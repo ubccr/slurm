@@ -42,6 +42,7 @@
 #  include "config.h"
 #endif
 
+#include <arpa/inet.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -156,10 +157,13 @@ static uint32_t _init_secret(void)
 {
 	uint32_t secret = 0xF0F00F0F;
 	struct timeval tv;
+	size_t len;
 	int fd;
 
 	if ((fd = open("/dev/urandom", O_RDONLY)) >= 0) {
-		read(fd, &secret, sizeof(uint32_t));
+		len = read(fd, &secret, sizeof(uint32_t));
+		if (len != sizeof(uint32_t))
+			error("mpi/sgimpt: urandom read error");
 		close(fd);
 	} else {
 		gettimeofday(&tv, NULL);
@@ -239,7 +243,6 @@ error:	return NULL;
 mpi_plugin_client_state_t *
 p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 {
-	char hname[256];
 	struct sockaddr_in sin;
 	socklen_t sinlen = sizeof(sin);
 
@@ -281,8 +284,10 @@ p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 				ntohs(sin.sin_port));
 
 	/* Get the global services up and going */
-	if (MPI_RM2_init_p(*env))
+	if (MPI_RM2_init_p(*env)) {
+		error("mpi/sgimpt: MPI_RM2_init_p() failed: %m");
 		return NULL;
+	}
 
 	/* Provide MPT services in a different thread */
 	if (pthread_create(&mpt_thread, NULL, _mpt_func, (void*)job)) {
