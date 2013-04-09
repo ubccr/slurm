@@ -13,6 +13,7 @@ documents those changes that are of interest to users and admins.
     and DenyUsers.
  -- Fix sched/backfill logic to initiate jobs with maximum time limit over the
     partition limit, but the minimum time limit permits it to start.
+ -- Add support for SGI MPT (Message Passing Toolkit).
 
 * Changes in Slurm 2.6.0pre2
 ============================

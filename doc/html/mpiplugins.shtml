@@ -24,6 +24,7 @@ abbreviation for the type of node selection algorithm. We recommend, for example
 <li><b>mvapich</b>&#151;For use with MVAPICH.</li>
 <li><b>openmpi</b>&#151;For use with OpenMPI.</li>
 <li><b>pmi2</b>&#151;For use with MPI2 and MVAPICH2.</li>
+<li><b>sgimpt</b>&#151;For use with SGI MPT.</li>
 <li><b>none</b>&#151;For use with most other versions of MPI.</li>
 </ul>
 <p>The <span class="commandline">plugin_name</span> and
@@ -126,6 +127,6 @@ to maintain data format compatibility across different versions of the plugin.</
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 3 April 2012</p>
+<p style="text-align:center;">Last modified 9 April 2013</p>
 
 <!--#include virtual="footer.txt"-->

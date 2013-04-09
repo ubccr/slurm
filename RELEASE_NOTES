@@ -41,6 +41,7 @@ HIGHLIGHTS
    reservations (e.g. specific different core count for each node).
  - Make sched/backfill the default scheduling plugin rather than sched/builtin
    (FIFO).
+ - Add support for SGI MPT (Message Passing Toolkit).
 
 CONFIGURATION FILE CHANGES (see "man slurm.conf" for details)
 =============================================================

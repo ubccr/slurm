@@ -388,7 +388,8 @@ This also works for MVAPICH-SHMEM.<BR>
 (For MPI2 and MVAPICH2)<BR>
 <input type="radio" name="mpi_default" value="mvapich"> <B>MVAPICH</B><BR>
 <input type="radio" name="mpi_default" value="none" checked> <B>None</B>:
-+This works for most other MPI types including MPICH2, LAM MPI and Open MPI.<BR>
+This works for most other MPI types including MPICH2, LAM MPI and Open MPI<BR>
+<input type="radio" name="mpi_default" value="sgimpt"> <B>SGI MPT</B>.
 <P>
 
 <H2>Process Tracking</H2>

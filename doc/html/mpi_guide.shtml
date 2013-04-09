@@ -43,6 +43,7 @@ with SLURM are provided below.
 <li><a href="#mvapich2">MVAPICH2</a></li>
 <li><a href="#open_mpi">Open MPI</a></li>
 <li><a href="#quadrics_mpi">Quadrics MPI</a></li>
+<li><a href="#sgi_mpt">SGI MPT</a></li>
 <li><a href="#UPC">UPC</a></li>
 </ul></p>
 <hr size=4 width="100%">
@@ -449,6 +450,18 @@ $ srun [options] &lt;program&gt; [program args]
 
 <hr size=4 width="100%">
 
+<h2><a name="sgi_mpt" href="http://techpubs.sgi.com/library/manuals/3000/007-3773-003/pdf/007-3773-003.pdf"><b>SGI MPT</b></a></h2>
+
+<p>SGI MPT relies upon SLURM to
+allocate resources for the job and <span class="commandline">srun</span>
+to initiate the tasks. One would build the MPI program in the normal manner
+then initiate it using a command line of this sort:</p>
+<pre>
+$ srun [options] &lt;program&gt; [program args]
+</pre>
+
+<hr size=4 width="100%">
+
 <h2><a name="UPC" href="http://upc.lbl.gov/"><b>UPC (Unified Parallel C)</b></a></h2>
 
 <p>Berkeley UPC (and likely other UPC implementations) rely upon SLURM to
@@ -462,6 +475,6 @@ $ srun -N4 -n16 a.out
 
 <hr size=4 width="100%">
 
-<p style="text-align:center;">Last modified 1 April 2013</p>
+<p style="text-align:center;">Last modified 5 April 2013</p>
 
 <!--#include virtual="footer.txt"-->

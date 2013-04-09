@@ -132,8 +132,7 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t*job,
 	return SLURM_SUCCESS;
 }
 
-static int
-_load_libs(void)
+static int _load_libs(void)
 {
 	mpt_xlib = dlopen("libxmpi.so", RTLD_LAZY | RTLD_LOCAL);
 	if (!mpt_xlib)
@@ -186,8 +185,10 @@ static void *_mpt_func(void * arg)
 
 	/* Get a handle to this MPI world */
 	handle = MPI_RM2_handle_p();
-	if (!handle)
+	if (!handle) {
+		error("mpi/sgimpt: MPI_RM2_handle_p() failed: %m");
 		goto error;
+	}
 
 	hl = hostlist_create(job->step_layout->node_list);
 	if (!hl) {
@@ -206,28 +207,33 @@ static void *_mpt_func(void * arg)
 		free(hnames[i]);
 	xfree(hnames);
 	hostlist_destroy(hl);
-	if (rc)
+	if (rc) {
+		error("mpi/sgimpt: MPI_RM2_sethosts_p() failed: %m");
 		goto error;
+	}
 
 	/* Wait for the launch to complete */
 	rc = MPI_RM2_start_p(handle, mpt_listen_sock, mpt_secret);
-	if (rc)
+	if (rc) {
+		error("mpi/sgimpt: MPI_RM2_start_p() failed: %m");
 		goto error;
+	}
 
 	/* Let the jobs get going and wait for them to complete */
 	rc = MPI_RM2_monitor_p(handle);
-	if (rc)
+	if (rc) {
+		error("mpi/sgimpt: MPI_RM2_monitor_p() failed: %m");
 		goto error;
+	}
 
 	/* Clean things up */
 	rc = MPI_RM2_finalize_p(handle);
-	if (rc)
+	if (rc) {
+		error("mpi/sgimpt: MPI_RM2_finalize_p() failed: %m");
 		goto error;
+	}
 
-	return NULL;
-error:
-	error("mpi/sgimpt: Error with interacting with MPT\n");
-	return NULL;
+error:	return NULL;
 }
 
 mpi_plugin_client_state_t *
