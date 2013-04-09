@@ -125,18 +125,19 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t*job,
 
 	/* Let the shepherds know how to contact libxmpi */
 	env_array_overwrite_fmt(env, "MPI_ENVIRONMENT", "%x %s 0 %s 0",
-				   addr.s_addr,
-				   getenvp(*env, "SLURM_SGIMPT_PORT"),
-				   getenvp(*env, "SLURM_SGIMPT_SECRET"));
+				addr.s_addr,
+				getenvp(*env, "SLURM_SGIMPT_PORT"),
+				getenvp(*env, "SLURM_SGIMPT_SECRET"));
 
 	return SLURM_SUCCESS;
 }
 
 static int
-load_libs(void)
+_load_libs(void)
 {
 	mpt_xlib = dlopen("libxmpi.so", RTLD_LAZY | RTLD_LOCAL);
-	if (!mpt_xlib) {-1;}
+	if (!mpt_xlib)
+		return -1;
 
 	LOOKUP_SYM(MPI_RM2_init);
 	LOOKUP_SYM(MPI_RM2_handle);
@@ -152,8 +153,7 @@ load_libs(void)
  * MPT uses a random private 32-bit value to provide weak authentication of
  * connections
  */
-static uint32_t
-init_secret(void)
+static uint32_t _init_secret(void)
 {
 	uint32_t secret = 0xF0F00F0F;
 	struct timeval tv;
@@ -170,8 +170,7 @@ init_secret(void)
 	return secret;
 }
 
-static void *
-mpt_func(void * arg)
+static void *_mpt_func(void * arg)
 {
 	const mpi_plugin_client_info_t * job =
 		(const mpi_plugin_client_info_t *)arg;
@@ -187,40 +186,47 @@ mpt_func(void * arg)
 
 	/* Get a handle to this MPI world */
 	handle = MPI_RM2_handle_p();
-	if (!handle) {goto error;}
+	if (!handle)
+		goto error;
 
 	hl = hostlist_create(job->step_layout->node_list);
-	hnames = (char**)xmalloc(nhosts * sizeof(char*));
-	if (!hl || !hnames) {
-		error("Out of memory");
+	if (!hl) {
+		error("mpi/sgimpt: Invalid node list:%s",
+		      job->step_layout->node_list);
 		return NULL;
 	}
 
-	for (i = 0; i < nhosts; i++) {hnames[i] = hostlist_nth(hl, i);}
+	hnames = (char**)xmalloc(nhosts * sizeof(char*));
+	for (i = 0; i < nhosts; i++)
+		hnames[i] = hostlist_nth(hl, i);
 
 	/* Let MPT know the hosts and tasks per node */
 	rc = MPI_RM2_sethosts_p(handle, nhosts, hnames, nprocs);
-	if (rc) {goto error;}
-
-	for (i = 0; i < nhosts; i++) {free(hnames[i]);}
+	for (i = 0; i < nhosts; i++)
+		free(hnames[i]);
 	xfree(hnames);
 	hostlist_destroy(hl);
+	if (rc)
+		goto error;
 
 	/* Wait for the launch to complete */
 	rc = MPI_RM2_start_p(handle, mpt_listen_sock, mpt_secret);
-	if (rc) {goto error;}
+	if (rc)
+		goto error;
 
 	/* Let the jobs get going and wait for them to complete */
 	rc = MPI_RM2_monitor_p(handle);
-	if (rc) {goto error;}
+	if (rc)
+		goto error;
 
 	/* Clean things up */
 	rc = MPI_RM2_finalize_p(handle);
-	if (rc) {goto error;}
+	if (rc)
+		goto error;
 
 	return NULL;
 error:
-	error("Error with interacting with MPT\n");
+	error("mpi/sgimpt: Error with interacting with MPT\n");
 	return NULL;
 }
 
@@ -233,16 +239,16 @@ p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 
 	debug("Using mpi/sgimpt");
 
-	if (load_libs()) {
+	if (_load_libs()) {
 		error("Could not load MPT's libxmpi.so\n");
 		return NULL;
 	}
 
-	mpt_secret = init_secret();
+	mpt_secret = _init_secret();
 
 	/* For listening for MPT shepherds on */
 	if (0 > (mpt_listen_sock = socket(AF_INET, SOCK_STREAM, 0))) {
-		error("socket: %m");
+		error("mpi/sgimpt: socket: %m");
 		return NULL;
 	}
 
@@ -252,28 +258,29 @@ p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 	sin.sin_port = htons(0);
 
 	if (0 > bind(mpt_listen_sock, (struct sockaddr*)&sin, sinlen)) {
-		error("bind: %m");
+		error("mpi/sgimpt: bind: %m");
 		return NULL;
 	}
 	if (0 > listen(mpt_listen_sock, 256)) {
-		error("listen: %m");
+		error("mpi/sgimpt: listen: %m");
 		return NULL;
 	}
 	if (0 > getsockname(mpt_listen_sock, (void*)&sin, &sinlen)) {
-		error("getsockname: %m");
+		error("mpi/sgimpt: getsockname: %m");
 		return NULL;
 	}
 
 	env_array_overwrite_fmt(env, "SLURM_SGIMPT_SECRET", "%x", mpt_secret);
 	env_array_overwrite_fmt(env, "SLURM_SGIMPT_PORT", "%hu",
-				   ntohs(sin.sin_port));
+				ntohs(sin.sin_port));
 
 	/* Get the global services up and going */
-	if (MPI_RM2_init_p(*env)) {return NULL;}
+	if (MPI_RM2_init_p(*env))
+		return NULL;
 
 	/* Provide MPT services in a different thread */
-	if (pthread_create(&mpt_thread, NULL, mpt_func, (void*)job)) {
-		error("pthread_create: %m");
+	if (pthread_create(&mpt_thread, NULL, _mpt_func, (void*)job)) {
+		error("mpi/sgimpt: pthread_create: %m");
 		return NULL;
 	}
 
@@ -292,7 +299,7 @@ int p_mpi_hook_client_fini(mpi_plugin_client_state_t *state)
 
 	pthread_cancel(mpt_thread);
 	if (pthread_join(mpt_thread, (void**)&ret)) {
-		error("pthread_join: %m");
+		error("mpi/sgimpt: pthread_join: %m");
 		return SLURM_ERROR;
 	}
 
