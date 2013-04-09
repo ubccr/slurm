@@ -564,6 +564,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/mpi/none/Makefile
 		 src/plugins/mpi/openmpi/Makefile
 		 src/plugins/mpi/pmi2/Makefile
+		 src/plugins/mpi/sgimpt/Makefile
 		 src/plugins/task/Makefile
 		 src/plugins/task/affinity/Makefile
 		 src/plugins/task/cgroup/Makefile
