@@ -56,6 +56,8 @@
 #include "src/common/env.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
+#define _DEBUG 0
+
 /*
  * These variables are required by the generic plugin interface.  If they
  * are not found in the plugin, the plugin loader will ignore it.
@@ -206,6 +208,10 @@ static void *_mpt_func(void * arg)
 		hnames[i] = hostlist_nth(hl, i);
 
 	/* Let MPT know the hosts and tasks per node */
+#if _DEBUG
+	for (i = 0; i < nhosts; i++)
+		info("hname[%d]:%s nproc[%d]:%d", i, hnames[i], i, nprocs[i]);
+#endif
 	rc = MPI_RM2_sethosts_p(handle, nhosts, hnames, nprocs);
 	for (i = 0; i < nhosts; i++)
 		free(hnames[i]);
@@ -219,7 +225,8 @@ static void *_mpt_func(void * arg)
 	/* Wait for the launch to complete */
 	rc = MPI_RM2_start_p(handle, mpt_listen_sock, mpt_secret);
 	if (rc) {
-		error("mpi/sgimpt: MPI_RM2_start_p() failed: %m");
+		error("mpi/sgimpt: MPI_RM2_start_p(%u,%x) failed: %m",
+		      mpt_listen_sock, mpt_secret);
 		goto error;
 	}
 
