@@ -72,6 +72,12 @@ exec $bin_rm -f $test_prog ${test_prog}.o
 if {$use_pmi} {
 	set pmi_link "-rpath $slurm_dir/lib -L $slurm_dir/lib -lpmi"
 	eval exec $mpicc -Xlinker $pmi_link -o $test_prog ${test_prog}.c
+} elseif { ![string compare [mpi_default] "sgimpt"] } {
+	set  pos [string first $mpicc "/bin/mpicc"]
+	incr pos -1
+	set  path [string range $mpicc 0 $pos]
+	exec $mpicc -I $path/include test1.88.prog.c -L $path/lib -lmpi -o $test_prog
+#	exec mv a.out $test_prog
 } else {
 	exec $mpicc -o $test_prog ${test_prog}.c
 }
