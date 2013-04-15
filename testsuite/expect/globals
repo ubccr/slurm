@@ -1042,6 +1042,38 @@ proc test_using_slurmdbd { } {
 
 ################################################################
 #
+# Proc: mpi_default
+#
+# Purpose: Use scontrol to determine the default MPI plugin
+#
+# Returns: Name of default MPI type
+#
+################################################################
+
+proc mpi_default {} {
+	global scontrol
+
+	log_user 0
+	set name ""
+	set fd [open "|$scontrol show config"]
+	while {[gets $fd line] != -1} {
+		if {[regexp {^MpiDefault *= (\w+)} $line frag name]
+				== 1} {
+			break
+		}
+	}
+	catch {close $fd}
+	log_user 1
+
+	if {[string length $name] == 0} {
+		send_user "ERROR: could not identify the Priority Type\n"
+	}
+
+	return $name
+}
+
+################################################################
+#
 # Proc: priority_type
 #
 # Purpose: Use scontrol to determine the priority plugin
