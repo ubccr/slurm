@@ -2805,7 +2805,7 @@ int layouts_api_get_values( char *layout_type,
 	const layouts_keyspec_t* keyspec;
 	layout_plugin_t *plugin;
 	layouts_plugin_spec_t* plugin_spec;
-	layout_t *layout;
+	//layout_t *layout;
 	void** data=NULL;
 	void** e_data=NULL;
 
@@ -2854,7 +2854,7 @@ int layouts_api_get_values( char *layout_type,
 		info("Layout API: no plugin named %s", layout_type);
 		goto cleanup;
 	}
-	layout = plugin->layout;
+	//layout = plugin->layout;
 	plugin_spec = plugin->ops->spec;
 	if (!plugin_spec) {
 		info("Layout API: no plugin_spec for %s", layout_type);
@@ -2924,7 +2924,7 @@ int update_layout ( update_layout_msg_t * update_layout_msg )
 	layout_plugin_t *plugin;
 	const layouts_keyspec_t* current;
 	layouts_plugin_spec_t* plugin_spec;
-	layout_t *layout;
+	//layout_t *layout;
 
 	if (update_layout_msg->entities == NULL) {
 		if ( layouts_api_list_entities (update_layout_msg->layout_type,
@@ -2961,7 +2961,7 @@ int update_layout ( update_layout_msg_t * update_layout_msg )
 			update_layout_msg->layout_type);
 		return SLURM_ERROR;
 	}
-	layout = plugin->layout;
+	//layout = plugin->layout;
 	plugin_spec = plugin->ops->spec;
 
 	key = xmalloc(strlen(update_layout_msg->key_value));
