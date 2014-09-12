@@ -1563,6 +1563,7 @@ _update_it (int argc, char *argv[])
 	int node_tag = 0, part_tag = 0, job_tag = 0;
 	int block_tag = 0, sub_tag = 0, res_tag = 0;
 	int debug_tag = 0, step_tag = 0, front_end_tag = 0;
+	int layout_tag = 0;
 	int jerror_code = SLURM_SUCCESS;
 
 	/* First identify the entity to update */
@@ -1599,6 +1600,9 @@ _update_it (int argc, char *argv[])
 		} else if (!strncasecmp(tag, "SlurmctldDebug",
 					MAX(tag_len, 2))) {
 			debug_tag = 1;
+		} else if (!strncasecmp(tag, "Layout",
+					MAX(tag_len, 3))) {
+			layout_tag = 1;
 		}
 	}
 
@@ -1627,6 +1631,8 @@ _update_it (int argc, char *argv[])
 		error_code = _update_bluegene_subbp (argc, argv);
 	else if (debug_tag)
 		error_code = _update_slurmctld_debug(val);
+	else if (layout_tag)
+		error_code = scontrol_update_layout (argc, argv);
 	else {
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in update command\n");

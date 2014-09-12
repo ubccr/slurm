@@ -160,6 +160,20 @@ void slurm_init_update_node_msg (update_node_msg_t * update_node_msg)
 	update_node_msg->weight = (uint32_t) NO_VAL;
 }
 
+
+/*
+ * slurm_init_update_layout_msg - initialize layout update message
+ * OUT update_layout_msg
+ */
+void slurm_init_update_layout_msg (update_layout_msg_t * update_layout_msg)
+{
+	memset(update_layout_msg, 0, sizeof(update_layout_msg_t));
+	update_layout_msg->layout_type = NULL;
+	update_layout_msg->key_value = NULL;
+	update_layout_msg->entities = NULL;
+	update_layout_msg->entity_type = NULL;
+}
+
 /*
  * slurm_init_update_front_end_msg - initialize front_end node update message
  * OUT update_front_end_msg - user defined node descriptor

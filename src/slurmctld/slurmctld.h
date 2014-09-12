@@ -2072,6 +2072,13 @@ extern void update_logging(void);
  */
 extern int update_node ( update_node_msg_t * update_node_msg )  ;
 
+/*
+ * update_layout - update the configuration data for one layout
+ * IN update_layout_msg - update layout request
+ * RET SLURM_SUCCESS or error code
+ */
+extern int update_layout ( update_layout_msg_t * update_layout_msg )  ;
+
 /* Update nodes accounting usage data */
 extern void update_nodes_acct_gather_data(void);
 

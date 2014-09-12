@@ -183,6 +183,7 @@ inline static void  _slurm_rpc_trigger_pull(slurm_msg_t * msg);
 inline static void  _slurm_rpc_update_front_end(slurm_msg_t * msg);
 inline static void  _slurm_rpc_update_job(slurm_msg_t * msg);
 inline static void  _slurm_rpc_update_node(slurm_msg_t * msg);
+inline static void  _slurm_rpc_update_layout(slurm_msg_t * msg);
 inline static void  _slurm_rpc_update_partition(slurm_msg_t * msg);
 inline static void  _slurm_rpc_update_block(slurm_msg_t * msg);
 inline static void  _slurm_rpc_kill_job2(slurm_msg_t *msg);
@@ -392,6 +393,10 @@ void slurmctld_req(slurm_msg_t *msg, connection_arg_t *arg)
 		_slurm_rpc_update_node(msg);
 		slurm_free_update_node_msg(msg->data);
 		break;
+	case REQUEST_UPDATE_LAYOUT:
+		_slurm_rpc_update_layout(msg);
+		slurm_free_update_layout_msg(msg->data);
+		 break;
 	case REQUEST_CREATE_PARTITION:
 	case REQUEST_UPDATE_PARTITION:
 		_slurm_rpc_update_partition(msg);
@@ -3379,6 +3384,50 @@ static void _slurm_rpc_update_node(slurm_msg_t * msg)
 	schedule_node_save();
 	queue_job_scheduler();
 	trigger_reconfig();
+}
+
+/*
+ * _slurm_rpc_update_layout - process RPC to update the configuration of a
+ *	layout (e.g. UP/DOWN)
+ */
+static void _slurm_rpc_update_layout(slurm_msg_t * msg)
+{
+	int error_code = SLURM_SUCCESS;
+	DEF_TIMERS;
+	update_layout_msg_t *update_layout_msg_ptr =
+		(update_layout_msg_t *) msg->data;
+	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
+
+	START_TIMER;
+	debug2("Processing RPC: REQUEST_UPDATE_LAYOUT from uid=%d", uid);
+	if (!validate_super_user(uid)) {
+		error_code = ESLURM_USER_ID_MISSING;
+		error("Security violation, UPDATE_LAYOUT RPC from uid=%d", uid);
+	}
+
+	if (error_code == SLURM_SUCCESS) {
+		/* do RPC call */
+		error_code = update_layout(update_layout_msg_ptr);
+		END_TIMER2("_slurm_rpc_update_layout");
+	}
+
+	/* return result */
+	if (error_code) {
+		info("_slurm_rpc_update_layout for %s: %s",
+		     update_layout_msg_ptr->layout_type,
+		     slurm_strerror(error_code));
+		slurm_send_rc_msg(msg, error_code);
+	} else {
+		debug2("_slurm_rpc_update_layout complete for %s %s",
+		       update_layout_msg_ptr->layout_type, TIME_STR);
+		slurm_send_rc_msg(msg, SLURM_SUCCESS);
+	}
+
+	/* Below functions provide their own locks */
+	/* Maybe needs when scheduler, etc. will depend on layout */
+	//schedule_node_save();
+	//queue_job_scheduler();
+	//trigger_reconfig();
 }
 
 /* _slurm_rpc_update_partition - process RPC to update the configuration

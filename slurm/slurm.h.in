@@ -2424,6 +2424,14 @@ typedef struct slurm_update_node_msg {
 	uint32_t weight;	/* new weight for node */
 } update_node_msg_t;
 
+typedef struct slurm_update_layout_msg {
+	char* layout_type;	/* type of layout */
+	char* key_value;	/* pairs key=value with separators */
+	char* entities;		/* name of entities */
+	char* entity_type;	/* type of entities */
+	//uint32_t mod_uid;
+} update_layout_msg_t;
+
 typedef struct slurm_update_front_end_msg {
 	char *name;		/* comma separated list of front end nodes */
 	uint32_t node_state;	/* see enum node_states */
@@ -3482,6 +3490,12 @@ extern char *slurm_sprint_node_table PARAMS((node_info_t * node_ptr,
 void slurm_init_update_node_msg PARAMS((update_node_msg_t * update_node_msg));
 
 /*
+ * slurm_init_update_layout_msg - initialize layout update message
+ * OUT update_layout_msg
+ */
+void slurm_init_update_layout_msg PARAMS((update_layout_msg_t * update_layout_msg));
+
+/*
  * slurm_update_node - issue RPC to a node's configuration per request,
  *	only usable by user root
  * IN node_msg - description of node updates
@@ -3489,6 +3503,13 @@ void slurm_init_update_node_msg PARAMS((update_node_msg_t * update_node_msg));
  */
 extern int slurm_update_node PARAMS((update_node_msg_t * node_msg));
 
+/*
+ * slurm_update_layout - issue RPC to a layout's configuration per request,
+ *	only usable by user root
+ * IN layout_msg - description of layout updates
+ * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ */
+extern int slurm_update_layout PARAMS((update_layout_msg_t * layout_msg));
 
 /*****************************************************************************\
  *	SLURM FRONT_END CONFIGURATION READ/PRINT/UPDATE FUNCTIONS

@@ -253,6 +253,7 @@ typedef enum {
 	REQUEST_UPDATE_RESERVATION,
 	REQUEST_UPDATE_BLOCK,
 	REQUEST_UPDATE_FRONT_END,
+	REQUEST_UPDATE_LAYOUT,
 
 	REQUEST_RESOURCE_ALLOCATION = 4001,
 	RESPONSE_RESOURCE_ALLOCATION,
@@ -1165,6 +1166,7 @@ extern void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg);
 
 extern void slurm_free_update_front_end_msg(update_front_end_msg_t * msg);
 extern void slurm_free_update_node_msg(update_node_msg_t * msg);
+extern void slurm_free_update_layout_msg(update_layout_msg_t * msg);
 extern void slurm_free_update_part_msg(update_part_msg_t * msg);
 extern void slurm_free_delete_part_msg(delete_part_msg_t * msg);
 extern void slurm_free_resv_desc_msg(resv_desc_msg_t * msg);

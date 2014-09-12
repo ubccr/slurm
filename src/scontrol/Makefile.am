@@ -17,6 +17,7 @@ scontrol_SOURCES =	\
 	scontrol.h	\
 	update_job.c	\
 	update_node.c	\
+	update_layout.c	\
 	update_part.c	\
 	update_step.c   \
 	info_lics.c

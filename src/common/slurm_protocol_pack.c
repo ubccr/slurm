@@ -115,6 +115,11 @@ static void _pack_update_node_msg(update_node_msg_t * msg, Buf buffer,
 static int _unpack_update_node_msg(update_node_msg_t ** msg, Buf buffer,
 				   uint16_t protocol_version);
 
+static void _pack_update_layout_msg(update_layout_msg_t * msg, Buf buffer,
+				  uint16_t protocol_version);
+static int _unpack_update_layout_msg(update_layout_msg_t ** msg, Buf buffer,
+				   uint16_t protocol_version);
+
 static void
 _pack_node_registration_status_msg(slurm_node_registration_status_msg_t *
 				   msg, Buf buffer,
@@ -895,6 +900,11 @@ pack_msg(slurm_msg_t const *msg, Buf buffer)
 				      buffer,
 				      msg->protocol_version);
 		break;
+	case REQUEST_UPDATE_LAYOUT:
+		_pack_update_layout_msg((update_layout_msg_t *) msg->data,
+					buffer,
+					msg->protocol_version);
+		break;
 	case REQUEST_CREATE_PARTITION:
 	case REQUEST_UPDATE_PARTITION:
 		_pack_update_partition_msg((update_part_msg_t *) msg->
@@ -1488,6 +1498,11 @@ unpack_msg(slurm_msg_t * msg, Buf buffer)
 		rc = _unpack_update_node_msg((update_node_msg_t **) &
 					     (msg->data), buffer,
 					     msg->protocol_version);
+		break;
+	case REQUEST_UPDATE_LAYOUT:
+		rc = _unpack_update_layout_msg((update_layout_msg_t **) &
+					       (msg->data), buffer,
+					       msg->protocol_version);
 		break;
 	case REQUEST_CREATE_PARTITION:
 	case REQUEST_UPDATE_PARTITION:
@@ -2553,6 +2568,58 @@ _unpack_update_node_msg(update_node_msg_t ** msg, Buf buffer,
 
 unpack_error:
 	slurm_free_update_node_msg(tmp_ptr);
+	*msg = NULL;
+	return SLURM_ERROR;
+}
+
+static void
+_pack_update_layout_msg(update_layout_msg_t * msg, Buf buffer,
+		      uint16_t protocol_version)
+{
+	xassert(msg != NULL);
+	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
+		packstr(msg->layout_type, buffer);
+		packstr(msg->key_value, buffer);
+		packstr(msg->entities, buffer);
+		packstr(msg->entity_type, buffer);
+		//pack32(msg->mod_uid, buffer);
+	} else {
+		error("_pack_update_layout_msg: protocol_version "
+		      "%hu not supported", protocol_version);
+	}
+}
+
+static int
+_unpack_update_layout_msg(update_layout_msg_t ** msg, Buf buffer,
+			uint16_t protocol_version)
+{
+	uint32_t uint32_tmp;
+	update_layout_msg_t *tmp_ptr;
+
+	/* alloc memory for structure */
+	xassert(msg != NULL);
+	tmp_ptr = xmalloc(sizeof(update_layout_msg_t));
+	*msg = tmp_ptr;
+
+	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
+		safe_unpackstr_xmalloc(&tmp_ptr->layout_type,
+				       &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&tmp_ptr->key_value,
+				       &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&tmp_ptr->entities,
+				       &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&tmp_ptr->entity_type,
+				       &uint32_tmp, buffer);
+		//safe_unpack32(&tmp_ptr->mod_uid, buffer);
+	} else {
+		error("_unpack_update_layout_msg: protocol_version "
+		      "%hu not supported", protocol_version);
+		goto unpack_error;
+	}
+	return SLURM_SUCCESS;
+
+unpack_error:
+	slurm_free_update_layout_msg(tmp_ptr);
 	*msg = NULL;
 	return SLURM_ERROR;
 }

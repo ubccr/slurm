@@ -627,6 +627,17 @@ extern void slurm_free_update_node_msg(update_node_msg_t * msg)
 	}
 }
 
+extern void slurm_free_update_layout_msg(update_layout_msg_t * msg)
+{
+	if (msg) {
+		xfree(msg->layout_type);
+		xfree(msg->key_value);
+		xfree(msg->entities);
+		xfree(msg->entity_type);
+		xfree(msg);
+	}
+}
+
 extern void slurm_free_update_part_msg(update_part_msg_t * msg)
 {
 	if (msg) {
@@ -2879,6 +2890,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_UPDATE_NODE:
 		slurm_free_update_node_msg(data);
 		break;
+	case REQUEST_UPDATE_LAYOUT:
+		slurm_free_update_layout_msg(data);
+		break;
 	case REQUEST_CREATE_PARTITION:
 	case REQUEST_UPDATE_PARTITION:
 		slurm_free_update_part_msg(data);
@@ -3301,6 +3315,8 @@ rpc_num2string(uint16_t opcode)
 		return "REQUEST_UPDATE_JOB";
 	case REQUEST_UPDATE_NODE:
 		return "REQUEST_UPDATE_NODE";
+	case REQUEST_UPDATE_LAYOUT:
+		return "REQUEST_UPDATE_LAYOUT";
 	case REQUEST_CREATE_PARTITION:
 		return "REQUEST_CREATE_PARTITION";
 	case REQUEST_DELETE_PARTITION:

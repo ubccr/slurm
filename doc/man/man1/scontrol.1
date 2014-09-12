@@ -1004,6 +1004,28 @@ Setting a front end node "DOWN" will cause all running and suspended jobs on
 that node to be terminated.
 
 .TP
+\fBSPECIFICATIONS FOR UPDATE COMMAND, LAYOUTS\fR
+.TP
+\fILayout\fP=<type>
+Identify the layout type to be updated. This specification is required.
+.TP
+\fIEntities\fP=<name>
+Identify the entity(ies) to be updated. Multiple entity names may be specified
+using simple range expressions (e.g. "lx[10\-20]"). This specification is
+required if no entity type is specified and can be use with entity type.
+.TP
+\fIEntity_type\fP=<type>
+Identify the type of entities to be updated. This specification is
+required if no entity is specified and can be use with entities list.
+.TP
+\fI<key>\fP=<value>
+Identify the key to update. The key and the type of value depend of the layout
+type. You can add the value instead of setting it adding a '+' sign before the
+'=' sign, if the type support it. The value is a single value and is used for
+all entities. This specification is required and can be used several times with
+different keys.
+
+.TP
 \fBSPECIFICATIONS FOR CREATE, UPDATE, AND DELETE COMMANDS, PARTITIONS\fR
 .TP
 \fIAllowGroups\fP=<name>

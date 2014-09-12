@@ -2901,3 +2901,120 @@ cleanup:
 	}
 	return rc;
 }
+
+/*
+ * update_layout - update the configuration data for one layout
+ * IN update_layout_msg - update layout request
+ * RET SLURM_SUCCESS or error code
+ * Defined in slurmctld.h
+ */
+int update_layout ( update_layout_msg_t * update_layout_msg )
+{
+	int rc = SLURM_SUCCESS;
+	int i, mem_entities;
+	hostlist_t host_list;
+	char ** entities_name=NULL;
+	char *key, *value;
+	char *first, *end;
+	void *data;
+	entity_t** entities_struct = NULL;
+	int operation = LAYOUTS_SET_OPERATION_SET;
+	char  *this_node_name = NULL;
+	layouts_keydef_types_t type;
+	layout_plugin_t *plugin;
+	const layouts_keyspec_t* current;
+	layouts_plugin_spec_t* plugin_spec;
+	layout_t *layout;
+
+	if (update_layout_msg->entities == NULL) {
+		if ( layouts_api_list_entities (update_layout_msg->layout_type,
+						update_layout_msg->entity_type,
+						NULL,
+						entities_name) ) {
+			info("update_layout: entity_type not found (%s)",
+			     update_layout_msg->entity_type);
+			return ESLURM_INVALID_NODE_NAME;
+		}
+	} else {
+		host_list = hostlist_create(update_layout_msg->entities);
+		if (host_list == NULL) {
+			info("update_layout: hostlist_create error on %s: %m",
+			      update_layout_msg->entities);
+			return ESLURM_INVALID_NODE_NAME;
+		}
+		mem_entities = hostlist_count(host_list);
+		entities_name = (char**) xmalloc((mem_entities+1) *
+							sizeof(char*));
+		i = 0;
+		while ( (this_node_name = hostlist_shift (host_list)) ) {
+			entities_name[i] = xstrdup(this_node_name);
+			i++;
+		}
+		entities_name[mem_entities]=NULL;
+		slurm_hostlist_destroy(host_list);
+	}
+
+	//get layout
+	plugin = _layouts_get_plugin (update_layout_msg->layout_type);
+	if (!plugin) {
+		info("Layout API: no plugin named %s",
+			update_layout_msg->layout_type);
+		return SLURM_ERROR;
+	}
+	layout = plugin->layout;
+	plugin_spec = plugin->ops->spec;
+
+	key = xmalloc(strlen(update_layout_msg->key_value));
+	value = xmalloc(strlen(update_layout_msg->key_value));
+	end = update_layout_msg->key_value;
+	while( end ) {
+		first = end;
+		end = strchr(first, '=');
+		if ( end == NULL ) {
+			info("update_layout: error in identifying key: %s",
+				first);
+			rc = SLURM_ERROR;
+			break;
+		}
+		memcpy (key, first, end - first);
+		key[end - first]='\0';
+		first = end;
+		end = strchr(first, '#');
+		if ( end == NULL ) {
+			memcpy (value, first, strlen(first));
+			value[strlen(first)]='\0';
+		} else {
+			memcpy (value, first, end - first);
+			value[end - first]='\0';
+		}
+		if ( strncasecmp(&(key[strlen(key)-1]), "+" ,1) == 0) {
+			operation = LAYOUTS_SET_OPERATION_SUM;
+			key[strlen(key)-1] = '\0';
+		}
+		type = L_T_ERROR;
+		for (current = plugin_spec->keyspec; current->key; ++current) {
+			if (strcmp(current->key, key)==0)
+				type = current->type;
+		}
+		if (type == L_T_ERROR) {
+		        info("update_layout: error key type: %s",
+				key);
+			rc = SLURM_ERROR;
+			break;
+		}
+		data = _create_data_from_str(value, mem_entities, key, type);
+		rc = layouts_api( LAYOUTS_API_SET,
+				  update_layout_msg->layout_type,
+				  key,
+				  (const char **) entities_name,
+				  entities_struct,
+				  operation,
+				  data);
+		xfree(data);
+	}
+
+	xfree(key);
+	xfree(value);
+
+	return rc;
+}
