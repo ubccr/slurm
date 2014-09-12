@@ -168,10 +168,6 @@ void slurm_init_update_node_msg (update_node_msg_t * update_node_msg)
 void slurm_init_update_layout_msg (update_layout_msg_t * update_layout_msg)
 {
 	memset(update_layout_msg, 0, sizeof(update_layout_msg_t));
-	update_layout_msg->layout_type = NULL;
-	update_layout_msg->key_value = NULL;
-	update_layout_msg->entities = NULL;
-	update_layout_msg->entity_type = NULL;
 }
 
 /*

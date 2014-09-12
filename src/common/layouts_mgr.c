@@ -274,8 +274,8 @@ uint8_t compare_test(const void* node_data, const void* arg)
 }
 
 static int _consolidation_alloc(void *val,
-			        layouts_plugin_spec_t *plugin_spec,
-			        const char* key_type)
+				layouts_plugin_spec_t *plugin_spec,
+				const char* key_type)
 {
 
 	layouts_keydef_types_t type = L_T_ERROR;
@@ -660,7 +660,7 @@ static void* _create_data_from_str(char* str, int size, char* key,
 				   layouts_keydef_types_t type)
 {
 	int i;
-	void* data;
+	void* data = NULL;
 	void *out;
 
 	switch (type) {
@@ -727,8 +727,7 @@ static void* _create_data_from_str(char* str, int size, char* key,
 				break;
 		}
 	}
-	if (data)
-		xfree (data);
+	xfree (data);
 	return out;
 }
 
@@ -1894,7 +1893,7 @@ static void** _recursive_update_get( xtree_node_t *current_node,
 					LAYOUTS_SET_CONSOLIDATION_SUM ||
 			    consolidation_layout &
 			    		LAYOUTS_SET_CONSOLIDATION_MEAN) {
-				if (!current_node->start)
+				if (!current_node || !current_node->start)
 					break;
 				other_node = current_node->start;
 				_consolidation_reset ( *current_value,
@@ -2019,7 +2018,7 @@ static int _update_set (     void **values,
 {
 	xtree_t* tree;
 	xtree_node_t *root_node, *current_node, *other_node;
-	xtree_node_t **tree_nodes;
+	xtree_node_t **tree_nodes = NULL;
 	int set_entities=0, s;
 	int i1, i2, i;
 
@@ -2154,7 +2153,8 @@ static int _update_set (     void **values,
 				while (i1 != i2) {
 					for (i=i1; i!=i2; ++i) {
 						current_node = tree_nodes[i];
-						if (!current_node->start)
+						if (!current_node ||
+						    !current_node->start)
 							break;
 						other_node =
 							current_node->start;
@@ -2174,8 +2174,9 @@ static int _update_set (     void **values,
 									tree_nodes);
 						other_node =
 							current_node->start;
-						while (other_node !=
-						       current_node->end) {
+						while (other_node &&
+						       (other_node !=
+						        current_node->end)) {
 							tree_nodes[set_entities]
 								= other_node;
 							entities_struct[set_entities] = 
@@ -2213,8 +2214,7 @@ static int _update_set (     void **values,
 				set_entities++;
 	}
 
-	if (tree_nodes)
-		xfree(tree_nodes);
+	xfree(tree_nodes);
 
 	if (mem_entities != set_entities+1) {
 		mem_entities = set_entities+1;
@@ -2798,8 +2798,8 @@ int layouts_api_get_values( char *layout_type,
 			    void* vector)
 {
 	int rc = SLURM_ERROR;
-	char **type_dot_key;
-	int i, j, nb_key=0;
+	char **type_dot_key = NULL;
+	int i, j, nb_key = 0;
 	entity_t* entity = entities_struct;
 	layouts_keydef_types_t def_type = L_T_ERROR;
 	const layouts_keyspec_t* keyspec;
