@@ -463,7 +463,8 @@ static int _setup_print_fields_list(List format_list)
 			else
 				field->len = 10;
 			field->print_routine = slurmdb_report_print_time;
-		} else if (!strncasecmp("Proper", object, MAX(command_len, 2))) {
+		} else if (!strncasecmp("Proper", object,
+					MAX(command_len, 2))) {
 			field->type = PRINT_CLUSTER_USER_PROPER;
 			field->name = xstrdup("Proper Name");
 			field->len = 15;
@@ -508,7 +509,8 @@ static int _setup_print_fields_list(List format_list)
 			else
 				field->len = 15;
 			field->print_routine = print_fields_str;
-		} else if (!strncasecmp("Energy", object, MAX(command_len, 1))) {
+		} else if (!strncasecmp("Energy", object,
+					MAX(command_len, 1))) {
 			field->type = PRINT_CLUSTER_ENERGY;
 			field->name = xstrdup("Energy");
 			field->len = 10;
@@ -1158,21 +1160,23 @@ extern int cluster_utilization(int argc, char *argv[])
 
 		itr3 = list_iterator_create(cluster->accounting_list);
 		while((accting = list_next(itr3))) {
+			/* FIXME: we don't handle assets here */
 			total_acct.alloc_secs += accting->alloc_secs;
 			total_acct.down_secs += accting->down_secs;
 			total_acct.pdown_secs += accting->pdown_secs;
 			total_acct.idle_secs += accting->idle_secs;
 			total_acct.resv_secs += accting->resv_secs;
 			total_acct.over_secs += accting->over_secs;
-			total_acct.cpu_count += accting->cpu_count;
+			total_acct.asset_rec.count += accting->asset_rec.count;
 			total_acct.consumed_energy += accting->consumed_energy;
 		}
 		list_iterator_destroy(itr3);
 
-		total_acct.cpu_count /= list_count(cluster->accounting_list);
+		total_acct.asset_rec.count /=
+			list_count(cluster->accounting_list);
 
-		local_total_time =
-			(uint64_t)total_time * (uint64_t)total_acct.cpu_count;
+		local_total_time = (uint64_t)total_time *
+			(uint64_t)total_acct.asset_rec.count;
 		total_reported = total_acct.alloc_secs + total_acct.down_secs
 			+ total_acct.pdown_secs + total_acct.idle_secs
 			+ total_acct.resv_secs;
@@ -1187,7 +1191,7 @@ extern int cluster_utilization(int argc, char *argv[])
 				break;
 			case PRINT_CLUSTER_CPUS:
 				field->print_routine(field,
-						     total_acct.cpu_count,
+						     total_acct.asset_rec.count,
 						     (curr_inx ==
 						      field_count));
 				break;

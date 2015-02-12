@@ -73,17 +73,26 @@
 
 extern char *acct_coord_table;
 extern char *acct_table;
+extern char *asset_table;
 extern char *assoc_day_table;
+extern char *assoc_day_ext_table;
 extern char *assoc_hour_table;
+extern char *assoc_hour_ext_table;
 extern char *assoc_month_table;
+extern char *assoc_month_ext_table;
 extern char *assoc_table;
-extern char * clus_res_table;
+extern char *clus_res_table;
 extern char *cluster_day_table;
+extern char *cluster_day_ext_table;
 extern char *cluster_hour_table;
+extern char *cluster_hour_ext_table;
 extern char *cluster_month_table;
+extern char *cluster_month_ext_table;
 extern char *cluster_table;
 extern char *event_table;
+extern char *event_ext_table;
 extern char *job_table;
+extern char *job_ext_table;
 extern char *last_ran_table;
 extern char *qos_table;
 extern char *resv_table;
@@ -93,9 +102,17 @@ extern char *txn_table;
 extern char *user_table;
 extern char *suspend_table;
 extern char *wckey_day_table;
+extern char *wckey_day_ext_table;
 extern char *wckey_hour_table;
+extern char *wckey_hour_ext_table;
 extern char *wckey_month_table;
+extern char *wckey_month_ext_table;
 extern char *wckey_table;
+
+extern char *event_view;
+extern char *event_ext_view;
+extern char *job_view;
+extern char *job_ext_view;
 
 /* Since tables are cluster centric we have a global cluster list to
  * go off of.
@@ -103,6 +120,12 @@ extern char *wckey_table;
 extern List as_mysql_cluster_list;
 extern List as_mysql_total_cluster_list;
 extern pthread_mutex_t as_mysql_cluster_list_lock;
+
+/* same thing about assets */
+/* full_asset_query is protected by the assoc_mgr_lock_t->asset locks
+ * and should be related to the assoc_mgr_asset_list */
+extern char *asset_view_str;
+extern char *full_asset_query;
 
 extern uint64_t debug_flags;
 
@@ -120,6 +143,8 @@ extern int check_connection(mysql_conn_t *mysql_conn);
 extern char *fix_double_quotes(char *str);
 extern int last_affected_rows(mysql_conn_t *mysql_conn);
 extern void reset_mysql_conn(mysql_conn_t *mysql_conn);
+extern int create_cluster_ext_tables(mysql_conn_t *mysql_conn,
+				     char *cluster_name);
 extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name);
 extern int remove_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name);
 extern int setup_assoc_limits(slurmdb_assoc_rec_t *assoc,

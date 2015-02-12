@@ -4778,6 +4778,7 @@ inline static void  _slurm_rpc_accounting_update_msg(slurm_msg_t *msg)
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 	accounting_update_msg_t *update_ptr =
 		(accounting_update_msg_t *) msg->data;
+	bool sent_rc = false;
 	DEF_TIMERS;
 
 	START_TIMER;
@@ -4798,13 +4799,34 @@ inline static void  _slurm_rpc_accounting_update_msg(slurm_msg_t *msg)
 
 	slurm_send_rc_msg(msg, rc);
 
-	if (update_ptr->update_list && list_count(update_ptr->update_list))
+	if (update_ptr->update_list && list_count(update_ptr->update_list)) {
+		slurmdb_update_object_t *object =
+			list_peek(update_ptr->update_list);
+		if (object->type != SLURMDB_ADD_ASSET) {
+			/* If not specific message types, send message back
+			 * to the caller immediately letting him know we got it.
+			 * In most cases there is no need to wait since the end
+			 * result would be the same if we wait or not
+			 * since the update has already happened in
+			 * the database.
+			 */
+			slurm_send_rc_msg(msg, rc);
+			sent_rc = true;
+		}
 		rc = assoc_mgr_update(update_ptr->update_list);
+	}
 
 	END_TIMER2("_slurm_rpc_accounting_update_msg");
 
-	if (rc != SLURM_SUCCESS)
-		error("assoc_mgr_update gave error: %s", slurm_strerror(rc));
+	if (sent_rc) {
+		if (rc != SLURM_SUCCESS)
+			error("assoc_mgr_update gave error: %s",
+			      slurm_strerror(rc));
+	} else {
+		info("sending after");
+		slurm_send_rc_msg(msg, rc);
+	}
+
 }
 
 /* _slurm_rpc_reboot_nodes - process RPC to schedule nodes reboot */

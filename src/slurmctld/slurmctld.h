@@ -366,6 +366,7 @@ extern struct part_record default_part;	/* default configuration values */
 extern char *default_part_name;		/* name of default partition */
 extern struct part_record *default_part_loc;	/* default partition ptr */
 extern uint16_t part_max_priority;      /* max priority in all partitions */
+extern List asset_list;
 
 /*****************************************************************************\
  *  RESERVATION parameters and data structures
@@ -549,6 +550,7 @@ struct job_record {
 	uint32_t array_task_id;		/* task_id of a job array */
 	job_array_struct_t *array_recs;	/* job array details,
 					 * only in meta-job record */
+	List     assets;                /* used for assets used by the job */
 	uint32_t assoc_id;              /* used for accounting plugins */
 	void    *assoc_ptr;		/* job's assoc record ptr, it is
 					 * void* because of interdependencies
@@ -1433,13 +1435,13 @@ extern int job_step_signal(uint32_t job_id, uint32_t step_id,
 extern void job_time_limit (void);
 
 /*
- * job_update_cpu_cnt - when job is completing remove allocated cpus
+ * job_update_asset_cnt - when job is completing remove allocated assets
  *                      from count.
  * IN/OUT job_ptr - job structure to be updated
  * IN node_inx    - node bit that is finished with job.
  * RET SLURM_SUCCES on success SLURM_ERROR on cpu_cnt underflow
  */
-extern int job_update_cpu_cnt(struct job_record *job_ptr, int node_inx);
+extern int job_update_asset_cnt(struct job_record *job_ptr, int node_inx);
 
 /*
  * check_job_step_time_limit - terminate jobsteps which have exceeded
@@ -1889,7 +1891,7 @@ extern void send_all_to_accounting(time_t event_time);
 
 /* A slurmctld lock needs to at least have a node read lock set before
  * this is called */
-extern void set_cluster_cpus(void);
+extern void set_cluster_assets(void);
 
 /* sends all jobs in eligible state to accounting.  Only needed at
  * first registration

@@ -139,6 +139,7 @@ typedef enum {
 	SLURMDB_REMOVE_RES,
 	SLURMDB_MODIFY_RES,
 	SLURMDB_REMOVE_QOS_USAGE,
+	SLURMDB_ADD_ASSET,
 } slurmdb_update_type_t;
 
 /* Define QOS flags */
@@ -360,11 +361,22 @@ typedef struct {
 } slurmdb_account_rec_t;
 
 typedef struct {
+	List assets;
 	uint64_t alloc_secs; /* number of cpu seconds allocated */
 	uint64_t consumed_energy; /* energy allocated in Joules */
 	uint32_t id;	/* association/wckey ID		*/
 	time_t period_start; /* when this record was started */
 } slurmdb_accounting_rec_t;
+
+typedef struct {
+	uint64_t alloc_secs; /* number of cpu seconds allocated */
+	uint64_t down_secs;  /* number of cpu seconds down */
+	uint64_t idle_secs;  /* number of cpu seconds idle */
+	uint64_t over_secs;  /* number of cpu seconds overcommitted */
+	uint64_t pdown_secs; /* number of cpu seconds planned down */
+	time_t period_start; /* when this record was started */
+	uint64_t resv_secs;  /* number of cpu seconds reserved */
+} slurmdb_asset_stats_rec_t;
 
 typedef struct {
 	char *archive_dir;     /* location to place archive file */
@@ -400,12 +412,35 @@ typedef struct {
 			     insert of jobs since past */
 } slurmdb_archive_rec_t;
 
+typedef struct {
+	uint32_t count;  /* Count of asset on a given cluster, 0 if
+			   listed generically. */
+	List id_list;    /* Database ID */
+	List name_list;  /* Name of asset if type is generic like GRES
+			    or License. */
+	List type_list;  /* Type of asset (CPU, MEM, etc) */
+	uint16_t with_deleted;
+} slurmdb_asset_cond_t;
+
+typedef struct {
+	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
+	uint64_t alloc_secs; /* total amost of secs allocated in the
+				accounting_list */
+	uint32_t count; /* Count of asset on a given cluster, 0 if
+			   listed generically. */
+	uint32_t id;    /* Database ID for the asset */
+	char *name;     /* Name of asset if type is generic like GRES
+			   or License. */
+	char *type;     /* Type of asset (CPU, MEM, etc) */
+} slurmdb_asset_rec_t;
+
 /* slurmdb_assoc_cond_t is defined above alphabetical */
 
 typedef struct slurmdb_assoc_rec {
-	List accounting_list; 	   /* list of slurmdb_accounting_rec_t *'s */
+	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
 	char *acct;		   /* account/project associated to
 				    * assoc */
+	List assets; 	   /* list of slurmdb_asset_rec_t *'s */
 	struct slurmdb_assoc_rec *assoc_next; /* next assoc with
 						       * same hash index
 						       * based off the
@@ -503,13 +538,13 @@ typedef struct {
 } slurmdb_cluster_cond_t;
 
 typedef struct {
-	List accounting_list; /* list of slurmdb_cluster_accounting_rec_t *'s */
+	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
+	List assets; /* list of slurmdb_asset_rec_t */
 	uint16_t classification; /* how this machine is classified */
 	slurm_addr_t control_addr; /* For convenience only.
 				    * DOESN'T GET PACKED */
 	char *control_host;
 	uint32_t control_port;
-	uint32_t cpu_count;
 	uint16_t dimensions; /* number of dimensions this cluster is */
 	int *dim_size; /* For convenience only.
 			* Size of each dimension For now only on
@@ -526,8 +561,9 @@ typedef struct {
 
 typedef struct {
 	uint64_t alloc_secs; /* number of cpu seconds allocated */
+	slurmdb_asset_rec_t asset_rec;
 	uint64_t consumed_energy; /* energy allocated in Joules */
-	uint32_t cpu_count; /* number of cpus during time period */
+	uint64_t cpu_count;
 	uint64_t down_secs; /* number of cpu seconds down */
 	uint64_t idle_secs; /* number of cpu seconds idle */
 	uint64_t over_secs; /* number of cpu seconds overcommitted */
@@ -562,10 +598,10 @@ typedef struct {
 } slurmdb_event_cond_t;
 
 typedef struct {
+	List assets;            /* Assets touched by this event */
 	char *cluster;          /* Name of associated cluster */
 	char *cluster_nodes;    /* node list in cluster during time
 				 * period (only set in a cluster event) */
-	uint32_t cpu_count;     /* Number of CPUs effected by event */
 	uint16_t event_type;    /* type of event (slurmdb_event_type_t) */
 	char *node_name;        /* Name of node (only set in a node event) */
 	time_t period_end;      /* End of period */
@@ -599,6 +635,7 @@ typedef struct {
 	char    *array_task_str; /* If pending these are the array
 				    tasks this record represents.
 				 */
+	List assets;
 	uint32_t associd;
 	char	*blockid;
 	char    *cluster;
@@ -906,8 +943,8 @@ typedef struct {
 } slurmdb_wckey_cond_t;
 
 typedef struct {
-	List accounting_list; 	/* list of slurmdb_accounting_rec_t *'s */
-
+	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
+	List assets; 	        /* list of slurmdb_asset_rec_t *'s */
 	char *cluster;		/* cluster associated */
 
 	uint32_t id;		/* id identifing a combination of
@@ -956,10 +993,12 @@ typedef struct {
 } slurmdb_report_user_rec_t;
 
 typedef struct {
+	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
+	List assets; /* list of slurmdb_asset_rec_t *'s */
 	List assoc_list; /* list of slurmdb_report_assoc_rec_t *'s */
-	uint64_t consumed_energy;
-	uint32_t cpu_count;
+	uint64_t cpu_count;
 	uint64_t cpu_secs;
+	uint64_t consumed_energy;
 	char *name;
 	List user_list; /* list of slurmdb_report_user_rec_t *'s */
 } slurmdb_report_cluster_rec_t;
@@ -1327,6 +1366,8 @@ extern void slurmdb_destroy_res_rec(void *object);
 extern void slurmdb_destroy_txn_rec(void *object);
 extern void slurmdb_destroy_wckey_rec(void *object);
 extern void slurmdb_destroy_archive_rec(void *object);
+extern void slurmdb_destroy_asset_rec_noalloc(void *object);
+extern void slurmdb_destroy_asset_rec(void *object);
 extern void slurmdb_destroy_report_assoc_rec(void *object);
 extern void slurmdb_destroy_report_user_rec(void *object);
 extern void slurmdb_destroy_report_cluster_rec(void *object);
@@ -1334,6 +1375,7 @@ extern void slurmdb_destroy_report_cluster_rec(void *object);
 extern void slurmdb_destroy_user_cond(void *object);
 extern void slurmdb_destroy_account_cond(void *object);
 extern void slurmdb_destroy_cluster_cond(void *object);
+extern void slurmdb_destroy_asset_cond(void *object);
 extern void slurmdb_destroy_assoc_cond(void *object);
 extern void slurmdb_destroy_event_cond(void *object);
 extern void slurmdb_destroy_job_cond(void *object);
@@ -1368,6 +1410,8 @@ extern void slurmdb_init_res_rec(slurmdb_res_rec_t *res,
 				 bool free_it);
 extern void slurmdb_init_wckey_rec(slurmdb_wckey_rec_t *wckey,
 				   bool free_it);
+extern void slurmdb_init_asset_cond(slurmdb_asset_cond_t *asset,
+				    bool free_it);
 extern void slurmdb_init_cluster_cond(slurmdb_cluster_cond_t *cluster,
 				      bool free_it);
 extern void slurmdb_init_res_cond(slurmdb_res_cond_t *cluster,

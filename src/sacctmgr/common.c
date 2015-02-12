@@ -195,9 +195,16 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("% Allowed");
 		field->len = 10;
 		field->print_routine = print_fields_uint16;
+	} else if (!strncasecmp("Assets", object, MAX(command_len, 2)) ||
+		   !strncasecmp("CPUCount", object, MAX(command_len, 2))) {
+		/* Assets used to be named cpucount */
+		field->type = PRINT_ASSETS;
+		field->name = xstrdup("Assets");
+		field->len = 20;
+		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("Classification", object,
 				MAX(command_len, 3))) {
-		field->type = PRINT_CPUS;
+		field->type = PRINT_CLASS;
 		field->name = xstrdup("Class");
 		field->len = 9;
 		field->print_routine = print_fields_str;
@@ -242,11 +249,6 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("# Used");
 		field->len = 10;
 		field->print_routine = print_fields_uint32;
-	} else if (!strncasecmp("CPUCount", object, MAX(command_len, 2))) {
-		field->type = PRINT_CPUS;
-		field->name = xstrdup("CPUCount");
-		field->len = 9;
-		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("DefaultAccount", object,
 				MAX(command_len, 8))) {
 		field->type = PRINT_DACCT;

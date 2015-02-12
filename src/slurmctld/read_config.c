@@ -540,6 +540,96 @@ static int _build_all_nodeline_info(void)
 	return rc;
 }
 
+static int _init_assets(void)
+{
+	char *temp_char = slurm_get_accounting_storage_assets();
+	List char_list;
+	List add_list = NULL;
+	slurmdb_asset_rec_t *asset_rec;
+
+	if (!temp_char) {
+		error("No assets defined, this should never happen");
+		return SLURM_ERROR;
+	}
+
+	char_list = list_create(slurm_destroy_char);
+	slurm_addto_char_list(char_list, temp_char);
+	xfree(temp_char);
+
+	if (!list_count(char_list)) {
+		FREE_NULL_LIST(char_list);
+		error("Asset list is empty, this should never happen");
+		return SLURM_ERROR;
+	}
+
+	FREE_NULL_LIST(asset_list);
+	asset_list = list_create(slurmdb_destroy_asset_rec);
+	while ((temp_char = list_pop(char_list))) {
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+
+		asset_rec->type = temp_char;
+
+		if (!strcasecmp(temp_char, "cpu") ||
+		    !strcasecmp(temp_char, "mem")) {
+		} else if (!strncasecmp(temp_char, "gres:", 5)) {
+			asset_rec->type[4] = '\0';
+			asset_rec->name = xstrdup(temp_char+5);
+			if (!asset_rec->name)
+				fatal("Gres type assets need to have a name, "
+				      "(i.e. Gres:GPU).  You gave %s",
+				      temp_char);
+		} else if (!strncasecmp(temp_char, "license:", 8)) {
+			asset_rec->type[7] = '\0';
+			asset_rec->name = xstrdup(temp_char+8);
+			if (!asset_rec->name)
+				fatal("License type assets need to "
+				      "have a name, (i.e. License:Foo).  "
+				      "You gave %s",
+				      temp_char);
+		} else {
+			fatal("Unknown asset type '%s', acceptiable types are "
+			      "CPU,Gres:,License:,Mem", temp_char);
+			xfree(asset_rec->type);
+			xfree(asset_rec);
+		}
+
+		if (assoc_mgr_fill_in_asset(acct_db_conn, asset_rec, 1, NULL, 0)
+		    != SLURM_SUCCESS) {
+			if (!add_list)
+				add_list = list_create(
+					slurmdb_destroy_asset_rec);
+			info("Couldn't find asset %s%s%s in the database, "
+			     "creating.",
+			     asset_rec->type, asset_rec->name ? ":" : "",
+			     asset_rec->name ? asset_rec->name : "");
+			list_append(add_list, asset_rec);
+		} else
+			list_append(asset_list, asset_rec);
+	}
+
+	if (add_list) {
+		if (acct_storage_g_add_assets(acct_db_conn, getuid(), add_list)
+		    != SLURM_SUCCESS)
+			fatal("Problem adding assets to the database, "
+			      "can't continue until database is able to "
+			      "make new assets");
+		while ((asset_rec = list_pop(add_list))) {
+			if (assoc_mgr_fill_in_asset(acct_db_conn, asset_rec,
+						    1, NULL, 0)
+			    != SLURM_SUCCESS) {
+				fatal("Unknown asset %s(%s) after adding.  "
+				      "It appears "
+				      "there may be a problem with the "
+				      "slurmdbd communicating with the "
+				      "slurmctld.",
+				      asset_rec->type, asset_rec->name);
+			} else
+				list_append(asset_list, asset_rec);
+		}
+	}
+	return SLURM_SUCCESS;
+}
+
 /* Convert a comma delimited list of account names into a NULL terminated
  * array of pointers to strings. Call accounts_list_free() to release memory */
 extern void accounts_list_build(char *accounts, char ***accounts_array)
@@ -586,7 +676,7 @@ extern void qos_list_build(char *qos, bitstr_t **qos_bits)
 	slurmdb_qos_rec_t qos_rec, *qos_ptr = NULL;
 	bitstr_t *tmp_qos_bitstr;
 	int rc;
-	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK,
+	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK,
 				   READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 	if (!qos) {
@@ -937,6 +1027,8 @@ int read_slurm_conf(int recover, bool reconfig)
 		default_part_name = old_def_part_name;
 		return error_code;
 	}
+
+	_init_assets();
 
 	if (slurm_layouts_init() != SLURM_SUCCESS)
 		fatal("Failed to initialize the layouts framework");
@@ -1833,8 +1925,7 @@ static int _sync_nodes_to_comp_job(void)
 			   plugin and this happens before it is
 			   normally set up so do it now.
 			*/
-			if (!cluster_cpus)
-				set_cluster_cpus();
+			set_cluster_assets();
 
 			info("%s: Job %u in completing state",
 			     __func__, job_ptr->job_id);

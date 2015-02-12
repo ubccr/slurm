@@ -635,6 +635,45 @@ no_rollup_change:
 		rc = mysql_db_query(mysql_conn, query);
 	}
 
+	if (job_ptr->db_index && job_ptr->assets) {
+		ListIterator itr;
+		slurmdb_asset_rec_t *asset_rec;
+
+		xfree(query);
+
+		itr = list_iterator_create(job_ptr->assets);
+		while ((asset_rec = list_next(itr))) {
+			if (!asset_rec->id)
+				continue;
+			if (!query)
+				xstrfmtcat(query,
+					   "insert into \"%s_%s\" "
+					   "(job_db_inx, id_asset, count) "
+					   "values (%u, %u, %u)",
+					   mysql_conn->cluster_name,
+					   job_ext_table,
+					   job_ptr->db_index,
+					   asset_rec->id, asset_rec->count);
+			else
+				xstrfmtcat(query,
+					   ", (%u, %u, %u)",
+					   job_ptr->db_index,
+					   asset_rec->id, asset_rec->count);
+			debug("inserting %s(%s) with asset %u count of %u",
+			      job_ptr->name, mysql_conn->cluster_name,
+			      asset_rec->id, asset_rec->count);
+		}
+		list_iterator_destroy(itr);
+		if (query) {
+			xstrcat(query,
+				" on duplicate key update "
+				"count=VALUES(count);");
+			debug("%d(%s:%d) query\n%s",
+			      mysql_conn->conn, THIS_FILE, __LINE__, query);
+			rc = mysql_db_query(mysql_conn, query);
+		}
+	}
+
 	xfree(block_id);
 	xfree(partition);
 	xfree(gres_req);

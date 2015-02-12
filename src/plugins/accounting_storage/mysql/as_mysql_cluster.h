@@ -72,7 +72,12 @@ extern int as_mysql_register_ctld(mysql_conn_t *mysql_conn,
 extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
 			      slurmdb_cluster_rec_t *cluster_rec);
 
-extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
-				 char *cluster_nodes, uint32_t cpus,
-				 time_t event_time);
+extern int as_mysql_cluster_assets(mysql_conn_t *mysql_conn,
+				   char *cluster_nodes, List *assets,
+				   time_t event_time);
+
+extern int as_mysql_cluster_get_assets(mysql_conn_t *mysql_conn,
+				       slurmdb_cluster_rec_t *cluster_rec);
+
+
 #endif

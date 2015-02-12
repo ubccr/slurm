@@ -1226,6 +1226,26 @@ char *slurm_get_accounting_storage_type(void)
 
 }
 
+/* slurm_get_accounting_storage_assets
+ * returns the accounting storage assets from slurmctld_conf object
+ * RET char *    - accounting storage assets,  MUST be xfreed by caller
+ */
+char *slurm_get_accounting_storage_assets(void)
+{
+	char *accounting_assets;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+		accounting_assets = NULL;
+	} else {
+		conf = slurm_conf_lock();
+		accounting_assets = xstrdup(conf->accounting_storage_assets);
+		slurm_conf_unlock();
+	}
+	return accounting_assets;
+
+}
+
 /* slurm_get_accounting_storage_user
  * returns the storage user from slurmctld_conf object
  * RET char *    - storage user,  MUST be xfreed by caller

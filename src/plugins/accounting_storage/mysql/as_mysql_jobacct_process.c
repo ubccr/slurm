@@ -369,13 +369,14 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 	slurmdb_step_rec_t *step = NULL;
 	time_t now = time(NULL);
 	List job_list = list_create(slurmdb_destroy_job_rec);
-	ListIterator itr = NULL;
+	ListIterator itr = NULL, itr2 = NULL;
 	List local_cluster_list = NULL;
 	int set = 0;
 	char *prefix="t2";
 	int rc = SLURM_SUCCESS;
-	int last_id = -1, curr_id = -1;
+	int last_id = -1, curr_id = -1, i;
 	local_cluster_t *curr_cluster = NULL;
+	slurmdb_asset_rec_t *asset_rec, *loc_asset_rec;
 
 	/* This is here to make sure we are looking at only this user
 	 * if this flag is set.  We also include any accounts they may be
@@ -400,6 +401,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 			      mysql_conn, query, 0))) {
 			xfree(extra);
 			xfree(query);
+			info("here 3");
 			rc = SLURM_ERROR;
 			goto end_it;
 		}
@@ -449,7 +451,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 			       "on t1.id_assoc=t2.id_assoc "
 			       "left join \"%s_%s\" as t3 "
 			       " on t1.id_resv=t3.id_resv ",
-			       job_fields, cluster_name, job_table,
+			       job_fields, cluster_name, job_view,
 			       cluster_name, assoc_table,
 			       cluster_name, resv_table);
 	if (extra) {
@@ -468,6 +470,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
 		rc = SLURM_ERROR;
+		info("here 4");
 		goto end_it;
 	}
 	xfree(query);
@@ -483,11 +486,13 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 		local_cluster_list = setup_cluster_list_with_inx(
 			mysql_conn, job_cond, (void **)&curr_cluster);
 		if (!local_cluster_list) {
+			info("here 2");
 			rc = SLURM_ERROR;
 			goto end_it;
 		}
 	}
 
+	itr2 = list_iterator_create(assoc_mgr_asset_list);
 	while ((row = mysql_fetch_row(result))) {
 		char *id = row[JOB_REQ_ID];
 		bool job_ended = 0;
@@ -734,6 +739,22 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 			if (set)
 				xstrcat(extra, ")");
 		}
+
+		job->assets = list_create(slurmdb_destroy_asset_rec);
+		i = JOB_REQ_COUNT-1;
+		list_iterator_reset(itr2);
+		while ((asset_rec = list_next(itr2))) {
+			i++;
+			/* Skip if the asset is NULL,
+			 * it means this job doesn't care about it.
+			 */
+			if (!row[i] || !row[i][0])
+				continue;
+			loc_asset_rec = slurmdb_copy_asset_rec(asset_rec);
+			loc_asset_rec->count = slurm_atoul(row[i]);
+			list_append(job->assets, loc_asset_rec);
+		}
+
 		query =	xstrdup_printf("select %s from \"%s_%s\" as t1 "
 				       "where t1.job_db_inx=%s",
 				       step_fields, cluster_name,
@@ -749,6 +770,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 		if (!(step_result = mysql_db_query_ret(
 			      mysql_conn, query, 0))) {
 			xfree(query);
+			info("here");
 			rc = SLURM_ERROR;
 			goto end_it;
 		}
@@ -924,6 +946,9 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 	mysql_free_result(result);
 
 end_it:
+	if (itr2)
+		list_iterator_destroy(itr2);
+
 	if (local_cluster_list)
 		list_destroy(local_cluster_list);
 
@@ -1545,6 +1570,8 @@ extern List as_mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 	int only_pending = 0;
 	List use_cluster_list = as_mysql_cluster_list;
 	char *cluster_name;
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 	memset(&user, 0, sizeof(slurmdb_user_rec_t));
 	user.uid = uid;
@@ -1591,6 +1618,9 @@ extern List as_mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 	else
 		slurm_mutex_lock(&as_mysql_cluster_list_lock);
 
+	assoc_mgr_lock(&locks);
+	xstrcat(tmp, full_asset_query);
+
 	job_list = list_create(slurmdb_destroy_job_rec);
 	itr = list_iterator_create(use_cluster_list);
 	while ((cluster_name = list_next(itr))) {
@@ -1603,6 +1633,8 @@ extern List as_mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 			      cluster_name);
 	}
 	list_iterator_destroy(itr);
+
+	assoc_mgr_unlock(&locks);
 
 	if (use_cluster_list == as_mysql_cluster_list)
 		slurm_mutex_unlock(&as_mysql_cluster_list_lock);

@@ -50,8 +50,9 @@
 #define SLURMDBD_2_5_VERSION   11	/* slurm version 2.5 */
 
 typedef struct {
+	List assets;
 	char *cluster_nodes;
-	char *cpu_count;
+	char *inx;
 	char *node_name;
 	char *period_end;
 	char *period_start;
@@ -171,22 +172,22 @@ typedef struct {
 /* if this changes you will need to edit the corresponding
  * enum below */
 char *event_req_inx[] = {
+	"inx",
 	"time_start",
 	"time_end",
 	"node_name",
 	"cluster_nodes",
-	"count",
 	"reason",
 	"reason_uid",
 	"state",
 };
 
 enum {
+	EVENT_REQ_INX,
 	EVENT_REQ_START,
 	EVENT_REQ_END,
 	EVENT_REQ_NODE,
 	EVENT_REQ_CNODES,
-	EVENT_REQ_CNT,
 	EVENT_REQ_REASON,
 	EVENT_REQ_REASON_UID,
 	EVENT_REQ_STATE,
@@ -424,8 +425,28 @@ static int high_buffer_size = (1024 * 1024);
 static void _pack_local_event(local_event_t *object,
 			      uint16_t rpc_version, Buf buffer)
 {
+	slurmdb_asset_rec_t *asset_rec;
+	ListIterator itr = NULL;
+	uint32_t count = NO_VAL;
+
+	if (object->assets)
+		count = list_count(object->assets);
+	else
+		count = NO_VAL;
+
+	pack32(count, buffer);
+
+	if (count && count != NO_VAL) {
+		itr = list_iterator_create(object->assets);
+		while ((asset_rec = list_next(itr))) {
+			slurmdb_pack_asset_rec(
+				asset_rec, rpc_version, buffer);
+		}
+		list_iterator_destroy(itr);
+	}
+
 	packstr(object->cluster_nodes, buffer);
-	packstr(object->cpu_count, buffer);
+	packstr(object->inx, buffer);
 	packstr(object->node_name, buffer);
 	packstr(object->period_end, buffer);
 	packstr(object->period_start, buffer);
@@ -440,17 +461,52 @@ static int _unpack_local_event(local_event_t *object,
 			       uint16_t rpc_version, Buf buffer)
 {
 	uint32_t tmp32;
+	uint32_t count;
+	char *tmp_char;
+	int i;
+	slurmdb_asset_rec_t *asset_rec;
 
-	unpackstr_ptr(&object->cluster_nodes, &tmp32, buffer);
-	unpackstr_ptr(&object->cpu_count, &tmp32, buffer);
-	unpackstr_ptr(&object->node_name, &tmp32, buffer);
-	unpackstr_ptr(&object->period_end, &tmp32, buffer);
-	unpackstr_ptr(&object->period_start, &tmp32, buffer);
-	unpackstr_ptr(&object->reason, &tmp32, buffer);
-	unpackstr_ptr(&object->reason_uid, &tmp32, buffer);
-	unpackstr_ptr(&object->state, &tmp32, buffer);
+	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		safe_unpack32(&count, buffer);
+		if (count != NO_VAL) {
+			object->assets = list_create(slurmdb_destroy_asset_rec);
+			for (i=0; i<count; i++) {
+				if (slurmdb_unpack_asset_rec(
+					    (void *)&asset_rec,
+					    rpc_version, buffer) == SLURM_ERROR)
+					goto unpack_error;
+				list_append(object->assets, asset_rec);
+			}
+		}
+		unpackstr_ptr(&object->cluster_nodes, &tmp32, buffer);
+		unpackstr_ptr(&object->inx, &tmp32, buffer);
+		unpackstr_ptr(&object->node_name, &tmp32, buffer);
+		unpackstr_ptr(&object->period_end, &tmp32, buffer);
+		unpackstr_ptr(&object->period_start, &tmp32, buffer);
+		unpackstr_ptr(&object->reason, &tmp32, buffer);
+		unpackstr_ptr(&object->reason_uid, &tmp32, buffer);
+		unpackstr_ptr(&object->state, &tmp32, buffer);
+	} else {
+		unpackstr_ptr(&object->cluster_nodes, &tmp32, buffer);
+		object->assets = list_create(slurmdb_destroy_asset_rec);
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+		asset_rec->id = ASSET_CPU;
+		list_append(object->assets, asset_rec);
+		unpackstr_ptr(&tmp_char, &tmp32, buffer);
+		asset_rec->count = slurm_atoul(tmp_char);
+		xfree(tmp_char);
+		unpackstr_ptr(&object->node_name, &tmp32, buffer);
+		unpackstr_ptr(&object->period_end, &tmp32, buffer);
+		unpackstr_ptr(&object->period_start, &tmp32, buffer);
+		unpackstr_ptr(&object->reason, &tmp32, buffer);
+		unpackstr_ptr(&object->reason_uid, &tmp32, buffer);
+		unpackstr_ptr(&object->state, &tmp32, buffer);
+	}
 
 	return SLURM_SUCCESS;
+
+unpack_error:
+	return SLURM_ERROR;
 }
 
 static void _pack_local_job(local_job_t *object,
@@ -1401,19 +1457,25 @@ static uint32_t _archive_events(mysql_conn_t *mysql_conn, char *cluster_name,
 	uint32_t cnt = 0;
 	local_event_t event;
 	Buf buffer;
+	ListIterator itr;
 	int error_code = 0, i = 0;
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
+
 
 	xfree(tmp);
 	xstrfmtcat(tmp, "%s", event_req_inx[0]);
 	for(i=1; i<EVENT_REQ_COUNT; i++) {
 		xstrfmtcat(tmp, ", %s", event_req_inx[i]);
 	}
+	assoc_mgr_lock(&locks);
+	xstrcat(tmp, full_asset_query);
 
 	/* get all the events started before this time listed */
 	query = xstrdup_printf("select %s from \"%s_%s\" where "
 			       "time_start <= %ld "
 			       "&& time_end != 0 order by time_start asc",
-			       tmp, cluster_name, event_table, period_end);
+			       tmp, cluster_name, event_view, period_end);
 	xfree(tmp);
 
 //	START_TIMER;
@@ -1421,12 +1483,14 @@ static uint32_t _archive_events(mysql_conn_t *mysql_conn, char *cluster_name,
 		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
+		assoc_mgr_unlock(&locks);
 		return SLURM_ERROR;
 	}
 	xfree(query);
 
 	if (!(cnt = mysql_num_rows(result))) {
 		mysql_free_result(result);
+		assoc_mgr_unlock(&locks);
 		return 0;
 	}
 
@@ -1437,23 +1501,44 @@ static uint32_t _archive_events(mysql_conn_t *mysql_conn, char *cluster_name,
 	packstr(cluster_name, buffer);
 	pack32(cnt, buffer);
 
+	itr = list_iterator_create(assoc_mgr_asset_list);
 	while ((row = mysql_fetch_row(result))) {
+		slurmdb_asset_rec_t *asset_rec, *loc_asset_rec;
 		if (!period_start)
 			period_start = slurm_atoul(row[EVENT_REQ_START]);
 
 		memset(&event, 0, sizeof(local_event_t));
 
 		event.cluster_nodes = row[EVENT_REQ_CNODES];
-		event.cpu_count = row[EVENT_REQ_CNT];
+		event.inx = row[EVENT_REQ_INX];
 		event.node_name = row[EVENT_REQ_NODE];
 		event.period_end = row[EVENT_REQ_END];
 		event.period_start = row[EVENT_REQ_START];
 		event.reason = row[EVENT_REQ_REASON];
 		event.reason_uid = row[EVENT_REQ_REASON_UID];
 		event.state = row[EVENT_REQ_STATE];
+		event.assets = list_create(slurmdb_destroy_asset_rec);
+
+		i = EVENT_REQ_COUNT-1;
+		list_iterator_reset(itr);
+		while ((asset_rec = list_next(itr))) {
+			i++;
+			/* Skip if the asset is NULL,
+			 * it means this cluster
+			 * doesn't care about it.
+			 */
+			if (!row[i] || !row[i][0])
+				continue;
+			loc_asset_rec = slurmdb_copy_asset_rec(asset_rec);
+			loc_asset_rec->count = slurm_atoul(row[i]);
+			list_append(event.assets, loc_asset_rec);
+		}
 
 		_pack_local_event(&event, SLURM_PROTOCOL_VERSION, buffer);
+		FREE_NULL_LIST(event.assets);
 	}
+	list_iterator_destroy(itr);
+	assoc_mgr_unlock(&locks);
 	mysql_free_result(result);
 
 //	END_TIMER2("step query");
@@ -1475,20 +1560,23 @@ static char *
 _load_events(uint16_t rpc_version, Buf buffer, char *cluster_name,
 	     uint32_t rec_cnt)
 {
-	char *insert = NULL, *format = NULL;
+	char *insert = NULL, *cols = NULL, *format = NULL, *asset_values = NULL;
 	local_event_t object;
 	int i = 0;
+	ListIterator itr;
+	slurmdb_asset_rec_t *asset_rec;
 
-	xstrfmtcat(insert, "insert into \"%s_%s\" (%s",
-		   cluster_name, event_table, event_req_inx[0]);
-	xstrcat(format, "('%s'");
+	xstrfmtcat(cols, "(%s", event_req_inx[0]);
+	xstrcat(format, "insert into \"%s_%s\" %s ('%s'");
 	for(i=1; i<EVENT_REQ_COUNT; i++) {
-		xstrfmtcat(insert, ", %s", event_req_inx[i]);
+		xstrfmtcat(cols, ", %s", event_req_inx[i]);
 		xstrcat(format, ", '%s'");
 	}
-	xstrcat(insert, ") values ");
-	xstrcat(format, ")");
-	for(i=0; i<rec_cnt; i++) {
+	xstrcat(cols, ") values ");
+	xstrcat(format, ");");
+
+	for (i=0; i<rec_cnt; i++) {
+		char *inx;
 		memset(&object, 0, sizeof(local_event_t));
 		if (_unpack_local_event(&object, rpc_version, buffer)
 		    != SLURM_SUCCESS) {
@@ -1497,22 +1585,50 @@ _load_events(uint16_t rpc_version, Buf buffer, char *cluster_name,
 			xfree(insert);
 			break;
 		}
-		if (i)
-			xstrcat(insert, ", ");
+
+		xassert(object.assets);
 
 		xstrfmtcat(insert, format,
+			   cluster_name, event_table, cols,
+			   object.inx,
 			   object.period_start,
 			   object.period_end,
 			   object.node_name,
 			   object.cluster_nodes,
-			   object.cpu_count,
 			   object.reason,
 			   object.reason_uid,
 			   object.state);
+		if (slurm_atoul(object.inx))
+			inx = object.inx;
+		else
+			inx = "LAST_INSERT_ID()";
 
+		itr = list_iterator_create(object.assets);
+		while ((asset_rec = list_next(itr))) {
+			if (asset_values) {
+				xstrfmtcat(asset_values,
+					   ", (%s, %u, %u)",
+					   inx, asset_rec->id,
+					   asset_rec->count);
+			} else {
+				xstrfmtcat(asset_values,
+					   "insert into \"%s_%s\" "
+					   "(inx, id_asset, count) values "
+					   "(%s, %u, %u)",
+					   cluster_name, event_ext_table,
+					   inx, asset_rec->id,
+					   asset_rec->count);
+			}
+		}
+		list_iterator_destroy(itr);
+		if (asset_values) {
+			xstrfmtcat(insert, "%s;", asset_values);
+			xfree(asset_values);
+		}
 	}
 //	END_TIMER2("step query");
 //	info("event query took %s", TIME_STR);
+	xfree(cols);
 	xfree(format);
 
 	return insert;
@@ -2195,9 +2311,13 @@ static int _execute_archive(mysql_conn_t *mysql_conn,
 			else if (rc == SLURM_ERROR)
 				return rc;
 		}
-		query = xstrdup_printf("delete from \"%s_%s\" where "
+		query = xstrdup_printf("delete t1, t2 from \"%s_%s\" t1 "
+				       "join \"%s_%s\" t2 on t1.inx=t2.inx "
+				       "where "
 				       "time_start <= %ld && time_end != 0",
-				       cluster_name, event_table, curr_end);
+				       cluster_name, event_table,
+				       cluster_name, event_ext_table,
+				       curr_end);
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 		rc = mysql_db_query(mysql_conn, query);

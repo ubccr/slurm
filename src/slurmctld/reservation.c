@@ -553,7 +553,7 @@ static int _set_assoc_list(slurmctld_resv_t *resv_ptr)
 	int rc = SLURM_SUCCESS, i = 0, j = 0;
 	List assoc_list_allow = NULL, assoc_list_deny = NULL, assoc_list;
 	slurmdb_assoc_rec_t assoc, *assoc_ptr = NULL;
-	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK,
+	assoc_mgr_lock_t locks = { NO_LOCK, READ_LOCK, NO_LOCK,
 				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 
@@ -2632,9 +2632,8 @@ extern void show_resv(char **buffer_ptr, int *buffer_size, uid_t uid,
 	time_t now = time(NULL);
 	List assoc_list = NULL;
 	bool check_permissions = false;
-	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK,
-				   NO_LOCK, NO_LOCK,
-				   NO_LOCK, NO_LOCK };
+	assoc_mgr_lock_t locks = { NO_LOCK, READ_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 	DEF_TIMERS;
 

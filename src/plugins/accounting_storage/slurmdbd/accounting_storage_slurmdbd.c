@@ -163,6 +163,20 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	memset(req, 0, sizeof(dbd_job_start_msg_t));
 
 	req->account       = xstrdup(job_ptr->account);
+
+	if (job_ptr->assets) {
+		ListIterator itr;
+		slurmdb_asset_rec_t *asset_rec, *new_asset;
+		req->assets = list_create(slurmdb_destroy_asset_rec);
+		itr = list_iterator_create(job_ptr->assets);
+		while ((asset_rec = list_next(itr))) {
+			if (!(new_asset = slurmdb_copy_asset_rec(asset_rec)))
+				continue;
+			list_append(req->assets, new_asset);
+		}
+		list_iterator_destroy(itr);
+	}
+
 	req->assoc_id      = job_ptr->assoc_id;
 #ifdef HAVE_BG
 	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
@@ -625,6 +639,31 @@ extern int acct_storage_p_add_clusters(void *db_conn, uint32_t uid,
 	if (resp_code != SLURM_SUCCESS) {
 		rc = resp_code;
 	}
+	return rc;
+}
+
+extern int acct_storage_p_add_assets(void *db_conn,
+				     uint32_t uid, List asset_list)
+{
+	slurmdbd_msg_t req;
+	dbd_list_msg_t get_msg;
+	int rc, resp_code;
+
+	/* This means we are updating views which don't apply in this plugin */
+	if (!asset_list)
+		return SLURM_SUCCESS;
+
+	memset(&get_msg, 0, sizeof(dbd_list_msg_t));
+	get_msg.my_list = asset_list;
+
+	req.msg_type = DBD_ADD_ASSETS;
+	req.data = &get_msg;
+	rc = slurm_send_slurmdbd_recv_rc_msg(SLURM_PROTOCOL_VERSION,
+					     &req, &resp_code);
+
+	if (resp_code != SLURM_SUCCESS)
+		rc = resp_code;
+
 	return rc;
 }
 
@@ -1638,6 +1677,47 @@ extern List acct_storage_p_get_config(void *db_conn, char *config_name)
 	return ret_list;
 }
 
+extern List acct_storage_p_get_assets(void *db_conn, uid_t uid,
+				      slurmdb_asset_cond_t *asset_cond)
+{
+	slurmdbd_msg_t req, resp;
+	dbd_cond_msg_t get_msg;
+	dbd_list_msg_t *got_msg;
+	int rc;
+	List ret_list = NULL;
+
+	memset(&get_msg, 0, sizeof(dbd_cond_msg_t));
+	get_msg.cond = asset_cond;
+
+	req.msg_type = DBD_GET_ASSETS;
+	req.data = &get_msg;
+	rc = slurm_send_recv_slurmdbd_msg(SLURM_PROTOCOL_VERSION, &req, &resp);
+
+	if (rc != SLURM_SUCCESS)
+		error("slurmdbd: DBD_GET_ASSETS failure: %m");
+	else if (resp.msg_type == DBD_RC) {
+		dbd_rc_msg_t *msg = resp.data;
+		if (msg->return_code == SLURM_SUCCESS) {
+			info("%s", msg->comment);
+			ret_list = list_create(NULL);
+		} else {
+			slurm_seterrno(msg->return_code);
+			error("%s", msg->comment);
+		}
+		slurmdbd_free_rc_msg(msg);
+	} else if (resp.msg_type != DBD_GOT_ASSETS) {
+		error("slurmdbd: response type not DBD_GOT_ASSETS: %u",
+		      resp.msg_type);
+	} else {
+		got_msg = (dbd_list_msg_t *) resp.data;
+		ret_list = got_msg->my_list;
+		got_msg->my_list = NULL;
+		slurmdbd_free_list_msg(got_msg);
+	}
+
+	return ret_list;
+}
+
 extern List acct_storage_p_get_assocs(
 	void *db_conn, uid_t uid, slurmdb_assoc_cond_t *assoc_cond)
 {
@@ -1906,7 +1986,7 @@ extern List acct_storage_p_get_wckeys(void *db_conn, uid_t uid,
 }
 
 extern List acct_storage_p_get_reservations(
-	void *mysql_conn, uid_t uid,
+	void *db_conn, uid_t uid,
 	slurmdb_reservation_cond_t *resv_cond)
 {
 	slurmdbd_msg_t req, resp;
@@ -2115,13 +2195,7 @@ extern int clusteracct_storage_p_node_down(void *db_conn,
 {
 	slurmdbd_msg_t msg;
 	dbd_node_state_msg_t req;
-	uint16_t cpus;
 	char *my_reason;
-
-	if (slurmctld_conf.fast_schedule)
-		cpus = node_ptr->config_ptr->cpus;
-	else
-		cpus = node_ptr->cpus;
 
 	if (reason)
 		my_reason = reason;
@@ -2129,7 +2203,7 @@ extern int clusteracct_storage_p_node_down(void *db_conn,
 		my_reason = node_ptr->reason;
 
 	memset(&req, 0, sizeof(dbd_node_state_msg_t));
-	req.cpu_count = cpus;
+	req.assets     = node_ptr->assets;
 	req.hostlist   = node_ptr->name;
 	req.new_state  = DBD_NODE_STATE_DOWN;
 	req.event_time = event_time;
@@ -2138,7 +2212,7 @@ extern int clusteracct_storage_p_node_down(void *db_conn,
 	req.state      = node_ptr->node_state;
 	msg.msg_type   = DBD_NODE_STATE;
 	msg.data       = &req;
-
+	info("sending a down message here");
 	if (slurm_send_slurmdbd_msg(SLURM_PROTOCOL_VERSION, &msg) < 0)
 		return SLURM_ERROR;
 
@@ -2160,27 +2234,31 @@ extern int clusteracct_storage_p_node_up(void *db_conn,
 	msg.msg_type   = DBD_NODE_STATE;
 	msg.data       = &req;
 
+	info("sending an up message here");
 	if (slurm_send_slurmdbd_msg(SLURM_PROTOCOL_VERSION, &msg) < 0)
 		return SLURM_ERROR;
 
 	return SLURM_SUCCESS;
 }
 
-extern int clusteracct_storage_p_cluster_cpus(void *db_conn,
-					      char *cluster_nodes,
-					      uint32_t cpus,
-					      time_t event_time)
+extern int clusteracct_storage_p_cluster_assets(void *db_conn,
+						char *cluster_nodes,
+						List assets,
+						time_t event_time)
 {
 	slurmdbd_msg_t msg;
-	dbd_cluster_cpus_msg_t req;
+	dbd_cluster_assets_msg_t req;
 	int rc = SLURM_ERROR;
 
-	debug2("Sending cpu count of %d for cluster", cpus);
-	memset(&req, 0, sizeof(dbd_cluster_cpus_msg_t));
+	if (!assets)
+		return rc;
+
+	debug2("Sending %d assets for cluster", list_count(assets));
+	memset(&req, 0, sizeof(dbd_cluster_assets_msg_t));
 	req.cluster_nodes = cluster_nodes;
-	req.cpu_count   = cpus;
+	req.assets       = assets;
 	req.event_time   = event_time;
-	msg.msg_type     = DBD_CLUSTER_CPUS;
+	msg.msg_type     = DBD_CLUSTER_ASSETS;
 	msg.data         = &req;
 
 	slurm_send_slurmdbd_recv_rc_msg(SLURM_PROTOCOL_VERSION, &msg, &rc);
@@ -2680,14 +2758,14 @@ extern int acct_storage_p_flush_jobs_on_cluster(void *db_conn,
 						time_t event_time)
 {
 	slurmdbd_msg_t msg;
-	dbd_cluster_cpus_msg_t req;
+	dbd_cluster_assets_msg_t req;
 
 	info("Ending any jobs in accounting that were running when controller "
 	     "went down on");
 
-	memset(&req, 0, sizeof(dbd_cluster_cpus_msg_t));
+	memset(&req, 0, sizeof(dbd_cluster_assets_msg_t));
 
-	req.cpu_count   = 0;
+	req.assets       = NULL;
 	req.event_time   = event_time;
 
 	msg.msg_type     = DBD_FLUSH_JOBS;

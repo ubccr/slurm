@@ -495,11 +495,13 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req, uint16_t rpc_version)
 
 	switch (req->msg_type) {
 	case DBD_ADD_ACCOUNTS:
+	case DBD_ADD_ASSETS:
 	case DBD_ADD_ASSOCS:
 	case DBD_ADD_CLUSTERS:
 	case DBD_ADD_RES:
 	case DBD_ADD_USERS:
 	case DBD_GOT_ACCOUNTS:
+	case DBD_GOT_ASSETS:
 	case DBD_GOT_ASSOCS:
 	case DBD_GOT_CLUSTERS:
 	case DBD_GOT_EVENTS:
@@ -532,13 +534,14 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req, uint16_t rpc_version)
 	case DBD_ARCHIVE_LOAD:
 		slurmdb_pack_archive_rec(req->data, rpc_version, buffer);
 		break;
-	case DBD_CLUSTER_CPUS:
+	case DBD_CLUSTER_ASSETS:
 	case DBD_FLUSH_JOBS:
-		slurmdbd_pack_cluster_cpus_msg(
-			(dbd_cluster_cpus_msg_t *)req->data, rpc_version,
+		slurmdbd_pack_cluster_assets_msg(
+			(dbd_cluster_assets_msg_t *)req->data, rpc_version,
 			buffer);
 		break;
 	case DBD_GET_ACCOUNTS:
+	case DBD_GET_ASSETS:
 	case DBD_GET_ASSOCS:
 	case DBD_GET_CLUSTERS:
 	case DBD_GET_EVENTS:
@@ -676,11 +679,13 @@ extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp,
 
 	switch (resp->msg_type) {
 	case DBD_ADD_ACCOUNTS:
+	case DBD_ADD_ASSETS:
 	case DBD_ADD_ASSOCS:
 	case DBD_ADD_CLUSTERS:
 	case DBD_ADD_RES:
 	case DBD_ADD_USERS:
 	case DBD_GOT_ACCOUNTS:
+	case DBD_GOT_ASSETS:
 	case DBD_GOT_ASSOCS:
 	case DBD_GOT_CLUSTERS:
 	case DBD_GOT_EVENTS:
@@ -714,13 +719,14 @@ extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp,
 		rc = slurmdb_unpack_archive_rec(
 			&resp->data, rpc_version, buffer);
 		break;
-	case DBD_CLUSTER_CPUS:
+	case DBD_CLUSTER_ASSETS:
 	case DBD_FLUSH_JOBS:
-		rc = slurmdbd_unpack_cluster_cpus_msg(
-			(dbd_cluster_cpus_msg_t **)&resp->data,
+		rc = slurmdbd_unpack_cluster_assets_msg(
+			(dbd_cluster_assets_msg_t **)&resp->data,
 			rpc_version, buffer);
 		break;
 	case DBD_GET_ACCOUNTS:
+	case DBD_GET_ASSETS:
 	case DBD_GET_ASSOCS:
 	case DBD_GET_CLUSTERS:
 	case DBD_GET_EVENTS:
@@ -861,6 +867,8 @@ extern slurmdbd_msg_type_t str_2_slurmdbd_msg_type(char *msg_type)
 		return DBD_ADD_ACCOUNTS;
 	} else if (!strcasecmp(msg_type, "Add Account Coord")) {
 		return DBD_ADD_ACCOUNT_COORDS;
+	} else if (!strcasecmp(msg_type, "Add Assets")) {
+		return DBD_ADD_ASSETS;
 	} else if (!strcasecmp(msg_type, "Add Associations")) {
 		return DBD_ADD_ASSOCS;
 	} else if (!strcasecmp(msg_type, "Add Clusters")) {
@@ -869,12 +877,14 @@ extern slurmdbd_msg_type_t str_2_slurmdbd_msg_type(char *msg_type)
 		return DBD_ADD_RES;
 	} else if (!strcasecmp(msg_type, "Add Users")) {
 		return DBD_ADD_USERS;
-	} else if (!strcasecmp(msg_type, "Cluster Processors")) {
-		return DBD_CLUSTER_CPUS;
+	} else if (!strcasecmp(msg_type, "Cluster Assets")) {
+		return DBD_CLUSTER_ASSETS;
 	} else if (!strcasecmp(msg_type, "Flush Jobs")) {
 		return DBD_FLUSH_JOBS;
 	} else if (!strcasecmp(msg_type, "Get Accounts")) {
 		return DBD_GET_ACCOUNTS;
+	} else if (!strcasecmp(msg_type, "Get Assets")) {
+		return DBD_GET_ASSETS;
 	} else if (!strcasecmp(msg_type, "Get Associations")) {
 		return DBD_GET_ASSOCS;
 	} else if (!strcasecmp(msg_type, "Get Association Usage")) {
@@ -895,6 +905,8 @@ extern slurmdbd_msg_type_t str_2_slurmdbd_msg_type(char *msg_type)
 		return DBD_GET_USERS;
 	} else if (!strcasecmp(msg_type, "Got Accounts")) {
 		return DBD_GOT_ACCOUNTS;
+	} else if (!strcasecmp(msg_type, "Got Assets")) {
+		return DBD_GOT_ASSETS;
 	} else if (!strcasecmp(msg_type, "Got Associations")) {
 		return DBD_GOT_ASSOCS;
 	} else if (!strcasecmp(msg_type, "Got Association Usage")) {
@@ -1047,6 +1059,12 @@ extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type, int get_enum)
 		} else
 			return "Add Account Coord";
 		break;
+	case DBD_ADD_ASSETS:
+		if (get_enum) {
+			return "DBD_ADD_ASSETS";
+		} else
+			return "Add Assets";
+		break;
 	case DBD_ADD_ASSOCS:
 		if (get_enum) {
 			return "DBD_ADD_ASSOCS";
@@ -1071,11 +1089,11 @@ extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type, int get_enum)
 		} else
 			return "Add Users";
 		break;
-	case DBD_CLUSTER_CPUS:
+	case DBD_CLUSTER_ASSETS:
 		if (get_enum) {
-			return "DBD_CLUSTER_CPUS";
+			return "DBD_CLUSTER_ASSETS";
 		} else
-			return "Cluster Processors";
+			return "Cluster Assets";
 		break;
 	case DBD_FLUSH_JOBS:
 		if (get_enum) {
@@ -1088,6 +1106,12 @@ extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type, int get_enum)
 			return "DBD_GET_ACCOUNTS";
 		} else
 			return "Get Accounts";
+		break;
+	case DBD_GET_ASSETS:
+		if (get_enum) {
+			return "DBD_GET_ASSETS";
+		} else
+			return "Get Assets";
 		break;
 	case DBD_GET_ASSOCS:
 		if (get_enum) {
@@ -1148,6 +1172,12 @@ extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type, int get_enum)
 			return "DBD_GOT_ACCOUNTS";
 		} else
 			return "Got Accounts";
+		break;
+	case DBD_GOT_ASSETS:
+		if (get_enum) {
+			return "DBD_GOT_ASSETS";
+		} else
+			return "Got Assets";
 		break;
 	case DBD_GOT_ASSOCS:
 		if (get_enum) {
@@ -2506,9 +2536,10 @@ extern void slurmdbd_free_acct_coord_msg(dbd_acct_coord_msg_t *msg)
 	}
 }
 
-extern void slurmdbd_free_cluster_cpus_msg(dbd_cluster_cpus_msg_t *msg)
+extern void slurmdbd_free_cluster_assets_msg(dbd_cluster_assets_msg_t *msg)
 {
 	if (msg) {
+		FREE_NULL_LIST(msg->assets);
 		xfree(msg->cluster_nodes);
 		xfree(msg);
 	}
@@ -2546,6 +2577,9 @@ extern void slurmdbd_free_cond_msg(dbd_cond_msg_t *msg,
 		case DBD_GET_ACCOUNTS:
 		case DBD_REMOVE_ACCOUNTS:
 			my_destroy = slurmdb_destroy_account_cond;
+			break;
+		case DBD_GET_ASSETS:
+			my_destroy = slurmdb_destroy_asset_cond;
 			break;
 		case DBD_GET_ASSOCS:
 		case DBD_GET_PROBS:
@@ -2625,6 +2659,7 @@ extern void slurmdbd_free_job_start_msg(void *in)
 	if (msg) {
 		xfree(msg->account);
 		xfree(msg->array_task_str);
+		FREE_NULL_LIST(msg->assets);
 		xfree(msg->block_id);
 		xfree(msg->gres_alloc);
 		xfree(msg->gres_req);
@@ -2710,6 +2745,7 @@ extern void slurmdbd_free_modify_msg(dbd_modify_msg_t *msg,
 extern void slurmdbd_free_node_state_msg(dbd_node_state_msg_t *msg)
 {
 	if (msg) {
+		FREE_NULL_LIST(msg->assets);
 		xfree(msg->hostlist);
 		xfree(msg->reason);
 		xfree(msg);
@@ -2839,37 +2875,88 @@ unpack_error:
 }
 
 extern void
-slurmdbd_pack_cluster_cpus_msg(dbd_cluster_cpus_msg_t *msg,
+slurmdbd_pack_cluster_assets_msg(dbd_cluster_assets_msg_t *msg,
 			       uint16_t rpc_version, Buf buffer)
 {
-	if (rpc_version >= SLURMDBD_MIN_VERSION) {
+	uint32_t count = NO_VAL;
+	slurmdb_asset_rec_t *asset_rec;
+	ListIterator itr;
+
+	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		if (msg->assets)
+			count = list_count(msg->assets);
+
+		pack32(count, buffer);
+		if (count != NO_VAL) {
+			itr = list_iterator_create(msg->assets);
+			while ((asset_rec = list_next(itr)))
+				slurmdb_pack_asset_rec(asset_rec, rpc_version,
+						       buffer);
+			list_iterator_destroy(itr);
+		}
 		packstr(msg->cluster_nodes, buffer);
-		pack32(msg->cpu_count,    buffer);
+		pack_time(msg->event_time, buffer);
+	} else if (rpc_version >= SLURMDBD_MIN_VERSION) {
+		packstr(msg->cluster_nodes, buffer);
+		itr = list_iterator_create(msg->assets);
+		while ((asset_rec = list_next(itr))) {
+			if (asset_rec->id == 1)
+				break;
+		}
+		list_iterator_destroy(itr);
+		if (asset_rec)
+			count = asset_rec->count;
+		else
+			count = 0;
+		pack32(count, buffer);
 		pack_time(msg->event_time, buffer);
 	}
 }
 
 extern int
-slurmdbd_unpack_cluster_cpus_msg(dbd_cluster_cpus_msg_t **msg,
+slurmdbd_unpack_cluster_assets_msg(dbd_cluster_assets_msg_t **msg,
 				 uint16_t rpc_version, Buf buffer)
 {
-	dbd_cluster_cpus_msg_t *msg_ptr;
-	uint32_t uint32_tmp;
+	dbd_cluster_assets_msg_t *msg_ptr;
+	uint32_t uint32_tmp, i;
+	uint32_t count = NO_VAL;
+	slurmdb_asset_rec_t *asset_rec;
 
-	msg_ptr = xmalloc(sizeof(dbd_cluster_cpus_msg_t));
+	msg_ptr = xmalloc(sizeof(dbd_cluster_assets_msg_t));
 	*msg = msg_ptr;
 
-	if (rpc_version >= SLURMDBD_MIN_VERSION) {
+	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		safe_unpack32(&count, buffer);
+		if (count != NO_VAL) {
+			msg_ptr->assets =
+				list_create(slurmdb_destroy_asset_rec);
+			for (i=0; i<count; i++) {
+				if (slurmdb_unpack_asset_rec(
+					    (void **)&asset_rec, rpc_version,
+					    buffer)
+				    != SLURM_SUCCESS)
+					goto unpack_error;
+				list_append(msg_ptr->assets, asset_rec);
+			}
+		}
 		safe_unpackstr_xmalloc(&msg_ptr->cluster_nodes,
 				       &uint32_tmp, buffer);
-		safe_unpack32(&msg_ptr->cpu_count, buffer);
+		safe_unpack_time(&msg_ptr->event_time, buffer);
+	} else if (rpc_version >= SLURMDBD_MIN_VERSION) {
+		safe_unpackstr_xmalloc(&msg_ptr->cluster_nodes,
+				       &uint32_tmp, buffer);
+		msg_ptr->assets = list_create(slurmdb_destroy_asset_rec);
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+		asset_rec->id = ASSET_CPU;
+		list_append(msg_ptr->assets, asset_rec);
+		safe_unpack32(&asset_rec->count, buffer);
 		safe_unpack_time(&msg_ptr->event_time, buffer);
 	}
 
 	return SLURM_SUCCESS;
 
 unpack_error:
-	slurmdbd_free_cluster_cpus_msg(msg_ptr);
+	slurmdbd_free_cluster_assets_msg(msg_ptr);
 	*msg = NULL;
 	return SLURM_ERROR;
 }
@@ -2937,6 +3024,9 @@ extern void slurmdbd_pack_cond_msg(dbd_cond_msg_t *msg,
 	case DBD_REMOVE_ACCOUNTS:
 		my_function = slurmdb_pack_account_cond;
 		break;
+	case DBD_GET_ASSETS:
+		my_function = slurmdb_pack_asset_cond;
+		break;
 	case DBD_GET_ASSOCS:
 	case DBD_GET_PROBS:
 	case DBD_REMOVE_ASSOCS:
@@ -2996,6 +3086,9 @@ extern int slurmdbd_unpack_cond_msg(dbd_cond_msg_t **msg,
 	case DBD_GET_ACCOUNTS:
 	case DBD_REMOVE_ACCOUNTS:
 		my_function = slurmdb_unpack_account_cond;
+		break;
+	case DBD_GET_ASSETS:
+		my_function = slurmdb_unpack_asset_cond;
 		break;
 	case DBD_GET_ASSOCS:
 	case DBD_GET_PROBS:
@@ -3211,8 +3304,58 @@ extern void
 slurmdbd_pack_job_start_msg(void *in,
 			    uint16_t rpc_version, Buf buffer)
 {
+	uint32_t count = NO_VAL;
+	slurmdb_asset_rec_t *asset_rec = NULL;
+	ListIterator itr;
 	dbd_job_start_msg_t *msg = (dbd_job_start_msg_t *)in;
-	if (rpc_version >= SLURM_14_11_PROTOCOL_VERSION) {
+
+	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		packstr(msg->account, buffer);
+		pack32(msg->alloc_cpus, buffer);
+		pack32(msg->alloc_nodes, buffer);
+		pack32(msg->array_job_id, buffer);
+		pack32(msg->array_max_tasks, buffer);
+		pack32(msg->array_task_id, buffer);
+		packstr(msg->array_task_str, buffer);
+		pack32(msg->array_task_pending, buffer);
+
+		if (msg->assets)
+			count = list_count(msg->assets);
+
+		pack32(count, buffer);
+		if (count != NO_VAL) {
+			itr = list_iterator_create(msg->assets);
+			while ((asset_rec = list_next(itr)))
+				slurmdb_pack_asset_rec(asset_rec, rpc_version,
+						       buffer);
+			list_iterator_destroy(itr);
+		}
+
+		pack32(msg->assoc_id, buffer);
+		packstr(msg->block_id, buffer);
+		pack32(msg->db_index, buffer);
+		pack_time(msg->eligible_time, buffer);
+		pack32(msg->gid, buffer);
+		packstr(msg->gres_alloc, buffer);
+		packstr(msg->gres_req, buffer);
+		packstr(msg->gres_used, buffer);
+		pack32(msg->job_id, buffer);
+		pack16(msg->job_state, buffer);
+		packstr(msg->name, buffer);
+		packstr(msg->nodes, buffer);
+		packstr(msg->node_inx, buffer);
+		packstr(msg->partition, buffer);
+		pack32(msg->priority, buffer);
+		pack32(msg->qos_id, buffer);
+		pack32(msg->req_cpus, buffer);
+		pack32(msg->req_mem, buffer);
+		pack32(msg->resv_id, buffer);
+		pack_time(msg->start_time, buffer);
+		pack_time(msg->submit_time, buffer);
+		pack32(msg->timelimit, buffer);
+		pack32(msg->uid, buffer);
+		packstr(msg->wckey, buffer);
+	} else if (rpc_version >= SLURM_14_11_PROTOCOL_VERSION) {
 		packstr(msg->account, buffer);
 		pack32(msg->alloc_cpus, buffer);
 		pack32(msg->alloc_nodes, buffer);
@@ -3280,14 +3423,69 @@ extern int
 slurmdbd_unpack_job_start_msg(void **msg,
 			      uint16_t rpc_version, Buf buffer)
 {
-	uint32_t uint32_tmp;
+	uint32_t uint32_tmp, i;
+	uint32_t count = NO_VAL;
+	slurmdb_asset_rec_t *asset_rec;
 	dbd_job_start_msg_t *msg_ptr = xmalloc(sizeof(dbd_job_start_msg_t));
 	*msg = msg_ptr;
 
 	msg_ptr->array_job_id = 0;
 	msg_ptr->array_task_id = NO_VAL;
 
-	if (rpc_version >= SLURM_14_11_PROTOCOL_VERSION) {
+	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		safe_unpackstr_xmalloc(&msg_ptr->account, &uint32_tmp, buffer);
+		safe_unpack32(&msg_ptr->alloc_cpus, buffer);
+		safe_unpack32(&msg_ptr->alloc_nodes, buffer);
+		safe_unpack32(&msg_ptr->array_job_id, buffer);
+		safe_unpack32(&msg_ptr->array_max_tasks, buffer);
+		safe_unpack32(&msg_ptr->array_task_id, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->array_task_str,
+				       &uint32_tmp, buffer);
+		safe_unpack32(&msg_ptr->array_task_pending, buffer);
+
+		safe_unpack32(&count, buffer);
+		if (count != NO_VAL) {
+			msg_ptr->assets =
+				list_create(slurmdb_destroy_asset_rec);
+			for (i=0; i<count; i++) {
+				if (slurmdb_unpack_asset_rec(
+					    (void **)&asset_rec, rpc_version,
+					    buffer)
+				    != SLURM_SUCCESS)
+					goto unpack_error;
+				list_append(msg_ptr->assets, asset_rec);
+			}
+		}
+
+		safe_unpack32(&msg_ptr->assoc_id, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->block_id, &uint32_tmp, buffer);
+		safe_unpack32(&msg_ptr->db_index, buffer);
+		safe_unpack_time(&msg_ptr->eligible_time, buffer);
+		safe_unpack32(&msg_ptr->gid, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->gres_alloc, &uint32_tmp,
+				       buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->gres_req, &uint32_tmp,
+				       buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->gres_used, &uint32_tmp,
+				       buffer);
+		safe_unpack32(&msg_ptr->job_id, buffer);
+		safe_unpack16(&msg_ptr->job_state, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->name, &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->nodes, &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->node_inx, &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->partition,
+				       &uint32_tmp, buffer);
+		safe_unpack32(&msg_ptr->priority, buffer);
+		safe_unpack32(&msg_ptr->qos_id, buffer);
+		safe_unpack32(&msg_ptr->req_cpus, buffer);
+		safe_unpack32(&msg_ptr->req_mem, buffer);
+		safe_unpack32(&msg_ptr->resv_id, buffer);
+		safe_unpack_time(&msg_ptr->start_time, buffer);
+		safe_unpack_time(&msg_ptr->submit_time, buffer);
+		safe_unpack32(&msg_ptr->timelimit, buffer);
+		safe_unpack32(&msg_ptr->uid, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->wckey, &uint32_tmp, buffer);
+	} else if (rpc_version >= SLURM_14_11_PROTOCOL_VERSION) {
 		safe_unpackstr_xmalloc(&msg_ptr->account, &uint32_tmp, buffer);
 		safe_unpack32(&msg_ptr->alloc_cpus, buffer);
 		safe_unpack32(&msg_ptr->alloc_nodes, buffer);
@@ -3357,6 +3555,19 @@ slurmdbd_unpack_job_start_msg(void **msg,
 		safe_unpack32(&msg_ptr->timelimit, buffer);
 		safe_unpack32(&msg_ptr->uid, buffer);
 		safe_unpackstr_xmalloc(&msg_ptr->wckey, &uint32_tmp, buffer);
+	}
+
+	if (!msg_ptr->assets) {
+		msg_ptr->assets = list_create(slurmdb_destroy_asset_rec);
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+		asset_rec->id = ASSET_CPU;
+		asset_rec->count = msg_ptr->alloc_cpus;
+		list_append(msg_ptr->assets, asset_rec);
+
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+		asset_rec->id = ASSET_MEM;
+		asset_rec->count = msg_ptr->req_mem;
+		list_append(msg_ptr->assets, asset_rec);
 	}
 
 	return SLURM_SUCCESS;
@@ -3446,6 +3657,10 @@ extern void slurmdbd_pack_list_msg(dbd_list_msg_t *msg,
 	case DBD_ADD_ACCOUNTS:
 	case DBD_GOT_ACCOUNTS:
 		my_function = slurmdb_pack_account_rec;
+		break;
+	case DBD_ADD_ASSETS:
+	case DBD_GOT_ASSETS:
+		my_function = slurmdb_pack_asset_rec;
 		break;
 	case DBD_ADD_ASSOCS:
 	case DBD_GOT_ASSOCS:
@@ -3539,6 +3754,11 @@ extern int slurmdbd_unpack_list_msg(dbd_list_msg_t **msg, uint16_t rpc_version,
 	case DBD_GOT_ACCOUNTS:
 		my_function = slurmdb_unpack_account_rec;
 		my_destroy = slurmdb_destroy_account_rec;
+		break;
+	case DBD_ADD_ASSETS:
+	case DBD_GOT_ASSETS:
+		my_function = slurmdb_unpack_asset_rec;
+		my_destroy = slurmdb_destroy_asset_rec;
 		break;
 	case DBD_ADD_ASSOCS:
 	case DBD_GOT_ASSOCS:
@@ -3750,8 +3970,43 @@ extern void
 slurmdbd_pack_node_state_msg(dbd_node_state_msg_t *msg,
 			     uint16_t rpc_version, Buf buffer)
 {
-	if (rpc_version >= SLURM_14_11_PROTOCOL_VERSION) {
-		pack32(msg->cpu_count, buffer);
+	uint32_t count = NO_VAL;
+	slurmdb_asset_rec_t *asset_rec = NULL;
+	ListIterator itr;
+
+	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		if (msg->assets)
+			count = list_count(msg->assets);
+
+		pack32(count, buffer);
+		if (count != NO_VAL) {
+			itr = list_iterator_create(msg->assets);
+			while ((asset_rec = list_next(itr)))
+				slurmdb_pack_asset_rec(asset_rec, rpc_version,
+						       buffer);
+			list_iterator_destroy(itr);
+		}
+
+		packstr(msg->hostlist, buffer);
+		packstr(msg->reason, buffer);
+		pack32(msg->reason_uid, buffer);
+		pack16(msg->new_state, buffer);
+		pack_time(msg->event_time, buffer);
+		pack32(msg->state, buffer);
+	} else if (rpc_version >= SLURM_14_11_PROTOCOL_VERSION) {
+		if (msg->assets) {
+			itr = list_iterator_create(msg->assets);
+			while ((asset_rec = list_next(itr))) {
+				if (asset_rec->id == 1)
+					break;
+			}
+			list_iterator_destroy(itr);
+		}
+		if (asset_rec)
+			count = asset_rec->count;
+		else
+			count = 0;
+		pack32(count, buffer);
 		packstr(msg->hostlist, buffer);
 		packstr(msg->reason, buffer);
 		pack32(msg->reason_uid, buffer);
@@ -3759,7 +4014,19 @@ slurmdbd_pack_node_state_msg(dbd_node_state_msg_t *msg,
 		pack_time(msg->event_time, buffer);
 		pack32(msg->state, buffer);
 	} else if (rpc_version >= SLURMDBD_MIN_VERSION) {
-		pack32(msg->cpu_count, buffer);
+		if (msg->assets) {
+			itr = list_iterator_create(msg->assets);
+			while ((asset_rec = list_next(itr))) {
+				if (asset_rec->id == 1)
+					break;
+			}
+			list_iterator_destroy(itr);
+		}
+		if (asset_rec)
+			count = asset_rec->count;
+		else
+			count = 0;
+		pack32(count, buffer);
 		packstr(msg->hostlist, buffer);
 		packstr(msg->reason, buffer);
 		pack32(msg->reason_uid, buffer);
@@ -3774,16 +4041,42 @@ slurmdbd_unpack_node_state_msg(dbd_node_state_msg_t **msg,
 			       uint16_t rpc_version, Buf buffer)
 {
 	dbd_node_state_msg_t *msg_ptr;
-	uint32_t uint32_tmp;
 	uint16_t tmp_state;
+	uint32_t uint32_tmp, i;
+	uint32_t count = NO_VAL;
+	slurmdb_asset_rec_t *asset_rec;
 
 	msg_ptr = xmalloc(sizeof(dbd_node_state_msg_t));
 	*msg = msg_ptr;
 
 	msg_ptr->reason_uid = NO_VAL;
 
-	if (rpc_version >= SLURM_14_11_PROTOCOL_VERSION) {
-		safe_unpack32(&msg_ptr->cpu_count, buffer);
+	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		safe_unpack32(&count, buffer);
+		if (count != NO_VAL) {
+			msg_ptr->assets =
+				list_create(slurmdb_destroy_asset_rec);
+			for (i=0; i<count; i++) {
+				if (slurmdb_unpack_asset_rec(
+					    (void **)&asset_rec, rpc_version,
+					    buffer)
+				    != SLURM_SUCCESS)
+					goto unpack_error;
+				list_append(msg_ptr->assets, asset_rec);
+			}
+		}
+		safe_unpackstr_xmalloc(&msg_ptr->hostlist, &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->reason,   &uint32_tmp, buffer);
+		safe_unpack32(&msg_ptr->reason_uid, buffer);
+		safe_unpack16(&msg_ptr->new_state, buffer);
+		safe_unpack_time(&msg_ptr->event_time, buffer);
+		safe_unpack32(&msg_ptr->state, buffer);
+	} else if (rpc_version >= SLURM_14_11_PROTOCOL_VERSION) {
+		msg_ptr->assets = list_create(slurmdb_destroy_asset_rec);
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+		asset_rec->id = ASSET_CPU;
+		list_append(msg_ptr->assets, asset_rec);
+		safe_unpack32(&asset_rec->count, buffer);
 		safe_unpackstr_xmalloc(&msg_ptr->hostlist, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&msg_ptr->reason,   &uint32_tmp, buffer);
 		safe_unpack32(&msg_ptr->reason_uid, buffer);
@@ -3791,7 +4084,11 @@ slurmdbd_unpack_node_state_msg(dbd_node_state_msg_t **msg,
 		safe_unpack_time(&msg_ptr->event_time, buffer);
 		safe_unpack32(&msg_ptr->state, buffer);
 	} else if (rpc_version >= SLURMDBD_MIN_VERSION) {
-		safe_unpack32(&msg_ptr->cpu_count, buffer);
+		msg_ptr->assets = list_create(slurmdb_destroy_asset_rec);
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+		asset_rec->id = ASSET_CPU;
+		list_append(msg_ptr->assets, asset_rec);
+		safe_unpack32(&asset_rec->count, buffer);
 		safe_unpackstr_xmalloc(&msg_ptr->hostlist, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&msg_ptr->reason,   &uint32_tmp, buffer);
 		safe_unpack32(&msg_ptr->reason_uid, buffer);

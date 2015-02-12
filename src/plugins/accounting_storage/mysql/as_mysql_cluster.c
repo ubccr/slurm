@@ -37,6 +37,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#include "as_mysql_asset.h"
 #include "as_mysql_assoc.h"
 #include "as_mysql_cluster.h"
 #include "as_mysql_usage.h"
@@ -633,6 +634,8 @@ extern List as_mysql_get_clusters(mysql_conn_t *mysql_conn, uid_t uid,
 	slurmdb_cluster_rec_t *cluster = NULL;
 	slurmdb_assoc_rec_t *assoc = NULL;
 	List assoc_list = NULL;
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 	/* if this changes you will need to edit the corresponding enum */
 	char *cluster_req_inx[] = {
@@ -702,26 +705,14 @@ empty:
 		assoc_cond.with_deleted = cluster_cond->with_deleted;
 	}
 	assoc_cond.cluster_list = list_create(NULL);
-
+	assoc_mgr_lock(&locks);
 	while ((row = mysql_fetch_row(result))) {
-		MYSQL_RES *result2 = NULL;
-		MYSQL_ROW row2;
-
 		cluster = xmalloc(sizeof(slurmdb_cluster_rec_t));
 		list_append(cluster_list, cluster);
 
 		cluster->name = xstrdup(row[CLUSTER_REQ_NAME]);
 
 		list_append(assoc_cond.cluster_list, cluster->name);
-
-		/* get the usage if requested */
-		if (cluster_cond && cluster_cond->with_usage) {
-			as_mysql_get_usage(
-				mysql_conn, uid, cluster,
-				DBD_GET_CLUSTER_USAGE,
-				cluster_cond->usage_start,
-				cluster_cond->usage_end);
-		}
 
 		cluster->classification = slurm_atoul(row[CLUSTER_REQ_CLASS]);
 		cluster->control_host = xstrdup(row[CLUSTER_REQ_CH]);
@@ -732,25 +723,21 @@ empty:
 		cluster->plugin_id_select =
 			slurm_atoul(row[CLUSTER_REQ_PI_SELECT]);
 
-		query = xstrdup_printf(
-			"select count, cluster_nodes from "
-			"\"%s_%s\" where time_end=0 and node_name='' limit 1",
-			cluster->name, event_table);
-		debug4("%d(%s:%d) query\n%s",
-		       mysql_conn->conn, THIS_FILE, __LINE__, query);
-		if (!(result2 = mysql_db_query_ret(
-			      mysql_conn, query, 0))) {
-			xfree(query);
+		if (as_mysql_cluster_get_assets(mysql_conn, cluster)
+		    != SLURM_SUCCESS)
 			continue;
+
+		/* get the usage if requested */
+		if (cluster_cond && cluster_cond->with_usage) {
+			as_mysql_get_usage(
+				mysql_conn, uid, cluster,
+				DBD_GET_CLUSTER_USAGE,
+				cluster_cond->usage_start,
+				cluster_cond->usage_end);
 		}
-		xfree(query);
-		if ((row2 = mysql_fetch_row(result2))) {
-			cluster->cpu_count = slurm_atoul(row2[0]);
-			if (row2[1] && row2[1][0])
-				cluster->nodes = xstrdup(row2[1]);
-		}
-		mysql_free_result(result2);
+
 	}
+	assoc_mgr_unlock(&locks);
 	mysql_free_result(result);
 
 	if (!list_count(assoc_cond.cluster_list)) {
@@ -806,7 +793,7 @@ extern List as_mysql_get_cluster_events(mysql_conn_t *mysql_conn, uint32_t uid,
 	char *extra = NULL;
 	char *tmp = NULL;
 	List ret_list = NULL;
-	ListIterator itr = NULL;
+	ListIterator itr = NULL, itr2 = NULL;
 	char *object = NULL;
 	int set = 0;
 	int i=0;
@@ -814,11 +801,12 @@ extern List as_mysql_get_cluster_events(mysql_conn_t *mysql_conn, uint32_t uid,
 	MYSQL_ROW row;
 	time_t now = time(NULL);
 	List use_cluster_list = as_mysql_cluster_list;
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 	/* if this changes you will need to edit the corresponding enum */
 	char *event_req_inx[] = {
 		"cluster_nodes",
-		"count",
 		"node_name",
 		"state",
 		"time_start",
@@ -829,7 +817,6 @@ extern List as_mysql_get_cluster_events(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	enum {
 		EVENT_REQ_CNODES,
-		EVENT_REQ_CPU,
 		EVENT_REQ_NODE,
 		EVENT_REQ_STATE,
 		EVENT_REQ_START,
@@ -985,12 +972,16 @@ empty:
 	if (use_cluster_list == as_mysql_cluster_list)
 		slurm_mutex_lock(&as_mysql_cluster_list_lock);
 
+	assoc_mgr_lock(&locks);
+	xstrcat(tmp, full_asset_query);
+
 	ret_list = list_create(slurmdb_destroy_event_rec);
 
+	itr2 = list_iterator_create(assoc_mgr_asset_list);
 	itr = list_iterator_create(use_cluster_list);
 	while ((object = list_next(itr))) {
 		query = xstrdup_printf("select %s from \"%s_%s\"",
-				       tmp, object, event_table);
+				       tmp, object, event_view);
 		if (extra)
 			xstrfmtcat(query, " %s", extra);
 
@@ -1009,6 +1000,8 @@ empty:
 		xfree(query);
 
 		while ((row = mysql_fetch_row(result))) {
+			int i;
+			slurmdb_asset_rec_t *asset_rec, *loc_asset_rec;
 			slurmdb_event_rec_t *event =
 				xmalloc(sizeof(slurmdb_event_rec_t));
 
@@ -1022,7 +1015,6 @@ empty:
 			} else
 				event->event_type = SLURMDB_EVENT_CLUSTER;
 
-			event->cpu_count = slurm_atoul(row[EVENT_REQ_CPU]);
 			event->state = slurm_atoul(row[EVENT_REQ_STATE]);
 			event->period_start = slurm_atoul(row[EVENT_REQ_START]);
 			event->period_end = slurm_atoul(row[EVENT_REQ_END]);
@@ -1035,12 +1027,33 @@ empty:
 			if (row[EVENT_REQ_CNODES] && row[EVENT_REQ_CNODES][0])
 				event->cluster_nodes =
 					xstrdup(row[EVENT_REQ_CNODES]);
+
+			event->assets = list_create(slurmdb_destroy_asset_rec);
+
+			i = EVENT_REQ_COUNT-1;
+			list_iterator_reset(itr2);
+			while ((asset_rec = list_next(itr2))) {
+				i++;
+				/* Skip if the asset is NULL,
+				 * it means this cluster
+				 * doesn't care about it.
+				 */
+				if (!row[i] || !row[i][0])
+					continue;
+				loc_asset_rec = slurmdb_copy_asset_rec(
+					asset_rec);
+				loc_asset_rec->count = slurm_atoul(row[i]);
+				list_append(event->assets, loc_asset_rec);
+			}
 		}
 		mysql_free_result(result);
 	}
 	list_iterator_destroy(itr);
+	list_iterator_destroy(itr2);
 	xfree(tmp);
 	xfree(extra);
+
+	assoc_mgr_unlock(&locks);
 
 	if (use_cluster_list == as_mysql_cluster_list)
 		slurm_mutex_unlock(&as_mysql_cluster_list_lock);
@@ -1053,10 +1066,12 @@ extern int as_mysql_node_down(mysql_conn_t *mysql_conn,
 			      time_t event_time, char *reason,
 			      uint32_t reason_uid)
 {
-	uint16_t cpus;
 	int rc = SLURM_SUCCESS;
 	char *query = NULL;
 	char *my_reason;
+	slurmdb_asset_rec_t *asset_rec;
+	char *asset_values = NULL;
+	ListIterator itr;
 
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return ESLURM_DB_CONNECTION;
@@ -1071,18 +1086,42 @@ extern int as_mysql_node_down(mysql_conn_t *mysql_conn,
 		return SLURM_ERROR;
 	}
 
-	if (slurmctld_conf.fast_schedule && !slurmdbd_conf)
-		cpus = node_ptr->config_ptr->cpus;
-	else
-		cpus = node_ptr->cpus;
+	if (!node_ptr->assets || !list_count(node_ptr->assets)) {
+		error("node ptr has no assets!");
+		return SLURM_ERROR;
+	}
+
+	itr = list_iterator_create(node_ptr->assets);
+	while ((asset_rec = list_next(itr))) {
+		if (!asset_rec->id)
+			continue;
+		if (!asset_values)
+			xstrfmtcat(asset_values,
+				   "insert into \"%s_%s\" "
+				   "(inx, id_asset, count) values "
+				   "(LAST_INSERT_ID(), %u, %u)",
+				   mysql_conn->cluster_name,
+				   event_ext_table,
+				   asset_rec->id, asset_rec->count);
+		else
+			xstrfmtcat(asset_values,
+				   ", (LAST_INSERT_ID(), %u, %u)",
+				   asset_rec->id, asset_rec->count);
+		debug("inserting %s(%s) with asset %u count of %u",
+		       node_ptr->name, mysql_conn->cluster_name,
+		       asset_rec->id, asset_rec->count);
+	}
+	list_iterator_destroy(itr);
+
+	/* Sanity check, since we just added the id this should never happen */
+	if (asset_values)
+		xstrcat(asset_values,
+			" on duplicate key update count=VALUES(count);");
 
 	if (reason)
 		my_reason = slurm_add_slash_to_quotes(reason);
 	else
 		my_reason = slurm_add_slash_to_quotes(node_ptr->reason);
-
-	debug2("inserting %s(%s) with %u cpus",
-	       node_ptr->name, mysql_conn->cluster_name, cpus);
 
 	query = xstrdup_printf(
 		"update \"%s_%s\" set time_end=%ld where "
@@ -1099,14 +1138,16 @@ extern int as_mysql_node_down(mysql_conn_t *mysql_conn,
 	 */
 	xstrfmtcat(query,
 		   "insert into \"%s_%s\" "
-		   "(node_name, state, count, time_start, "
+		   "(node_name, state, time_start, "
 		   "reason, reason_uid) "
-		   "values ('%s', %u, %u, %ld, '%s', %u) "
-		   "on duplicate key update time_end=0;",
+		   "values ('%s', %u, %ld, '%s', %u) "
+		   "on duplicate key update time_end=0, "
+		   "inx=LAST_INSERT_ID(inx);%s",
 		   mysql_conn->cluster_name, event_table,
 		   node_ptr->name, node_ptr->node_state,
-		   cpus, event_time, my_reason, reason_uid);
-	debug4("%d(%s:%d) query\n%s",
+		   event_time, my_reason, reason_uid, asset_values);
+	xfree(asset_values);
+	debug("%d(%s:%d) query\n%s",
 	       mysql_conn->conn, THIS_FILE, __LINE__, query);
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
@@ -1207,6 +1248,9 @@ extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
 	int rc = SLURM_SUCCESS;
 	time_t now = time(NULL);
 	char *query = NULL;
+	char *asset_values = NULL;
+	ListIterator itr;
+	slurmdb_asset_rec_t *asset_rec;
 
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return ESLURM_DB_CONNECTION;
@@ -1234,21 +1278,41 @@ extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
 	    || (slurmdbd_conf && !slurmdbd_conf->track_ctld))
 		return rc;
 
-	/* If cpus is 0 we can get the current number of cpus by
-	   sending 0 for the cpus param in the as_mysql_cluster_cpus
+	/* If assets is NULL we can get the current number of assets by
+	   sending NULL for the assets param in the as_mysql_cluster_assets
 	   function.
 	*/
-	if (!cluster_rec->cpu_count) {
-		cluster_rec->cpu_count = as_mysql_cluster_cpus(
-			mysql_conn, cluster_rec->control_host, 0, now);
+	if (!cluster_rec->assets) {
+		as_mysql_cluster_assets(
+			mysql_conn, cluster_rec->control_host,
+			&cluster_rec->assets, now);
 	}
 
-	/* Since as_mysql_cluster_cpus could change the
+	/* Since as_mysql_cluster_assets could change the
 	   last_affected_rows we can't group this with the above
 	   return.
 	*/
-	if (!cluster_rec->cpu_count)
+	if (!cluster_rec->assets)
 		return rc;
+
+	itr = list_iterator_create(cluster_rec->assets);
+	while ((asset_rec = list_next(itr))) {
+		if (!asset_rec->id)
+			continue;
+		if (!asset_values)
+			xstrfmtcat(asset_values,
+				   "insert into \"%s_%s\" "
+				   "(inx, id_asset, count) values "
+				   "(LAST_INSERT_ID(), %u, %u)",
+				   cluster_rec->name,
+				   event_ext_table,
+				   asset_rec->id, asset_rec->count);
+		else
+			xstrfmtcat(asset_values,
+				   ", (LAST_INSERT_ID(), %u, %u)",
+				   asset_rec->id, asset_rec->count);
+	}
+	list_iterator_destroy(itr);
 
 	/* If we affected things we need to now drain the nodes in the
 	 * cluster.  This is to give better stats on accounting that
@@ -1258,11 +1322,12 @@ extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
 	 * info.
 	 */
 	query = xstrdup_printf(
-		"insert into \"%s_%s\" (count, state, "
-		"time_start, reason) "
-		"values ('%u', %u, %ld, 'slurmctld disconnect')",
+		"insert into \"%s_%s\" (state, time_start, reason) "
+		"values (%u, %ld, 'slurmctld disconnect');%s",
 		cluster_rec->name, event_table,
-		cluster_rec->cpu_count, NODE_STATE_DOWN, (long)now);
+		NODE_STATE_DOWN, (long)now, asset_values);
+	xfree(asset_values);
+
 	if (debug_flags & DEBUG_FLAG_DB_EVENT)
 		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 	rc = mysql_db_query(mysql_conn, query);
@@ -1271,15 +1336,24 @@ extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
 	return rc;
 }
 
-extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
-				 char *cluster_nodes, uint32_t cpus,
-				 time_t event_time)
+extern int as_mysql_cluster_assets(mysql_conn_t *mysql_conn,
+				   char *cluster_nodes, List *assets,
+				   time_t event_time)
 {
 	char* query;
 	int rc = SLURM_SUCCESS;
 	int first = 0;
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
+	slurmdb_asset_rec_t *asset_rec, *loc_asset_rec;
+	ListIterator itr;
+	char *asset_query = NULL, *asset_values = NULL;
+	int i;
+	bool update = false;
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
+
+	xassert(assets);
 
  	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return ESLURM_DB_CONNECTION;
@@ -1289,12 +1363,43 @@ extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 		return SLURM_ERROR;
 	}
 
+	if (*assets) {
+		itr = list_iterator_create(*assets);
+		while ((asset_rec = list_next(itr))) {
+			if (!asset_rec->id)
+				continue;
+			xstrfmtcat(asset_query, ", ext_%u", asset_rec->id);
+			if (!asset_values)
+				xstrfmtcat(asset_values,
+					   "insert into \"%s_%s\" "
+					   "(inx, id_asset, count) values "
+					   "(LAST_INSERT_ID(), %u, %u)",
+					   mysql_conn->cluster_name,
+					   event_ext_table,
+					   asset_rec->id, asset_rec->count);
+			else
+				xstrfmtcat(asset_values,
+					   ", (LAST_INSERT_ID(), %u, %u)",
+					   asset_rec->id, asset_rec->count);
+		}
+		list_iterator_destroy(itr);
+	} else {
+		assoc_mgr_lock(&locks);
+		asset_query = xstrdup(full_asset_query);
+	}
+
 	/* Record the processor count */
 	query = xstrdup_printf(
-		"select count, cluster_nodes from \"%s_%s\" where "
+		"select cluster_nodes%s from \"%s_%s\" where "
 		"time_end=0 and node_name='' and state=0 limit 1",
-		mysql_conn->cluster_name, event_table);
+		asset_query,
+		mysql_conn->cluster_name, event_view);
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
+		if (!*assets)
+			assoc_mgr_unlock(&locks);
+
+		xfree(asset_query);
+		xfree(asset_values);
 		xfree(query);
 		if (mysql_errno(mysql_conn->db_conn) == ER_NO_SUCH_TABLE)
 			rc = ESLURM_ACCESS_DENIED;
@@ -1318,7 +1423,7 @@ extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 		 * may not be up when we run this in the controller or
 		 * in the slurmdbd.
 		 */
-		if (!cpus) {
+		if (!*assets) {
 			rc = 0;
 			goto end_it;
 		}
@@ -1327,20 +1432,79 @@ extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 		goto add_it;
 	}
 
-	/* If cpus is 0 we want to return the cpu count for this cluster */
-	if (!cpus) {
-		rc = atoi(row[0]);
+	/* we want to start at the second column on the query */
+	i = 0;
+
+	/* If assets is NULL we want to return the assets for this cluster */
+	if (!*assets) {
+		xfree(asset_query);
+		xfree(asset_values);
+		*assets = list_create(slurmdb_destroy_asset_rec);
+		itr = list_iterator_create(assoc_mgr_asset_list);
+		while ((asset_rec = list_next(itr))) {
+			i++;
+			/* Skip if the asset is NULL, it means this
+			 * cluster doesn't care about it. */
+			if (!row[i] || !row[i][0])
+				continue;
+			loc_asset_rec = slurmdb_copy_asset_rec(asset_rec);
+			loc_asset_rec->count = slurm_atoul(row[i]);
+			list_append(*assets, loc_asset_rec);
+			xstrfmtcat(asset_query, ", ext_%u", loc_asset_rec->id);
+			if (!asset_values)
+				xstrfmtcat(asset_values,
+					   "insert into \"%s_%s\" "
+					   "(inx, id_asset, count) values "
+					   "(LAST_INSERT_ID(), %u, %u)",
+					   mysql_conn->cluster_name,
+					   event_ext_table,
+					   loc_asset_rec->id,
+					   loc_asset_rec->count);
+			else
+				xstrfmtcat(asset_values,
+					   ", (LAST_INSERT_ID(), %u, %u)",
+					   loc_asset_rec->id,
+					   loc_asset_rec->count);
+		}
+		list_iterator_destroy(itr);
+		/* end_it will only unlock this if !*assets, so do it
+		 * here instead.
+		 */
+		assoc_mgr_unlock(&locks);
+
 		goto end_it;
+	} else {
+		itr = list_iterator_create(*assets);
+		while ((asset_rec = list_next(itr))) {
+			i++;
+
+			if (!row[i]) { /* first time around */
+				update = 1;
+				continue;
+			}
+
+			if (slurm_atoul(row[i]) == asset_rec->count) {
+				if (debug_flags & DEBUG_FLAG_DB_EVENT)
+					DB_DEBUG(mysql_conn->conn,
+						 "we have the same count as "
+						 "before for asset %d on %s, "
+						 "no need to update "
+						 "the database.",
+						 asset_rec->id,
+						 mysql_conn->cluster_name);
+			} else {
+				debug("%s has changed asset %d from %s to %u",
+				      mysql_conn->cluster_name, asset_rec->id,
+				      row[i], asset_rec->count);
+				update = 1;
+			}
+		}
+		list_iterator_destroy(itr);
 	}
 
-	if (slurm_atoul(row[0]) == cpus) {
-		if (debug_flags & DEBUG_FLAG_DB_EVENT)
-			DB_DEBUG(mysql_conn->conn,
-				 "we have the same cpu count as before for %s, "
-				 "no need to update the database.",
-				 mysql_conn->cluster_name);
+	if (!update) {
 		if (cluster_nodes) {
-			if (!row[1][0]) {
+			if (!row[0][0]) {
 				debug("Adding cluster nodes '%s' to "
 				      "last instance of cluster '%s'.",
 				      cluster_nodes, mysql_conn->cluster_name);
@@ -1353,7 +1517,7 @@ extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 				(void) mysql_db_query(mysql_conn, query);
 				xfree(query);
 				goto update_it;
-			} else if (!strcmp(cluster_nodes, row[1])) {
+			} else if (!strcmp(cluster_nodes, row[0])) {
 				if (debug_flags & DEBUG_FLAG_DB_EVENT)
 					DB_DEBUG(mysql_conn->conn,
 						 "we have the same nodes "
@@ -1362,14 +1526,12 @@ extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 						 "update the database.");
 				goto update_it;
 			}
-		} else
-			goto end_it;
-	} else {
-		debug("%s has changed from %s cpus to %u",
-		      mysql_conn->cluster_name, row[0], cpus);
+		}
+
+		goto end_it;
 	}
 
-	/* reset all the entries for this cluster since the cpus
+	/* reset all the entries for this cluster since the assets
 	   changed some of the downed nodes may have gone away.
 	   Request them again with ACCOUNTING_FIRST_REG */
 	query = xstrdup_printf(
@@ -1382,11 +1544,10 @@ extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 		goto end_it;
 add_it:
 	query = xstrdup_printf(
-		"insert into \"%s_%s\" (cluster_nodes, count, "
-		"time_start, reason) "
-		"values ('%s', %u, %ld, 'Cluster processor count')",
+		"insert into \"%s_%s\" (cluster_nodes, time_start, reason) "
+		"values ('%s', %ld, 'Cluster Registered Assets');%s",
 		mysql_conn->cluster_name, event_table,
-		cluster_nodes, cpus, event_time);
+		cluster_nodes, event_time, asset_values);
 	(void) mysql_db_query(mysql_conn, query);
 	xfree(query);
 update_it:
@@ -1398,9 +1559,79 @@ update_it:
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
 end_it:
+	if (!*assets)
+		assoc_mgr_unlock(&locks);
+
+	xfree(asset_query);
+	xfree(asset_values);
 	mysql_free_result(result);
 	if (first && rc == SLURM_SUCCESS)
 		rc = ACCOUNTING_FIRST_REG;
 
 	return rc;
+}
+
+/* assoc_mgr_lock_t read lock needs to be locked before calling this */
+extern int as_mysql_cluster_get_assets(mysql_conn_t *mysql_conn,
+				       slurmdb_cluster_rec_t *cluster_rec)
+{
+	MYSQL_RES *result = NULL;
+	MYSQL_ROW row;
+	ListIterator itr;
+	char *query;
+
+	xassert(cluster_rec);
+
+	if (!cluster_rec->name || !cluster_rec->name[0]) {
+		error("We need a cluster name to set assets on");
+		return SLURM_ERROR;
+	}
+
+	query = xstrdup_printf(
+		"select cluster_nodes%s from "
+		"\"%s_%s\" where time_end=0 and node_name='' limit 1",
+		full_asset_query, cluster_rec->name, event_view);
+	debug4("%d(%s:%d) query\n%s",
+	       mysql_conn->conn, THIS_FILE, __LINE__, query);
+	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
+		xfree(query);
+		return SLURM_ERROR;
+	}
+	xfree(query);
+	itr = list_iterator_create(assoc_mgr_asset_list);
+	if ((row = mysql_fetch_row(result))) {
+		slurmdb_asset_rec_t *asset_rec, *loc_asset_rec;
+		int i = 1;
+
+		if (row[1] && row[1][0]) {
+			xfree(cluster_rec->nodes);
+			cluster_rec->nodes = xstrdup(row[1]);
+		}
+
+		if (!cluster_rec->assets)
+			cluster_rec->assets =
+				list_create(slurmdb_destroy_asset_rec);
+		else
+			list_flush(cluster_rec->assets);
+
+		i = 1;
+		while ((asset_rec = list_next(itr))) {
+			i++;
+			/* Skip if the asset is NULL,
+			 * it means this cluster
+			 * doesn't care about it.
+			 */
+			if (!row[i] || !row[i][0])
+				continue;
+			loc_asset_rec = slurmdb_copy_asset_rec(
+				asset_rec);
+			loc_asset_rec->count = slurm_atoul(row[i]);
+			list_append(cluster_rec->assets, loc_asset_rec);
+		}
+		list_iterator_reset(itr);
+	}
+	mysql_free_result(result);
+	list_iterator_destroy(itr);
+
+	return SLURM_SUCCESS;
 }

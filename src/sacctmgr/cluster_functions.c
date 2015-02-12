@@ -491,17 +491,14 @@ extern int sacctmgr_list_cluster(int argc, char *argv[])
 							     classification),
 						     (curr_inx == field_count));
 				break;
-			case PRINT_CPUS:
-			{
-				char tmp_char[9];
-				convert_num_unit((float)cluster->cpu_count,
-						 tmp_char, sizeof(tmp_char),
-						 UNIT_NONE);
+			case PRINT_ASSETS:
+				tmp_char = slurmdb_make_asset_string(
+					cluster->assets);
 				field->print_routine(field,
 						     tmp_char,
 						     (curr_inx == field_count));
+				xfree(tmp_char);
 				break;
-			}
 			case PRINT_DQOS:
 				if (!g_qos_list) {
 					g_qos_list = acct_storage_g_get_qos(

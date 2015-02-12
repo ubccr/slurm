@@ -96,6 +96,7 @@ struct features_record {
 extern List feature_list;	/* list of features_record entries */
 
 struct node_record {
+	List assets;                    /* assets this node has */
 	uint32_t magic;			/* magic cookie for data integrity */
 	char *name;			/* name of the node. NULL==defunct */
 	char *node_hostname;		/* hostname of the node */

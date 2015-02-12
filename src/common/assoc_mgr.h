@@ -61,10 +61,12 @@
 #define ASSOC_MGR_CACHE_USER  0x0004
 #define ASSOC_MGR_CACHE_WCKEY 0x0008
 #define ASSOC_MGR_CACHE_RES   0x0010
+#define ASSOC_MGR_CACHE_ASSET 0x0020
 #define ASSOC_MGR_CACHE_ALL   0xffff
 
 /* to lock or not */
 typedef struct {
+	lock_level_t asset;
 	lock_level_t assoc;
 	lock_level_t file;
 	lock_level_t qos;
@@ -81,6 +83,7 @@ typedef struct {
  *   (assoc_mgr_lock_datatype_t * 4 + 3) = write_cnt_lock   write lock count
  */
 typedef enum {
+	ASSET_LOCK,
 	ASSOC_LOCK,
 	FILE_LOCK,
 	QOS_LOCK,
@@ -190,6 +193,7 @@ struct assoc_mgr_qos_usage {
 };
 
 
+extern List assoc_mgr_asset_list;
 extern List assoc_mgr_assoc_list;
 extern List assoc_mgr_res_list;
 extern List assoc_mgr_qos_list;
@@ -236,6 +240,27 @@ extern int assoc_mgr_get_user_assocs(void *db_conn,
 				     slurmdb_assoc_rec_t *assoc,
 				     int enforce,
 				     List assoc_list);
+
+/*
+ * get info from the storage
+ * IN/OUT:  asset - slurmdb_asset_rec_t with at least id or type and
+ *                  optional name set.
+ * IN: enforce - return an error if no such asset exists
+ * IN/OUT: asset_pptr - if non-NULL then return a pointer to the
+ *			slurmdb_asset record in cache on success
+ *                      DO NOT FREE.
+ * IN: locked - If you plan on using asset_pptr after this function
+ *              you need to have an assoc_mgr_lock_t READ_LOCK for
+ *              assets while you use it before and after the
+ *              return.  This is not required if using the assoc for
+ *              non-pointer portions.
+ * RET: SLURM_SUCCESS on success, else SLURM_ERROR
+ */
+extern int assoc_mgr_fill_in_asset(void *db_conn,
+				   slurmdb_asset_rec_t *asset,
+				   int enforce,
+				   slurmdb_asset_rec_t **asset_pptr,
+				   bool locked);
 
 /*
  * get info from the storage
@@ -367,6 +392,13 @@ extern int assoc_mgr_update_qos(slurmdb_update_object_t *update);
  * RET: SLURM_SUCCESS on success (or not found) SLURM_ERROR else
  */
 extern int assoc_mgr_update_res(slurmdb_update_object_t *update);
+
+/*
+ * update cluster assets in cache
+ * IN:  slurmdb_update_object_t *object
+ * RET: SLURM_SUCCESS on success (or not found) SLURM_ERROR else
+ */
+extern int assoc_mgr_update_asset(slurmdb_update_object_t *update);
 
 /*
  * update users in cache

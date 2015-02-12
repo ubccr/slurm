@@ -538,11 +538,12 @@ extern int sacctmgr_list_event(int argc, char *argv[])
 			field->name = xstrdup("Cluster");
 			field->len = 10;
 			field->print_routine = print_fields_str;
-		} else if (!strncasecmp("CPUs", object,
-				MAX(command_len, 2))) {
-			field->type = PRINT_CPUS;
-			field->name = xstrdup("CPUs");
-			field->len = 7;
+		} else if (!strncasecmp("Assets", object,
+					MAX(command_len, 2)) ||
+			   !strncasecmp("CPUs", object, MAX(command_len, 2))) {
+			field->type = PRINT_ASSETS;
+			field->name = xstrdup("Assets");
+			field->len = 20;
 			field->print_routine = print_fields_str;
 		} else if (!strncasecmp("Duration", object,
 				       MAX(command_len, 2))) {
@@ -652,13 +653,14 @@ extern int sacctmgr_list_event(int argc, char *argv[])
 					event->cluster_nodes,
 					(curr_inx == field_count));
 				break;
-			case PRINT_CPUS:
-				convert_num_unit((float)event->cpu_count,
-						 tmp, sizeof(tmp), UNIT_NONE);
+			case PRINT_ASSETS:
+				tmp_char = slurmdb_make_asset_string(
+					event->assets);
 				field->print_routine(
 					field,
-					tmp,
+					tmp_char,
 					(curr_inx == field_count));
+				xfree(tmp_char);
 				break;
 			case PRINT_DURATION:
 				if (!newend)

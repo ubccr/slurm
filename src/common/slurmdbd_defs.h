@@ -93,7 +93,7 @@ typedef enum {
 	DBD_ADD_ASSOCS,         /* Add new association to the mix       */
 	DBD_ADD_CLUSTERS,       /* Add new cluster to the mix           */
 	DBD_ADD_USERS,          /* Add new user to the mix              */
-	DBD_CLUSTER_CPUS,	/* Record total processors on cluster	*/
+	DBD_CLUSTER_ASSETS,	/* Record total assets on cluster	*/
 	DBD_FLUSH_JOBS, 	/* End jobs that are still running
 				 * when a controller is restarted.	*/
 	DBD_GET_ACCOUNTS,	/* Get account information		*/
@@ -178,6 +178,9 @@ typedef enum {
 	DBD_ADD_CLUS_RES,    	/* Add cluster using a resource    	*/
 	DBD_REMOVE_CLUS_RES,   	/* Remove existing cluster resource    	*/
 	DBD_MODIFY_CLUS_RES,   	/* Modify existing cluster resource   	*/
+	DBD_ADD_ASSETS,         /* Add assets to the database           */
+	DBD_GET_ASSETS,         /* Get assets from the database         */
+	DBD_GOT_ASSETS,         /* Got assets from the database         */
 } slurmdbd_msg_type_t;
 
 /*****************************************************************************\
@@ -194,11 +197,11 @@ typedef struct {
 	slurmdb_user_cond_t *cond;
 } dbd_acct_coord_msg_t;
 
-typedef struct dbd_cluster_cpus_msg {
+typedef struct dbd_cluster_assets_msg {
+	List assets;	        /* list of assets */
 	char *cluster_nodes;	/* nodes in cluster */
-	uint32_t cpu_count;	/* total processor count */
 	time_t event_time;	/* time of transition */
-} dbd_cluster_cpus_msg_t;
+} dbd_cluster_assets_msg_t;
 
 typedef struct {
 	void *rec; /* this could be anything based on the type types
@@ -277,6 +280,7 @@ typedef struct dbd_job_start_msg {
 				 * if N/A */
 	char *   array_task_str;/* hex string of unstarted tasks */
 	uint32_t array_task_pending;/* number of tasks still pending */
+	List     assets;        /* various assets the job has */
 	uint32_t assoc_id;	/* accounting association id */
 	char *   block_id;      /* Bluegene block id */
 	uint32_t db_index;	/* index into the db for this job */
@@ -342,7 +346,7 @@ typedef struct {
 #define DBD_NODE_STATE_DOWN  1
 #define DBD_NODE_STATE_UP    2
 typedef struct dbd_node_state_msg {
-	uint32_t cpu_count;     /* number of cpus on node */
+	List     assets;        /* various assets the node has */
 	time_t event_time;	/* time of transition */
 	char *hostlist;		/* name of hosts */
 	uint16_t new_state;	/* new state of host, see DBD_NODE_STATE_* */
@@ -465,7 +469,7 @@ extern void slurmdbd_free_buffer(void *x);
  * Free various SlurmDBD message structures
 \*****************************************************************************/
 extern void slurmdbd_free_acct_coord_msg(dbd_acct_coord_msg_t *msg);
-extern void slurmdbd_free_cluster_cpus_msg(dbd_cluster_cpus_msg_t *msg);
+extern void slurmdbd_free_cluster_assets_msg(dbd_cluster_assets_msg_t *msg);
 extern void slurmdbd_free_rec_msg(dbd_rec_msg_t *msg, slurmdbd_msg_type_t type);
 extern void slurmdbd_free_cond_msg(dbd_cond_msg_t *msg,
 				   slurmdbd_msg_type_t type);
@@ -493,9 +497,9 @@ extern void slurmdbd_free_usage_msg(dbd_usage_msg_t *msg,
 extern void slurmdbd_pack_acct_coord_msg(dbd_acct_coord_msg_t *msg,
 					 uint16_t rpc_version,
 					 Buf buffer);
-extern void slurmdbd_pack_cluster_cpus_msg(dbd_cluster_cpus_msg_t *msg,
-					   uint16_t rpc_version,
-					   Buf buffer);
+extern void slurmdbd_pack_cluster_assets_msg(dbd_cluster_assets_msg_t *msg,
+					     uint16_t rpc_version,
+					     Buf buffer);
 extern void slurmdbd_pack_rec_msg(dbd_rec_msg_t *msg,
 				  uint16_t rpc_version,
 				  slurmdbd_msg_type_t type, Buf buffer);
@@ -556,9 +560,9 @@ extern void slurmdbd_pack_buffer(void *in,
 extern int slurmdbd_unpack_acct_coord_msg(dbd_acct_coord_msg_t **msg,
 					  uint16_t rpc_version,
 					  Buf buffer);
-extern int slurmdbd_unpack_cluster_cpus_msg(dbd_cluster_cpus_msg_t **msg,
-					    uint16_t rpc_version,
-					    Buf buffer);
+extern int slurmdbd_unpack_cluster_assets_msg(dbd_cluster_assets_msg_t **msg,
+					      uint16_t rpc_version,
+					      Buf buffer);
 extern int slurmdbd_unpack_rec_msg(dbd_rec_msg_t **msg,
 				   uint16_t rpc_version,
 				   slurmdbd_msg_type_t type,

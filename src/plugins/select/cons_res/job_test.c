@@ -2967,17 +2967,20 @@ alloc_job:
 
 	/* load memory allocated array */
 	save_mem = details_ptr->pn_min_memory;
+	job_res->nmem = 0;
 	if (save_mem & MEM_PER_CPU) {
 		/* memory is per-cpu */
 		save_mem &= (~MEM_PER_CPU);
 		for (i = 0; i < job_res->nhosts; i++) {
 			job_res->memory_allocated[i] = job_res->cpus[i] *
 						       save_mem;
+			job_res->nmem += job_res->memory_allocated[i];
 		}
 	} else {
 		/* memory is per-node */
 		for (i = 0; i < job_res->nhosts; i++) {
 			job_res->memory_allocated[i] = save_mem;
+			job_res->nmem += job_res->memory_allocated[i];
 		}
 	}
 	return error_code;

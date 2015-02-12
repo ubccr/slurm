@@ -297,6 +297,27 @@ void print_fields(type_t type, void *object)
 					     tmp_char,
 					     (curr_inx == field_count));
 			break;
+		case PRINT_ASSETS:
+			switch(type) {
+			case JOB:
+				tmp_char = slurmdb_make_asset_string(
+					job->assets);
+				break;
+			case JOBSTEP:
+				tmp_char = slurmdb_make_asset_string(
+					step->job_ptr->assets);
+				break;
+			case JOBCOMP:
+			default:
+				tmp_char = NULL;
+				break;
+			}
+
+			field->print_routine(field,
+					     tmp_char,
+					     (curr_inx == field_count));
+			xfree(tmp_char);
+			break;
 		case PRINT_ACT_CPUFREQ:
 			switch (type) {
 			case JOB:

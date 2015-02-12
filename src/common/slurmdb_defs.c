@@ -85,8 +85,8 @@ static void _free_clus_res_rec_members(slurmdb_clus_res_rec_t *clus_res)
 static void _free_cluster_rec_members(slurmdb_cluster_rec_t *cluster)
 {
 	if (cluster) {
-		if (cluster->accounting_list)
-			list_destroy(cluster->accounting_list);
+		FREE_NULL_LIST(cluster->accounting_list);
+		FREE_NULL_LIST(cluster->assets);
 		xfree(cluster->control_host);
 		xfree(cluster->dim_size);
 		xfree(cluster->name);
@@ -123,6 +123,15 @@ static void _free_cluster_cond_members(slurmdb_cluster_cond_t *cluster_cond)
 	if (cluster_cond) {
 		if (cluster_cond->cluster_list)
 			list_destroy(cluster_cond->cluster_list);
+	}
+}
+
+static void _free_asset_cond_members(slurmdb_asset_cond_t *asset_cond)
+{
+	if (asset_cond) {
+		FREE_NULL_LIST(asset_cond->id_list);
+		FREE_NULL_LIST(asset_cond->name_list);
+		FREE_NULL_LIST(asset_cond->type_list);
 	}
 }
 
@@ -575,6 +584,8 @@ extern void slurmdb_destroy_cluster_accounting_rec(void *object)
 		(slurmdb_cluster_accounting_rec_t *)object;
 
 	if (clusteracct_rec) {
+		slurmdb_destroy_asset_rec_noalloc(
+			&clusteracct_rec->asset_rec);
 		xfree(clusteracct_rec);
 	}
 }
@@ -628,6 +639,7 @@ extern void slurmdb_destroy_event_rec(void *object)
 		(slurmdb_event_rec_t *)object;
 
 	if (slurmdb_event) {
+		FREE_NULL_LIST(slurmdb_event->assets);
 		xfree(slurmdb_event->cluster);
 		xfree(slurmdb_event->cluster_nodes);
 		xfree(slurmdb_event->node_name);
@@ -642,6 +654,7 @@ extern void slurmdb_destroy_job_rec(void *object)
 	slurmdb_job_rec_t *job = (slurmdb_job_rec_t *)object;
 	if (job) {
 		xfree(job->account);
+		FREE_NULL_LIST(job->assets);
 		xfree(job->alloc_gres);
 		xfree(job->array_task_str);
 		xfree(job->blockid);
@@ -742,6 +755,28 @@ extern void slurmdb_destroy_archive_rec(void *object)
 	}
 }
 
+extern void slurmdb_destroy_asset_rec_noalloc(void *object)
+{
+	slurmdb_asset_rec_t *asset_rec = (slurmdb_asset_rec_t *)object;
+
+	if (!asset_rec)
+		return;
+
+	FREE_NULL_LIST(asset_rec->accounting_list);
+	xfree(asset_rec->name);
+	xfree(asset_rec->type);
+}
+
+extern void slurmdb_destroy_asset_rec(void *object)
+{
+	slurmdb_asset_rec_t *asset_rec = (slurmdb_asset_rec_t *)object;
+
+	if (asset_rec) {
+		slurmdb_destroy_asset_rec_noalloc(asset_rec);
+		xfree(asset_rec);
+	}
+}
+
 extern void slurmdb_destroy_report_assoc_rec(void *object)
 {
 	slurmdb_report_assoc_rec_t *slurmdb_report_assoc =
@@ -821,6 +856,17 @@ extern void slurmdb_destroy_cluster_cond(void *object)
 	if (slurmdb_cluster) {
 		_free_cluster_cond_members(slurmdb_cluster);
 		xfree(slurmdb_cluster);
+	}
+}
+
+extern void slurmdb_destroy_asset_cond(void *object)
+{
+	slurmdb_asset_cond_t *slurmdb_asset =
+		(slurmdb_asset_cond_t *)object;
+
+	if (slurmdb_asset) {
+		_free_asset_cond_members(slurmdb_asset);
+		xfree(slurmdb_asset);
 	}
 }
 
@@ -1353,6 +1399,18 @@ extern void slurmdb_init_wckey_rec(slurmdb_wckey_rec_t *wckey, bool free_it)
 		_free_wckey_rec_members(wckey);
 	memset(wckey, 0, sizeof(slurmdb_wckey_rec_t));
 	wckey->is_def = (uint16_t)NO_VAL;
+}
+
+extern void slurmdb_init_asset_cond(slurmdb_asset_cond_t *asset,
+				    bool free_it)
+{
+	if (!asset)
+		return;
+
+	if (free_it)
+		_free_asset_cond_members(asset);
+	memset(asset, 0, sizeof(slurmdb_asset_cond_t));
+	asset->count = NO_VAL;
 }
 
 extern void slurmdb_init_cluster_cond(slurmdb_cluster_cond_t *cluster,
@@ -2600,6 +2658,7 @@ extern slurmdb_report_cluster_rec_t *slurmdb_cluster_rec_2_report(
 {
 	slurmdb_report_cluster_rec_t *slurmdb_report_cluster;
 	slurmdb_cluster_accounting_rec_t *accting = NULL;
+	//slurmdb_asset_rec_t *asset_rec;
 	ListIterator cluster_itr = NULL;
 	int count;
 
@@ -2621,6 +2680,28 @@ extern slurmdb_report_cluster_rec_t *slurmdb_cluster_rec_2_report(
 		slurmdb_report_cluster->consumed_energy += accting->consumed_energy;
 	}
 	list_iterator_destroy(cluster_itr);
+
+	/* if (!cluster->assets || !(count = list_count(cluster->assets))) */
+	/* 	return slurmdb_report_cluster; */
+
+	/* asset_itr = list_iterator_create(cluster->assets); */
+	/* while ((asset_rec = list_next(asset_itr))) { */
+	/* 	if (!asset_rec->accounting_list || */
+	/* 	    !list_count(asset_rec->accounting_list)) */
+	/* 		continue; */
+	/* 	/\* get the amount of time and the average asset count */
+	/* 	   during the time we are looking at *\/ */
+	/* 	cluster_itr = list_iterator_create(asset->accounting_list); */
+	/* 	while ((accting = list_next(cluster_itr))) { */
+	/* 	/\* FIXME: NO ASSET HANDLED HERE YET *\/ */
+	/* 	slurmdb_report_cluster->cpu_secs += accting->alloc_secs */
+	/* 		+ accting->down_secs + accting->idle_secs */
+	/* 		+ accting->resv_secs + accting->pdown_secs; */
+	/* 	slurmdb_report_cluster->cpu_count += accting->asset_rec.count; */
+	/* 	slurmdb_report_cluster->consumed_energy += */
+	/* 		accting->consumed_energy; */
+	/* } */
+	/* list_iterator_destroy(cluster_itr); */
 
 	slurmdb_report_cluster->cpu_count /= count;
 
@@ -2734,4 +2815,44 @@ end_it:
 		list_destroy(cluster_list);
 
 	return rc;
+}
+
+extern slurmdb_asset_rec_t *slurmdb_copy_asset_rec(slurmdb_asset_rec_t *asset)
+{
+	slurmdb_asset_rec_t *asset_out = NULL;
+
+	if (!asset)
+		return asset_out;
+
+	asset_out = xmalloc_nz(sizeof(slurmdb_asset_rec_t));
+	memcpy(asset_out, asset, sizeof(slurmdb_asset_rec_t));
+	asset_out->name = xstrdup(asset->name);
+	asset_out->type = xstrdup(asset->type);
+
+	return asset_out;
+}
+
+/* caller must xfree this char * returned */
+extern char *slurmdb_make_asset_string(List assets)
+{
+	char *asset_str = NULL;
+	ListIterator itr;
+	slurmdb_asset_rec_t *asset_rec;
+
+	if (!assets)
+		return asset_str;
+
+	itr = list_iterator_create(assets);
+	while ((asset_rec = list_next(itr))) {
+		if (asset_str)
+			xstrcat(asset_str, ",");
+		xstrfmtcat(asset_str, "%s%s%s=%u",
+			   asset_rec->type,
+			   asset_rec->name ? ":" : "",
+			   asset_rec->name ? asset_rec->name : "",
+			   asset_rec->count);
+	}
+	list_iterator_destroy(itr);
+
+	return asset_str;
 }

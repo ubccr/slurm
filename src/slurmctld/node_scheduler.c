@@ -573,7 +573,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 				build_cg_bitmap(job_ptr);
 			}
 			bit_clear(job_ptr->node_bitmap_cg, i);
-			job_update_cpu_cnt(job_ptr, i);
+			job_update_asset_cnt(job_ptr, i);
 			/* node_cnt indicates how many nodes we are waiting
 			 * to get epilog complete messages from, so do not
 			 * count down nodes. NOTE: The job's node_cnt will not
@@ -2901,7 +2901,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 				    (!bit_test(job_ptr->node_bitmap_cg, i)))
 					continue;
 				bit_clear(job_ptr->node_bitmap_cg, i);
-				job_update_cpu_cnt(job_ptr, i);
+				job_update_asset_cnt(job_ptr, i);
 				if (node_ptr->comp_job_cnt)
 					(node_ptr->comp_job_cnt)--;
 				if ((job_ptr->node_cnt > 0) &&
@@ -2931,7 +2931,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 		} else if (IS_NODE_DOWN(node_ptr)) {
 			/* Consider job already completed */
 			bit_clear(job_ptr->node_bitmap_cg, i);
-			job_update_cpu_cnt(job_ptr, i);
+			job_update_asset_cnt(job_ptr, i);
 			if (node_ptr->comp_job_cnt)
 				(node_ptr->comp_job_cnt)--;
 			if ((job_ptr->node_cnt > 0) &&

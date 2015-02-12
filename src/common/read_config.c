@@ -162,6 +162,7 @@ static int _validate_and_set_defaults(slurm_ctl_conf_t *conf,
 static uint16_t *_parse_srun_ports(const char *);
 
 s_p_options_t slurm_conf_options[] = {
+	{"AccountingStorageAssets", S_P_STRING},
 	{"AccountingStorageEnforce", S_P_STRING},
 	{"AccountingStorageHost", S_P_STRING},
 	{"AccountingStorageBackupHost", S_P_STRING},
@@ -3350,6 +3351,11 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 				xstrdup(DEFAULT_ACCOUNTING_STORAGE_TYPE);
 	}
 
+	if (!s_p_get_string(&conf->accounting_storage_assets,
+			    "AccountingStorageAssets", hashtbl))
+		conf->accounting_storage_assets =
+			xstrdup(DEFAULT_ACCOUNTING_ASSETS);
+
 	if (s_p_get_string(&temp_str, "AccountingStorageEnforce", hashtbl)) {
 		if (slurm_strcasestr(temp_str, "1")
 		    || slurm_strcasestr(temp_str, "associations"))
@@ -4356,6 +4362,11 @@ extern char * debug_flags2str(uint64_t debug_flags)
 			xstrcat(rc, ",");
 		xstrcat(rc, "DB_Assoc");
 	}
+	if (debug_flags & DEBUG_FLAG_DB_ASSET) {
+		if (rc)
+			xstrcat(rc, ",");
+		xstrcat(rc, "DB_Asset");
+	}
 	if (debug_flags & DEBUG_FLAG_DB_EVENT) {
 		if (rc)
 			xstrcat(rc, ",");
@@ -4563,6 +4574,8 @@ extern int debug_str2flags(char *debug_flags, uint64_t *flags_out)
 			(*flags_out) |= DEBUG_FLAG_CPU_BIND;
 		else if (strcasecmp(tok, "DB_Assoc") == 0)
 			(*flags_out) |= DEBUG_FLAG_DB_ASSOC;
+		else if (strcasecmp(tok, "DB_Asset") == 0)
+			(*flags_out) |= DEBUG_FLAG_DB_ASSET;
 		else if (strcasecmp(tok, "DB_Event") == 0)
 			(*flags_out) |= DEBUG_FLAG_DB_EVENT;
 		else if (strcasecmp(tok, "DB_Job") == 0)

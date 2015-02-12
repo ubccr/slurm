@@ -1,10 +1,9 @@
 /*****************************************************************************\
- *  proc_req.h - functions and definitions for processing incoming RPCs.
+ *  as_mysql_asset.c - functions dealing with assets.
  *****************************************************************************
- *  Copyright (C) 2008 Lawrence Livermore National Security.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Morris Jette <jette1@llnl.gov>
- *  CODE-OCEC-09-009. All rights reserved.
+ *
+ *  Copyright (C) 2015 SchedMD LLC.
+ *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -36,35 +35,19 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef _PROC_REQ_H
-#define _PROC_REQ_H
+#ifndef _HAVE_AS_MYSQL_ASSET_H
+#define _HAVE_AS_MYSQL_ASSET_H
 
-#include "src/common/macros.h"
-#include "src/common/pack.h"
-#include "src/common/slurm_protocol_defs.h"
+#include "accounting_storage_mysql.h"
 
-typedef struct {
-	List assets;
-	char *cluster_name;
-	uint16_t ctld_port; /* slurmctld_port */
-	void *db_conn; /* database connection */
-	char ip[32];
-	slurm_fd_t newsockfd; /* socket connection descriptor */
-	uint16_t orig_port;
-	uint16_t rpc_version; /* version of rpc */
-} slurmdbd_conn_t;
+extern int update_full_asset_query(void);
 
-/* Process an incoming RPC
- * slurmdbd_conn IN/OUT - in will that the newsockfd set before
- *       calling and db_conn and rpc_version will be filled in with the init.
- * msg IN - incoming message
- * msg_size IN - size of msg in bytes
- * first IN - set if first message received on the socket
- * buffer OUT - outgoing response, must be freed by caller
- * uid IN/OUT - user ID who initiated the RPC
- * RET SLURM_SUCCESS or error code */
-extern int proc_req(slurmdbd_conn_t *slurmdbd_conn, char *msg,
-		    uint32_t msg_size, bool first, Buf *out_buffer,
-		    uint32_t *uid);
+extern int update_asset_views(mysql_conn_t *mysql_conn, char *cluster_name);
 
-#endif /* !_PROC_REQ */
+extern int as_mysql_add_assets(mysql_conn_t *mysql_conn,
+			       uint32_t uid, List asset_list);
+
+extern List as_mysql_get_assets(mysql_conn_t *mysql_conn, uid_t uid,
+				slurmdb_asset_cond_t *asset_cond);
+
+#endif

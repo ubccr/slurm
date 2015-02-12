@@ -37,6 +37,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#include "as_mysql_cluster.h"
 #include "as_mysql_usage.h"
 #include "as_mysql_rollup.h"
 
@@ -310,11 +311,11 @@ static void *_cluster_rollup_usage(void *arg)
 
 	if ((day_end - day_start) > 0) {
 		START_TIMER;
-		rc = as_mysql_daily_rollup(&mysql_conn,
-					   local_rollup->cluster_name,
-					   day_start,
-					   day_end,
-					   local_rollup->archive_data);
+		rc = as_mysql_nonhour_rollup(&mysql_conn, 0,
+					     local_rollup->cluster_name,
+					     day_start,
+					     day_end,
+					     local_rollup->archive_data);
 		snprintf(timer_str, sizeof(timer_str),
 			 "daily_rollup for %s", local_rollup->cluster_name);
 		END_TIMER3(timer_str, 5000000);
@@ -324,7 +325,7 @@ static void *_cluster_rollup_usage(void *arg)
 
 	if ((month_end - month_start) > 0) {
 		START_TIMER;
-		rc = as_mysql_monthly_rollup(&mysql_conn,
+		rc = as_mysql_nonhour_rollup(&mysql_conn, 1,
 					     local_rollup->cluster_name,
 					     month_start,
 					     month_end,
@@ -416,6 +417,7 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	MYSQL_ROW row;
 	char *tmp = NULL;
 	char *my_usage_table = cluster_day_table;
+	char *my_usage_ext_table = cluster_day_ext_table;
 	char *query = NULL;
 	char *cluster_req_inx[] = {
 		"alloc_secs",
@@ -447,7 +449,13 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		return SLURM_ERROR;
 	}
 
-	if (set_usage_information(&my_usage_table, type, &start, &end)
+	if (!cluster_rec->assets &&
+	    ((rc = as_mysql_cluster_get_assets(mysql_conn, cluster_rec))
+	     != SLURM_SUCCESS))
+		return rc;
+
+	if (set_usage_information(&my_usage_table, &my_usage_ext_table,
+				  type, &start, &end)
 	    != SLURM_SUCCESS) {
 		return SLURM_ERROR;
 	}
@@ -468,8 +476,7 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	debug4("%d(%s:%d) query\n%s",
 	       mysql_conn->conn, THIS_FILE, __LINE__, query);
 
-	if (!(result = mysql_db_query_ret(
-		      mysql_conn, query, 0))) {
+	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
 		return SLURM_ERROR;
 	}
@@ -488,7 +495,11 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		accounting_rec->idle_secs = slurm_atoull(row[CLUSTER_ICPU]);
 		accounting_rec->over_secs = slurm_atoull(row[CLUSTER_OCPU]);
 		accounting_rec->resv_secs = slurm_atoull(row[CLUSTER_RCPU]);
-		accounting_rec->cpu_count = slurm_atoul(row[CLUSTER_CNT]);
+		/* FIXME: THIS PROBABLY NEEDS TO BE READ IN */
+		accounting_rec->asset_rec.id = 1;
+		accounting_rec->asset_rec.name = xstrdup("cpu");
+		/* FIXME: ***********************************/
+		accounting_rec->asset_rec.count = slurm_atoul(row[CLUSTER_CNT]);
 		accounting_rec->period_start = slurm_atoul(row[CLUSTER_START]);
 		accounting_rec->consumed_energy =
 			slurm_atoull(row[CLUSTER_ENERGY]);
@@ -513,6 +524,7 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 	MYSQL_ROW row;
 	char *tmp = NULL;
 	char *my_usage_table = NULL;
+	char *my_usage_ext_table = NULL;
 	char *query = NULL;
 	List usage_list = NULL;
 	char *id_str = NULL;
@@ -565,6 +577,7 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 		list_iterator_destroy(itr);
 
 		my_usage_table = assoc_day_table;
+		my_usage_ext_table = assoc_day_ext_table;
 		break;
 	}
 	case DBD_GET_WCKEY_USAGE:
@@ -588,6 +601,7 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 		list_iterator_destroy(itr);
 
 		my_usage_table = wckey_day_table;
+		my_usage_ext_table = wckey_day_ext_table;
 		break;
 	}
 	default:
@@ -596,7 +610,8 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 		break;
 	}
 
-	if (set_usage_information(&my_usage_table, type, &start, &end)
+	if (set_usage_information(&my_usage_table, &my_usage_ext_table,
+				  type, &start, &end)
 	    != SLURM_SUCCESS) {
 		xfree(id_str);
 		return SLURM_ERROR;
@@ -733,6 +748,7 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	MYSQL_ROW row;
 	char *tmp = NULL;
 	char *my_usage_table = NULL;
+	char *my_usage_ext_table = NULL;
 	slurmdb_assoc_rec_t *slurmdb_assoc = in;
 	slurmdb_wckey_rec_t *slurmdb_wckey = in;
 	char *query = NULL;
@@ -767,6 +783,7 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		username = slurmdb_assoc->user;
 		my_list = &slurmdb_assoc->accounting_list;
 		my_usage_table = assoc_day_table;
+		my_usage_ext_table = assoc_day_ext_table;
 		break;
 	}
 	case DBD_GET_WCKEY_USAGE:
@@ -782,7 +799,7 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		cluster_name = slurmdb_wckey->cluster;
 		username = slurmdb_wckey->user;
 		my_list = &slurmdb_wckey->accounting_list;
-		my_usage_table = wckey_day_table;
+		my_usage_ext_table = wckey_day_ext_table;
 		break;
 	}
 	case DBD_GET_CLUSTER_USAGE:
@@ -855,7 +872,8 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	}
 is_user:
 
-	if (set_usage_information(&my_usage_table, type, &start, &end)
+	if (set_usage_information(&my_usage_table, &my_usage_ext_table,
+				  type, &start, &end)
 	    != SLURM_SUCCESS) {
 		return SLURM_ERROR;
 	}

@@ -182,6 +182,7 @@ diag_stats_t slurmctld_diag_stats;
 int	slurmctld_primary = 1;
 bool	want_nodes_reboot = true;
 int	with_slurmdbd = 0;
+List    asset_list = NULL;
 
 /* Local variables */
 static pthread_t assoc_cache_thread = (pthread_t) 0;
@@ -494,6 +495,10 @@ int main(int argc, char *argv[])
 				      "slurmctld start time");
 			}
 		}
+
+
+		acct_storage_g_add_assets(acct_db_conn,
+					  slurmctld_conf.slurm_user_id, NULL);
 
 		info("Running as primary controller");
 		if ((slurmctld_config.resume_backup == false) &&
@@ -1149,7 +1154,7 @@ static int _accounting_cluster_ready()
 
 	lock_slurmctld(node_read_lock);
 
-	set_cluster_cpus();
+	set_cluster_assets();
 
 	/* Now get the names of all the nodes on the cluster at this
 	   time and send it also.
@@ -1158,11 +1163,12 @@ static int _accounting_cluster_ready()
 	bit_nset(total_node_bitmap, 0, node_record_count-1);
 	cluster_nodes = bitmap2node_name_sortable(total_node_bitmap, 0);
 	FREE_NULL_BITMAP(total_node_bitmap);
+
+	rc = clusteracct_storage_g_cluster_assets(acct_db_conn,
+						  cluster_nodes,
+						  asset_list, event_time);
 	unlock_slurmctld(node_read_lock);
 
-	rc = clusteracct_storage_g_cluster_cpus(acct_db_conn,
-						cluster_nodes,
-						cluster_cpus, event_time);
 	xfree(cluster_nodes);
 	if (rc == ACCOUNTING_FIRST_REG) {
 		/* see if we are running directly to a database
@@ -1772,7 +1778,8 @@ extern void ctld_assoc_mgr_init(slurm_trigger_callbacks_t *callbacks)
 	assoc_init_arg.update_license_notify = license_update_remote;
 	assoc_init_arg.update_qos_notify = _update_qos;
 	assoc_init_arg.update_resvs = update_assocs_in_resvs;
-	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_ASSOC |
+	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_ASSET |
+				     ASSOC_MGR_CACHE_ASSOC |
 				     ASSOC_MGR_CACHE_USER  |
 				     ASSOC_MGR_CACHE_QOS   |
 				     ASSOC_MGR_CACHE_RES;
@@ -1851,31 +1858,77 @@ extern void send_all_to_accounting(time_t event_time)
 
 /* A slurmctld lock needs to at least have a node read lock set before
  * this is called */
-extern void set_cluster_cpus(void)
+extern void set_cluster_assets(void)
 {
-	uint32_t cpus = 0;
 	struct node_record *node_ptr;
+	slurmdb_asset_rec_t *asset_rec, *cpu_asset = NULL, *mem_asset = NULL;
+	ListIterator itr;
 	int i;
+
+	xassert(asset_list);
+
+	itr = list_iterator_create(asset_list);
+	while ((asset_rec = list_next(itr))) {
+		if (!asset_rec->type) {
+			error("Asset %d doesn't have a type given, "
+			      "this should never happen",
+			      asset_rec->id);
+			continue; /* this should never happen */
+		}
+		/* reset them now since we are about to add to them */
+		asset_rec->count = 0;
+		if (!strcmp(asset_rec->type, "cpu")) {
+			cpu_asset = asset_rec;
+			continue;
+		} else if (!strcmp(asset_rec->type, "mem")) {
+			mem_asset = asset_rec;
+			continue;
+		}
+		/* FIXME: set up the other assets here that aren't specific */
+	}
+	list_iterator_destroy(itr);
 
 	node_ptr = node_record_table_ptr;
 	for (i = 0; i < node_record_count; i++, node_ptr++) {
+		uint32_t cpu_count = 0, mem_count = 0;
 		if (node_ptr->name == '\0')
 			continue;
+		if (!node_ptr->assets)
+			node_ptr->assets = list_create(
+				slurmdb_destroy_asset_rec);
 #ifdef SLURM_NODE_ACCT_REGISTER
-		if (slurmctld_conf.fast_schedule)
-			cpus += node_ptr->config_ptr->cpus;
-		else
-			cpus += node_ptr->cpus;
+		if (slurmctld_conf.fast_schedule) {
+			cpu_count += node_ptr->config_ptr->cpus;
+			mem_count += node_ptr->config_ptr->real_memory;
+		} else {
+			cpu_count += node_ptr->cpus;
+			mem_count += node_ptr->real_memory;
+		}
 #else
-		cpus += node_ptr->config_ptr->cpus;
-#endif
-	}
+		cpu_count += node_ptr->config_ptr->cpus;
+		mem_count += node_ptr->config_ptr->real_memory;
 
-	/* Since cluster_cpus is used else where we need to keep a
-	   local var here to avoid race conditions on cluster_cpus
-	   not being correct.
-	*/
-	cluster_cpus = cpus;
+#endif
+		cpu_asset->count += cpu_count;
+		mem_asset->count += mem_count;
+
+		/* add the cpu asset to the node */
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+		asset_rec->id = cpu_asset->id;
+		asset_rec->count = cpu_count;
+		list_append(node_ptr->assets, asset_rec);
+
+		/* add the mem asset to the node */
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+		asset_rec->id = mem_asset->id;
+		asset_rec->count = mem_count / 1024; /* convert to GB */
+		list_append(node_ptr->assets, asset_rec);
+	}
+	mem_asset->count /= 1024; /* convert to GB */
+	/* FIXME: This probably needs to be removed and handled
+	 * differently in the spots this is used.
+	 */
+	cluster_cpus = cpu_asset->count;
 }
 
 /*

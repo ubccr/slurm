@@ -42,36 +42,58 @@
 #include "as_mysql_archive.h"
 #include "src/common/parse_time.h"
 
+enum {
+	TIME_ALLOC,
+	TIME_DOWN,
+	TIME_RESV
+};
+
+enum {
+	ASSOC_TABLES,
+	WCKEY_TABLES
+};
+
+typedef struct {
+	uint32_t count;
+	uint32_t id;
+	uint64_t time_alloc;
+	uint64_t time_down;
+	uint64_t time_idle;
+	uint64_t time_over;
+	uint64_t time_pd;
+	uint64_t time_resv;
+	uint64_t total_time;
+} local_asset_usage_t;
+
 typedef struct {
 	int id;
-	uint64_t a_cpu;
-	uint64_t energy;
+	List loc_assets;
 } local_id_usage_t;
 
 typedef struct {
-	int id; /*only needed for reservations */
-	uint64_t total_time;
-	uint64_t a_cpu;
-	int cpu_count;
-	uint64_t d_cpu;
-	uint64_t i_cpu;
-	uint64_t o_cpu;
-	uint64_t pd_cpu;
-	uint64_t r_cpu;
-	time_t start;
 	time_t end;
-	uint64_t energy;
+	int id; /*only needed for reservations */
+	List loc_assets;
+	time_t start;
 } local_cluster_usage_t;
 
 typedef struct {
 	uint64_t a_cpu;
+	time_t end;
 	int id;
 	List local_assocs; /* list of assocs to spread unused time
 			      over of type local_id_usage_t */
-	uint64_t total_time;
 	time_t start;
-	time_t end;
+	uint64_t total_time;
 } local_resv_usage_t;
+
+static void _destroy_local_asset_usage(void *object)
+{
+	local_asset_usage_t *a_usage = (local_asset_usage_t *)object;
+	if (a_usage) {
+		xfree(a_usage);
+	}
+}
 
 static void _destroy_local_id_usage(void *object)
 {
@@ -85,6 +107,7 @@ static void _destroy_local_cluster_usage(void *object)
 {
 	local_cluster_usage_t *c_usage = (local_cluster_usage_t *)object;
 	if (c_usage) {
+		FREE_NULL_LIST(c_usage->loc_assets);
 		xfree(c_usage);
 	}
 }
@@ -97,6 +120,98 @@ static void _destroy_local_resv_usage(void *object)
 			list_destroy(r_usage->local_assocs);
 		xfree(r_usage);
 	}
+}
+
+static int _find_loc_asset(void *x, void *key)
+{
+	local_asset_usage_t *loc_asset = (local_asset_usage_t *)x;
+	uint32_t asset_id = *(uint32_t *)key;
+
+	if (loc_asset->id == asset_id)
+		return 1;
+	return 0;
+}
+
+static void _remove_job_asset_time_from_cluster(List c_assets, List j_assets,
+						int seconds)
+{
+	ListIterator c_itr;
+	local_asset_usage_t *c_asset, *j_asset;
+
+	if ((seconds <= 0) || !c_assets || !j_assets ||
+	    !list_count(c_assets) || !list_count(j_assets))
+		return;
+
+	c_itr = list_iterator_create(c_assets);
+	while ((c_asset = list_next(c_itr))) {
+		if (!(j_asset = list_find_first(
+			      j_assets, _find_loc_asset, &c_asset->id)))
+			continue;
+		c_asset->total_time -= seconds * j_asset->count;
+	}
+	list_iterator_destroy(c_itr);
+}
+
+
+static void _add_time_asset(List assets, int type, uint32_t id, uint64_t time)
+{
+	local_asset_usage_t *loc_asset;
+
+	if (!time)
+		return;
+
+	loc_asset = list_find_first(assets, _find_loc_asset, &id);
+
+	if (!loc_asset) {
+		loc_asset = xmalloc(sizeof(local_asset_usage_t));
+		loc_asset->id = id;
+		list_append(assets, loc_asset);
+	}
+
+	switch (type) {
+	case TIME_ALLOC:
+		loc_asset->time_alloc += time;
+		break;
+	case TIME_DOWN:
+		loc_asset->time_down += time;
+		break;
+	case TIME_RESV:
+		loc_asset->time_resv += time;
+		break;
+	default:
+		error("_add_time_asset: unknown type %d given", type);
+		break;
+	}
+}
+
+static void _add_job_alloc_time_to_cluster(List c_assets, List j_assets)
+{
+	ListIterator c_itr = list_iterator_create(c_assets);
+	local_asset_usage_t *c_asset, *j_asset;
+
+	while ((c_asset = list_next(c_itr))) {
+		if (!(j_asset = list_find_first(j_assets,
+						_find_loc_asset, &c_asset->id)))
+			continue;
+		c_asset->time_alloc += j_asset->time_alloc;
+	}
+	list_iterator_destroy(c_itr);
+}
+
+static void _setup_cluster_asset(List assets, uint32_t id,
+				 uint32_t count, int seconds)
+{
+	local_asset_usage_t *loc_asset =
+		list_find_first(assets, _find_loc_asset, &id);
+
+	if (!loc_asset) {
+		loc_asset = xmalloc(sizeof(local_asset_usage_t));
+		loc_asset->id = id;
+		list_append(assets, loc_asset);
+	}
+
+	loc_asset->count = count;
+	loc_asset->total_time += seconds * loc_asset->count;
 }
 
 static int _process_purge(mysql_conn_t *mysql_conn,
@@ -155,41 +270,74 @@ static int _process_purge(mysql_conn_t *mysql_conn,
 	return rc;
 }
 
-static int _process_cluster_usage(mysql_conn_t *mysql_conn,
-				  char *cluster_name,
-				  time_t curr_start, time_t curr_end,
-				  time_t now, local_cluster_usage_t *c_usage)
-{
-	int rc = SLURM_SUCCESS;
-	char *query = NULL;
-	uint64_t total_used;
-	char start_char[20], end_char[20];
+/* static int _process_cluster_asset_nonhour_usage(mysql_conn_t *mysql_conn, */
+/* 						char *cluster_name, */
+/* 						time_t curr_start, */
+/* 						time_t curr_end, */
+/* 						time_t use_start, */
+/* 						local_asset_usage_t *loc_asset) */
+/* { */
+/* 	query = xstrdup_printf("insert into \"%s_%s\" " */
+/* 			       "(time_start, id_asset, alloc_secs, " */
+/* 			       "down_secs, pdown_secs, " */
+/* 			       "idle_secs, over_secs, " */
+/* 			       "resv_secs) " */
+/* 			       "values (%ld, %u, %u, " */
+/* 			       "%"PRIu64", %"PRIu64", %"PRIu64", " */
+/* 			       "%"PRIu64", %"PRIu64", %"PRIu64") " */
+/* 			       "on duplicate key update " */
+/* 			       "count=VALUES(count), " */
+/* 			       "alloc_secs=VALUES(alloc_secs), " */
+/* 			       "down_secs=VALUES(down_secs), " */
+/* 			       "pdown_secs=VALUES(pdown_secs), " */
+/* 			       "idle_secs=VALUES(idle_secs), " */
+/* 			       "over_secs=VALUES(over_secs), " */
+/* 			       "resv_secs=VALUES(resv_secs)", */
+/* 			       cluster_name, cluster_hour_ext_table, */
+/* 			       use_start, loc_asset->id, loc_asset->count, */
+/* 			       loc_asset->time_alloc, loc_asset->time_down, */
+/* 			       loc_asset->time_pd, loc_asset->time_idle, */
+/* 			       loc_asset->time_over, loc_asset->time_resv); */
 
-	if (!c_usage)
-		return rc;
+/* } */
+
+static void _setup_cluster_asset_usage(mysql_conn_t *mysql_conn,
+				       char *cluster_name,
+				       time_t curr_start, time_t curr_end,
+				       time_t now, time_t use_start,
+				       local_asset_usage_t *loc_asset,
+				       char **query)
+{
+	char start_char[20], end_char[20];
+	uint64_t total_used;
+
+	if (!loc_asset)
+		return;
+
 	/* Now put the lists into the usage tables */
 
 	/* sanity check to make sure we don't have more
 	   allocated cpus than possible. */
-	if (c_usage->total_time < c_usage->a_cpu) {
+	if (loc_asset->total_time < loc_asset->time_alloc) {
 		slurm_make_time_str(&curr_start, start_char,
 				    sizeof(start_char));
 		slurm_make_time_str(&curr_end, end_char,
 				    sizeof(end_char));
 		error("We have more allocated time than is "
 		      "possible (%"PRIu64" > %"PRIu64") for "
-		      "cluster %s(%d) from %s - %s",
-		      c_usage->a_cpu, c_usage->total_time,
-		      cluster_name, c_usage->cpu_count,
-		      start_char, end_char);
-		c_usage->a_cpu = c_usage->total_time;
+		      "cluster %s(%d) from %s - %s asset %u",
+		      loc_asset->time_alloc, loc_asset->total_time,
+		      cluster_name, loc_asset->count,
+		      start_char, end_char, loc_asset->id);
+		loc_asset->time_alloc = loc_asset->total_time;
 	}
 
-	total_used = c_usage->a_cpu + c_usage->d_cpu + c_usage->pd_cpu;
+	total_used = loc_asset->time_alloc +
+		loc_asset->time_down + loc_asset->time_pd;
 
 	/* Make sure the total time we care about
 	   doesn't go over the limit */
-	if (c_usage->total_time < total_used) {
+	if (loc_asset->total_time < total_used) {
 		int64_t overtime;
 
 		slurm_make_time_str(&curr_start, start_char,
@@ -199,119 +347,282 @@ static int _process_cluster_usage(mysql_conn_t *mysql_conn,
 		error("We have more time than is "
 		      "possible (%"PRIu64"+%"PRIu64"+%"
 		      PRIu64")(%"PRIu64") > %"PRIu64" for "
-		      "cluster %s(%d) from %s - %s",
-		      c_usage->a_cpu, c_usage->d_cpu,
-		      c_usage->pd_cpu, total_used,
-		      c_usage->total_time,
-		      cluster_name, c_usage->cpu_count,
-		      start_char, end_char);
+		      "cluster %s(%d) from %s - %s asset %u",
+		      loc_asset->time_alloc, loc_asset->time_down,
+		      loc_asset->time_pd, total_used,
+		      loc_asset->total_time,
+		      cluster_name, loc_asset->count,
+		      start_char, end_char, loc_asset->id);
 
 		/* First figure out how much actual down time
 		   we have and then how much
 		   planned down time we have. */
-		overtime = (int64_t)(c_usage->total_time -
-				     (c_usage->a_cpu + c_usage->d_cpu));
+		overtime = (int64_t)(loc_asset->total_time -
+				     (loc_asset->time_alloc +
+				      loc_asset->time_down));
 		if (overtime < 0) {
-			c_usage->d_cpu += overtime;
-			if ((int64_t)c_usage->d_cpu < 0)
-				c_usage->d_cpu = 0;
+			loc_asset->time_down += overtime;
+			if ((int64_t)loc_asset->time_down < 0)
+				loc_asset->time_down = 0;
 		}
 
-		overtime = (int64_t)(c_usage->total_time -
-				     (c_usage->a_cpu + c_usage->d_cpu
-				      + c_usage->pd_cpu));
+		overtime = (int64_t)(loc_asset->total_time -
+				     (loc_asset->time_alloc +
+				      loc_asset->time_down +
+				      loc_asset->time_pd));
 		if (overtime < 0) {
-			c_usage->pd_cpu += overtime;
-			if ((int64_t)c_usage->pd_cpu < 0)
-				c_usage->pd_cpu = 0;
+			loc_asset->time_pd += overtime;
+			if ((int64_t)loc_asset->time_pd < 0)
+				loc_asset->time_pd = 0;
 		}
 
-		total_used = c_usage->a_cpu +
-			c_usage->d_cpu + c_usage->pd_cpu;
+		total_used = loc_asset->time_alloc +
+			loc_asset->time_down + loc_asset->time_pd;
 		/* info("We now have (%"PRIu64"+%"PRIu64"+" */
 		/*      "%"PRIu64")(%"PRIu64") " */
 		/*       "?= %"PRIu64"", */
-		/*       c_usage->a_cpu, c_usage->d_cpu, */
-		/*       c_usage->pd_cpu, total_used, */
-		/*       c_usage->total_time); */
+		/*       loc_asset->time_alloc, loc_asset->time_down, */
+		/*       loc_asset->time_pd, total_used, */
+		/*       loc_asset->total_time); */
 	}
 
-	c_usage->i_cpu = c_usage->total_time - total_used - c_usage->r_cpu;
+	loc_asset->time_idle = loc_asset->total_time -
+		total_used - loc_asset->time_resv;
 	/* sanity check just to make sure we have a
 	 * legitimate time after we calulated
 	 * idle/reserved time put extra in the over
 	 * commit field
 	 */
-	/* info("%s got idle of %lld", c_usage->name, */
-	/*      (int64_t)c_usage->i_cpu); */
-	if ((int64_t)c_usage->i_cpu < 0) {
-		/* info("got %d %d %d", c_usage->r_cpu, */
-		/*      c_usage->i_cpu, c_usage->o_cpu); */
-		c_usage->r_cpu += (int64_t)c_usage->i_cpu;
-		c_usage->o_cpu -= (int64_t)c_usage->i_cpu;
-		c_usage->i_cpu = 0;
-		if ((int64_t)c_usage->r_cpu < 0)
-			c_usage->r_cpu = 0;
+	/* info("%s got idle of %lld", loc_asset->name, */
+	/*      (int64_t)loc_asset->time_idle); */
+	if ((int64_t)loc_asset->time_idle < 0) {
+		/* info("got %d %d %d", loc_asset->time_resv, */
+		/*      loc_asset->time_idle, loc_asset->time_over); */
+		loc_asset->time_resv += (int64_t)loc_asset->time_idle;
+		loc_asset->time_over -= (int64_t)loc_asset->time_idle;
+		loc_asset->time_idle = 0;
+		if ((int64_t)loc_asset->time_resv < 0)
+			loc_asset->time_resv = 0;
 	}
 
 	/* info("cluster %s(%u) down %"PRIu64" alloc %"PRIu64" " */
 	/*      "resv %"PRIu64" idle %"PRIu64" over %"PRIu64" " */
 	/*      "total= %"PRIu64" ?= %"PRIu64" from %s", */
 	/*      cluster_name, */
-	/*      c_usage->cpu_count, c_usage->d_cpu, c_usage->a_cpu, */
-	/*      c_usage->r_cpu, c_usage->i_cpu, c_usage->o_cpu, */
-	/*      c_usage->d_cpu + c_usage->a_cpu + */
-	/*      c_usage->r_cpu + c_usage->i_cpu, */
-	/*      c_usage->total_time, */
-	/*      slurm_ctime(&c_usage->start)); */
-	/* info("to %s", slurm_ctime(&c_usage->end)); */
-	query = xstrdup_printf("insert into \"%s_%s\" "
-			       "(creation_time, "
-			       "mod_time, time_start, "
-			       "count, alloc_secs, "
-			       "down_secs, pdown_secs, "
-			       "idle_secs, over_secs, "
-			       "resv_secs, consumed_energy) "
-			       "values (%ld, %ld, %ld, %d, "
-			       "%"PRIu64", %"PRIu64", %"PRIu64", "
-			       "%"PRIu64", %"PRIu64", %"PRIu64", "
-			       "%"PRIu64")",
-			       cluster_name, cluster_hour_table,
-			       now, now,
-			       c_usage->start,
-			       c_usage->cpu_count,
-			       c_usage->a_cpu, c_usage->d_cpu,
-			       c_usage->pd_cpu, c_usage->i_cpu,
-			       c_usage->o_cpu, c_usage->r_cpu,
-			       c_usage->energy);
+	/*      loc_asset->count, loc_asset->time_down, */
+	/*      loc_asset->time_alloc, */
+	/*      loc_asset->time_resv, loc_asset->time_idle, */
+	/*      loc_asset->time_over, */
+	/*      loc_asset->time_down + loc_asset->time_alloc + */
+	/*      loc_asset->time_resv + loc_asset->time_idle, */
+	/*      loc_asset->total_time, */
+	/*      slurm_ctime(&loc_asset->start)); */
+	/* info("to %s", slurm_ctime(&loc_asset->end)); */
+	if (*query)
+		xstrfmtcat(*query, ", (%ld, %ld, %ld, %u, %u, "
+			   "%"PRIu64", %"PRIu64", %"PRIu64", "
+			   "%"PRIu64", %"PRIu64", %"PRIu64")",
+			   now, now, use_start, loc_asset->id,
+			   loc_asset->count,
+			   loc_asset->time_alloc,
+			   loc_asset->time_down,
+			   loc_asset->time_pd,
+			   loc_asset->time_idle,
+			   loc_asset->time_over,
+			   loc_asset->time_resv);
+	else
+		xstrfmtcat(*query, "insert into \"%s_%s\" "
+			   "(creation_time, mod_time, "
+			   "time_start, id_asset, count, "
+			   "alloc_secs, down_secs, pdown_secs, "
+			   "idle_secs, over_secs, resv_secs) "
+			   "values (%ld, %ld, %ld, %u, %u, "
+			   "%"PRIu64", %"PRIu64", %"PRIu64", "
+			   "%"PRIu64", %"PRIu64", %"PRIu64")",
+			   cluster_name, cluster_hour_table,
+			   now, now,
+			   use_start, loc_asset->id,
+			   loc_asset->count,
+			   loc_asset->time_alloc,
+			   loc_asset->time_down,
+			   loc_asset->time_pd,
+			   loc_asset->time_idle,
+			   loc_asset->time_over,
+			   loc_asset->time_resv);
+
+	return;
+}
+
+static int _process_cluster_usage(mysql_conn_t *mysql_conn,
+				  char *cluster_name,
+				  time_t curr_start, time_t curr_end,
+				  time_t now, local_cluster_usage_t *c_usage)
+{
+	int rc = SLURM_SUCCESS;
+	char *query = NULL;
+	ListIterator itr;
+	local_asset_usage_t *loc_asset;
+
+	if (!c_usage)
+		return rc;
+	/* Now put the lists into the usage tables */
+
+	xassert(c_usage->loc_assets);
+	itr = list_iterator_create(c_usage->loc_assets);
+	while ((loc_asset = list_next(itr))) {
+		_setup_cluster_asset_usage(mysql_conn, cluster_name,
+					   curr_start, curr_end, now,
+					   c_usage->start, loc_asset, &query);
+	}
+	list_iterator_destroy(itr);
+
+	if (!query)
+		return rc;
+
+	xstrfmtcat(query,
+		   " on duplicate key update "
+		   "mod_time=%ld, count=VALUES(count), "
+		   "alloc_secs=VALUES(alloc_secs), "
+		   "down_secs=VALUES(down_secs), "
+		   "pdown_secs=VALUES(pdown_secs), "
+		   "idle_secs=VALUES(idle_secs), "
+		   "over_secs=VALUES(over_secs), "
+		   "resv_secs=VALUES(resv_secs)",
+		   now);
 
 	/* Spacing out the inserts here instead of doing them
 	   all at once in the end proves to be faster.  Just FYI
 	   so we don't go testing again and again.
 	*/
-	if (query) {
-		xstrfmtcat(query,
-			   " on duplicate key update "
-			   "mod_time=%ld, count=VALUES(count), "
-			   "alloc_secs=VALUES(alloc_secs), "
-			   "down_secs=VALUES(down_secs), "
-			   "pdown_secs=VALUES(pdown_secs), "
-			   "idle_secs=VALUES(idle_secs), "
-			   "over_secs=VALUES(over_secs), "
-			   "resv_secs=VALUES(resv_secs), "
-			   "consumed_energy=VALUES(consumed_energy)",
-			   now);
-		if (debug_flags & DEBUG_FLAG_DB_USAGE)
-			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-		rc = mysql_db_query(mysql_conn, query);
-		xfree(query);
-		if (rc != SLURM_SUCCESS)
-			error("Couldn't add cluster hour rollup");
-	}
+	if (debug_flags & DEBUG_FLAG_DB_USAGE)
+		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+	rc = mysql_db_query(mysql_conn, query);
+	xfree(query);
+	if (rc != SLURM_SUCCESS)
+		error("Couldn't add cluster hour rollup");
 
 	return rc;
 }
 
+/* static void _create_id_usage_nonhour_insert(char *cluster_name, int type, */
+/* 					    time_t curr_start, time_t now, */
+/* 					    local_id_usage_t *id_usage, */
+/* 					    char **query) */
+/* { */
+/* 	switch (type) { */
+/* 	case ASSOC_TABLES: */
+/* 		id_name = "id_assoc"; */
+/* 		table = assoc_day_table; */
+/* 		table_ext = assoc_day_ext_table; */
+/* 		break; */
+/* 	case WCKEY_TABLES: */
+/* 		id_name = "id_wckey"; */
+/* 		table = wckey_day_table; */
+/* 		table_ext = wckey_day_ext_table; */
+/* 		break; */
+/* 	default: */
+/* 		error("_create_id_usage_nonhour_insert: unknown type %d", type); */
+/* 		return; */
+/* 		break; */
+/* 	} */
+
+/* 	xstrfmtcat(*query, */
+/* 		   "insert into \"%s_%s\" (creation_time, mod_time, %s, " */
+/* 		   "time_start) " */
+/* 		   "values (%ld, %ld, %u, %ld, %"PRIu64") " */
+/* 		   "on duplicate key update mod_time=VALUES(mod_time), " */
+/* 		   "inx=LAST_INSERT_ID(inx);", */
+/* 		   cluster_name, table, id_name, now, now, */
+/* 		   id_usage->id, curr_start); */
+
+/* 	if (!id_usage->loc_assets || !list_count(id_usage->loc_assets)) { */
+/* 		error("%s %d doesn't have any assets", id_name, id_usage->id); */
+/* 		return; */
+/* 	} */
+
+/* 	first = 1; */
+/* 	itr = list_iterator_create(id_usage->loc_assets); */
+/* 	while ((loc_asset = list_next(itr))) { */
+/* 		if (!first) { */
+/* 			xstrfmtcat(*query, */
+/* 				   ", (LAST_INSERT_ID(), %u, %"PRIu64");", */
+/* 				   loc_asset->id, loc_asset->time_alloc); */
+
+/* 		} else { */
+/* 			first = 0; */
+/* 			xstrfmtcat(*query, */
+/* 				   "insert into \"%s_%s\" " */
+/* 				   "(inx, id_asset, alloc_secs) " */
+/* 				   "values (LAST_INSERT_ID(), %u, %"PRIu64")", */
+/* 				   cluster_name, table_ext, */
+/* 				   loc_asset->id, loc_asset->time_alloc); */
+/* 		} */
+/* 	} */
+/* 	list_iterator_destroy(itr); */
+/* 	xstrcat(*query, */
+/* 		" on duplicate key update alloc_secs=VALUES(alloc_secs);"); */
+/* } */
+
+static void _create_id_usage_insert(char *cluster_name, int type,
+				    time_t curr_start, time_t now,
+				    local_id_usage_t *id_usage,
+				    char **query)
+{
+	local_asset_usage_t *loc_asset;
+	ListIterator itr;
+	bool first;
+	char *table = NULL, *id_name = NULL;
+
+	xassert(query);
+
+	switch (type) {
+	case ASSOC_TABLES:
+		id_name = "id_assoc";
+		table = assoc_hour_table;
+		break;
+	case WCKEY_TABLES:
+		id_name = "id_wckey";
+		table = wckey_hour_table;
+		break;
+	default:
+		error("_create_id_usage_insert: unknown type %d", type);
+		return;
+		break;
+	}
+
+	if (!id_usage->loc_assets || !list_count(id_usage->loc_assets)) {
+		error("%s %d doesn't have any assets", id_name, id_usage->id);
+		return;
+	}
+
+	first = 1;
+	itr = list_iterator_create(id_usage->loc_assets);
+	while ((loc_asset = list_next(itr))) {
+		if (!first) {
+			xstrfmtcat(*query,
+				   ", (%ld, %ld, %u, %ld, %u, %"PRIu64")",
+				   now, now,
+				   id_usage->id, curr_start, loc_asset->id,
+				   loc_asset->time_alloc);
+		} else {
+			xstrfmtcat(*query,
+				   "insert into \"%s_%s\" "
+				   "(creation_time, mod_time, id, "
+				   "time_start, id_asset, alloc_secs) "
+				   "values (%ld, %ld, %u, %ld, %u, %"PRIu64")",
+				   cluster_name, table, now, now,
+				   id_usage->id, curr_start, loc_asset->id,
+				   loc_asset->time_alloc);
+			first = 0;
+		}
+	}
+	list_iterator_destroy(itr);
+	xstrfmtcat(*query,
+		   " on duplicate key update mod_time=%ld, "
+		   "alloc_secs=VALUES(alloc_secs);", now);
+}
+
+/* assoc_mgr_locks on assets need to be read locked before this */
 static local_cluster_usage_t *_setup_cluster_usage(mysql_conn_t *mysql_conn,
 						   char *cluster_name,
 						   time_t curr_start,
@@ -323,10 +634,11 @@ static local_cluster_usage_t *_setup_cluster_usage(mysql_conn_t *mysql_conn,
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
 	int i = 0;
+	ListIterator itr2 = NULL;
+	slurmdb_asset_rec_t *asset_rec;
 
 	char *event_req_inx[] = {
 		"node_name",
-		"count",
 		"time_start",
 		"time_end",
 		"state",
@@ -334,7 +646,6 @@ static local_cluster_usage_t *_setup_cluster_usage(mysql_conn_t *mysql_conn,
 	char *event_str = NULL;
 	enum {
 		EVENT_REQ_NAME,
-		EVENT_REQ_CPU,
 		EVENT_REQ_START,
 		EVENT_REQ_END,
 		EVENT_REQ_STATE,
@@ -346,6 +657,8 @@ static local_cluster_usage_t *_setup_cluster_usage(mysql_conn_t *mysql_conn,
 		xstrfmtcat(event_str, ", %s", event_req_inx[i]);
 	}
 
+	xstrcat(event_str, full_asset_query);
+
 	/* first get the events during this time.  All that is
 	 * except things with the maintainance flag set in the
 	 * state.  We handle those later with the reservations.
@@ -355,7 +668,7 @@ static local_cluster_usage_t *_setup_cluster_usage(mysql_conn_t *mysql_conn,
 			       "&& (time_end >= %ld "
 			       "|| time_end = 0)) "
 			       "order by node_name, time_start",
-			       event_str, cluster_name, event_table,
+			       event_str, cluster_name, event_view,
 			       NODE_STATE_MAINT,
 			       curr_end, curr_start);
 	xfree(event_str);
@@ -368,11 +681,13 @@ static local_cluster_usage_t *_setup_cluster_usage(mysql_conn_t *mysql_conn,
 	}
 	xfree(query);
 
+	itr2 = list_iterator_create(assoc_mgr_asset_list);
 	while ((row = mysql_fetch_row(result))) {
 		time_t row_start = slurm_atoul(row[EVENT_REQ_START]);
 		time_t row_end = slurm_atoul(row[EVENT_REQ_END]);
-		uint32_t row_cpu = slurm_atoul(row[EVENT_REQ_CPU]);
 		uint16_t state = slurm_atoul(row[EVENT_REQ_STATE]);
+		local_asset_usage_t *loc_asset;
+
 		if (row_start < curr_start)
 			row_start = curr_start;
 
@@ -388,22 +703,21 @@ static local_cluster_usage_t *_setup_cluster_usage(mysql_conn_t *mysql_conn,
 		/* this means we are a cluster registration
 		   entry */
 		if (!row[EVENT_REQ_NAME][0]) {
+			local_cluster_usage_t *loc_c_usage = c_usage;
+
 			/* if the cpu count changes we will
 			 * only care about the last cpu count but
 			 * we will keep a total of the time for
 			 * all cpus to get the correct cpu time
 			 * for the entire period.
 			 */
-			if (state || !c_usage) {
-				local_cluster_usage_t *loc_c_usage;
 
+			if (state || !c_usage) {
 				loc_c_usage = xmalloc(
 					sizeof(local_cluster_usage_t));
-				loc_c_usage->cpu_count = row_cpu;
-				loc_c_usage->total_time =
-					(row_end - row_start) * row_cpu;
 				loc_c_usage->start = row_start;
-				loc_c_usage->end = row_end;
+				loc_c_usage->loc_assets =
+					list_create(_destroy_local_asset_usage);
 				/* If this has a state it
 				   means the slurmctld went
 				   down and we should put this
@@ -416,13 +730,30 @@ static local_cluster_usage_t *_setup_cluster_usage(mysql_conn_t *mysql_conn,
 						    loc_c_usage);
 				else
 					c_usage = loc_c_usage;
-				loc_c_usage = NULL;
-			} else {
-				c_usage->cpu_count = row_cpu;
-				c_usage->total_time +=
-					(row_end - row_start) * row_cpu;
-				c_usage->end = row_end;
+			} else
+				loc_c_usage = c_usage;
+
+			loc_c_usage->end = row_end;
+
+			xassert(loc_c_usage->loc_assets);
+
+			i = EVENT_REQ_COUNT-1;
+			list_iterator_reset(itr2);
+			while ((asset_rec = list_next(itr2))) {
+				i++;
+				/* Skip if the asset is NULL,
+				 * it means this cluster
+				 * doesn't care about it.
+				 */
+				if (!row[i] || !row[i][0])
+					continue;
+
+				_setup_cluster_asset(loc_c_usage->loc_assets,
+						     asset_rec->id,
+						     slurm_atoul(row[i]),
+						     (row_end - row_start));
 			}
+
 			continue;
 		}
 
@@ -440,20 +771,30 @@ static local_cluster_usage_t *_setup_cluster_usage(mysql_conn_t *mysql_conn,
 				local_end = c_usage->end;
 			seconds = (local_end - local_start);
 			if (seconds > 0) {
-				/* info("node %s adds " */
-				/*      "(%d)(%d-%d) * %d = %d " */
-				/*      "to %d", */
-				/*      row[EVENT_REQ_NAME], */
-				/*      seconds, */
-				/*      local_end, local_start, */
-				/*      row_cpu, */
-				/*      seconds * row_cpu, */
-				/*      row_cpu); */
-				c_usage->d_cpu += seconds * row_cpu;
+				ListIterator c_itr = list_iterator_create(
+					c_usage->loc_assets);
+
+				while ((loc_asset = list_next(c_itr))) {
+					/* info("node %s adds asset %d " */
+					/*      "(%d)(%d-%d) * %d = %d " */
+					/*      "to %d", */
+					/*      row[EVENT_REQ_NAME], */
+					/*      loc_asset->id, seconds, */
+					/*      local_end, local_start, */
+					/*      c_asset->count, */
+					/*      seconds * c_asset->count, */
+					/*      c_asset->count); */
+					loc_asset->time_down +=
+						seconds * loc_asset->count;
+				}
+				list_iterator_destroy(c_itr);
 			}
 		}
 	}
 	mysql_free_result(result);
+
+	list_iterator_destroy(itr2);
+
 	return c_usage;
 }
 
@@ -464,13 +805,14 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 {
 	int rc = SLURM_SUCCESS;
 	int add_sec = 3600;
-	int i=0;
+	int i=0, id;
 	time_t now = time(NULL);
 	time_t curr_start = start;
 	time_t curr_end = curr_start + add_sec;
 	char *query = NULL;
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
+	ListIterator itr2 = NULL;
 	ListIterator a_itr = NULL;
 	ListIterator c_itr = NULL;
 	ListIterator w_itr = NULL;
@@ -480,6 +822,8 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 	List wckey_usage_list = list_create(_destroy_local_id_usage);
 	List resv_usage_list = list_create(_destroy_local_resv_usage);
 	uint16_t track_wckey = slurm_get_track_wckey();
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	/* char start_char[20], end_char[20]; */
 
 	char *job_req_inx[] = {
@@ -492,7 +836,6 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		"job.time_start",
 		"job.time_end",
 		"job.time_suspended",
-		"job.cpus_alloc",
 		"job.cpus_req",
 		"job.id_resv",
 		"SUM(step.consumed_energy)"
@@ -508,7 +851,6 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		JOB_REQ_START,
 		JOB_REQ_END,
 		JOB_REQ_SUSPENDED,
-		JOB_REQ_ACPU,
 		JOB_REQ_RCPU,
 		JOB_REQ_RESVID,
 		JOB_REQ_ENERGY,
@@ -562,9 +904,13 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 	for(i=1; i<RESV_REQ_COUNT; i++) {
 		xstrfmtcat(resv_str, ", %s", resv_req_inx[i]);
 	}
+	assoc_mgr_lock(&locks);
+
+	xstrcat(job_str, full_asset_query);
 
 /* 	info("begin start %s", slurm_ctime(&curr_start)); */
 /* 	info("begin end %s", slurm_ctime(&curr_end)); */
+	itr2 = list_iterator_create(assoc_mgr_asset_list);
 	a_itr = list_iterator_create(assoc_usage_list);
 	c_itr = list_iterator_create(cluster_down_list);
 	w_itr = list_iterator_create(wckey_usage_list);
@@ -612,9 +958,13 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			      mysql_conn, query, 0))) {
 			xfree(query);
 			_destroy_local_cluster_usage(c_usage);
-			return SLURM_ERROR;
+			rc = SLURM_ERROR;
+			goto end_it;
 		}
 		xfree(query);
+
+		if (c_usage)
+			xassert(c_usage->loc_assets);
 
 		/* If a reservation overlaps another reservation we
 		   total up everything here as if they didn't but when
@@ -640,6 +990,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			time_t row_end = slurm_atoul(row[RESV_REQ_END]);
 			uint32_t row_cpu = slurm_atoul(row[RESV_REQ_CPU]);
 			uint32_t row_flags = slurm_atoul(row[RESV_REQ_FLAGS]);
+			local_asset_usage_t *loc_asset;
 
 			if (row_start < curr_start)
 				row_start = curr_start;
@@ -680,10 +1031,17 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			*/
 			if (!c_usage)
 				continue;
-			else if (row_flags & RESERVE_FLAG_MAINT)
-				c_usage->pd_cpu += r_usage->total_time;
+
+			/* Only able to do CPUs currently */
+			id = ASSET_CPU;
+			loc_asset = list_find_first(c_usage->loc_assets,
+						    _find_loc_asset, &id);
+
+			if (row_flags & RESERVE_FLAG_MAINT)
+				loc_asset->time_pd += r_usage->total_time;
 			else
-				c_usage->a_cpu += r_usage->total_time;
+				loc_asset->time_alloc += r_usage->total_time;
+
 			/* slurm_make_time_str(&r_usage->start, start_char, */
 			/* 		    sizeof(start_char)); */
 			/* slurm_make_time_str(&r_usage->end, end_char, */
@@ -707,7 +1065,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 				       "group by job.job_db_inx "
 				       "order by job.id_assoc, "
 				       "job.time_eligible",
-				       job_str, cluster_name, job_table,
+				       job_str, cluster_name, job_view,
 				       cluster_name, step_table,
 				       curr_end, curr_start);
 
@@ -717,7 +1075,8 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			      mysql_conn, query, 0))) {
 			xfree(query);
 			_destroy_local_cluster_usage(c_usage);
-			return SLURM_ERROR;
+			rc = SLURM_ERROR;
+			goto end_it;
 		}
 		xfree(query);
 
@@ -731,8 +1090,8 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			time_t row_eligible = slurm_atoul(row[JOB_REQ_ELG]);
 			time_t row_start = slurm_atoul(row[JOB_REQ_START]);
 			time_t row_end = slurm_atoul(row[JOB_REQ_END]);
-			uint32_t row_acpu = slurm_atoul(row[JOB_REQ_ACPU]);
 			uint32_t row_rcpu = slurm_atoul(row[JOB_REQ_RCPU]);
+			slurmdb_asset_rec_t *asset_rec;
 			uint64_t row_energy = 0;
 			int loc_seconds = 0;
 			seconds = 0;
@@ -775,6 +1134,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					      query, 0))) {
 					xfree(query);
 					_destroy_local_cluster_usage(c_usage);
+					assoc_mgr_unlock(&locks);
 					return SLURM_ERROR;
 				}
 				xfree(query);
@@ -810,13 +1170,13 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 				a_usage->id = assoc_id;
 				list_append(assoc_usage_list, a_usage);
 				last_id = assoc_id;
+				a_usage->loc_assets = list_create(
+					_destroy_local_asset_usage);
 			}
 
-			a_usage->a_cpu += seconds * row_acpu;
-			a_usage->energy += row_energy;
-
+			/* Short circuit this so so we don't get a pointer. */
 			if (!track_wckey)
-				goto calc_cluster;
+				last_wckeyid = wckey_id;
 
 			/* do the wckey calculation */
 			if (last_wckeyid != wckey_id) {
@@ -831,12 +1191,43 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					w_usage->id = wckey_id;
 					list_append(wckey_usage_list,
 						    w_usage);
+					w_usage->loc_assets = list_create(
+						_destroy_local_asset_usage);
 				}
-
 				last_wckeyid = wckey_id;
 			}
-			w_usage->a_cpu += seconds * row_acpu;
-			w_usage->energy += row_energy;
+
+			i = JOB_REQ_COUNT-1;
+			list_iterator_reset(itr2);
+			while ((asset_rec = list_next(itr2))) {
+				uint64_t time;
+				i++;
+				/* Skip if the asset is NULL,
+				 * it means this cluster
+				 * doesn't care about it.
+				 */
+				if (!row[i] || !row[i][0])
+					continue;
+				time = slurm_atoul(row[i]) * seconds;
+				_add_time_asset(a_usage->loc_assets,
+						TIME_ALLOC, asset_rec->id,
+						time);
+				if (w_usage)
+					_add_time_asset(w_usage->loc_assets,
+							TIME_ALLOC,
+							asset_rec->id,
+							time);
+			}
+
+			_add_time_asset(a_usage->loc_assets,
+					TIME_ALLOC, ASSET_ENERGY,
+					row_energy);
+			if (w_usage)
+				_add_time_asset(
+					w_usage->loc_assets,
+					TIME_ALLOC, ASSET_ENERGY,
+					row_energy);
+
 			/* do the cluster allocated calculation */
 		calc_cluster:
 
@@ -852,18 +1243,18 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 				if (loc_c_usage->end < temp_end)
 					temp_end = loc_c_usage->end;
 				loc_seconds = (temp_end - temp_start);
-				if (loc_seconds > 0) {
-					/* info(" Job %u was running for " */
-					/*      "%"PRIu64" seconds while " */
-					/*      "cluster %s's slurmctld " */
-					/*      "wasn't responding", */
-					/*      job_id, */
-					/*      (uint64_t) */
-					/*      (seconds * row_acpu), */
-					/*      cluster_name); */
-					loc_c_usage->total_time -=
-						loc_seconds * row_acpu;
-				}
+				/* info(" Job %u was running for " */
+				/*      "%"PRIu64" seconds while " */
+				/*      "cluster %s's slurmctld " */
+				/*      "wasn't responding", */
+				/*      job_id, */
+				/*      (uint64_t) */
+				/*      (seconds * row_acpu), */
+				/*      cluster_name); */
+				_remove_job_asset_time_from_cluster(
+					loc_c_usage->loc_assets,
+					a_usage->loc_assets,
+					loc_seconds);
 			}
 
 			/* first figure out the reservation */
@@ -885,6 +1276,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 				   outside of the reservation. */
 				list_iterator_reset(r_itr);
 				while ((r_usage = list_next(r_itr))) {
+					int temp_end, temp_start;
 					/* since the reservation could
 					   have changed in some way,
 					   thus making a new
@@ -893,21 +1285,31 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					   sure all the reservations
 					   are checked to see if such
 					   a thing has happened */
-					if (r_usage->id == resv_id) {
-						int temp_end = row_end;
-						int temp_start = row_start;
-						if (r_usage->start > temp_start)
-							temp_start =
-								r_usage->start;
-						if (r_usage->end < temp_end)
-							temp_end = r_usage->end;
+					if (r_usage->id != resv_id)
+						continue;
+					temp_end = row_end;
+					temp_start = row_start;
+					if (r_usage->start > temp_start)
+						temp_start =
+							r_usage->start;
+					if (r_usage->end < temp_end)
+						temp_end = r_usage->end;
 
-						if ((temp_end - temp_start)
-						    > 0) {
+					loc_seconds = (temp_end - temp_start);
+
+					if (loc_seconds > 0) {
+						id = ASSET_CPU;
+						local_asset_usage_t *loc_asset =
+							list_find_first(
+								a_usage->
+								loc_assets,
+								_find_loc_asset,
+								&id);
+						if (loc_asset) {
 							r_usage->a_cpu +=
-								(temp_end
-								 - temp_start)
-								* row_acpu;
+								loc_seconds *
+								loc_asset->
+								count;
 						}
 					}
 				}
@@ -933,8 +1335,9 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 				/*      seconds * row_acpu, */
 				/*      row_acpu); */
 
-				c_usage->a_cpu += seconds * row_acpu;
-				c_usage->energy += row_energy;
+				_add_job_alloc_time_to_cluster(
+					c_usage->loc_assets,
+					a_usage->loc_assets);
 			}
 
 			/* now reserved time */
@@ -968,8 +1371,9 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					/*      loc_seconds, */
 					/*      row_rcpu); */
 
-					c_usage->r_cpu +=
-						loc_seconds * row_rcpu;
+					_add_time_asset(c_usage->loc_assets,
+							TIME_RESV, ASSET_CPU,
+							loc_seconds * row_rcpu);
 				}
 			}
 		}
@@ -1013,9 +1417,12 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					a_usage->id = associd;
 					list_append(assoc_usage_list, a_usage);
 					last_id = associd;
+					a_usage->loc_assets = list_create(
+						_destroy_local_asset_usage);
 				}
-
-				a_usage->a_cpu += seconds;
+				/* This only works with CPUs now. */
+				_add_time_asset(a_usage->loc_assets,
+						TIME_ALLOC, ASSET_CPU, seconds);
 			}
 			list_iterator_destroy(tmp_itr);
 		}
@@ -1023,8 +1430,17 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		/* now apply the down time from the slurmctld disconnects */
 		if (c_usage) {
 			list_iterator_reset(c_itr);
-			while ((loc_c_usage = list_next(c_itr)))
-				c_usage->d_cpu += loc_c_usage->total_time;
+			while ((loc_c_usage = list_next(c_itr))) {
+				local_asset_usage_t *loc_asset;
+				ListIterator tmp_itr = list_iterator_create(
+					loc_c_usage->loc_assets);
+				while ((loc_asset = list_next(tmp_itr)))
+					_add_time_asset(c_usage->loc_assets,
+							TIME_DOWN,
+							loc_asset->id,
+							loc_asset->total_time);
+				list_iterator_destroy(tmp_itr);
+			}
 
 			if ((rc = _process_cluster_usage(
 				     mysql_conn, cluster_name, curr_start,
@@ -1036,40 +1452,11 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		}
 
 		list_iterator_reset(a_itr);
-		while ((a_usage = list_next(a_itr))) {
-/* 			info("association (%d) %d alloc %d", */
-/* 			     a_usage->id, last_id, */
-/* 			     a_usage->a_cpu); */
-			if (query) {
-				xstrfmtcat(query,
-					   ", (%ld, %ld, %d, %ld, %"PRIu64", "
-					   "%"PRIu64")",
-					   now, now,
-					   a_usage->id, curr_start,
-					   a_usage->a_cpu, a_usage->energy);
-			} else {
-				xstrfmtcat(query,
-					   "insert into \"%s_%s\" "
-					   "(creation_time, "
-					   "mod_time, id_assoc, time_start, "
-					   "alloc_secs, consumed_energy) "
-					   "values "
-					   "(%ld, %ld, %d, %ld, %"PRIu64", "
-					   "%"PRIu64")",
-					   cluster_name, assoc_hour_table,
-					   now, now,
-					   a_usage->id, curr_start,
-					   a_usage->a_cpu, a_usage->energy);
-			}
-		}
+		while ((a_usage = list_next(a_itr)))
+			_create_id_usage_insert(cluster_name, ASSOC_TABLES,
+						curr_start, now,
+						a_usage, &query);
 		if (query) {
-			xstrfmtcat(query,
-				   " on duplicate key update "
-				   "mod_time=%ld, "
-				   "alloc_secs=VALUES(alloc_secs), "
-				   "consumed_energy=VALUES(consumed_energy);",
-				   now);
-
 			if (debug_flags & DEBUG_FLAG_DB_USAGE)
 				DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 			rc = mysql_db_query(mysql_conn, query);
@@ -1085,40 +1472,11 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			goto end_loop;
 
 		list_iterator_reset(w_itr);
-		while ((w_usage = list_next(w_itr))) {
-/* 			info("association (%d) %d alloc %d", */
-/* 			     w_usage->id, last_id, */
-/* 			     w_usage->a_cpu); */
-			if (query) {
-				xstrfmtcat(query,
-					   ", (%ld, %ld, %d, %ld, "
-					   "%"PRIu64", %"PRIu64")",
-					   now, now,
-					   w_usage->id, curr_start,
-					   w_usage->a_cpu, w_usage->energy);
-			} else {
-				xstrfmtcat(query,
-					   "insert into \"%s_%s\" "
-					   "(creation_time, "
-					   "mod_time, id_wckey, time_start, "
-					   "alloc_secs, consumed_energy) "
-					   "values "
-					   "(%ld, %ld, %d, %ld, "
-					   "%"PRIu64", %"PRIu64")",
-					   cluster_name, wckey_hour_table,
-					   now, now,
-					   w_usage->id, curr_start,
-					   w_usage->a_cpu, w_usage->energy);
-			}
-		}
+		while ((w_usage = list_next(w_itr)))
+			_create_id_usage_insert(cluster_name, WCKEY_TABLES,
+						curr_start, now,
+						w_usage, &query);
 		if (query) {
-			xstrfmtcat(query,
-				   " on duplicate key update "
-				   "mod_time=%ld, "
-				   "alloc_secs=VALUES(alloc_secs), "
-				   "consumed_energy=VALUES(consumed_energy);",
-				   now);
-
 			if (debug_flags & DEBUG_FLAG_DB_USAGE)
 				DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 			rc = mysql_db_query(mysql_conn, query);
@@ -1148,10 +1506,12 @@ end_it:
 	list_iterator_destroy(w_itr);
 	list_iterator_destroy(r_itr);
 
-	list_destroy(assoc_usage_list);
-	list_destroy(cluster_down_list);
-	list_destroy(wckey_usage_list);
-	list_destroy(resv_usage_list);
+	FREE_NULL_LIST(assoc_usage_list);
+	FREE_NULL_LIST(cluster_down_list);
+	FREE_NULL_LIST(wckey_usage_list);
+	FREE_NULL_LIST(resv_usage_list);
+
+	assoc_mgr_unlock(&locks);
 
 /* 	info("stop start %s", slurm_ctime(&curr_start)); */
 /* 	info("stop end %s", slurm_ctime(&curr_end)); */
@@ -1164,10 +1524,11 @@ end_it:
 
 	return rc;
 }
-extern int as_mysql_daily_rollup(mysql_conn_t *mysql_conn,
-				 char *cluster_name,
-				 time_t start, time_t end,
-				 uint16_t archive_data)
+extern int as_mysql_nonhour_rollup(mysql_conn_t *mysql_conn,
+				   bool run_month,
+				   char *cluster_name,
+				   time_t start, time_t end,
+				   uint16_t archive_data)
 {
 	/* can't just add 86400 since daylight savings starts and ends every
 	 * once in a while
@@ -1179,39 +1540,49 @@ extern int as_mysql_daily_rollup(mysql_conn_t *mysql_conn,
 	time_t now = time(NULL);
 	char *query = NULL;
 	uint16_t track_wckey = slurm_get_track_wckey();
+	char *unit_name;
 
 	if (!localtime_r(&curr_start, &start_tm)) {
-		error("Couldn't get localtime from day start %ld", curr_start);
+		error("Couldn't get localtime from start %ld", curr_start);
 		return SLURM_ERROR;
 	}
+
 	start_tm.tm_sec = 0;
 	start_tm.tm_min = 0;
 	start_tm.tm_hour = 0;
-	start_tm.tm_mday++;
 	start_tm.tm_isdst = -1;
+
+	if (run_month) {
+		unit_name = "month";
+		start_tm.tm_mday = 1;
+		start_tm.tm_mon++;
+	} else {
+		unit_name = "day";
+		start_tm.tm_mday++;
+	}
+
 	curr_end = mktime(&start_tm);
 
 	while (curr_start < end) {
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
 			DB_DEBUG(mysql_conn->conn,
-				 "curr day is now %ld-%ld",
-				 curr_start, curr_end);
+				 "curr %s is now %ld-%ld",
+				 unit_name, curr_start, curr_end);
 /* 		info("start %s", slurm_ctime(&curr_start)); */
 /* 		info("end %s", slurm_ctime(&curr_end)); */
 		query = xstrdup_printf(
-			"insert into \"%s_%s\" (creation_time, mod_time, "
-			"id_assoc, "
-			"time_start, alloc_secs, consumed_energy) "
-			"select %ld, %ld, id_assoc, "
-			"%ld, @ASUM:=SUM(alloc_secs), "
-			"@ESUM:=SUM(consumed_energy) "
-			"from \"%s_%s\" where "
+			"insert into \"%s_%s\" (creation_time, mod_time, id, "
+			"id_asset, time_start, alloc_secs) "
+			"select %ld, %ld, id, id_asset, "
+			"%ld, @ASUM:=SUM(alloc_secs) from \"%s_%s\" where "
 			"(time_start < %ld && time_start >= %ld) "
-			"group by id_assoc on duplicate key update "
-			"mod_time=%ld, alloc_secs=@ASUM, "
-			"consumed_energy=@ESUM;",
-			cluster_name, assoc_day_table, now, now, curr_start,
-			cluster_name, assoc_hour_table,
+			"group by id, id_asset on duplicate key update "
+			"mod_time=%ld, alloc_secs=@ASUM;",
+			cluster_name,
+			run_month ? assoc_month_table : assoc_day_table,
+			now, now, curr_start,
+			cluster_name,
+			run_month ? assoc_day_table : assoc_hour_table,
 			curr_end, curr_start, now);
 		/* We group on deleted here so if there are no entries
 		   we don't get an error, just nothing is returned.
@@ -1219,47 +1590,48 @@ extern int as_mysql_daily_rollup(mysql_conn_t *mysql_conn,
 		*/
 		xstrfmtcat(query,
 			   "insert into \"%s_%s\" (creation_time, "
-			   "mod_time, time_start, count, "
+			   "mod_time, time_start, id_asset, count, "
 			   "alloc_secs, down_secs, pdown_secs, "
-			   "idle_secs, over_secs, resv_secs, "
-			   "consumed_energy) "
+			   "idle_secs, over_secs, resv_secs) "
 			   "select %ld, %ld, "
-			   "%ld, @CPU:=MAX(count), "
+			   "%ld, id_asset, @CPU:=MAX(count), "
 			   "@ASUM:=SUM(alloc_secs), "
 			   "@DSUM:=SUM(down_secs), "
 			   "@PDSUM:=SUM(pdown_secs), "
 			   "@ISUM:=SUM(idle_secs), "
 			   "@OSUM:=SUM(over_secs), "
-			   "@RSUM:=SUM(resv_secs), "
-			   "@ESUM:=SUM(consumed_energy) from \"%s_%s\" where "
+			   "@RSUM:=SUM(resv_secs) from \"%s_%s\" where "
 			   "(time_start < %ld && time_start >= %ld) "
-			   "group by deleted "
+			   "group by deleted, id_asset "
 			   "on duplicate key update "
 			   "mod_time=%ld, count=@CPU, "
 			   "alloc_secs=@ASUM, down_secs=@DSUM, "
 			   "pdown_secs=@PDSUM, idle_secs=@ISUM, "
-			   "over_secs=@OSUM, resv_secs=@RSUM, "
-			   "consumed_energy=@ESUM;",
-			   cluster_name, cluster_day_table,
+			   "over_secs=@OSUM, resv_secs=@RSUM;",
+			   cluster_name,
+			   run_month ? cluster_month_table : cluster_day_table,
 			   now, now, curr_start,
-			   cluster_name, cluster_hour_table,
+			   cluster_name,
+			   run_month ? cluster_day_table : cluster_hour_table,
 			   curr_end, curr_start, now);
 		if (track_wckey) {
 			xstrfmtcat(query,
 				   "insert into \"%s_%s\" (creation_time, "
-				   "mod_time, id_wckey, time_start, "
-				   "alloc_secs, consumed_energy) "
+				   "mod_time, id, id_asset, time_start, "
+				   "alloc_secs) "
 				   "select %ld, %ld, "
-				   "id_wckey, %ld, @ASUM:=SUM(alloc_secs), "
-				   "@ESUM:=SUM(consumed_energy) "
+				   "id, id_asset, %ld, @ASUM:=SUM(alloc_secs) "
 				   "from \"%s_%s\" where (time_start < %ld && "
-				   "time_start >= %ld) "
-				   "group by id_wckey on duplicate key update "
-				   "mod_time=%ld, alloc_secs=@ASUM, "
-				   "consumed_energy=@ESUM;",
-				   cluster_name, wckey_day_table,
+				   "time_start >= %ld) group by id, id_asset "
+				   "on duplicate key update "
+				   "mod_time=%ld, alloc_secs=@ASUM;",
+				   cluster_name,
+				   run_month ? wckey_month_table :
+				   wckey_day_table,
 				   now, now, curr_start,
-				   cluster_name, wckey_hour_table,
+				   cluster_name,
+				   run_month ? wckey_day_table :
+				   wckey_hour_table,
 				   curr_end, curr_start, now);
 		}
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
@@ -1267,14 +1639,14 @@ extern int as_mysql_daily_rollup(mysql_conn_t *mysql_conn,
 		rc = mysql_db_query(mysql_conn, query);
 		xfree(query);
 		if (rc != SLURM_SUCCESS) {
-			error("Couldn't add day rollup");
+			error("Couldn't add %s rollup", unit_name);
 			return SLURM_ERROR;
 		}
 
 		curr_start = curr_end;
 		if (!localtime_r(&curr_start, &start_tm)) {
-			error("Couldn't get localtime from day start %ld",
-			      curr_start);
+			error("Couldn't get localtime from %s start %ld",
+			      unit_name, curr_start);
 			return SLURM_ERROR;
 		}
 		start_tm.tm_sec = 0;
@@ -1290,133 +1662,7 @@ extern int as_mysql_daily_rollup(mysql_conn_t *mysql_conn,
 
 	/* go check to see if we archive and purge */
 	rc = _process_purge(mysql_conn, cluster_name, archive_data,
+			    run_month ? SLURMDB_PURGE_MONTHS :
 			    SLURMDB_PURGE_DAYS);
-	return rc;
-}
-extern int as_mysql_monthly_rollup(mysql_conn_t *mysql_conn,
-				   char *cluster_name,
-				   time_t start, time_t end,
-				   uint16_t archive_data)
-{
-	int rc = SLURM_SUCCESS;
-	struct tm start_tm;
-	time_t curr_start = start;
-	time_t curr_end;
-	time_t now = time(NULL);
-	char *query = NULL;
-	uint16_t track_wckey = slurm_get_track_wckey();
-
-	if (!localtime_r(&curr_start, &start_tm)) {
-		error("Couldn't get localtime from month start %ld",
-		      curr_start);
-		return SLURM_ERROR;
-	}
-	start_tm.tm_sec = 0;
-	start_tm.tm_min = 0;
-	start_tm.tm_hour = 0;
-	start_tm.tm_mday = 1;
-	start_tm.tm_mon++;
-	start_tm.tm_isdst = -1;
-	curr_end = mktime(&start_tm);
-
-	while (curr_start < end) {
-		if (debug_flags & DEBUG_FLAG_DB_USAGE)
-			DB_DEBUG(mysql_conn->conn,
-				 "curr month is now %ld-%ld",
-				 curr_start, curr_end);
-/* 		info("start %s", slurm_ctime(&curr_start)); */
-/* 		info("end %s", slurm_ctime(&curr_end)); */
-		query = xstrdup_printf(
-			"insert into \"%s_%s\" (creation_time, "
-			"mod_time, id_assoc, "
-			"time_start, alloc_secs, consumed_energy) select "
-			"%ld, %ld, id_assoc, "
-			"%ld, @ASUM:=SUM(alloc_secs), "
-			"@ESUM:=SUM(consumed_energy) "
-			"from \"%s_%s\" where "
-			"(time_start < %ld && time_start >= %ld) "
-			"group by id_assoc on duplicate key update "
-			"mod_time=%ld, alloc_secs=@ASUM, "
-			"consumed_energy=@ESUM;",
-			cluster_name, assoc_month_table, now, now, curr_start,
-			cluster_name, assoc_day_table,
-			curr_end, curr_start, now);
-		/* We group on deleted here so if there are no entries
-		   we don't get an error, just nothing is returned.
-		   Else we get a bunch of NULL's
-		*/
-		xstrfmtcat(query,
-			   "insert into \"%s_%s\" (creation_time, "
-			   "mod_time, time_start, count, "
-			   "alloc_secs, down_secs, pdown_secs, "
-			   "idle_secs, over_secs, resv_secs, "
-			   "consumed_energy) "
-			   "select %ld, %ld, "
-			   "%ld, @CPU:=MAX(count), "
-			   "@ASUM:=SUM(alloc_secs), "
-			   "@DSUM:=SUM(down_secs), "
-			   "@PDSUM:=SUM(pdown_secs), "
-			   "@ISUM:=SUM(idle_secs), "
-			   "@OSUM:=SUM(over_secs), "
-			   "@RSUM:=SUM(resv_secs), "
-			   "@ESUM:=SUM(consumed_energy) from \"%s_%s\" where "
-			   "(time_start < %ld && time_start >= %ld) "
-			   "group by deleted "
-			   "on duplicate key update "
-			   "mod_time=%ld, count=@CPU, "
-			   "alloc_secs=@ASUM, down_secs=@DSUM, "
-			   "pdown_secs=@PDSUM, idle_secs=@ISUM, "
-			   "over_secs=@OSUM, resv_secs=@RSUM, "
-			   "consumed_energy=@ESUM;",
-			   cluster_name, cluster_month_table,
-			   now, now, curr_start,
-			   cluster_name, cluster_day_table,
-			   curr_end, curr_start, now);
-		if (track_wckey) {
-			xstrfmtcat(query,
-				   "insert into \"%s_%s\" "
-				   "(creation_time, mod_time, "
-				   "id_wckey, time_start, alloc_secs, "
-				   "consumed_energy) "
-				   "select %ld, %ld, id_wckey, %ld, "
-				   "@ASUM:=SUM(alloc_secs), "
-				   "@ESUM:=SUM(consumed_energy) "
-				   "from \"%s_%s\" where (time_start < %ld && "
-				   "time_start >= %ld) "
-				   "group by id_wckey on duplicate key update "
-				   "mod_time=%ld, alloc_secs=@ASUM, "
-				   "consumed_energy=@ESUM;",
-				   cluster_name, wckey_month_table,
-				   now, now, curr_start,
-				   cluster_name, wckey_day_table,
-				   curr_end, curr_start, now);
-		}
-		if (debug_flags & DEBUG_FLAG_DB_USAGE)
-			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-		rc = mysql_db_query(mysql_conn, query);
-		xfree(query);
-		if (rc != SLURM_SUCCESS) {
-			error("Couldn't add day rollup");
-			return SLURM_ERROR;
-		}
-
-		curr_start = curr_end;
-		if (!localtime_r(&curr_start, &start_tm)) {
-			error("Couldn't get localtime from month start %ld",
-			      curr_start);
-		}
-		start_tm.tm_sec = 0;
-		start_tm.tm_min = 0;
-		start_tm.tm_hour = 0;
-		start_tm.tm_mday = 1;
-		start_tm.tm_mon++;
-		start_tm.tm_isdst = -1;
-		curr_end = mktime(&start_tm);
-	}
-
-	/* go check to see if we archive and purge */
-	rc = _process_purge(mysql_conn, cluster_name, archive_data,
-			    SLURMDB_PURGE_MONTHS);
-
 	return rc;
 }

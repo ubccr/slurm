@@ -52,6 +52,12 @@
 #define SLURMDB_PURGE_IN_MONTHS(_X) \
 	(_X != NO_VAL && _X & SLURMDB_PURGE_MONTHS)
 
+typedef enum {
+	ASSET_CPU = 1,
+	ASSET_MEM,
+	ASSET_ENERGY,
+} asset_types_t;
+
 typedef struct {
 	slurmdb_cluster_rec_t *cluster_rec;
 	int preempt_cnt;
@@ -117,5 +123,8 @@ extern slurmdb_report_cluster_rec_t *slurmdb_cluster_rec_2_report(
 extern char *slurmdb_get_selected_step_id(
 	char *job_id_str, int len,
 	slurmdb_selected_step_t *selected_step);
+
+extern slurmdb_asset_rec_t *slurmdb_copy_asset_rec(slurmdb_asset_rec_t *asset);
+extern char *slurmdb_make_asset_string(List assets);
 
 #endif

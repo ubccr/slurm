@@ -42,6 +42,7 @@
 #include "slurmdb_defs.h"
 #include "pack.h"
 #include "xmalloc.h"
+#include "xstring.h"
 
 extern void slurmdb_pack_user_defs(void *in,
 				   uint16_t rpc_version, Buf buffer);
@@ -109,6 +110,14 @@ extern void slurmdb_pack_archive_rec(void *in,
 				     uint16_t rpc_version, Buf buffer);
 extern int slurmdb_unpack_archive_rec(void **object, uint16_t rpc_version,
 				      Buf buffer);
+extern void slurmdb_pack_asset_cond(void *in, uint16_t rpc_version, Buf buffer);
+extern int slurmdb_unpack_asset_cond(void **object, uint16_t rpc_version,
+				     Buf buffer);
+extern void slurmdb_pack_asset_rec(void *in, uint16_t rpc_version, Buf buffer);
+extern int slurmdb_unpack_asset_rec_noalloc(
+	slurmdb_asset_rec_t *object_ptr, uint16_t rpc_version, Buf buffer);
+extern int slurmdb_unpack_asset_rec(void **object, uint16_t rpc_version,
+				    Buf buffer);
 
 extern void slurmdb_pack_user_cond(void *in,
 				   uint16_t rpc_version, Buf buffer);

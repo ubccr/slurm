@@ -1296,6 +1296,7 @@ typedef struct job_info {
 	uint32_t array_task_id;	/* task_id of a job array */
 	uint32_t array_max_tasks; /* Maximum number of running tasks */
 	char *array_task_str;	/* string expression of task IDs in this record */
+	List assets;            /* assets used in the job */
 	uint32_t assoc_id;	/* association id for job */
 	uint16_t batch_flag;	/* 1 if batch: queued job with script */
 	char *batch_host;	/* name of host running batch script */
@@ -2177,7 +2178,7 @@ typedef struct reservation_name_msg {
 #define DEBUG_FLAG_DB_WCKEY     0x0000008000000000 /* Database WCKey debug */
 #define DEBUG_FLAG_BURST_BUF    0x0000010000000000 /* Burst buffer plugin */
 #define DEBUG_FLAG_CPU_FREQ     0x0000020000000000 /* --cpu_freq debug */
-
+#define DEBUG_FLAG_DB_ASSET     0x0000040000000000 /* Database Asset debug */
 
 
 #define GROUP_FORCE		0x8000	/* if set, update group membership
@@ -2220,6 +2221,7 @@ typedef struct reservation_name_msg {
 
 typedef struct slurm_ctl_conf {
 	time_t last_update;	/* last update time of the build parameters */
+	char *accounting_storage_assets; /* list of assets */
 	uint16_t accounting_storage_enforce; /* job requires valid association:
 					      * user/account/partition/cluster */
 	char *accounting_storage_backup_host;	/* accounting storage

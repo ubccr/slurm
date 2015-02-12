@@ -129,8 +129,14 @@ extern int acct_storage_p_add_clusters(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
+extern int acct_storage_p_add_assets(void *db_conn,
+				     uint32_t uid, List asset_list)
+{
+	return SLURM_SUCCESS;
+}
+
 extern int acct_storage_p_add_assocs(void *db_conn, uint32_t uid,
-					   List assoc_list)
+				     List assoc_list)
 {
 	return SLURM_SUCCESS;
 }
@@ -299,6 +305,12 @@ extern List acct_storage_p_get_config(void *db_conn, char *config_name)
 	return NULL;
 }
 
+extern List acct_storage_p_get_assets(void *db_conn, uid_t uid,
+				      slurmdb_asset_cond_t *asset_cond)
+{
+	return NULL;
+}
+
 extern List acct_storage_p_get_assocs(void *db_conn, uid_t uid,
 					    slurmdb_assoc_cond_t *assoc_q)
 {
@@ -335,8 +347,8 @@ extern List acct_storage_p_get_wckeys(void *db_conn, uid_t uid,
 	return NULL;
 }
 
-extern List acct_storage_p_get_reservations(void *mysql_conn, uid_t uid,
-					    slurmdb_reservation_cond_t *resv_cond)
+extern List acct_storage_p_get_reservations(
+	void *db_conn, uid_t uid, slurmdb_reservation_cond_t *resv_cond)
 {
 	return NULL;
 }
@@ -397,9 +409,9 @@ extern int clusteracct_storage_p_fini_ctld(void *db_conn,
 	return SLURM_SUCCESS;
 }
 
-extern int clusteracct_storage_p_cluster_cpus(void *db_conn,
+extern int clusteracct_storage_p_cluster_assets(void *db_conn,
 					      char *cluster_nodes,
-					      uint32_t cpus,
+					      List assets,
 					      time_t event_time)
 {
 	return SLURM_SUCCESS;

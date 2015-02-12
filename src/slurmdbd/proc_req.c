@@ -57,6 +57,8 @@ static int   _add_accounts(slurmdbd_conn_t *slurmdbd_conn,
 			   Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _add_account_coords(slurmdbd_conn_t *slurmdbd_conn,
 				 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
+static int   _add_assets(slurmdbd_conn_t *slurmdbd_conn,
+			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _add_assocs(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _add_clusters(slurmdbd_conn_t *slurmdbd_conn,
@@ -75,10 +77,12 @@ static int   _archive_dump(slurmdbd_conn_t *slurmdbd_conn,
 			   Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _archive_load(slurmdbd_conn_t *slurmdbd_conn,
 			   Buf in_buffer, Buf *out_buffer, uint32_t *uid);
-static int   _cluster_cpus(slurmdbd_conn_t *slurmdbd_conn,
+static int   _cluster_assets(slurmdbd_conn_t *slurmdbd_conn,
 			   Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_accounts(slurmdbd_conn_t *slurmdbd_conn,
 			   Buf in_buffer, Buf *out_buffer, uint32_t *uid);
+static int   _get_assets(slurmdbd_conn_t *slurmdbd_conn,
+			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_assocs(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_clusters(slurmdbd_conn_t *slurmdbd_conn,
@@ -217,6 +221,10 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 			rc = _add_account_coords(slurmdbd_conn,
 						 in_buffer, out_buffer, uid);
 			break;
+		case DBD_ADD_ASSETS:
+			rc = _add_assets(slurmdbd_conn,
+					 in_buffer, out_buffer, uid);
+			break;
 		case DBD_ADD_ASSOCS:
 			rc = _add_assocs(slurmdbd_conn,
 					 in_buffer, out_buffer, uid);
@@ -253,13 +261,17 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 			rc = _archive_load(slurmdbd_conn,
 					   in_buffer, out_buffer, uid);
 			break;
-		case DBD_CLUSTER_CPUS:
-			rc = _cluster_cpus(slurmdbd_conn,
+		case DBD_CLUSTER_ASSETS:
+			rc = _cluster_assets(slurmdbd_conn,
 					   in_buffer, out_buffer, uid);
 			break;
 		case DBD_GET_ACCOUNTS:
 			rc = _get_accounts(slurmdbd_conn,
 					   in_buffer, out_buffer, uid);
+			break;
+		case DBD_GET_ASSETS:
+			rc = _get_assets(slurmdbd_conn,
+					 in_buffer, out_buffer, uid);
 			break;
 		case DBD_GET_ASSOCS:
 			rc = _get_assocs(slurmdbd_conn,
@@ -579,6 +591,33 @@ end_it:
 	slurmdbd_free_acct_coord_msg(get_msg);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
 				      rc, comment, DBD_ADD_ACCOUNT_COORDS);
+	return rc;
+}
+
+static int _add_assets(slurmdbd_conn_t *slurmdbd_conn,
+		       Buf in_buffer, Buf *out_buffer, uint32_t *uid)
+{
+	int rc = SLURM_SUCCESS;
+	dbd_list_msg_t *get_msg = NULL;
+	char *comment = NULL;
+
+	debug2("DBD_ADD_ASSETS: called");
+
+	if (slurmdbd_unpack_list_msg(&get_msg, slurmdbd_conn->rpc_version,
+				     DBD_ADD_ASSETS, in_buffer) !=
+	    SLURM_SUCCESS) {
+		comment = "Failed to unpack DBD_ADD_ASSETS message";
+		error("CONN:%u %s", slurmdbd_conn->newsockfd, comment);
+		rc = SLURM_ERROR;
+		goto end_it;
+	}
+
+	rc = acct_storage_g_add_assets(slurmdbd_conn->db_conn, *uid,
+				       get_msg->my_list);
+end_it:
+	slurmdbd_free_list_msg(get_msg);
+	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
+				      rc, comment, DBD_ADD_ASSETS);
 	return rc;
 }
 
@@ -945,46 +984,50 @@ end_it:
 	return rc;
 }
 
-static int _cluster_cpus(slurmdbd_conn_t *slurmdbd_conn,
+static int _cluster_assets(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid)
 {
-	dbd_cluster_cpus_msg_t *cluster_cpus_msg = NULL;
+	dbd_cluster_assets_msg_t *cluster_assets_msg = NULL;
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
 	if ((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)) {
-		comment = "DBD_CLUSTER_CPUS message from invalid uid";
-		error("DBD_CLUSTER_CPUS message from invalid uid %u", *uid);
+		comment = "DBD_CLUSTER_ASSETS message from invalid uid";
+		error("DBD_CLUSTER_ASSETS message from invalid uid %u", *uid);
 		rc = ESLURM_ACCESS_DENIED;
 		goto end_it;
 	}
-	if (slurmdbd_unpack_cluster_cpus_msg(&cluster_cpus_msg,
+	if (slurmdbd_unpack_cluster_assets_msg(&cluster_assets_msg,
 					     slurmdbd_conn->rpc_version,
 					     in_buffer) !=
 	    SLURM_SUCCESS) {
-		comment = "Failed to unpack DBD_CLUSTER_CPUS message";
+		comment = "Failed to unpack DBD_CLUSTER_ASSETS message";
 		error("CONN:%u %s", slurmdbd_conn->newsockfd, comment);
 		rc = SLURM_ERROR;
 		goto end_it;
 	}
-	debug2("DBD_CLUSTER_CPUS: called for %s(%u)",
+	debug2("DBD_CLUSTER_ASSETS: called for %s(%u)",
 	       slurmdbd_conn->cluster_name,
-	       cluster_cpus_msg->cpu_count);
+	       cluster_assets_msg->assets ?
+	       list_count(cluster_assets_msg->assets) : 0);
 
-	rc = clusteracct_storage_g_cluster_cpus(
+	rc = clusteracct_storage_g_cluster_assets(
 		slurmdbd_conn->db_conn,
-		cluster_cpus_msg->cluster_nodes,
-		cluster_cpus_msg->cpu_count,
-		cluster_cpus_msg->event_time);
+		cluster_assets_msg->cluster_nodes,
+		cluster_assets_msg->assets,
+		cluster_assets_msg->event_time);
 	if (rc == ESLURM_ACCESS_DENIED) {
 		comment = "This cluster hasn't been added to accounting yet";
 		rc = SLURM_ERROR;
 	}
 end_it:
-	if (rc == SLURM_SUCCESS)
-		slurmdbd_conn->cluster_cpus = cluster_cpus_msg->cpu_count;
+	if (rc == SLURM_SUCCESS) {
+		slurmdbd_conn->assets = cluster_assets_msg->assets;
+		cluster_assets_msg->assets = NULL;
+	}
+
 	if (!slurmdbd_conn->ctld_port) {
-		info("DBD_CLUSTER_CPUS: cluster not registered");
+		info("DBD_CLUSTER_ASSETS: cluster not registered");
 		slurmdbd_conn->ctld_port =
 			clusteracct_storage_g_register_disconn_ctld(
 				slurmdbd_conn->db_conn, slurmdbd_conn->ip);
@@ -992,9 +1035,9 @@ end_it:
 		_add_registered_cluster(slurmdbd_conn);
 	}
 
-	slurmdbd_free_cluster_cpus_msg(cluster_cpus_msg);
+	slurmdbd_free_cluster_assets_msg(cluster_assets_msg);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
-				      rc, comment, DBD_CLUSTER_CPUS);
+				      rc, comment, DBD_CLUSTER_ASSETS);
 	return rc;
 }
 
@@ -1036,6 +1079,51 @@ static int _get_accounts(slurmdbd_conn_t *slurmdbd_conn,
 	}
 
 	slurmdbd_free_cond_msg(get_msg, DBD_GET_ACCOUNTS);
+	if (list_msg.my_list)
+		list_destroy(list_msg.my_list);
+
+	return rc;
+}
+
+static int _get_assets(slurmdbd_conn_t *slurmdbd_conn,
+		       Buf in_buffer, Buf *out_buffer, uint32_t *uid)
+{
+	dbd_cond_msg_t *get_msg = NULL;
+	dbd_list_msg_t list_msg;
+	char *comment = NULL;
+	int rc = SLURM_SUCCESS;
+
+	debug2("DBD_GET_ASSETS: called");
+	if (slurmdbd_unpack_cond_msg(&get_msg, slurmdbd_conn->rpc_version,
+				     DBD_GET_ASSETS, in_buffer) !=
+	    SLURM_SUCCESS) {
+		comment = "Failed to unpack DBD_GET_ASSETS message";
+		error("CONN:%u %s", slurmdbd_conn->newsockfd, comment);
+		*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
+					      SLURM_ERROR, comment,
+					      DBD_GET_ASSETS);
+		return SLURM_ERROR;
+	}
+
+	list_msg.my_list = acct_storage_g_get_assets(
+		slurmdbd_conn->db_conn, *uid, get_msg->cond);
+
+	if (!errno) {
+		if (!list_msg.my_list)
+			list_msg.my_list = list_create(NULL);
+		*out_buffer = init_buf(1024);
+		pack16((uint16_t) DBD_GOT_ASSETS, *out_buffer);
+		slurmdbd_pack_list_msg(&list_msg, slurmdbd_conn->rpc_version,
+				       DBD_GOT_ASSETS, *out_buffer);
+	} else {
+		*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
+					      errno, slurm_strerror(errno),
+					      DBD_GET_ASSETS);
+		rc = SLURM_ERROR;
+	}
+
+	slurmdbd_free_cond_msg(get_msg, DBD_GET_ASSETS);
+
 	if (list_msg.my_list)
 		list_destroy(list_msg.my_list);
 
@@ -1689,7 +1777,7 @@ static int _get_reservations(slurmdbd_conn_t *slurmdbd_conn,
 static int _flush_jobs(slurmdbd_conn_t *slurmdbd_conn,
 		       Buf in_buffer, Buf *out_buffer, uint32_t *uid)
 {
-	dbd_cluster_cpus_msg_t *cluster_cpus_msg = NULL;
+	dbd_cluster_assets_msg_t *cluster_assets_msg = NULL;
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
@@ -1699,8 +1787,8 @@ static int _flush_jobs(slurmdbd_conn_t *slurmdbd_conn,
 		rc = ESLURM_ACCESS_DENIED;
 		goto end_it;
 	}
-	if (slurmdbd_unpack_cluster_cpus_msg(
-		    &cluster_cpus_msg, slurmdbd_conn->rpc_version, in_buffer)
+	if (slurmdbd_unpack_cluster_assets_msg(
+		    &cluster_assets_msg, slurmdbd_conn->rpc_version, in_buffer)
 	    != SLURM_SUCCESS) {
 		comment = "Failed to unpack DBD_FLUSH_JOBS message";
 		error("CONN:%u %s", slurmdbd_conn->newsockfd, comment);
@@ -1712,9 +1800,9 @@ static int _flush_jobs(slurmdbd_conn_t *slurmdbd_conn,
 
 	rc = acct_storage_g_flush_jobs_on_cluster(
 		slurmdbd_conn->db_conn,
-		cluster_cpus_msg->event_time);
+		cluster_assets_msg->event_time);
 end_it:
-	slurmdbd_free_cluster_cpus_msg(cluster_cpus_msg);
+	slurmdbd_free_cluster_assets_msg(cluster_assets_msg);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
 				      rc, comment, DBD_FLUSH_JOBS);
 	return rc;
@@ -2571,7 +2659,7 @@ static int _node_state(slurmdbd_conn_t *slurmdbd_conn,
 
 	memset(&node_ptr, 0, sizeof(struct node_record));
 	node_ptr.name = node_state_msg->hostlist;
-	node_ptr.cpus = node_state_msg->cpu_count;
+	node_ptr.assets = node_state_msg->assets;
 	node_ptr.node_state = node_state_msg->state;
 	node_ptr.reason = node_state_msg->reason;
 	node_ptr.reason_time = node_state_msg->event_time;
@@ -2579,7 +2667,7 @@ static int _node_state(slurmdbd_conn_t *slurmdbd_conn,
 
 	slurmctld_conf.fast_schedule = 0;
 
-	if (!node_ptr.cpus)
+	if (!node_ptr.assets)
 		node_state_msg->new_state = DBD_NODE_STATE_UP;
 
 	if (node_state_msg->new_state == DBD_NODE_STATE_UP) {
@@ -2641,6 +2729,7 @@ static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 	job.total_cpus = job_start_msg->alloc_cpus;
 	job.total_nodes = job_start_msg->alloc_nodes;
 	job.account = _replace_double_quotes(job_start_msg->account);
+	job.assets = job_start_msg->assets;
 	job.array_job_id = job_start_msg->array_job_id;
 	job.array_task_id = job_start_msg->array_task_id;
 	array_recs.task_id_str = job_start_msg->array_task_str;

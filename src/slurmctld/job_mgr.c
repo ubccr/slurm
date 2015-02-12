@@ -1070,6 +1070,9 @@ static void _dump_job_state(struct job_record *dump_job_ptr, Buf buffer)
 	ListIterator step_iterator;
 	struct step_record *step_ptr;
 	uint32_t tmp_32;
+	int count = NO_VAL;
+	slurmdb_asset_rec_t *asset_rec;
+	ListIterator itr;
 
 	/* Dump basic job info */
 	pack32(dump_job_ptr->array_job_id, buffer);
@@ -1090,6 +1093,20 @@ static void _dump_job_state(struct job_record *dump_job_ptr, Buf buffer)
 		tmp_32 = NO_VAL;
 		pack32(tmp_32, buffer);
 	}
+
+	if (dump_job_ptr->assets)
+		count = list_count(dump_job_ptr->assets);
+
+	pack32(count, buffer);
+	if (count != NO_VAL) {
+		itr = list_iterator_create(dump_job_ptr->assets);
+		while ((asset_rec = list_next(itr)))
+			slurmdb_pack_asset_rec(asset_rec,
+					       SLURM_PROTOCOL_VERSION,
+					       buffer);
+		list_iterator_destroy(itr);
+	}
+
 	pack32(dump_job_ptr->assoc_id, buffer);
 	pack32(dump_job_ptr->job_id, buffer);
 	pack32(dump_job_ptr->user_id, buffer);
@@ -1257,6 +1274,9 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 	slurmdb_qos_rec_t qos_rec;
 	bool job_finished = false;
 	char jbuf[JBUFSIZ];
+	List assets = NULL;
+	uint32_t count = NO_VAL;
+	slurmdb_asset_rec_t *asset_rec;
 
 	if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
 		safe_unpack32(&array_job_id, buffer);
@@ -1272,6 +1292,20 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 			safe_unpack32(&min_exit_code,  buffer);
 			safe_unpack32(&max_exit_code,  buffer);
 			safe_unpack32(&tot_comp_tasks, buffer);
+		}
+
+		safe_unpack32(&count, buffer);
+		if (count != NO_VAL) {
+			assets = list_create(slurmdb_destroy_asset_rec);
+			for (i=0; i<count; i++) {
+				if (slurmdb_unpack_asset_rec(
+					    (void **)&asset_rec,
+					    protocol_version,
+					    buffer)
+				    != SLURM_SUCCESS)
+					goto unpack_error;
+				list_append(assets, asset_rec);
+			}
 		}
 
 		safe_unpack32(&assoc_id, buffer);
@@ -1801,6 +1835,10 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 	if (job_id_sequence <= job_id)
 		job_id_sequence = job_id + 1;
 
+	FREE_NULL_LIST(job_ptr->assets);
+	job_ptr->assets = assets;
+	assets = NULL;
+
 	xfree(job_ptr->account);
 	job_ptr->account = account;
 	xstrtolower(job_ptr->account);
@@ -2031,6 +2069,31 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 		} else
 			job_ptr->qos_id = qos_rec.id;
 	}
+
+	if (!job_ptr->assets) {
+		job_ptr->assets = list_create(slurmdb_destroy_asset_rec);
+		asset_rec = xmalloc(sizeof(slurmdb_asset_rec_t));
+		asset_rec->id = ASSET_CPU;
+		if (assoc_mgr_fill_in_asset(acct_db_conn, asset_rec, 1, NULL, 0)
+		    != SLURM_SUCCESS) {
+			debug("CPU asset not known yet.  "
+			      "Assuming name is 'cpu'.");
+			asset_rec->type = xstrdup("cpu");
+		}
+
+		if (job_ptr->total_cpus && !IS_JOB_PENDING(job_ptr)) {
+			/* If job is PENDING ignore total_cpus,
+			 * which may have been set by previous run
+			 * followed by job requeue. */
+			asset_rec->count = job_ptr->total_cpus;
+		} else {
+			/* job is pending, this will be added later */
+			xfree(asset_rec);
+		}
+		if (asset_rec)
+			list_append(job_ptr->assets, asset_rec);
+	}
+
 	build_node_details(job_ptr, false);	/* set node_addr */
 	return SLURM_SUCCESS;
 
@@ -2038,6 +2101,7 @@ unpack_error:
 	error("Incomplete job record");
 	xfree(alloc_node);
 	xfree(account);
+	FREE_NULL_LIST(assets);
 	xfree(batch_host);
 	xfree(burst_buffer);
 	xfree(comment);
@@ -2822,7 +2886,7 @@ extern int kill_job_by_front_end_name(char *node_name)
 			kill_job_cnt++;
 			while ((i = bit_ffs(job_ptr->node_bitmap_cg)) >= 0) {
 				bit_clear(job_ptr->node_bitmap_cg, i);
-				job_update_cpu_cnt(job_ptr, i);
+				job_update_asset_cnt(job_ptr, i);
 				if (job_ptr->node_cnt)
 					(job_ptr->node_cnt)--;
 				else {
@@ -3052,7 +3116,7 @@ extern int kill_running_job_by_node_name(char *node_name)
 				continue;
 			kill_job_cnt++;
 			bit_clear(job_ptr->node_bitmap_cg, bit_position);
-			job_update_cpu_cnt(job_ptr, bit_position);
+			job_update_asset_cnt(job_ptr, bit_position);
 			if (job_ptr->node_cnt)
 				(job_ptr->node_cnt)--;
 			else {
@@ -6898,9 +6962,9 @@ void job_time_limit(void)
 	fini_job_resv_check();
 }
 
-extern int job_update_cpu_cnt(struct job_record *job_ptr, int node_inx)
+extern int job_update_asset_cnt(struct job_record *job_ptr, int node_inx)
 {
-	int cnt, offset, rc = SLURM_SUCCESS;
+	int cpu_cnt, cnt, offset = -1, rc = SLURM_SUCCESS;
 
 	xassert(job_ptr);
 
@@ -6917,38 +6981,80 @@ extern int job_update_cpu_cnt(struct job_record *job_ptr, int node_inx)
 		struct node_record *node_ptr =
 			node_record_table_ptr + node_inx;
 		if (slurmctld_conf.fast_schedule)
-			cnt = node_ptr->config_ptr->cpus;
+			cpu_cnt = node_ptr->config_ptr->cpus;
 		else
-			cnt = node_ptr->cpus;
+			cpu_cnt = node_ptr->cpus;
 	} else {
 		if ((offset = job_resources_node_inx_to_cpu_inx(
 			     job_ptr->job_resrcs, node_inx)) < 0) {
-			error("job_update_cpu_cnt: problem getting "
+			error("job_update_asset_cnt: problem getting "
 			      "offset of job %u",
 			      job_ptr->job_id);
 			job_ptr->cpu_cnt = 0;
 			return SLURM_ERROR;
 		}
 
-		cnt = job_ptr->job_resrcs->cpus[offset];
+		cpu_cnt = job_ptr->job_resrcs->cpus[offset];
 	}
-	if (cnt > job_ptr->cpu_cnt) {
-		error("job_update_cpu_cnt: cpu_cnt underflow on job_id %u",
+	if (cpu_cnt > job_ptr->cpu_cnt) {
+		error("job_update_asset_cnt: cpu_cnt underflow on job_id %u",
 		      job_ptr->job_id);
 		job_ptr->cpu_cnt = 0;
 		rc = SLURM_ERROR;
 	} else
-		job_ptr->cpu_cnt -= cnt;
+		job_ptr->cpu_cnt -= cpu_cnt;
 
 	if (IS_JOB_RESIZING(job_ptr)) {
-		if (cnt > job_ptr->total_cpus) {
-			error("job_update_cpu_cnt: total_cpus "
+		ListIterator itr;
+		slurmdb_asset_rec_t *asset_rec = NULL;
+
+		if (offset < 0 &&
+		    (offset = job_resources_node_inx_to_cpu_inx(
+			    job_ptr->job_resrcs, node_inx)) < 0) {
+			error("job_update_asset_cnt: problem getting "
+			      "offset of job %u",
+			      job_ptr->job_id);
+			return SLURM_ERROR;
+		}
+
+		if (cpu_cnt > job_ptr->total_cpus) {
+			error("job_update_asset_cnt: total_cpus "
 			      "underflow on job_id %u",
 			      job_ptr->job_id);
 			job_ptr->total_cpus = 0;
 			rc = SLURM_ERROR;
 		} else
-			job_ptr->total_cpus -= cnt;
+			job_ptr->total_cpus -= cpu_cnt;
+
+		itr = list_iterator_create(job_ptr->assets);
+		while ((asset_rec = list_next(itr))) {
+			switch (asset_rec->id) {
+			case ASSET_CPU:
+				cnt = cpu_cnt;
+				break;
+			case ASSET_MEM:
+				cnt = job_ptr->job_resrcs->
+					memory_allocated[offset];
+				break;
+			default:
+				/* we are only handling node assets
+				   here */
+				break;
+			}
+
+			if (asset_rec->count > cnt) {
+				error("job_update_asset_cnt: asset %s%s%s(%u) "
+				      "underflow on job_id %u",
+				      asset_rec->type,
+				      asset_rec->name ? ":" : "",
+				      asset_rec->name ? asset_rec->name : "",
+				      asset_rec->id,
+				      job_ptr->job_id);
+				asset_rec->count = 0;
+			} else
+				asset_rec->count -= cnt;
+		}
+		list_iterator_destroy(itr);
 	}
 	return rc;
 }
@@ -7160,6 +7266,7 @@ static void _list_delete_job(void *job_entry)
 	}
 
 	delete_job_details(job_ptr);
+	FREE_NULL_LIST(job_ptr->assets);
 	xfree(job_ptr->account);
 	xfree(job_ptr->alias_list);
 	xfree(job_ptr->alloc_node);
@@ -7493,8 +7600,11 @@ void pack_job(struct job_record *dump_job_ptr, uint16_t show_flags, Buf buffer,
 {
 	struct job_details *detail_ptr;
 	time_t begin_time = 0;
+	slurmdb_asset_rec_t *asset_rec = NULL;
+	int count = NO_VAL;
+	ListIterator itr;
 	char *nodelist = NULL;
-	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK,
+	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK,
 				   READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 	if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
@@ -7509,6 +7619,20 @@ void pack_job(struct job_record *dump_job_ptr, uint16_t show_flags, Buf buffer,
 			packnull(buffer);
 			pack32((uint32_t) 0, buffer);
 		}
+
+		if (dump_job_ptr->assets)
+			count = list_count(dump_job_ptr->assets);
+
+		pack32(count, buffer);
+		if (count != NO_VAL) {
+			itr = list_iterator_create(dump_job_ptr->assets);
+			while ((asset_rec = list_next(itr)))
+				slurmdb_pack_asset_rec(asset_rec,
+						       protocol_version,
+						       buffer);
+			list_iterator_destroy(itr);
+		}
+
 		pack32(dump_job_ptr->assoc_id, buffer);
 		pack32(dump_job_ptr->job_id,   buffer);
 		pack32(dump_job_ptr->user_id,  buffer);

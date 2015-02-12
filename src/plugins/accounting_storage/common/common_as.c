@@ -50,17 +50,26 @@
 #include "src/slurmdbd/read_config.h"
 #include "common_as.h"
 
-extern char *assoc_hour_table;
 extern char *assoc_day_table;
+extern char *assoc_day_ext_table;
+extern char *assoc_hour_table;
+extern char *assoc_hour_ext_table;
 extern char *assoc_month_table;
+extern char *assoc_month_ext_table;
 
-extern char *cluster_hour_table;
 extern char *cluster_day_table;
+extern char *cluster_day_ext_table;
+extern char *cluster_hour_table;
+extern char *cluster_hour_ext_table;
 extern char *cluster_month_table;
+extern char *cluster_month_ext_table;
 
-extern char *wckey_hour_table;
 extern char *wckey_day_table;
+extern char *wckey_day_ext_table;
+extern char *wckey_hour_table;
+extern char *wckey_hour_ext_table;
 extern char *wckey_month_table;
+extern char *wckey_month_ext_table;
 
 /*
  * We want SLURMDB_MODIFY_ASSOC always to be the last
@@ -180,6 +189,10 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 	case SLURMDB_ADD_COORD:
 	case SLURMDB_REMOVE_COORD:
 		update_object->objects = list_create(slurmdb_destroy_user_rec);
+		break;
+	case SLURMDB_ADD_ASSET:
+		xassert(((slurmdb_asset_rec_t *)object)->id);
+		update_object->objects = list_create(slurmdb_destroy_asset_rec);
 		break;
 	case SLURMDB_ADD_ASSOC:
 		/* We are going to send these to the slurmctld's so
@@ -324,6 +337,9 @@ extern void dump_update_list(List update_list)
 		case SLURMDB_REMOVE_COORD:
 			debug3("\tUSER RECORDS");
 			break;
+		case SLURMDB_ADD_ASSET:
+			debug3("\tASSET RECORDS");
+			break;
 		case SLURMDB_ADD_ASSOC:
 		case SLURMDB_MODIFY_ASSOC:
 		case SLURMDB_REMOVE_ASSOC:
@@ -414,7 +430,8 @@ extern int cluster_first_reg(char *host, uint16_t port, uint16_t rpc_version)
  * IN/OUT usage_end: end time
  * RET: error code
  */
-extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
+extern int set_usage_information(char **usage_table, char **usage_ext_table,
+				 slurmdbd_msg_type_t type,
 				 time_t *usage_start, time_t *usage_end)
 {
 	time_t start = (*usage_start), end = (*usage_end);
@@ -422,6 +439,7 @@ extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
 	struct tm start_tm;
 	struct tm end_tm;
 	char *my_usage_table = (*usage_table);
+	char *my_usage_ext_table = (*usage_ext_table);
 
 	/* Default is going to be the last day */
 	if (!end) {
@@ -480,12 +498,15 @@ extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
 		switch (type) {
 		case DBD_GET_ASSOC_USAGE:
 			my_usage_table = assoc_hour_table;
+			my_usage_ext_table = assoc_hour_ext_table;
 			break;
 		case DBD_GET_WCKEY_USAGE:
 			my_usage_table = wckey_hour_table;
+			my_usage_ext_table = wckey_hour_ext_table;
 			break;
 		case DBD_GET_CLUSTER_USAGE:
 			my_usage_table = cluster_hour_table;
+			my_usage_ext_table = cluster_hour_ext_table;
 			break;
 		default:
 			error("Bad type given for hour usage %d %s", type,
@@ -497,12 +518,15 @@ extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
 		switch (type) {
 		case DBD_GET_ASSOC_USAGE:
 			my_usage_table = assoc_month_table;
+			my_usage_ext_table = assoc_month_ext_table;
 			break;
 		case DBD_GET_WCKEY_USAGE:
 			my_usage_table = wckey_month_table;
+			my_usage_ext_table = wckey_month_ext_table;
 			break;
 		case DBD_GET_CLUSTER_USAGE:
 			my_usage_table = cluster_month_table;
+			my_usage_ext_table = cluster_month_ext_table;
 			break;
 		default:
 			error("Bad type given for month usage %d %s", type,
@@ -514,6 +538,8 @@ extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
 	(*usage_start) = start;
 	(*usage_end) = end;
 	(*usage_table) = my_usage_table;
+	(*usage_ext_table) = my_usage_ext_table;
+
 	return SLURM_SUCCESS;
 }
 
