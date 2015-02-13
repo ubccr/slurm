@@ -47,58 +47,47 @@ static int _rename_usage_columns(mysql_conn_t *mysql_conn, char *table)
 	char *query = NULL;
 	int rc = SLURM_SUCCESS;
 
-	/* see if the clus_info table has been made */
 	query = xstrdup_printf(
-		"show columns from %s where field like '%%cpu_%%';",
+		"show columns from %s where field like '%%cpu_%%' "
+		"|| field like 'id_assoc' || field like 'id_wckey';",
 		table);
 
 	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-		xfree(query);
-		return SLURM_ERROR;
-	}
+	result = mysql_db_query_ret(mysql_conn, query, 0);
 	xfree(query);
+
+	if (!result)
+		return SLURM_ERROR;
 
 	while ((row = mysql_fetch_row(result))) {
 		char *new_char = xstrdup(row[0]);
 		xstrsubstitute(new_char, "cpu_", "");
-		query = xstrdup_printf("alter table %s change %s %s "
-				       "bigint unsigned default 0 not null",
-				       table, row[0], new_char);
-		xfree(new_char);
-		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-		if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-			error("Can't update %s %m", table);
-		xfree(query);
-	}
-	mysql_free_result(result);
-
-	query = xstrdup_printf(
-		"show columns from %s where field like 'id_assoc' "
-		"|| field like 'id_wckey';",
-		table);
-
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-		xfree(query);
-		return SLURM_ERROR;
-	}
-	xfree(query);
-
-	while ((row = mysql_fetch_row(result))) {
-		char *new_char = xstrdup(row[0]);
 		xstrsubstitute(new_char, "_assoc", "");
 		xstrsubstitute(new_char, "_wckey", "");
-		query = xstrdup_printf("alter table %s change %s %s "
-				       "int unsigned not null",
-				       table, row[0], new_char);
+
+		if (!query)
+			query = xstrdup_printf("alter table %s ", table);
+		else
+			xstrcat(query, ", ");
+
+		if (!strcmp("id", new_char))
+			xstrfmtcat(query, "change %s %s int unsigned not null",
+				   row[0], new_char);
+		else
+			xstrfmtcat(query,
+				   "change %s %s bigint unsigned default "
+				   "0 not null",
+				   row[0], new_char);
 		xfree(new_char);
+	}
+	mysql_free_result(result);
+
+	if (query) {
 		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
 		if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
 			error("Can't update %s %m", table);
 		xfree(query);
 	}
-	mysql_free_result(result);
 
 	return rc;
 }
@@ -708,9 +697,9 @@ static int _convert_id_usage_table(mysql_conn_t *mysql_conn, char *table)
 	/* 	INS_COUNT */
 	/* }; */
 	int rc;
-	DEF_TIMERS;
+	/* DEF_TIMERS; */
 
-	START_TIMER;
+	/* START_TIMER; */
 	if ((rc = _rename_usage_columns(mysql_conn, table)) != SLURM_SUCCESS)
 		return rc;
 
@@ -775,8 +764,8 @@ static int _convert_id_usage_table(mysql_conn_t *mysql_conn, char *table)
 	/* 		      table); */
 	/* 	xfree(query); */
 	/* } */
-	END_TIMER;
-	info("%s print conversion took %s", table, TIME_STR);
+	/* END_TIMER; */
+	/* info("%s print conversion took %s", table, TIME_STR); */
 
 	return rc;
 }
