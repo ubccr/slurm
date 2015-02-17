@@ -652,54 +652,8 @@ static int _convert_cluster_usage_table(mysql_conn_t *mysql_conn,
 static int _convert_id_usage_table(mysql_conn_t *mysql_conn, char *table)
 {
 	char *query = NULL;
-	/* int rc, i; */
-	/* char *tmp = NULL, *tmp2 = NULL; */
-	/* MYSQL_RES *result = NULL; */
-	/* MYSQL_ROW row = NULL; */
-
-	/* char *req_inx[] = { */
-	/* 	"creation_time", */
-	/* 	"mod_time", */
-	/* 	"deleted", */
-	/* 	"id", */
-	/* 	"time_start", */
-	/* 	"consumed_energy" */
-	/* }; */
-
-	/* enum { */
-	/* 	REQ_CREATE, */
-	/* 	REQ_MOD, */
-	/* 	REQ_DEL, */
-	/* 	REQ_ID, */
-	/* 	REQ_START, */
-	/* 	REQ_ENERGY, */
-	/* 	REQ_COUNT */
-	/* }; */
-
-	/* char *ins_inx[] = { */
-	/* 	"id_asset", */
-	/* 	"creation_time", */
-	/* 	"mod_time", */
-	/* 	"deleted", */
-	/* 	"id", */
-	/* 	"time_start", */
-	/* 	"alloc_secs" */
-	/* }; */
-
-	/* enum { */
-	/* 	INS_ID_ASSET, */
-	/* 	INS_CREATE, */
-	/* 	INS_MOD, */
-	/* 	INS_DEL, */
-	/* 	INS_ID, */
-	/* 	INS_START, */
-	/* 	INS_ALLOC, */
-	/* 	INS_COUNT */
-	/* }; */
 	int rc;
-	/* DEF_TIMERS; */
 
-	/* START_TIMER; */
 	if ((rc = _rename_usage_columns(mysql_conn, table)) != SLURM_SUCCESS)
 		return rc;
 
@@ -719,53 +673,6 @@ static int _convert_id_usage_table(mysql_conn_t *mysql_conn, char *table)
 	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
 		error("Can't convert %s info: %m", table);
 	xfree(query);
-
-	/* xstrfmtcat(tmp, "%s", req_inx[0]); */
-	/* for (i=1; i<REQ_COUNT; i++) */
-	/* 	xstrfmtcat(tmp, ", %s", req_inx[i]); */
-
-	/* xstrfmtcat(tmp2, "%s", ins_inx[0]); */
-	/* for (i=1; i<INS_COUNT; i++) */
-	/* 	xstrfmtcat(tmp2, ", %s", ins_inx[i]); */
-
-	/* query = xstrdup_printf("select %s from %s where consumed_energy != 0;", */
-	/* 		       tmp, table); */
-	/* xfree(tmp); */
-
-	/* debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query); */
-	/* if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) { */
-	/* 	xfree(query); */
-	/* 	return SLURM_ERROR; */
-	/* } */
-	/* xfree(query); */
-
-	/* while ((row = mysql_fetch_row(result))) { */
-	/* 	if (!query) */
-	/* 		query = xstrdup_printf("insert into %s (%s) values ", */
-	/* 				       table, tmp2); */
-	/* 	else */
-	/* 		xstrcat(query, ", "); */
-
-	/* 	xstrfmtcat(query, "(%d", ASSET_ENERGY); */
-	/* 	for (i=0; i<REQ_COUNT; i++) */
-	/* 		xstrfmtcat(query, ", %s", row[i]); */
-	/* 	xstrcat(query, ")"); */
-	/* } */
-	/* xfree(tmp2); */
-
-	/* if (query) { */
-	/* 	xstrfmtcat(query, */
-	/* 		   "on duplicate key update " */
-	/* 		   "mod_time=%ld, alloc_secs=VALUES(alloc_secs)", */
-	/* 		   time(NULL)); */
-	/* 	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query); */
-	/* 	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS) */
-	/* 		error("Can't convert %s info: %m", */
-	/* 		      table); */
-	/* 	xfree(query); */
-	/* } */
-	/* END_TIMER; */
-	/* info("%s print conversion took %s", table, TIME_STR); */
 
 	return rc;
 }
