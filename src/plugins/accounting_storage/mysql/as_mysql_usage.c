@@ -417,7 +417,6 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	MYSQL_ROW row;
 	char *tmp = NULL;
 	char *my_usage_table = cluster_day_table;
-	char *my_usage_ext_table = cluster_day_ext_table;
 	char *query = NULL;
 	char *cluster_req_inx[] = {
 		"id_asset",
@@ -454,8 +453,7 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	     != SLURM_SUCCESS))
 		return rc;
 
-	if (set_usage_information(&my_usage_table, &my_usage_ext_table,
-				  type, &start, &end)
+	if (set_usage_information(&my_usage_table, type, &start, &end)
 	    != SLURM_SUCCESS) {
 		return SLURM_ERROR;
 	}
@@ -530,7 +528,6 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 	MYSQL_ROW row;
 	char *tmp = NULL;
 	char *my_usage_table = NULL;
-	char *my_usage_ext_table = NULL;
 	char *query = NULL;
 	List usage_list = NULL;
 	char *id_str = NULL;
@@ -583,7 +580,6 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 		list_iterator_destroy(itr);
 
 		my_usage_table = assoc_day_table;
-		my_usage_ext_table = assoc_day_ext_table;
 		break;
 	}
 	case DBD_GET_WCKEY_USAGE:
@@ -607,7 +603,6 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 		list_iterator_destroy(itr);
 
 		my_usage_table = wckey_day_table;
-		my_usage_ext_table = wckey_day_ext_table;
 		break;
 	}
 	default:
@@ -616,8 +611,7 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 		break;
 	}
 
-	if (set_usage_information(&my_usage_table, &my_usage_ext_table,
-				  type, &start, &end)
+	if (set_usage_information(&my_usage_table, type, &start, &end)
 	    != SLURM_SUCCESS) {
 		xfree(id_str);
 		return SLURM_ERROR;
@@ -754,7 +748,6 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	MYSQL_ROW row;
 	char *tmp = NULL;
 	char *my_usage_table = NULL;
-	char *my_usage_ext_table = NULL;
 	slurmdb_assoc_rec_t *slurmdb_assoc = in;
 	slurmdb_wckey_rec_t *slurmdb_wckey = in;
 	char *query = NULL;
@@ -791,7 +784,6 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		username = slurmdb_assoc->user;
 		my_list = &slurmdb_assoc->accounting_list;
 		my_usage_table = assoc_day_table;
-		my_usage_ext_table = assoc_day_ext_table;
 		break;
 	}
 	case DBD_GET_WCKEY_USAGE:
@@ -807,7 +799,6 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		cluster_name = slurmdb_wckey->cluster;
 		username = slurmdb_wckey->user;
 		my_list = &slurmdb_wckey->accounting_list;
-		my_usage_ext_table = wckey_day_ext_table;
 		break;
 	}
 	case DBD_GET_CLUSTER_USAGE:
@@ -883,8 +874,7 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	}
 is_user:
 
-	if (set_usage_information(&my_usage_table, &my_usage_ext_table,
-				  type, &start, &end)
+	if (set_usage_information(&my_usage_table, type, &start, &end)
 	    != SLURM_SUCCESS) {
 		return SLURM_ERROR;
 	}

@@ -103,8 +103,8 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 		{ "mod_time", "int unsigned default 0 not null" },
 		{ "deleted", "tinyint default 0 not null" },
 		{ "id_assoc", "int not null" },
-		{ "time_start", "int unsigned not null" },
 		{ "id_asset", "int default 1 not null" },
+		{ "time_start", "int unsigned not null" },
 		{ "alloc_cpu_secs", "bigint default 0 not null" },
 		{ "consumed_energy", "bigint unsigned default 0 not null" },
 		{ NULL, NULL}
@@ -114,8 +114,8 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 		{ "creation_time", "int unsigned not null" },
 		{ "mod_time", "int unsigned default 0 not null" },
 		{ "deleted", "tinyint default 0 not null" },
-		{ "time_start", "int unsigned not null" },
 		{ "id_asset", "int default 1 not null" },
+		{ "time_start", "int unsigned not null" },
 		{ "cpu_count", "int default 0 not null" },
 		{ "alloc_cpu_secs", "bigint default 0 not null" },
 		{ "down_cpu_secs", "bigint default 0 not null" },
@@ -257,8 +257,8 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 		{ "mod_time", "int unsigned default 0 not null" },
 		{ "deleted", "tinyint default 0 not null" },
 		{ "id_wckey", "int not null" },
-		{ "time_start", "int unsigned not null" },
 		{ "id_asset", "int default 1 not null" },
+		{ "time_start", "int unsigned not null" },
 		{ "alloc_cpu_secs", "bigint default 0" },
 		{ "resv_cpu_secs", "bigint default 0" },
 		{ "over_cpu_secs", "bigint default 0" },
@@ -275,7 +275,7 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  assoc_usage_table_fields_14_11,
 				  ", primary key (id_assoc, "
-				  "time_start, id_asset))")
+				  "id_asset, time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -284,7 +284,7 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  assoc_usage_table_fields_14_11,
 				  ", primary key (id_assoc, "
-				  "time_start, id_asset))")
+				  "id_asset, time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -293,7 +293,7 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  assoc_usage_table_fields_14_11,
 				  ", primary key (id_assoc, "
-				  "time_start, id_asset))")
+				  "id_asset, time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -301,7 +301,7 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 		 cluster_name, cluster_day_table);
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  cluster_usage_table_fields_14_11,
-				  ", primary key (time_start, id_asset))")
+				  ", primary key (id_asset, time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -309,7 +309,7 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 		 cluster_name, cluster_hour_table);
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  cluster_usage_table_fields_14_11,
-				  ", primary key (time_start, id_asset))")
+				  ", primary key (id_asset, time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -317,7 +317,7 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 		 cluster_name, cluster_month_table);
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  cluster_usage_table_fields_14_11,
-				  ", primary key (time_start, id_asset))")
+				  ", primary key (id_asset, time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -369,7 +369,7 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  wckey_usage_table_fields_14_11,
 				  ", primary key (id_wckey, "
-				  "time_start, id_asset))")
+				  "id_asset, time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -378,7 +378,7 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  wckey_usage_table_fields_14_11,
 				  ", primary key (id_wckey, "
-				  "time_start, id_asset))")
+				  "id_asset, time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -387,7 +387,7 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  wckey_usage_table_fields_14_11,
 				  ", primary key (id_wckey, "
-				  "time_start, id_asset))")
+				  "id_asset, time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -478,173 +478,30 @@ static int _convert_event_table(mysql_conn_t *mysql_conn, char *cluster_name)
 }
 
 static int _convert_cluster_usage_table(mysql_conn_t *mysql_conn,
-					char *table, char *table_ext)
+					char *table)
 {
-	MYSQL_RES *result = NULL;
-	MYSQL_ROW row = NULL;
-	char *query = NULL, *tmp = NULL, *query2 = NULL;
-	int rc = SLURM_SUCCESS, i;
+	char *query = NULL;
+	int rc;
 
-	/* if this changes you will need to edit the corresponding enum */
-	char *req_inx[] = {
-		"alloc_cpu_secs",
-		"down_cpu_secs",
-		"pdown_cpu_secs",
-		"idle_cpu_secs",
-		"resv_cpu_secs",
-		"over_cpu_secs",
-		"cpu_count",
-		"time_start",
-		"consumed_energy"
-	};
+	if ((rc = _rename_usage_columns(mysql_conn, table)) != SLURM_SUCCESS)
+		return rc;
 
-	enum {
-		REQ_ACPU,
-		REQ_DCPU,
-		REQ_PDCPU,
-		REQ_ICPU,
-		REQ_RCPU,
-		REQ_OCPU,
-		REQ_CNT,
-		REQ_START,
-		REQ_ENERGY,
-		REQ_COUNT
-	};
-
-	/* this needs to line up directly with the beginning of req_inx */
-	char *ins_inx[] = {
-		"alloc_secs",
-		"down_secs",
-		"pdown_secs",
-		"idle_secs",
-		"resv_secs",
-		"over_secs",
-		"count",
-	};
-
-	enum {
-		INS_ACPU,
-		INS_DCPU,
-		INS_PDCPU,
-		INS_ICPU,
-		INS_RCPU,
-		INS_OCPU,
-		INS_CNT,
-		INS_COUNT
-	};
-	int count = 0;
-
-	xfree(tmp);
-	xstrfmtcat(tmp, "%s", req_inx[0]);
-	for (i=1; i<REQ_COUNT; i++)
-		xstrfmtcat(tmp, ", %s", req_inx[i]);
-
-	/* see if the clus_info table has been made */
-	query = xstrdup_printf("select %s from %s", tmp, table);
-	xfree(tmp);
-
+	/* alter usage table (NOTE: this appears to be slower than
+	 * the commented code, but this is cleaner and the code only
+	 * happens once when converting so it isn't that big a deal,
+	 * I opted for simple code instead of perhaps slightly
+	 * faster.) */
+	query = xstrdup_printf("insert into %s (creation_time, mod_time, "
+			       "deleted, id_asset, time_start, alloc_secs) "
+			       "select creation_time, mod_time, deleted, "
+			       "%d, time_start, consumed_energy from %s where "
+			       "consumed_energy != 0 on duplicate key update "
+			       "mod_time=%ld, alloc_secs=VALUES(alloc_secs);",
+			       table, ASSET_ENERGY, table, time(NULL));
 	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-		xfree(query);
-		return SLURM_ERROR;
-	}
+	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
+		error("Can't convert %s info: %m", table);
 	xfree(query);
-
-	xstrfmtcat(tmp, "%s", ins_inx[0]);
-	for (i=1; i<INS_COUNT; i++)
-		xstrfmtcat(tmp, ", %s", ins_inx[i]);
-
-	while ((row = mysql_fetch_row(result))) {
-		if (!query) {
-			query = xstrdup_printf("insert into %s "
-					       "(time_start, id_asset, %s) "
-					       "values ",
-					       table_ext, tmp);
-
-			/* query2 is for energy which only has alloc_secs */
-			query2 = xstrdup_printf("insert into %s "
-						"(time_start, id_asset, "
-						"alloc_secs) values ",
-						table_ext);
-		} else {
-			xstrcat(query, ", ");
-			xstrcat(query2, ", ");
-		}
-
-		xstrfmtcat(query, "(%s, %d", row[REQ_START], ASSET_CPU);
-		xstrfmtcat(query2, "(%s, %d, %s)",
-			   row[REQ_START], ASSET_ENERGY, row[REQ_ENERGY]);
-
-		for (i=0; i<INS_COUNT; i++)
-			xstrfmtcat(query, ", %s", row[i]);
-		xstrcat(query, ")");
-		count++;
-		if (count > 1000) {
-			/* break it up just to make sure we don't
-			   break any buffer.
-			*/
-			xstrcat(query,
-				" on duplicate key update "
-				"count=VALUES(count), "
-				"alloc_secs=VALUES(alloc_secs), "
-				"down_secs=VALUES(down_secs), "
-				"pdown_secs=VALUES(pdown_secs), "
-				"idle_secs=VALUES(idle_secs), "
-				"over_secs=VALUES(over_secs), "
-				"resv_secs=VALUES(resv_secs);");
-			xstrcat(query2,
-				" on duplicate key update "
-				"alloc_secs=VALUES(alloc_secs);");
-
-			debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-			if ((rc = mysql_db_query(mysql_conn, query))
-			    != SLURM_SUCCESS) {
-				error("Can't convert %s info to %s: %m",
-				      table, table_ext);
-				xfree(query);
-				xfree(query2);
-				break;
-			}
-			xfree(query);
-			debug4("(%s:%d) query\n%s",
-			       THIS_FILE, __LINE__, query2);
-			if ((rc = mysql_db_query(mysql_conn, query2))
-			    != SLURM_SUCCESS) {
-				error("Can't convert %s info to %s: %m",
-				      table, table_ext);
-				xfree(query2);
-				break;
-			}
-			xfree(query2);
-			count = 0;
-		}
-	}
-	mysql_free_result(result);
-	xfree(tmp);
-
-	if (query) {
-		xstrcat(query,
-			" on duplicate key update count=VALUES(count), "
-			"alloc_secs=VALUES(alloc_secs), "
-			"down_secs=VALUES(down_secs), "
-			"pdown_secs=VALUES(pdown_secs), "
-			"idle_secs=VALUES(idle_secs), "
-			"over_secs=VALUES(over_secs), "
-			"resv_secs=VALUES(resv_secs);");
-		xstrcat(query2,
-			" on duplicate key update count=VALUES(count), "
-			"alloc_secs=VALUES(alloc_secs);");
-		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-		if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-			error("Can't convert %s info to %s: %m",
-			      table, table_ext);
-		xfree(query);
-		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query2);
-		if ((rc = mysql_db_query(mysql_conn, query2)) != SLURM_SUCCESS)
-			error("Can't convert %s info to %s: %m",
-			      table, table_ext);
-		xfree(query2);
-	}
 
 	return rc;
 }
@@ -663,9 +520,9 @@ static int _convert_id_usage_table(mysql_conn_t *mysql_conn, char *table)
 	 * I opted for simple code instead of perhaps slightly
 	 * faster.) */
 	query = xstrdup_printf("insert into %s (creation_time, mod_time, "
-			       "deleted, id, time_start, id_asset, alloc_secs) "
+			       "deleted, id, id_asset, time_start, alloc_secs) "
 			       "select creation_time, mod_time, deleted, id, "
-			       "time_start, %d, consumed_energy from %s where "
+			       "%d, time_start, consumed_energy from %s where "
 			       "consumed_energy != 0 on duplicate key update "
 			       "mod_time=%ld, alloc_secs=VALUES(alloc_secs);",
 			       table, ASSET_ENERGY, table, time(NULL));
@@ -680,30 +537,24 @@ static int _convert_id_usage_table(mysql_conn_t *mysql_conn, char *table)
 static int _convert_cluster_usage_tables(mysql_conn_t *mysql_conn,
 					 char *cluster_name)
 {
-	char table[200], table_ext[200];
+	char table[200];
 	int rc;
 
 	snprintf(table, sizeof(table), "\"%s_%s\"",
 		 cluster_name, cluster_day_table);
-	snprintf(table_ext, sizeof(table_ext), "\"%s_%s\"",
-		 cluster_name, cluster_day_ext_table);
-	if ((rc = _convert_cluster_usage_table(mysql_conn, table, table_ext))
+	if ((rc = _convert_cluster_usage_table(mysql_conn, table))
 	    != SLURM_SUCCESS)
 		return rc;
 
 	snprintf(table, sizeof(table), "\"%s_%s\"",
 		 cluster_name, cluster_hour_table);
-	snprintf(table_ext, sizeof(table_ext), "\"%s_%s\"",
-		 cluster_name, cluster_hour_ext_table);
-	if ((rc = _convert_cluster_usage_table(mysql_conn, table, table_ext))
+	if ((rc = _convert_cluster_usage_table(mysql_conn, table))
 	    != SLURM_SUCCESS)
 		return rc;
 
 	snprintf(table, sizeof(table), "\"%s_%s\"",
 		 cluster_name, cluster_month_table);
-	snprintf(table_ext, sizeof(table_ext), "\"%s_%s\"",
-		 cluster_name, cluster_month_ext_table);
-	if ((rc = _convert_cluster_usage_table(mysql_conn, table, table_ext))
+	if ((rc = _convert_cluster_usage_table(mysql_conn, table))
 	    != SLURM_SUCCESS)
 		return rc;
 
