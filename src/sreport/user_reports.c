@@ -313,6 +313,17 @@ extern int user_top(int argc, char *argv[])
 	cluster_itr = list_iterator_create(slurmdb_report_cluster_list);
 	while((slurmdb_report_cluster = list_next(cluster_itr))) {
 		int count = 0;
+		uint32_t asset_id = ASSET_CPU;
+		slurmdb_asset_rec_t *cluster_cpu_asset_rec;
+
+		if (!(cluster_cpu_asset_rec = list_find_first(
+			      slurmdb_report_cluster->assets,
+			      slurmdb_find_asset_in_list,
+			      &asset_id))) {
+			info("error, no cpu(%d) asset!", asset_id);
+			continue;
+		}
+
 		list_sort(slurmdb_report_cluster->user_list,
 			  (ListCmpF)sort_user_dec);
 
@@ -372,7 +383,8 @@ extern int user_top(int argc, char *argv[])
 					field->print_routine(
 						field,
 						slurmdb_report_user->cpu_secs,
-						slurmdb_report_cluster->cpu_secs,
+						cluster_cpu_asset_rec->
+						alloc_secs,
 						(curr_inx == field_count));
 					break;
 				case PRINT_USER_ENERGY:

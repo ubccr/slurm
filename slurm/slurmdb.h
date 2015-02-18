@@ -994,9 +994,6 @@ typedef struct {
 	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
 	List assets; /* list of slurmdb_asset_rec_t *'s */
 	List assoc_list; /* list of slurmdb_report_assoc_rec_t *'s */
-	uint64_t cpu_count;
-	uint64_t cpu_secs;
-	uint64_t consumed_energy;
 	char *name;
 	List user_list; /* list of slurmdb_report_user_rec_t *'s */
 } slurmdb_report_cluster_rec_t;
