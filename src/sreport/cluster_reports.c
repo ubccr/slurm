@@ -1170,9 +1170,13 @@ extern int cluster_utilization(int argc, char *argv[])
 		list_iterator_destroy(itr3);
 
 		/* FIXME: Right now this only reports CPU assets */
-		total_acct = list_find_first(total_asset_acct,
-					     slurmdb_find_asset_in_list,
-					     &cpu_asset);
+		if (!(total_acct = list_find_first(
+			      total_asset_acct,
+			      slurmdb_find_cluster_accting_asset_in_list,
+			      &cpu_asset))) {
+			info("error, no cpu(%d) asset!", cpu_asset);
+			continue;
+		}
 
 		local_total_time = (uint64_t)total_time *
 			(uint64_t)total_acct->asset_rec.count;
