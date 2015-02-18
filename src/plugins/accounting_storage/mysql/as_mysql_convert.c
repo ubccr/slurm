@@ -911,7 +911,7 @@ extern int as_mysql_convert_tables(mysql_conn_t *mysql_conn)
 	list_iterator_destroy(itr);
 
 	if (rc == SLURM_SUCCESS) {
-		info("Coversion done: success!");
+		info("Conversion done: success!");
 		ext_tables_created = 1;
 	}
 
