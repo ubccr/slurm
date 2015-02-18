@@ -222,6 +222,21 @@ typedef struct assoc_mgr_qos_usage assoc_mgr_qos_usage_t;
 
 /* Association conditions used for queries of the database */
 
+/* slurmdb_asset_rec_t is used in other structures below so this needs
+ * to be declared before hand.
+ */
+typedef struct {
+	uint64_t alloc_secs; /* total amount of secs allocated if used in an
+				accounting_list, DON'T PACK */
+	uint32_t rec_count;  /* number of records alloc_secs is, DON'T PACK */
+	uint32_t count; /* Count of asset on a given cluster, 0 if
+			   listed generically. */
+	uint32_t id;    /* Database ID for the asset */
+	char *name;     /* Name of asset if type is generic like GRES
+			   or License. */
+	char *type;     /* Type of asset (CPU, MEM, etc) */
+} slurmdb_asset_rec_t;
+
 /* slurmdb_assoc_cond_t is used in other structures below so
  * this needs to be declared first.
  */
@@ -361,8 +376,8 @@ typedef struct {
 } slurmdb_account_rec_t;
 
 typedef struct {
-	List assets;
 	uint64_t alloc_secs; /* number of cpu seconds allocated */
+	slurmdb_asset_rec_t asset_rec;
 	uint64_t consumed_energy; /* energy allocated in Joules */
 	uint32_t id;	/* association/wckey ID		*/
 	time_t period_start; /* when this record was started */
@@ -422,17 +437,7 @@ typedef struct {
 	uint16_t with_deleted;
 } slurmdb_asset_cond_t;
 
-typedef struct {
-	uint64_t alloc_secs; /* total amost of secs allocated if used in an
-				accounting_list, DON'T PACK */
-	uint32_t rec_count;  /* number of records alloc_secs is, DON'T PACK */
-	uint32_t count; /* Count of asset on a given cluster, 0 if
-			   listed generically. */
-	uint32_t id;    /* Database ID for the asset */
-	char *name;     /* Name of asset if type is generic like GRES
-			   or License. */
-	char *type;     /* Type of asset (CPU, MEM, etc) */
-} slurmdb_asset_rec_t;
+/* slurmdb_asset_rec_t is defined above alphabetical */
 
 /* slurmdb_assoc_cond_t is defined above alphabetical */
 
@@ -973,9 +978,8 @@ typedef struct {
 
 typedef struct {
 	char *acct;
+	List assets; /* list of slurmdb_asset_rec_t *'s */
 	char *cluster;
-	uint64_t consumed_energy;
-	uint64_t cpu_secs;
 	char *parent_acct;
 	char *user;
 } slurmdb_report_assoc_rec_t;
@@ -983,9 +987,8 @@ typedef struct {
 typedef struct {
 	char *acct;
 	List acct_list; /* list of char *'s */
+	List assets; /* list of slurmdb_asset_rec_t *'s */
 	List assoc_list; /* list of slurmdb_report_assoc_rec_t's */
-	uint64_t consumed_energy;
-	uint64_t cpu_secs;
 	char *name;
 	uid_t uid;
 } slurmdb_report_user_rec_t;

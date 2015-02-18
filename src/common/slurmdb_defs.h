@@ -131,8 +131,13 @@ extern int slurmdb_find_cluster_accting_asset_in_list(void *x, void *key);
 extern int slurmdb_add_cluster_accounting_to_asset_list(
 	slurmdb_cluster_accounting_rec_t *accting,
 	List *assets);
+extern int slurmdb_add_accounting_to_asset_list(
+	slurmdb_accounting_rec_t *accting,
+	List *assets);
 extern int slurmdb_sum_accounting_list(
 	slurmdb_cluster_accounting_rec_t *accting,
 	List *total_asset_acct);
+extern void slurmdb_transfer_acct_list_2_asset(
+	List accounting_list, List *assets);
 
 #endif

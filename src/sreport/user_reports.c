@@ -328,9 +328,31 @@ extern int user_top(int argc, char *argv[])
 			  (ListCmpF)sort_user_dec);
 
 		itr = list_iterator_create(slurmdb_report_cluster->user_list);
-		while((slurmdb_report_user = list_next(itr))) {
+		while ((slurmdb_report_user = list_next(itr))) {
+			slurmdb_asset_rec_t *cpu_asset_rec, *energy_asset_rec;
 			int curr_inx = 1;
-			while((field = list_next(itr2))) {
+
+			asset_id = ASSET_CPU;
+
+			if (!(cpu_asset_rec = list_find_first(
+				      slurmdb_report_user->assets,
+				      slurmdb_find_asset_in_list,
+				      &asset_id))) {
+				info("error, no cpu(%d) asset!", asset_id);
+				continue;
+			}
+
+			asset_id = ASSET_ENERGY;
+
+			if (!(energy_asset_rec = list_find_first(
+				      slurmdb_report_user->assets,
+				      slurmdb_find_asset_in_list,
+				      &asset_id))) {
+				info("error, no energy(%d) asset!", asset_id);
+				continue;
+			}
+
+			while ((field = list_next(itr2))) {
 				char *tmp_char = NULL;
 				struct passwd *pwd = NULL;
 				switch(field->type) {
@@ -382,7 +404,7 @@ extern int user_top(int argc, char *argv[])
 				case PRINT_USER_USED:
 					field->print_routine(
 						field,
-						slurmdb_report_user->cpu_secs,
+						cpu_asset_rec->alloc_secs,
 						cluster_cpu_asset_rec->
 						alloc_secs,
 						(curr_inx == field_count));
@@ -390,7 +412,7 @@ extern int user_top(int argc, char *argv[])
 				case PRINT_USER_ENERGY:
 					field->print_routine(
 						field,
-						slurmdb_report_user->consumed_energy,
+						energy_asset_rec->alloc_secs,
 						(curr_inx ==field_count));
 					break;
 				default:

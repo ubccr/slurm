@@ -238,14 +238,32 @@ extern int sort_user_dec(void *v1, void *v2)
 	slurmdb_report_user_rec_t *user_a;
 	slurmdb_report_user_rec_t *user_b;
 	int diff;
+	/* FIXME : this only works for CPUs now */
+	int asset_id = ASSET_CPU;
 
 	user_a = *(slurmdb_report_user_rec_t **)v1;
 	user_b = *(slurmdb_report_user_rec_t **)v2;
 
 	if (sort_flag == SLURMDB_REPORT_SORT_TIME) {
-		if (user_a->cpu_secs > user_b->cpu_secs)
+		slurmdb_asset_rec_t *asset_a, *asset_b;
+
+		if (!user_a->assets || !user_b->assets)
+			return 0;
+
+		if (!(asset_a = list_find_first(user_a->assets,
+						slurmdb_find_asset_in_list,
+						&asset_id)))
+			return 1;
+
+		if (!(asset_b = list_find_first(user_b->assets,
+						slurmdb_find_asset_in_list,
+						&asset_id)))
 			return -1;
-		else if (user_a->cpu_secs < user_b->cpu_secs)
+
+
+		if (asset_a->alloc_secs > asset_b->alloc_secs)
+			return -1;
+		else if (asset_a->alloc_secs < asset_b->alloc_secs)
 			return 1;
 	}
 

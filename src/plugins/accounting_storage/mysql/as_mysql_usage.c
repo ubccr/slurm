@@ -537,15 +537,18 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 	slurmdb_wckey_rec_t *wckey = NULL;
 	slurmdb_accounting_rec_t *accounting_rec = NULL;
 
-	/* Since for id in association table we
-	   use t3 and in wckey table we use t1 we can't define it here */
-	char **usage_req_inx = NULL;
+	char *usage_req_inx[] = {
+		"t1.id",
+		"t1.id_asset",
+		"t1.time_start",
+		"t1.alloc_secs",
+	};
 
 	enum {
 		USAGE_ID,
+		USAGE_ASSET,
 		USAGE_START,
-		USAGE_ACPU,
-		USAGE_ENERGY,
+		USAGE_ALLOC,
 		USAGE_COUNT
 	};
 
@@ -560,15 +563,6 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 
 	switch (type) {
 	case DBD_GET_ASSOC_USAGE:
-	{
-		char *temp_usage[] = {
-			"t3.id_assoc",
-			"t1.time_start",
-			"t1.alloc_secs",
-			"t1.consumed_energy",
-		};
-		usage_req_inx = temp_usage;
-
 		itr = list_iterator_create(object_list);
 		while ((assoc = list_next(itr))) {
 			if (id_str)
@@ -581,17 +575,7 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 
 		my_usage_table = assoc_day_table;
 		break;
-	}
 	case DBD_GET_WCKEY_USAGE:
-	{
-		char *temp_usage[] = {
-			"id_wckey",
-			"time_start",
-			"alloc_secs",
-			"consumed_energy"
-		};
-		usage_req_inx = temp_usage;
-
 		itr = list_iterator_create(object_list);
 		while ((wckey = list_next(itr))) {
 			if (id_str)
@@ -604,7 +588,6 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 
 		my_usage_table = wckey_day_table;
 		break;
-	}
 	default:
 		error("Unknown usage type %d", type);
 		return SLURM_ERROR;
@@ -629,7 +612,7 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 			"select %s from \"%s_%s\" as t1, "
 			"\"%s_%s\" as t2, \"%s_%s\" as t3 "
 			"where (t1.time_start < %ld && t1.time_start >= %ld) "
-			"&& t1.id_assoc=t2.id_assoc && (%s) && "
+			"&& t1.id=t2.id_assoc && (%s) && "
 			"t2.lft between t3.lft and t3.rgt "
 			"order by t3.id_assoc, time_start;",
 			tmp, cluster_name, my_usage_table,
@@ -638,7 +621,7 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 		break;
 	case DBD_GET_WCKEY_USAGE:
 		query = xstrdup_printf(
-			"select %s from \"%s_%s\" "
+			"select %s from \"%s_%s\" as t1 "
 			"where (time_start < %ld && time_start >= %ld) "
 			"&& (%s) order by id_wckey, time_start;",
 			tmp, cluster_name, my_usage_table, end, start, id_str);
@@ -665,12 +648,24 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 	usage_list = list_create(slurmdb_destroy_accounting_rec);
 
 	while ((row = mysql_fetch_row(result))) {
+		slurmdb_asset_rec_t *asset_rec;
 		slurmdb_accounting_rec_t *accounting_rec =
 			xmalloc(sizeof(slurmdb_accounting_rec_t));
+
+		accounting_rec->asset_rec.id = slurm_atoul(row[USAGE_ASSET]);
+		if ((asset_rec = list_find_first(
+			     assoc_mgr_asset_list, slurmdb_find_asset_in_list,
+			     &accounting_rec->asset_rec.id))) {
+			accounting_rec->asset_rec.name =
+				xstrdup(asset_rec->name);
+			accounting_rec->asset_rec.type =
+				xstrdup(asset_rec->type);
+		}
+
 		accounting_rec->id = slurm_atoul(row[USAGE_ID]);
 		accounting_rec->period_start = slurm_atoul(row[USAGE_START]);
-		accounting_rec->alloc_secs = slurm_atoull(row[USAGE_ACPU]);
-		accounting_rec->consumed_energy = slurm_atoull(row[USAGE_ENERGY]);
+		accounting_rec->alloc_secs = slurm_atoull(row[USAGE_ALLOC]);
+
 		list_append(usage_list, accounting_rec);
 	}
 	mysql_free_result(result);

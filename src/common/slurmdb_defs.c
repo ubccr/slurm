@@ -618,6 +618,8 @@ extern void slurmdb_destroy_accounting_rec(void *object)
 		(slurmdb_accounting_rec_t *)object;
 
 	if (slurmdb_accounting) {
+		slurmdb_destroy_asset_rec_noalloc(
+			&slurmdb_accounting->asset_rec);
 		xfree(slurmdb_accounting);
 	}
 }
@@ -782,6 +784,7 @@ extern void slurmdb_destroy_report_assoc_rec(void *object)
 		(slurmdb_report_assoc_rec_t *)object;
 	if (slurmdb_report_assoc) {
 		xfree(slurmdb_report_assoc->acct);
+		FREE_NULL_LIST(slurmdb_report_assoc->assets);
 		xfree(slurmdb_report_assoc->cluster);
 		xfree(slurmdb_report_assoc->parent_acct);
 		xfree(slurmdb_report_assoc->user);
@@ -795,6 +798,7 @@ extern void slurmdb_destroy_report_user_rec(void *object)
 		(slurmdb_report_user_rec_t *)object;
 	if (slurmdb_report_user) {
 		xfree(slurmdb_report_user->acct);
+		FREE_NULL_LIST(slurmdb_report_user->assets);
 		if (slurmdb_report_user->acct_list)
 			list_destroy(slurmdb_report_user->acct_list);
 		if (slurmdb_report_user->assoc_list)
@@ -809,6 +813,7 @@ extern void slurmdb_destroy_report_cluster_rec(void *object)
 	slurmdb_report_cluster_rec_t *slurmdb_report_cluster =
 		(slurmdb_report_cluster_rec_t *)object;
 	if (slurmdb_report_cluster) {
+		FREE_NULL_LIST(slurmdb_report_cluster->assets);
 		if (slurmdb_report_cluster->assoc_list)
 			list_destroy(slurmdb_report_cluster->assoc_list);
 		xfree(slurmdb_report_cluster->name);
@@ -2887,6 +2892,33 @@ extern int slurmdb_add_cluster_accounting_to_asset_list(
 	return SLURM_SUCCESS;
 }
 
+extern int slurmdb_add_accounting_to_asset_list(
+	slurmdb_accounting_rec_t *accting,
+	List *assets)
+{
+	slurmdb_asset_rec_t *asset_rec = NULL;
+
+	if (!*assets)
+		*assets = list_create(slurmdb_destroy_asset_rec);
+	else
+		asset_rec = list_find_first(*assets,
+					    slurmdb_find_asset_in_list,
+					    &accting->asset_rec.id);
+
+	if (!asset_rec) {
+		asset_rec = slurmdb_copy_asset_rec(&accting->asset_rec);
+		if (!asset_rec) {
+			error("slurmdb_copy_asset_rec returned NULL");
+			return SLURM_ERROR;
+		}
+		list_push(*assets, asset_rec);
+	}
+
+	asset_rec->alloc_secs += accting->alloc_secs;
+
+	return SLURM_SUCCESS;
+}
+
 extern int slurmdb_sum_accounting_list(
 	slurmdb_cluster_accounting_rec_t *accting,
 	List *total_asset_acct)
@@ -2917,4 +2949,21 @@ extern int slurmdb_sum_accounting_list(
 	total_acct->asset_rec.rec_count++;
 
 	return SLURM_SUCCESS;
+}
+
+extern void slurmdb_transfer_acct_list_2_asset(
+	List accounting_list, List *assets)
+{
+	ListIterator itr;
+	slurmdb_accounting_rec_t *accting = NULL;
+
+	xassert(accounting_list);
+	xassert(assets);
+
+	/* get the amount of time this assoc used
+	   during the time we are looking at */
+	itr = list_iterator_create(accounting_list);
+	while ((accting = list_next(itr)))
+		slurmdb_add_accounting_to_asset_list(accting, assets);
+	list_iterator_destroy(itr);
 }
