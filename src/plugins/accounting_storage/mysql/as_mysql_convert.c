@@ -869,8 +869,8 @@ extern int as_mysql_convert_tables(mysql_conn_t *mysql_conn)
 	result = NULL;
 
 	if (!i) {
-		debug("It appears the table conversions have already "
-		      "taken place, hooray!");
+		debug2("It appears the table conversions have already "
+		       "taken place, hooray!");
 		return SLURM_SUCCESS;
 	}
 

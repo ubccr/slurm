@@ -762,7 +762,6 @@ extern void slurmdb_destroy_asset_rec_noalloc(void *object)
 	if (!asset_rec)
 		return;
 
-	FREE_NULL_LIST(asset_rec->accounting_list);
 	xfree(asset_rec->name);
 	xfree(asset_rec->type);
 }
@@ -2658,8 +2657,8 @@ extern slurmdb_report_cluster_rec_t *slurmdb_cluster_rec_2_report(
 {
 	slurmdb_report_cluster_rec_t *slurmdb_report_cluster;
 	slurmdb_cluster_accounting_rec_t *accting = NULL;
-	//slurmdb_asset_rec_t *asset_rec;
-	ListIterator cluster_itr = NULL;
+	slurmdb_asset_rec_t *asset_rec;
+	ListIterator itr = NULL;
 	int count;
 
 	xassert(cluster);
@@ -2669,41 +2668,18 @@ extern slurmdb_report_cluster_rec_t *slurmdb_cluster_rec_2_report(
 	if (!(count = list_count(cluster->accounting_list)))
 		return slurmdb_report_cluster;
 
-	/* get the amount of time and the average cpu count
+	/* get the amount of time and the average count
 	   during the time we are looking at */
-	cluster_itr = list_iterator_create(cluster->accounting_list);
-	while((accting = list_next(cluster_itr))) {
-		slurmdb_report_cluster->cpu_secs += accting->alloc_secs
-			+ accting->down_secs + accting->idle_secs
-			+ accting->resv_secs + accting->pdown_secs;
-		slurmdb_report_cluster->cpu_count += accting->cpu_count;
-		slurmdb_report_cluster->consumed_energy += accting->consumed_energy;
-	}
-	list_iterator_destroy(cluster_itr);
+	itr = list_iterator_create(cluster->accounting_list);
+	while ((accting = list_next(itr)))
+		slurmdb_add_cluster_accounting_to_asset_list(
+			accting, &slurmdb_report_cluster->assets);
+	list_iterator_destroy(itr);
 
-	/* if (!cluster->assets || !(count = list_count(cluster->assets))) */
-	/* 	return slurmdb_report_cluster; */
-
-	/* asset_itr = list_iterator_create(cluster->assets); */
-	/* while ((asset_rec = list_next(asset_itr))) { */
-	/* 	if (!asset_rec->accounting_list || */
-	/* 	    !list_count(asset_rec->accounting_list)) */
-	/* 		continue; */
-	/* 	/\* get the amount of time and the average asset count */
-	/* 	   during the time we are looking at *\/ */
-	/* 	cluster_itr = list_iterator_create(asset->accounting_list); */
-	/* 	while ((accting = list_next(cluster_itr))) { */
-	/* 	/\* FIXME: NO ASSET HANDLED HERE YET *\/ */
-	/* 	slurmdb_report_cluster->cpu_secs += accting->alloc_secs */
-	/* 		+ accting->down_secs + accting->idle_secs */
-	/* 		+ accting->resv_secs + accting->pdown_secs; */
-	/* 	slurmdb_report_cluster->cpu_count += accting->asset_rec.count; */
-	/* 	slurmdb_report_cluster->consumed_energy += */
-	/* 		accting->consumed_energy; */
-	/* } */
-	/* list_iterator_destroy(cluster_itr); */
-
-	slurmdb_report_cluster->cpu_count /= count;
+	itr = list_iterator_create(slurmdb_report_cluster->assets);
+	while ((asset_rec = list_next(itr)))
+		asset_rec->count /= asset_rec->rec_count;
+	list_iterator_destroy(itr);
 
 	return slurmdb_report_cluster;
 }
@@ -2855,4 +2831,90 @@ extern char *slurmdb_make_asset_string(List assets)
 	list_iterator_destroy(itr);
 
 	return asset_str;
+}
+
+extern int slurmdb_find_asset_in_list(void *x, void *key)
+{
+	slurmdb_asset_rec_t *asset_rec = (slurmdb_asset_rec_t *)x;
+	uint32_t asset_id = *(uint32_t *)key;
+
+	if (asset_rec->id == asset_id)
+		return 1;
+
+	return 0;
+}
+
+extern int slurmdb_find_cluster_accting_asset_in_list(void *x, void *key)
+{
+	slurmdb_cluster_accounting_rec_t *object =
+		(slurmdb_cluster_accounting_rec_t *)x;
+	uint32_t asset_id = *(uint32_t *)key;
+
+	if (object->asset_rec.id == asset_id)
+		return 1;
+
+	return 0;
+}
+
+extern int slurmdb_add_cluster_accounting_to_asset_list(
+	slurmdb_cluster_accounting_rec_t *accting,
+	List *assets)
+{
+	slurmdb_asset_rec_t *asset_rec = NULL;
+
+	if (!*assets)
+		*assets = list_create(slurmdb_destroy_asset_rec);
+	else
+		asset_rec = list_find_first(*assets,
+					    slurmdb_find_asset_in_list,
+					    &accting->asset_rec.id);
+
+	if (!asset_rec) {
+		asset_rec = slurmdb_copy_asset_rec(&accting->asset_rec);
+		if (!asset_rec) {
+			error("slurmdb_copy_asset_rec returned NULL");
+			return SLURM_ERROR;
+		}
+		list_push(*assets, asset_rec);
+	}
+
+	asset_rec->alloc_secs += accting->alloc_secs
+		+ accting->down_secs + accting->idle_secs
+		+ accting->resv_secs + accting->pdown_secs;
+	asset_rec->count += accting->asset_rec.count;
+	asset_rec->rec_count++;
+
+	return SLURM_SUCCESS;
+}
+
+extern int slurmdb_sum_accounting_list(
+	slurmdb_cluster_accounting_rec_t *accting,
+	List *total_asset_acct)
+{
+	slurmdb_cluster_accounting_rec_t *total_acct = NULL;
+
+	if (!*total_asset_acct)
+		*total_asset_acct = list_create(
+			slurmdb_destroy_cluster_accounting_rec);
+	else
+		total_acct = list_find_first(
+			*total_asset_acct,
+			slurmdb_find_cluster_accting_asset_in_list,
+			&accting->asset_rec.id);
+
+	if (!total_acct) {
+		total_acct = xmalloc(sizeof(slurmdb_cluster_accounting_rec_t));
+		total_acct->asset_rec.id = accting->asset_rec.id;
+		list_push(*total_asset_acct, total_acct);
+	}
+
+	total_acct->alloc_secs += accting->alloc_secs;
+	total_acct->down_secs  += accting->down_secs;
+	total_acct->idle_secs  += accting->idle_secs;
+	total_acct->resv_secs  += accting->resv_secs;
+	total_acct->pdown_secs += accting->pdown_secs;
+	total_acct->asset_rec.count += accting->asset_rec.count;
+	total_acct->asset_rec.rec_count++;
+
+	return SLURM_SUCCESS;
 }

@@ -488,7 +488,6 @@ extern void slurmdb_pack_cluster_accounting_rec(void *in, uint16_t rpc_version,
 
 		pack64(object->alloc_secs, buffer);
 		slurmdb_pack_asset_rec(&object->asset_rec, rpc_version, buffer);
-		pack64(object->consumed_energy, buffer);
 		pack64(object->down_secs, buffer);
 		pack64(object->idle_secs, buffer);
 		pack64(object->over_secs, buffer);
@@ -499,7 +498,7 @@ extern void slurmdb_pack_cluster_accounting_rec(void *in, uint16_t rpc_version,
 		/* We only want to send the CPU asset to older
 		   versions of SLURM.
 		*/
-		if (!object || (object->asset_rec.id != 1)) {
+		if (!object || (object->asset_rec.id != ASSET_CPU)) {
 			pack64(0, buffer);
 			pack64(0, buffer);
 			pack32(0, buffer);
@@ -513,7 +512,8 @@ extern void slurmdb_pack_cluster_accounting_rec(void *in, uint16_t rpc_version,
 		}
 
 		pack64(object->alloc_secs, buffer);
-		pack64(object->consumed_energy, buffer);
+		pack64(0, buffer); /* consumed energy doesn't exist
+				      anymore */
 		pack32(object->asset_rec.count, buffer);
 		pack64(object->down_secs, buffer);
 		pack64(object->idle_secs, buffer);
@@ -539,7 +539,6 @@ extern int slurmdb_unpack_cluster_accounting_rec(void **object,
 			    &object_ptr->asset_rec, rpc_version, buffer)
 		    != SLURM_SUCCESS)
 			goto unpack_error;
-		safe_unpack64(&object_ptr->consumed_energy, buffer);
 		safe_unpack64(&object_ptr->down_secs, buffer);
 		safe_unpack64(&object_ptr->idle_secs, buffer);
 		safe_unpack64(&object_ptr->over_secs, buffer);
@@ -547,12 +546,16 @@ extern int slurmdb_unpack_cluster_accounting_rec(void **object,
 		safe_unpack_time(&object_ptr->period_start, buffer);
 		safe_unpack64(&object_ptr->resv_secs, buffer);
 	} else if (rpc_version >= SLURM_14_03_PROTOCOL_VERSION) {
-
-		object_ptr->asset_rec.id = 1;
+		uint64_t tmp_64;
+		object_ptr->asset_rec.id = ASSET_CPU;
 		object_ptr->asset_rec.name = xstrdup("cpu");
 
 		safe_unpack64(&object_ptr->alloc_secs, buffer);
-		safe_unpack64(&object_ptr->consumed_energy, buffer);
+
+		/* consumed_energy has to be thrown away here, this
+		 * unpack shouldn't ever happen in practice.
+		 */
+		safe_unpack64(&tmp_64, buffer);
 		safe_unpack32(&object_ptr->asset_rec.count, buffer);
 		safe_unpack64(&object_ptr->down_secs, buffer);
 		safe_unpack64(&object_ptr->idle_secs, buffer);

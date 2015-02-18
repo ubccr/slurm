@@ -126,5 +126,13 @@ extern char *slurmdb_get_selected_step_id(
 
 extern slurmdb_asset_rec_t *slurmdb_copy_asset_rec(slurmdb_asset_rec_t *asset);
 extern char *slurmdb_make_asset_string(List assets);
+extern int slurmdb_find_asset_in_list(void *x, void *key);
+extern int slurmdb_find_cluster_accting_asset_in_list(void *x, void *key);
+extern int slurmdb_add_cluster_accounting_to_asset_list(
+	slurmdb_cluster_accounting_rec_t *accting,
+	List *assets);
+extern int slurmdb_sum_accounting_list(
+	slurmdb_cluster_accounting_rec_t *accting,
+	List *total_asset_acct);
 
 #endif

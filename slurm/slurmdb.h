@@ -423,9 +423,9 @@ typedef struct {
 } slurmdb_asset_cond_t;
 
 typedef struct {
-	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
-	uint64_t alloc_secs; /* total amost of secs allocated in the
-				accounting_list */
+	uint64_t alloc_secs; /* total amost of secs allocated if used in an
+				accounting_list, DON'T PACK */
+	uint32_t rec_count;  /* number of records alloc_secs is, DON'T PACK */
 	uint32_t count; /* Count of asset on a given cluster, 0 if
 			   listed generically. */
 	uint32_t id;    /* Database ID for the asset */
@@ -562,8 +562,6 @@ typedef struct {
 typedef struct {
 	uint64_t alloc_secs; /* number of cpu seconds allocated */
 	slurmdb_asset_rec_t asset_rec;
-	uint64_t consumed_energy; /* energy allocated in Joules */
-	uint64_t cpu_count;
 	uint64_t down_secs; /* number of cpu seconds down */
 	uint64_t idle_secs; /* number of cpu seconds idle */
 	uint64_t over_secs; /* number of cpu seconds overcommitted */

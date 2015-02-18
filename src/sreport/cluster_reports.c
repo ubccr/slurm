@@ -1144,42 +1144,41 @@ extern int cluster_utilization(int argc, char *argv[])
 
 	field_count = list_count(print_fields_list);
 
-	while((cluster = list_next(itr))) {
+	while ((cluster = list_next(itr))) {
 		slurmdb_cluster_accounting_rec_t *accting = NULL;
-		slurmdb_cluster_accounting_rec_t total_acct;
+		slurmdb_cluster_accounting_rec_t *total_acct;
+		List total_asset_acct;
 		uint64_t total_reported = 0;
 		uint64_t local_total_time = 0;
 		int curr_inx = 1;
+		uint32_t cpu_asset = ASSET_CPU;
 
 		if (!cluster->accounting_list
 		   || !list_count(cluster->accounting_list))
 			continue;
 
-		memset(&total_acct, 0,
-		       sizeof(slurmdb_cluster_accounting_rec_t));
-
 		itr3 = list_iterator_create(cluster->accounting_list);
-		while((accting = list_next(itr3))) {
-			/* FIXME: we don't handle assets here */
-			total_acct.alloc_secs += accting->alloc_secs;
-			total_acct.down_secs += accting->down_secs;
-			total_acct.pdown_secs += accting->pdown_secs;
-			total_acct.idle_secs += accting->idle_secs;
-			total_acct.resv_secs += accting->resv_secs;
-			total_acct.over_secs += accting->over_secs;
-			total_acct.asset_rec.count += accting->asset_rec.count;
-			total_acct.consumed_energy += accting->consumed_energy;
-		}
+		while ((accting = list_next(itr3)))
+			slurmdb_sum_accounting_list(
+				accting, &total_asset_acct);
 		list_iterator_destroy(itr3);
 
-		total_acct.asset_rec.count /=
-			list_count(cluster->accounting_list);
+		itr3 = list_iterator_create(total_asset_acct);
+		while ((accting = list_next(itr3)))
+			accting->asset_rec.count /=
+				accting->asset_rec.rec_count;
+		list_iterator_destroy(itr3);
+
+		/* FIXME: Right now this only reports CPU assets */
+		total_acct = list_find_first(total_asset_acct,
+					     slurmdb_find_asset_in_list,
+					     &cpu_asset);
 
 		local_total_time = (uint64_t)total_time *
-			(uint64_t)total_acct.asset_rec.count;
-		total_reported = total_acct.alloc_secs + total_acct.down_secs
-			+ total_acct.pdown_secs + total_acct.idle_secs
-			+ total_acct.resv_secs;
+			(uint64_t)total_acct->asset_rec.count;
+		total_reported = total_acct->alloc_secs + total_acct->down_secs
+			+ total_acct->pdown_secs + total_acct->idle_secs
+			+ total_acct->resv_secs;
 
 		while((field = list_next(itr2))) {
 			switch(field->type) {
@@ -1191,57 +1190,61 @@ extern int cluster_utilization(int argc, char *argv[])
 				break;
 			case PRINT_CLUSTER_CPUS:
 				field->print_routine(field,
-						     total_acct.asset_rec.count,
+						     total_acct->
+						     asset_rec.count,
 						     (curr_inx ==
 						      field_count));
 				break;
 			case PRINT_CLUSTER_ACPU:
 				field->print_routine(field,
-						     total_acct.alloc_secs,
+						     total_acct->alloc_secs,
 						     total_reported,
 						     (curr_inx ==
 						      field_count));
 				break;
 			case PRINT_CLUSTER_DCPU:
 				field->print_routine(field,
-						     total_acct.down_secs,
+						     total_acct->down_secs,
 						     total_reported,
 						     (curr_inx ==
 						      field_count));
 				break;
 			case PRINT_CLUSTER_ICPU:
 				field->print_routine(field,
-						     total_acct.idle_secs,
+						     total_acct->idle_secs,
 						     total_reported,
 						     (curr_inx ==
 						      field_count));
 				break;
 			case PRINT_CLUSTER_RCPU:
 				field->print_routine(field,
-						     total_acct.resv_secs,
+						     total_acct->resv_secs,
 						     total_reported,
 						     (curr_inx ==
 						      field_count));
 				break;
 			case PRINT_CLUSTER_OCPU:
 					field->print_routine(field,
-						     total_acct.over_secs,
+						     total_acct->over_secs,
 						     total_reported,
 						     (curr_inx ==
 						      field_count));
 				break;
 			case PRINT_CLUSTER_PDCPU:
 					field->print_routine(field,
-						     total_acct.pdown_secs,
+						     total_acct->pdown_secs,
 						     total_reported,
 						     (curr_inx ==
 						      field_count));
 				break;
 			case PRINT_CLUSTER_ENERGY:
-				field->print_routine(field,
-				                     total_acct.consumed_energy,
-				                     (curr_inx ==
-				                      field_count));
+				/* FIXME: This needs to be done
+				   differently since it is a
+				   different asset */
+				/* field->print_routine(field, */
+				/*                      total_acct->consumed_energy, */
+				/*                      (curr_inx == */
+				/*                       field_count)); */
 				break;
 			case PRINT_CLUSTER_TOTAL:
 				field->print_routine(field,

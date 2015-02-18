@@ -405,7 +405,7 @@ end_it:
 	return NULL;
 }
 
-
+/* assoc_mgr locks need to be set before hand */
 static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 			      slurmdb_cluster_rec_t *cluster_rec,
 			      slurmdbd_msg_type_t type,
@@ -420,6 +420,7 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	char *my_usage_ext_table = cluster_day_ext_table;
 	char *query = NULL;
 	char *cluster_req_inx[] = {
+		"id_asset",
 		"alloc_secs",
 		"down_secs",
 		"pdown_secs",
@@ -428,10 +429,10 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		"over_secs",
 		"count",
 		"time_start",
-		"consumed_energy"
 	};
 
 	enum {
+		CLUSTER_ASSET,
 		CLUSTER_ACPU,
 		CLUSTER_DCPU,
 		CLUSTER_PDCPU,
@@ -440,7 +441,6 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		CLUSTER_OCPU,
 		CLUSTER_CNT,
 		CLUSTER_START,
-		CLUSTER_ENERGY,
 		CLUSTER_COUNT
 	};
 
@@ -487,22 +487,28 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 			list_create(slurmdb_destroy_cluster_accounting_rec);
 
 	while ((row = mysql_fetch_row(result))) {
+		slurmdb_asset_rec_t *asset_rec;
 		slurmdb_cluster_accounting_rec_t *accounting_rec =
 			xmalloc(sizeof(slurmdb_cluster_accounting_rec_t));
+
+		accounting_rec->asset_rec.id = slurm_atoul(row[CLUSTER_ASSET]);
+		accounting_rec->asset_rec.count = slurm_atoul(row[CLUSTER_CNT]);
+		if ((asset_rec = list_find_first(
+			     assoc_mgr_asset_list, slurmdb_find_asset_in_list,
+			     &accounting_rec->asset_rec.id))) {
+			accounting_rec->asset_rec.name =
+				xstrdup(asset_rec->name);
+			accounting_rec->asset_rec.type =
+				xstrdup(asset_rec->type);
+		}
+
 		accounting_rec->alloc_secs = slurm_atoull(row[CLUSTER_ACPU]);
 		accounting_rec->down_secs = slurm_atoull(row[CLUSTER_DCPU]);
 		accounting_rec->pdown_secs = slurm_atoull(row[CLUSTER_PDCPU]);
 		accounting_rec->idle_secs = slurm_atoull(row[CLUSTER_ICPU]);
 		accounting_rec->over_secs = slurm_atoull(row[CLUSTER_OCPU]);
 		accounting_rec->resv_secs = slurm_atoull(row[CLUSTER_RCPU]);
-		/* FIXME: THIS PROBABLY NEEDS TO BE READ IN */
-		accounting_rec->asset_rec.id = 1;
-		accounting_rec->asset_rec.name = xstrdup("cpu");
-		/* FIXME: ***********************************/
-		accounting_rec->asset_rec.count = slurm_atoul(row[CLUSTER_CNT]);
 		accounting_rec->period_start = slurm_atoul(row[CLUSTER_START]);
-		accounting_rec->consumed_energy =
-			slurm_atoull(row[CLUSTER_ENERGY]);
 		list_append(cluster_rec->accounting_list, accounting_rec);
 	}
 	mysql_free_result(result);
@@ -759,6 +765,8 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	uint32_t id = NO_VAL;
 	char *cluster_name = NULL;
 	char **usage_req_inx = NULL;
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 	enum {
 		USAGE_ID,
@@ -804,8 +812,11 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	}
 	case DBD_GET_CLUSTER_USAGE:
 	{
-		return _get_cluster_usage(mysql_conn, uid, in,
-					  type, start, end);
+		assoc_mgr_lock(&locks);
+		rc = _get_cluster_usage(mysql_conn, uid, in,
+					type, start, end);
+		assoc_mgr_unlock(&locks);
+		return rc;
 		break;
 	}
 	default:
@@ -884,6 +895,8 @@ is_user:
 	for(i=1; i<USAGE_COUNT; i++) {
 		xstrfmtcat(tmp, ", %s", usage_req_inx[i]);
 	}
+	assoc_mgr_lock(&locks);
+
 	switch (type) {
 	case DBD_GET_ASSOC_USAGE:
 		query = xstrdup_printf(
@@ -906,6 +919,7 @@ is_user:
 		break;
 	default:
 		error("Unknown usage type %d", type);
+		assoc_mgr_unlock(&locks);
 		return SLURM_ERROR;
 		break;
 	}
@@ -916,6 +930,7 @@ is_user:
 	if (!(result = mysql_db_query_ret(
 		      mysql_conn, query, 0))) {
 		xfree(query);
+		assoc_mgr_unlock(&locks);
 		return SLURM_ERROR;
 	}
 	xfree(query);
@@ -926,6 +941,7 @@ is_user:
 	while ((row = mysql_fetch_row(result))) {
 		slurmdb_accounting_rec_t *accounting_rec =
 			xmalloc(sizeof(slurmdb_accounting_rec_t));
+		/* FIXME: assets need to be handled here */
 		accounting_rec->id = slurm_atoul(row[USAGE_ID]);
 		accounting_rec->period_start = slurm_atoul(row[USAGE_START]);
 		accounting_rec->alloc_secs = slurm_atoull(row[USAGE_ACPU]);
@@ -933,6 +949,8 @@ is_user:
 		list_append((*my_list), accounting_rec);
 	}
 	mysql_free_result(result);
+
+	assoc_mgr_unlock(&locks);
 
 	return rc;
 }

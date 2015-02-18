@@ -775,7 +775,7 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		slurm_mutex_unlock(&as_mysql_cluster_list_lock);
 		return SLURM_ERROR;
 	}
-	info("success");
+
 	/* might as well do all the cluster centric tables inside this
 	 * lock.  We need to do this on all the clusters deleted or
 	 * other wise just to make sure everything is kept up to
