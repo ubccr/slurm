@@ -63,6 +63,24 @@ static int _sort_group_asc(void *v1, void *v2)
 	return 0;
 }
 
+static void _transfer_job_assets_2_group(
+	slurmdb_job_rec_t *job, List *assets)
+{
+	ListIterator itr;
+	slurmdb_asset_rec_t *asset_rec;
+
+	xassert(job);
+	xassert(assets);
+
+	/* get the amount of time this assoc used
+	   during the time we are looking at */
+	itr = list_iterator_create(job->assets);
+	while ((asset_rec = list_next(itr)))
+		slurmdb_add_time_from_count_to_asset_list(
+			asset_rec, assets, job->elapsed);
+	list_iterator_destroy(itr);
+}
+
 static void _check_create_grouping(
 	List cluster_list,  ListIterator group_itr,
 	char *cluster, char *name, void *object,
@@ -206,11 +224,11 @@ static List _process_grouped_report(
 		char *tmp = NULL;
 		individual = 1;
 		itr = list_iterator_create(job_list);
-		while((job = list_next(itr))) {
+		while ((job = list_next(itr))) {
 			if (!job->elapsed || !job->alloc_cpus)
 				continue;
 			tmp = xstrdup_printf("%u", job->alloc_cpus);
-			while((group = list_next(group_itr))) {
+			while ((group = list_next(group_itr))) {
 				if (!strcmp(group, tmp)) {
 					break;
 				}
@@ -456,8 +474,7 @@ no_objects:
 		}
 
 		local_itr = list_iterator_create(acct_group->groups);
-		while((job_group = list_next(local_itr))) {
-			uint64_t total_secs = 0;
+		while ((job_group = list_next(local_itr))) {
 			if ((job->alloc_cpus < job_group->min_size)
 			   || (job->alloc_cpus > job_group->max_size))
 				continue;
@@ -465,11 +482,13 @@ no_objects:
 			job_group->count++;
 			acct_group->count++;
 			cluster_group->count++;
-			total_secs = (uint64_t)job->elapsed
-				* (uint64_t)job->alloc_cpus;
-			job_group->cpu_secs += total_secs;
-			acct_group->cpu_secs += total_secs;
-			cluster_group->cpu_secs += total_secs;
+
+			_transfer_job_assets_2_group(
+				job, &job_group->assets);
+			_transfer_job_assets_2_group(
+				job, &acct_group->assets);
+			_transfer_job_assets_2_group(
+				job, &cluster_group->assets);
 		}
 		list_iterator_destroy(local_itr);
 	}

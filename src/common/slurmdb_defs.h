@@ -134,6 +134,8 @@ extern int slurmdb_add_cluster_accounting_to_asset_list(
 extern int slurmdb_add_accounting_to_asset_list(
 	slurmdb_accounting_rec_t *accting,
 	List *assets);
+extern int slurmdb_add_time_from_count_to_asset_list(
+	slurmdb_asset_rec_t *asset_in, List *assets, time_t elapsed);
 extern int slurmdb_sum_accounting_list(
 	slurmdb_cluster_accounting_rec_t *accting,
 	List *total_asset_acct);

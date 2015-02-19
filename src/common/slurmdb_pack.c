@@ -867,7 +867,20 @@ extern void slurmdb_pack_accounting_rec(void *in, uint16_t rpc_version,
 {
 	slurmdb_accounting_rec_t *object = (slurmdb_accounting_rec_t *)in;
 
-	if (rpc_version >= SLURM_14_03_PROTOCOL_VERSION) {
+	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		if (!object) {
+			pack64(0, buffer);
+			slurmdb_pack_asset_rec(NULL, rpc_version, buffer);
+			pack32(0, buffer);
+			pack_time(0, buffer);
+			return;
+		}
+
+		pack64(object->alloc_secs, buffer);
+		slurmdb_pack_asset_rec(&object->asset_rec, rpc_version, buffer);
+		pack32(object->id, buffer);
+		pack_time(object->period_start, buffer);
+	} else if (rpc_version >= SLURM_14_03_PROTOCOL_VERSION) {
 		if (!object) {
 			pack64(0, buffer);
 			pack64(0, buffer);
@@ -877,7 +890,8 @@ extern void slurmdb_pack_accounting_rec(void *in, uint16_t rpc_version,
 		}
 
 		pack64(object->alloc_secs, buffer);
-		pack64(object->consumed_energy, buffer);
+		pack64(0, buffer); /* consumed energy doesn't exist
+				      anymore */
 		pack32(object->id, buffer);
 		pack_time(object->period_start, buffer);
 	}
@@ -891,9 +905,24 @@ extern int slurmdb_unpack_accounting_rec(void **object, uint16_t rpc_version,
 
 	*object = object_ptr;
 
-	if (rpc_version >= SLURM_14_03_PROTOCOL_VERSION) {
+	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
 		safe_unpack64(&object_ptr->alloc_secs, buffer);
-		safe_unpack64(&object_ptr->consumed_energy, buffer);
+		if (slurmdb_unpack_asset_rec_noalloc(
+			    &object_ptr->asset_rec, rpc_version, buffer)
+		    != SLURM_SUCCESS)
+			goto unpack_error;
+		safe_unpack32(&object_ptr->id, buffer);
+		safe_unpack_time(&object_ptr->period_start, buffer);
+	} else if (rpc_version >= SLURM_14_03_PROTOCOL_VERSION) {
+		uint64_t tmp_64;
+
+		object_ptr->asset_rec.id = ASSET_CPU;
+		object_ptr->asset_rec.name = xstrdup("cpu");
+		safe_unpack64(&object_ptr->alloc_secs, buffer);
+		/* consumed_energy has to be thrown away here, this
+		 * unpack shouldn't ever happen in practice.
+		 */
+		safe_unpack64(&tmp_64, buffer);
 		safe_unpack32(&object_ptr->id, buffer);
 		safe_unpack_time(&object_ptr->period_start, buffer);
 	}

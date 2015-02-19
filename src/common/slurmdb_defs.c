@@ -1170,6 +1170,7 @@ extern void slurmdb_destroy_report_job_grouping(void *object)
 	slurmdb_report_job_grouping_t *job_grouping =
 		(slurmdb_report_job_grouping_t *)object;
 	if (job_grouping) {
+		FREE_NULL_LIST(job_grouping->assets);
 		if (job_grouping->jobs)
 			list_destroy(job_grouping->jobs);
 		xfree(job_grouping);
@@ -1182,6 +1183,7 @@ extern void slurmdb_destroy_report_acct_grouping(void *object)
 		(slurmdb_report_acct_grouping_t *)object;
 	if (acct_grouping) {
 		xfree(acct_grouping->acct);
+		FREE_NULL_LIST(acct_grouping->assets);
 		if (acct_grouping->groups)
 			list_destroy(acct_grouping->groups);
 		xfree(acct_grouping);
@@ -1193,6 +1195,7 @@ extern void slurmdb_destroy_report_cluster_grouping(void *object)
 	slurmdb_report_cluster_grouping_t *cluster_grouping =
 		(slurmdb_report_cluster_grouping_t *)object;
 	if (cluster_grouping) {
+		FREE_NULL_LIST(cluster_grouping->assets);
 		xfree(cluster_grouping->cluster);
 		if (cluster_grouping->acct_list)
 			list_destroy(cluster_grouping->acct_list);
@@ -2915,6 +2918,36 @@ extern int slurmdb_add_accounting_to_asset_list(
 	}
 
 	asset_rec->alloc_secs += accting->alloc_secs;
+
+	return SLURM_SUCCESS;
+}
+
+extern int slurmdb_add_time_from_count_to_asset_list(
+	slurmdb_asset_rec_t *asset_in, List *assets, time_t elapsed)
+{
+	slurmdb_asset_rec_t *asset_rec = NULL;
+
+	if (!elapsed)
+		return SLURM_SUCCESS;
+
+	if (!*assets)
+		*assets = list_create(slurmdb_destroy_asset_rec);
+	else
+		asset_rec = list_find_first(*assets,
+					    slurmdb_find_asset_in_list,
+					    &asset_in->id);
+
+	if (!asset_rec) {
+		asset_rec = slurmdb_copy_asset_rec(asset_in);
+		if (!asset_rec) {
+			error("slurmdb_copy_asset_rec returned NULL");
+			return SLURM_ERROR;
+		}
+		list_push(*assets, asset_rec);
+	}
+
+	asset_rec->alloc_secs +=
+		((uint64_t)asset_in->count * (uint64_t)elapsed);
 
 	return SLURM_SUCCESS;
 }
