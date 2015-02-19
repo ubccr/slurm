@@ -692,6 +692,8 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 		return SLURM_ERROR;
 	}
 
+	xfree(id_str);
+
 	if (!usage_list) {
 		error("No usage given back?  This should never happen");
 		return SLURM_ERROR;
