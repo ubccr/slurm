@@ -753,6 +753,8 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 			loc_asset_rec = slurmdb_copy_asset_rec(asset_rec);
 			loc_asset_rec->count = slurm_atoul(row[i]);
 			list_append(job->assets, loc_asset_rec);
+			if (loc_asset_rec->id == ASSET_CPU)
+				job->alloc_cpus = loc_asset_rec->count;
 		}
 
 		query =	xstrdup_printf("select %s from \"%s_%s\" as t1 "
