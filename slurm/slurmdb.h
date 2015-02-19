@@ -378,20 +378,9 @@ typedef struct {
 typedef struct {
 	uint64_t alloc_secs; /* number of cpu seconds allocated */
 	slurmdb_asset_rec_t asset_rec;
-	uint64_t consumed_energy; /* energy allocated in Joules */
 	uint32_t id;	/* association/wckey ID		*/
 	time_t period_start; /* when this record was started */
 } slurmdb_accounting_rec_t;
-
-typedef struct {
-	uint64_t alloc_secs; /* number of cpu seconds allocated */
-	uint64_t down_secs;  /* number of cpu seconds down */
-	uint64_t idle_secs;  /* number of cpu seconds idle */
-	uint64_t over_secs;  /* number of cpu seconds overcommitted */
-	uint64_t pdown_secs; /* number of cpu seconds planned down */
-	time_t period_start; /* when this record was started */
-	uint64_t resv_secs;  /* number of cpu seconds reserved */
-} slurmdb_asset_stats_rec_t;
 
 typedef struct {
 	char *archive_dir;     /* location to place archive file */
@@ -442,10 +431,9 @@ typedef struct {
 /* slurmdb_assoc_cond_t is defined above alphabetical */
 
 typedef struct slurmdb_assoc_rec {
-	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
+	List accounting_list; /* list of slurmdb_accounting_rec_t *'s */
 	char *acct;		   /* account/project associated to
 				    * assoc */
-	List assets; 	   /* list of slurmdb_asset_rec_t *'s */
 	struct slurmdb_assoc_rec *assoc_next; /* next assoc with
 						       * same hash index
 						       * based off the
@@ -543,7 +531,7 @@ typedef struct {
 } slurmdb_cluster_cond_t;
 
 typedef struct {
-	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
+	List accounting_list; /* list of slurmdb_cluster_accounting_rec_t *'s */
 	List assets; /* list of slurmdb_asset_rec_t */
 	uint16_t classification; /* how this machine is classified */
 	slurm_addr_t control_addr; /* For convenience only.
@@ -946,7 +934,7 @@ typedef struct {
 } slurmdb_wckey_cond_t;
 
 typedef struct {
-	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
+	List accounting_list; /* list of slurmdb_accounting_rec_t *'s */
 	List assets; 	        /* list of slurmdb_asset_rec_t *'s */
 	char *cluster;		/* cluster associated */
 
@@ -994,7 +982,7 @@ typedef struct {
 } slurmdb_report_user_rec_t;
 
 typedef struct {
-	List accounting_list; /* list of slurmdb_asset_stats_rec_t *'s */
+	List accounting_list; /* list of slurmdb_accounting_rec_t *'s */
 	List assets; /* list of slurmdb_asset_rec_t *'s */
 	List assoc_list; /* list of slurmdb_report_assoc_rec_t *'s */
 	char *name;
@@ -1002,6 +990,7 @@ typedef struct {
 } slurmdb_report_cluster_rec_t;
 
 typedef struct {
+	List assets; /* list of slurmdb_asset_rec_t *'s */
 	List jobs; /* This should be a NULL destroy since we are just
 		    * putting a pointer to a slurmdb_job_rec_t here
 		    * not allocating any new memory */
@@ -1009,25 +998,21 @@ typedef struct {
 	uint32_t max_size; /* largest size of job in cpus here INFINITE if
 			    * last */
 	uint32_t count; /* count of jobs */
-	uint64_t cpu_secs; /* how many cpus secs taken up by this
-			    * grouping */
 } slurmdb_report_job_grouping_t;
 
 typedef struct {
 	char *acct; /*account name */
+	List assets; /* list of slurmdb_asset_rec_t *'s */
 	uint32_t count; /* total count of jobs taken up by this acct */
-	uint64_t cpu_secs; /* how many cpus secs taken up by this
-			    * acct */
 	List groups; /* containing slurmdb_report_job_grouping_t's*/
 	uint32_t lft;
 	uint32_t rgt;
 } slurmdb_report_acct_grouping_t;
 
 typedef struct {
+	List assets; /* list of slurmdb_asset_rec_t *'s */
 	char *cluster; /*cluster name */
 	uint32_t count; /* total count of jobs taken up by this cluster */
-	uint64_t cpu_secs; /* how many cpus secs taken up by this
-			    * cluster */
 	List acct_list; /* containing slurmdb_report_acct_grouping_t's */
 } slurmdb_report_cluster_grouping_t;
 
