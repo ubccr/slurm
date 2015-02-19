@@ -405,7 +405,108 @@ end_it:
 	return NULL;
 }
 
-/* assoc_mgr locks need to be set before hand */
+/* assoc_mgr locks need to be unlocked before coming here */
+static int _get_object_usage(mysql_conn_t *mysql_conn,
+			     slurmdbd_msg_type_t type, char *my_usage_table,
+			     char *cluster_name, char *id_str,
+			     time_t start, time_t end, List *usage_list)
+{
+	char *tmp = NULL;
+	int i = 0;
+	MYSQL_RES *result = NULL;
+	MYSQL_ROW row;
+	char *query = NULL;
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
+
+	char *usage_req_inx[] = {
+		"t1.id",
+		"t1.id_asset",
+		"t1.time_start",
+		"t1.alloc_secs",
+	};
+	enum {
+		USAGE_ID,
+		USAGE_ASSET,
+		USAGE_START,
+		USAGE_ALLOC,
+		USAGE_COUNT
+	};
+
+	xstrfmtcat(tmp, "%s", usage_req_inx[i]);
+	for (i=1; i<USAGE_COUNT; i++) {
+		xstrfmtcat(tmp, ", %s", usage_req_inx[i]);
+	}
+
+	switch (type) {
+	case DBD_GET_ASSOC_USAGE:
+		query = xstrdup_printf(
+			"select %s from \"%s_%s\" as t1, "
+			"\"%s_%s\" as t2, \"%s_%s\" as t3 "
+			"where (t1.time_start < %ld && t1.time_start >= %ld) "
+			"&& t1.id=t2.id_assoc && (%s) && "
+			"t2.lft between t3.lft and t3.rgt "
+			"order by t1.id, time_start;",
+			tmp, cluster_name, my_usage_table,
+			cluster_name, assoc_table, cluster_name, assoc_table,
+			end, start, id_str);
+		break;
+	case DBD_GET_WCKEY_USAGE:
+		query = xstrdup_printf(
+			"select %s from \"%s_%s\" as t1 "
+			"where (time_start < %ld && time_start >= %ld) "
+			"&& (%s) order by id, time_start;",
+			tmp, cluster_name, my_usage_table, end, start, id_str);
+		break;
+	default:
+		error("Unknown usage type %d", type);
+		xfree(tmp);
+		return SLURM_ERROR;
+		break;
+	}
+	xfree(tmp);
+
+	debug4("%d(%s:%d) query\n%s",
+	       mysql_conn->conn, THIS_FILE, __LINE__, query);
+	result = mysql_db_query_ret(mysql_conn, query, 0);
+	xfree(query);
+
+	if (!result)
+		return SLURM_ERROR;
+
+	if (!(*usage_list))
+		(*usage_list) = list_create(slurmdb_destroy_accounting_rec);
+
+	assoc_mgr_lock(&locks);
+	while ((row = mysql_fetch_row(result))) {
+		slurmdb_asset_rec_t *asset_rec;
+		slurmdb_accounting_rec_t *accounting_rec =
+			xmalloc(sizeof(slurmdb_accounting_rec_t));
+
+		accounting_rec->asset_rec.id = slurm_atoul(row[USAGE_ASSET]);
+		if ((asset_rec = list_find_first(
+			     assoc_mgr_asset_list, slurmdb_find_asset_in_list,
+			     &accounting_rec->asset_rec.id))) {
+			accounting_rec->asset_rec.name =
+				xstrdup(asset_rec->name);
+			accounting_rec->asset_rec.type =
+				xstrdup(asset_rec->type);
+		}
+
+		accounting_rec->id = slurm_atoul(row[USAGE_ID]);
+		accounting_rec->period_start = slurm_atoul(row[USAGE_START]);
+		accounting_rec->alloc_secs = slurm_atoull(row[USAGE_ALLOC]);
+
+		list_append(*usage_list, accounting_rec);
+	}
+	assoc_mgr_unlock(&locks);
+
+	mysql_free_result(result);
+
+	return SLURM_SUCCESS;
+}
+
+/* assoc_mgr locks need to unlocked before you get here */
 static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 			      slurmdb_cluster_rec_t *cluster_rec,
 			      slurmdbd_msg_type_t type,
@@ -418,6 +519,8 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 	char *tmp = NULL;
 	char *my_usage_table = cluster_day_table;
 	char *query = NULL;
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	char *cluster_req_inx[] = {
 		"id_asset",
 		"alloc_secs",
@@ -484,6 +587,7 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		cluster_rec->accounting_list =
 			list_create(slurmdb_destroy_cluster_accounting_rec);
 
+	assoc_mgr_lock(&locks);
 	while ((row = mysql_fetch_row(result))) {
 		slurmdb_asset_rec_t *asset_rec;
 		slurmdb_cluster_accounting_rec_t *accounting_rec =
@@ -509,6 +613,8 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		accounting_rec->period_start = slurm_atoul(row[CLUSTER_START]);
 		list_append(cluster_rec->accounting_list, accounting_rec);
 	}
+	assoc_mgr_unlock(&locks);
+
 	mysql_free_result(result);
 	return rc;
 }
@@ -516,19 +622,14 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 
 
 /* checks should already be done before this to see if this is a valid
-   user or not.
+   user or not.  The assoc_mgr locks should be unlocked before coming here.
 */
 extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 			      slurmdbd_msg_type_t type, List object_list,
 			      char *cluster_name, time_t start, time_t end)
 {
 	int rc = SLURM_SUCCESS;
-	int i=0;
-	MYSQL_RES *result = NULL;
-	MYSQL_ROW row;
-	char *tmp = NULL;
 	char *my_usage_table = NULL;
-	char *query = NULL;
 	List usage_list = NULL;
 	char *id_str = NULL;
 	ListIterator itr = NULL, u_itr = NULL;
@@ -536,22 +637,6 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 	slurmdb_assoc_rec_t *assoc = NULL;
 	slurmdb_wckey_rec_t *wckey = NULL;
 	slurmdb_accounting_rec_t *accounting_rec = NULL;
-
-	char *usage_req_inx[] = {
-		"t1.id",
-		"t1.id_asset",
-		"t1.time_start",
-		"t1.alloc_secs",
-	};
-
-	enum {
-		USAGE_ID,
-		USAGE_ASSET,
-		USAGE_START,
-		USAGE_ALLOC,
-		USAGE_COUNT
-	};
-
 
 	if (!object_list) {
 		error("We need an object to set data for getting usage");
@@ -600,75 +685,17 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 		return SLURM_ERROR;
 	}
 
-	xfree(tmp);
-	i=0;
-	xstrfmtcat(tmp, "%s", usage_req_inx[i]);
-	for(i=1; i<USAGE_COUNT; i++) {
-		xstrfmtcat(tmp, ", %s", usage_req_inx[i]);
-	}
-	switch (type) {
-	case DBD_GET_ASSOC_USAGE:
-		query = xstrdup_printf(
-			"select %s from \"%s_%s\" as t1, "
-			"\"%s_%s\" as t2, \"%s_%s\" as t3 "
-			"where (t1.time_start < %ld && t1.time_start >= %ld) "
-			"&& t1.id=t2.id_assoc && (%s) && "
-			"t2.lft between t3.lft and t3.rgt "
-			"order by t3.id_assoc, time_start;",
-			tmp, cluster_name, my_usage_table,
-			cluster_name, assoc_table, cluster_name, assoc_table,
-			end, start, id_str);
-		break;
-	case DBD_GET_WCKEY_USAGE:
-		query = xstrdup_printf(
-			"select %s from \"%s_%s\" as t1 "
-			"where (time_start < %ld && time_start >= %ld) "
-			"&& (%s) order by id_wckey, time_start;",
-			tmp, cluster_name, my_usage_table, end, start, id_str);
-		break;
-	default:
-		error("Unknown usage type %d", type);
+	if (_get_object_usage(mysql_conn, type, my_usage_table, cluster_name,
+			      id_str, start, end, &usage_list)
+	    != SLURM_SUCCESS) {
 		xfree(id_str);
-		xfree(tmp);
-		return SLURM_ERROR;
-		break;
-	}
-	xfree(id_str);
-	xfree(tmp);
-
-	debug4("%d(%s:%d) query\n%s",
-	       mysql_conn->conn, THIS_FILE, __LINE__, query);
-	if (!(result = mysql_db_query_ret(
-		      mysql_conn, query, 0))) {
-		xfree(query);
 		return SLURM_ERROR;
 	}
-	xfree(query);
 
-	usage_list = list_create(slurmdb_destroy_accounting_rec);
-
-	while ((row = mysql_fetch_row(result))) {
-		slurmdb_asset_rec_t *asset_rec;
-		slurmdb_accounting_rec_t *accounting_rec =
-			xmalloc(sizeof(slurmdb_accounting_rec_t));
-
-		accounting_rec->asset_rec.id = slurm_atoul(row[USAGE_ASSET]);
-		if ((asset_rec = list_find_first(
-			     assoc_mgr_asset_list, slurmdb_find_asset_in_list,
-			     &accounting_rec->asset_rec.id))) {
-			accounting_rec->asset_rec.name =
-				xstrdup(asset_rec->name);
-			accounting_rec->asset_rec.type =
-				xstrdup(asset_rec->type);
-		}
-
-		accounting_rec->id = slurm_atoul(row[USAGE_ID]);
-		accounting_rec->period_start = slurm_atoul(row[USAGE_START]);
-		accounting_rec->alloc_secs = slurm_atoull(row[USAGE_ALLOC]);
-
-		list_append(usage_list, accounting_rec);
+	if (!usage_list) {
+		error("No usage given back?  This should never happen");
+		return SLURM_ERROR;
 	}
-	mysql_free_result(result);
 
 	u_itr = list_iterator_create(usage_list);
 	itr = list_iterator_create(object_list);
@@ -733,97 +760,64 @@ extern int get_usage_for_list(mysql_conn_t *mysql_conn,
 	return rc;
 }
 
+/*   The assoc_mgr locks should be unlocked before coming here. */
 extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 			      void *in, slurmdbd_msg_type_t type,
 			      time_t start, time_t end)
 {
 	int rc = SLURM_SUCCESS;
-	int i=0, is_admin=1;
-	MYSQL_RES *result = NULL;
-	MYSQL_ROW row;
-	char *tmp = NULL;
+	int is_admin=1;
 	char *my_usage_table = NULL;
 	slurmdb_assoc_rec_t *slurmdb_assoc = in;
 	slurmdb_wckey_rec_t *slurmdb_wckey = in;
-	char *query = NULL;
 	char *username = NULL;
 	uint16_t private_data = 0;
-	slurmdb_user_rec_t user;
-	List *my_list;
-	uint32_t id = NO_VAL;
+	List *my_list = NULL;
 	char *cluster_name = NULL;
-	char **usage_req_inx = NULL;
-	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK,
-				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
+	char *id_str = NULL;
 
-	enum {
-		USAGE_ID,
-		USAGE_START,
-		USAGE_ACPU,
-		USAGE_COUNT,
-		USAGE_ENERGY
-	};
+	if (check_connection(mysql_conn) != SLURM_SUCCESS)
+		return ESLURM_DB_CONNECTION;
 
 	switch (type) {
 	case DBD_GET_ASSOC_USAGE:
-	{
-		char *temp_usage[] = {
-			"t3.id_assoc",
-			"t1.time_start",
-			"t1.alloc_secs"
-		};
-		usage_req_inx = temp_usage;
-
-		id = slurmdb_assoc->id;
+		if (!slurmdb_assoc->id) {
+			error("We need an id to set data for getting usage");
+			return SLURM_ERROR;
+		}
+		id_str = xstrdup_printf("t3.id_assoc=%u", slurmdb_assoc->id);
 		cluster_name = slurmdb_assoc->cluster;
 		username = slurmdb_assoc->user;
 		my_list = &slurmdb_assoc->accounting_list;
 		my_usage_table = assoc_day_table;
 		break;
-	}
 	case DBD_GET_WCKEY_USAGE:
-	{
-		char *temp_usage[] = {
-			"id_wckey",
-			"time_start",
-			"alloc_secs"
-		};
-		usage_req_inx = temp_usage;
-
-		id = slurmdb_wckey->id;
+		if (!slurmdb_wckey->id) {
+			error("We need an id to set data for getting usage");
+			return SLURM_ERROR;
+		}
+		id_str = xstrdup_printf("id=%d", slurmdb_wckey->id);
 		cluster_name = slurmdb_wckey->cluster;
 		username = slurmdb_wckey->user;
 		my_list = &slurmdb_wckey->accounting_list;
+		my_usage_table = wckey_day_table;
 		break;
-	}
 	case DBD_GET_CLUSTER_USAGE:
-	{
-		assoc_mgr_lock(&locks);
 		rc = _get_cluster_usage(mysql_conn, uid, in,
 					type, start, end);
-		assoc_mgr_unlock(&locks);
 		return rc;
 		break;
-	}
 	default:
 		error("Unknown usage type %d", type);
 		return SLURM_ERROR;
 		break;
 	}
 
-	if (!id) {
-		error("We need an id to set data for getting usage");
-		return SLURM_ERROR;
-	} else if (!cluster_name) {
+	if (!cluster_name) {
 		error("We need a cluster_name to set data for getting usage");
+		xfree(id_str);
 		return SLURM_ERROR;
 	}
-
-	if (check_connection(mysql_conn) != SLURM_SUCCESS)
-		return ESLURM_DB_CONNECTION;
-
-	memset(&user, 0, sizeof(slurmdb_user_rec_t));
-	user.uid = uid;
 
 	private_data = slurm_get_private_data();
 	if (private_data & PRIVATE_DATA_USAGE) {
@@ -831,8 +825,14 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 			      mysql_conn, uid, SLURMDB_ADMIN_OPERATOR))) {
 			ListIterator itr = NULL;
 			slurmdb_coord_rec_t *coord = NULL;
+			slurmdb_user_rec_t user;
+			bool is_coord;
 
-			if (username && !strcmp(slurmdb_assoc->user, user.name))
+			memset(&user, 0, sizeof(slurmdb_user_rec_t));
+			user.uid = uid;
+			is_coord = is_user_any_coord(mysql_conn, &user);
+
+			if (username && !strcmp(username, user.name))
 				goto is_user;
 
 			if (type != DBD_GET_ASSOC_USAGE)
@@ -844,7 +844,7 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 				goto bad_user;
 			}
 
-			if (!is_user_any_coord(mysql_conn, &user)) {
+			if (!is_coord) {
 				debug4("This user is not a coordinator.");
 				goto bad_user;
 			}
@@ -864,6 +864,7 @@ extern int as_mysql_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 
 		bad_user:
 			errno = ESLURM_ACCESS_DENIED;
+			xfree(id_str);
 			return SLURM_ERROR;
 		}
 	}
@@ -871,71 +872,13 @@ is_user:
 
 	if (set_usage_information(&my_usage_table, type, &start, &end)
 	    != SLURM_SUCCESS) {
+		xfree(id_str);
 		return SLURM_ERROR;
 	}
 
-	xfree(tmp);
-	i=0;
-	xstrfmtcat(tmp, "%s", usage_req_inx[i]);
-	for(i=1; i<USAGE_COUNT; i++) {
-		xstrfmtcat(tmp, ", %s", usage_req_inx[i]);
-	}
-	assoc_mgr_lock(&locks);
-
-	switch (type) {
-	case DBD_GET_ASSOC_USAGE:
-		query = xstrdup_printf(
-			"select %s from \"%s_%s\" as t1, "
-			"\"%s_%s\" as t2, \"%s_%s\" as t3 "
-			"where (t1.time_start < %ld && t1.time_start >= %ld) "
-			"&& t1.id_assoc=t2.id_assoc && t3.id_assoc=%d && "
-			"t2.lft between t3.lft and t3.rgt "
-			"order by t3.id_assoc, time_start;",
-			tmp, cluster_name, my_usage_table,
-			cluster_name, cluster_name, assoc_table, assoc_table,
-			end, start, id);
-		break;
-	case DBD_GET_WCKEY_USAGE:
-		query = xstrdup_printf(
-			"select %s from \"%s_%s\" "
-			"where (time_start < %ld && time_start >= %ld) "
-			"&& id_wckey=%d order by id_wckey, time_start;",
-			tmp, cluster_name, my_usage_table, end, start, id);
-		break;
-	default:
-		error("Unknown usage type %d", type);
-		assoc_mgr_unlock(&locks);
-		return SLURM_ERROR;
-		break;
-	}
-
-	xfree(tmp);
-	debug4("%d(%s:%d) query\n%s",
-	       mysql_conn->conn, THIS_FILE, __LINE__, query);
-	if (!(result = mysql_db_query_ret(
-		      mysql_conn, query, 0))) {
-		xfree(query);
-		assoc_mgr_unlock(&locks);
-		return SLURM_ERROR;
-	}
-	xfree(query);
-
-	if (!(*my_list))
-		(*my_list) = list_create(slurmdb_destroy_accounting_rec);
-
-	while ((row = mysql_fetch_row(result))) {
-		slurmdb_accounting_rec_t *accounting_rec =
-			xmalloc(sizeof(slurmdb_accounting_rec_t));
-		/* FIXME: assets need to be handled here */
-		accounting_rec->id = slurm_atoul(row[USAGE_ID]);
-		accounting_rec->period_start = slurm_atoul(row[USAGE_START]);
-		accounting_rec->alloc_secs = slurm_atoull(row[USAGE_ACPU]);
-		accounting_rec->consumed_energy = slurm_atoull(row[USAGE_ENERGY]);
-		list_append((*my_list), accounting_rec);
-	}
-	mysql_free_result(result);
-
-	assoc_mgr_unlock(&locks);
+	_get_object_usage(mysql_conn, type, my_usage_table, cluster_name,
+			  id_str, start, end, my_list);
+	xfree(id_str);
 
 	return rc;
 }
