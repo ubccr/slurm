@@ -717,7 +717,8 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 	if (mysql_db_create_table(mysql_conn, asset_table,
 				  asset_table_fields,
 				  ", primary key (id), "
-				  "unique index (type(20), name(20)))")
+				  "unique index (type(20), name(20))) "
+				  "auto_increment=1001")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 	else {
