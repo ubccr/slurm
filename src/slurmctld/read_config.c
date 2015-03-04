@@ -570,7 +570,8 @@ static int _init_assets(void)
 		asset_rec->type = temp_char;
 
 		if (!strcasecmp(temp_char, "cpu") ||
-		    !strcasecmp(temp_char, "mem")) {
+		    !strcasecmp(temp_char, "mem") ||
+		    !strcasecmp(temp_char, "energy")) {
 		} else if (!strncasecmp(temp_char, "gres:", 5)) {
 			asset_rec->type[4] = '\0';
 			asset_rec->name = xstrdup(temp_char+5);
@@ -613,16 +614,22 @@ static int _init_assets(void)
 			fatal("Problem adding assets to the database, "
 			      "can't continue until database is able to "
 			      "make new assets");
+		/* refresh list here since the updates are not
+		   sent dynamically */
+		assoc_mgr_refresh_lists(acct_db_conn, ASSOC_MGR_CACHE_ASSET);
+
 		while ((asset_rec = list_pop(add_list))) {
 			if (assoc_mgr_fill_in_asset(acct_db_conn, asset_rec,
 						    1, NULL, 0)
 			    != SLURM_SUCCESS) {
-				fatal("Unknown asset %s(%s) after adding.  "
+				fatal("Unknown asset %s%s%s after adding.  "
 				      "It appears "
 				      "there may be a problem with the "
 				      "slurmdbd communicating with the "
 				      "slurmctld.",
-				      asset_rec->type, asset_rec->name);
+				      asset_rec->type,
+				      asset_rec->name ? ":" : "",
+				      asset_rec->name ? asset_rec->name : "");
 			} else
 				list_append(asset_list, asset_rec);
 		}

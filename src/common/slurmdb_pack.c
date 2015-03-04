@@ -5515,6 +5515,9 @@ extern void slurmdb_pack_update_object(slurmdb_update_object_t *object,
 	case SLURMDB_REMOVE_RES:
 		my_function = slurmdb_pack_res_rec;
 		break;
+	case SLURMDB_ADD_ASSET:
+		my_function = slurmdb_pack_asset_rec;
+		break;
 	case SLURMDB_UPDATE_NOTSET:
 	default:
 		error("pack: unknown type set in update_object: %d",
@@ -5588,6 +5591,10 @@ extern int slurmdb_unpack_update_object(slurmdb_update_object_t **object,
 	case SLURMDB_REMOVE_RES:
 		my_function = slurmdb_unpack_res_rec;
 		my_destroy = slurmdb_destroy_res_rec;
+		break;
+	case SLURMDB_ADD_ASSET:
+		my_function = slurmdb_unpack_asset_rec;
+		my_destroy = slurmdb_destroy_asset_rec;
 		break;
 	case SLURMDB_UPDATE_NOTSET:
 	default:

@@ -2348,7 +2348,7 @@ static void *_assoc_cache_mgr(void *no_data)
 			return NULL;
 		}
 		lock_slurmctld(job_write_lock);
-		assoc_mgr_refresh_lists(acct_db_conn);
+		assoc_mgr_refresh_lists(acct_db_conn, 0);
 		if (running_cache)
 			unlock_slurmctld(job_write_lock);
 		slurm_mutex_unlock(&assoc_cache_mutex);

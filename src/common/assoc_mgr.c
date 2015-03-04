@@ -1876,7 +1876,7 @@ extern int assoc_mgr_get_user_assocs(void *db_conn,
 	   the association list can be made.
 	*/
 	if (!assoc_mgr_assoc_list)
-		if (assoc_mgr_refresh_lists(db_conn) == SLURM_ERROR)
+		if (assoc_mgr_refresh_lists(db_conn, 0) == SLURM_ERROR)
 			return SLURM_ERROR;
 
 	if ((!assoc_mgr_assoc_list
@@ -3973,7 +3973,6 @@ extern int assoc_mgr_update_asset(slurmdb_update_object_t *update)
 	int rc = SLURM_SUCCESS;
 	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK, NO_LOCK,
 				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
-
 	assoc_mgr_lock(&locks);
 	if (!assoc_mgr_asset_list) {
 		assoc_mgr_unlock(&locks);
@@ -4025,7 +4024,7 @@ extern int assoc_mgr_validate_assoc_id(void *db_conn,
 	   the association list can be made.
 	*/
 	if (!assoc_mgr_assoc_list)
-		if (assoc_mgr_refresh_lists(db_conn) == SLURM_ERROR)
+		if (assoc_mgr_refresh_lists(db_conn, 0) == SLURM_ERROR)
 			return SLURM_ERROR;
 
 	assoc_mgr_lock(&locks);
@@ -4798,41 +4797,50 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-extern int assoc_mgr_refresh_lists(void *db_conn)
+extern int assoc_mgr_refresh_lists(void *db_conn, uint16_t cache_level)
 {
+	bool partial_list = 1;
+
+	if (!cache_level) {
+		cache_level = init_setup.cache_level;
+		partial_list = 0;
+	}
+
 	/* get qos before association since it is used there */
-	if (init_setup.cache_level & ASSOC_MGR_CACHE_QOS)
+	if (cache_level & ASSOC_MGR_CACHE_QOS)
 		if (_refresh_assoc_mgr_qos_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 
 	/* get user before association/wckey since it is used there */
-	if (init_setup.cache_level & ASSOC_MGR_CACHE_USER)
+	if (cache_level & ASSOC_MGR_CACHE_USER)
 		if (_refresh_assoc_mgr_user_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 
-	if (init_setup.cache_level & ASSOC_MGR_CACHE_ASSOC) {
+	if (cache_level & ASSOC_MGR_CACHE_ASSOC) {
 		if (_refresh_assoc_mgr_assoc_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 	}
-	if (init_setup.cache_level & ASSOC_MGR_CACHE_WCKEY)
+	if (cache_level & ASSOC_MGR_CACHE_WCKEY)
 		if (_refresh_assoc_wckey_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 
-	if (init_setup.cache_level & ASSOC_MGR_CACHE_RES)
+	if (cache_level & ASSOC_MGR_CACHE_RES)
 		if (_refresh_assoc_mgr_res_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 
-	if (init_setup.cache_level & ASSOC_MGR_CACHE_ASSET) {
+	if (cache_level & ASSOC_MGR_CACHE_ASSET) {
 		if (_refresh_assoc_mgr_asset_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 	}
-	running_cache = 0;
+
+	if (!partial_list)
+		running_cache = 0;
 
 	return SLURM_SUCCESS;
 }

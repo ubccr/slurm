@@ -2373,7 +2373,6 @@ extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit)
 		ListIterator itr = NULL, itr2 = NULL, itr3 = NULL;
 		char *rem_cluster = NULL, *cluster_name = NULL;
 		slurmdb_update_object_t *object = NULL;
-		bool assets_updated = false;
 
 		xstrfmtcat(query, "select control_host, control_port, "
 			   "name, rpc_version "
@@ -2419,20 +2418,6 @@ extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit)
 				}
 				list_iterator_destroy(itr3);
 				break;
-			case SLURMDB_ADD_ASSET:
-				info("updating asset views");
-				if (assets_updated)
-					break;
-				info("actually updating");
-				assets_updated = true;
-				update_full_asset_query();
-				while ((cluster_name = list_next(itr2))) {
-					update_asset_views(mysql_conn,
-							   cluster_name);
-				}
-				list_iterator_reset(itr2);
-				break;
-
 			default:
 				break;
 			}

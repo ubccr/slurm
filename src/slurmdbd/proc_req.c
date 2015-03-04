@@ -618,6 +618,13 @@ end_it:
 	slurmdbd_free_list_msg(get_msg);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
 				      rc, comment, DBD_ADD_ASSETS);
+
+	/* This happens before the slurmctld registers and only when
+	   the slurmctld starts up.  So always commit, success or not.
+	   (don't ever use autocommit with innodb)
+	*/
+	acct_storage_g_commit(slurmdbd_conn->db_conn, 1);
+
 	return rc;
 }
 

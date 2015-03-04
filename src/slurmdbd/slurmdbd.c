@@ -208,7 +208,7 @@ int main(int argc, char *argv[])
 			acct_storage_g_commit(db_conn, 1);
 			run_dbd_backup();
 			if (!shutdown_time)
-				assoc_mgr_refresh_lists(db_conn);
+				assoc_mgr_refresh_lists(db_conn, 0);
 		} else if (slurmdbd_conf->dbd_host &&
 			   (!strcmp(slurmdbd_conf->dbd_host, node_name) ||
 			    !strcmp(slurmdbd_conf->dbd_host, "localhost"))) {

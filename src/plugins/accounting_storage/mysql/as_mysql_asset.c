@@ -145,7 +145,6 @@ extern int as_mysql_add_assets(mysql_conn_t *mysql_conn,
 	time_t now = time(NULL);
 	char *user_name = NULL;
 	int affect_rows = 0;
-	int added = 0;
 	char *cluster_name;
 	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK, NO_LOCK,
 				   NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
@@ -157,18 +156,8 @@ extern int as_mysql_add_assets(mysql_conn_t *mysql_conn,
 		return ESLURM_ACCESS_DENIED;
 
 	/* means just update the views */
-	if (!asset_list) {
-		slurm_mutex_lock(&as_mysql_cluster_list_lock);
-		assoc_mgr_lock(&locks);
-		update_full_asset_query();
-		itr = list_iterator_create(as_mysql_total_cluster_list);
-		while ((cluster_name = list_next(itr)))
-			update_asset_views(mysql_conn, cluster_name);
-		list_iterator_destroy(itr);
-		assoc_mgr_unlock(&locks);
-		slurm_mutex_unlock(&as_mysql_cluster_list_lock);
-		return SLURM_SUCCESS;
-	}
+	if (!asset_list)
+		goto update_views;
 
 	user_name = uid_to_string((uid_t) uid);
 	itr = list_iterator_create(asset_list);
@@ -177,8 +166,8 @@ extern int as_mysql_add_assets(mysql_conn_t *mysql_conn,
 			error("We need a asset type.");
 			rc = SLURM_ERROR;
 			continue;
-		} else if ((!strcasecmp(object->name, "gres") ||
-			    !strcasecmp(object->name, "license"))) {
+		} else if ((!strcasecmp(object->type, "gres") ||
+			    !strcasecmp(object->type, "license"))) {
 			if (!object->name) {
 				error("%s type assets "
 				      "need to have a name, "
@@ -204,13 +193,14 @@ extern int as_mysql_add_assets(mysql_conn_t *mysql_conn,
 			   "on duplicate key update deleted=0;",
 			   asset_table, cols, vals);
 
-		if (debug_flags & DEBUG_FLAG_DB_WCKEY)
+		if (debug_flags & DEBUG_FLAG_DB_ASSET)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 		object->id = mysql_db_insert_ret_id(mysql_conn, query);
 		xfree(query);
 		if (!object->id) {
-			error("Couldn't add asset %s", object->name);
-			added=0;
+			error("Couldn't add asset %s%s%s", object->type,
+			      object->name ? ":" : "",
+			      object->name ? object->name : "");
 			xfree(cols);
 			xfree(extra);
 			xfree(vals);
@@ -241,7 +231,7 @@ extern int as_mysql_add_assets(mysql_conn_t *mysql_conn,
 		xfree(cols);
 		xfree(extra);
 		xfree(vals);
-		debug4("query\n%s",query);
+		debug4("query\n%s", query);
 		rc = mysql_db_query(mysql_conn, query);
 		xfree(query);
 		if (rc != SLURM_SUCCESS) {
@@ -251,19 +241,29 @@ extern int as_mysql_add_assets(mysql_conn_t *mysql_conn,
 					      SLURMDB_ADD_ASSET,
 					      object) == SLURM_SUCCESS)
 				list_remove(itr);
-			added++;
 		}
 
 	}
 	list_iterator_destroy(itr);
 	xfree(user_name);
 
-	if (!added) {
-		reset_mysql_conn(mysql_conn);
-		goto end_it;
+update_views:
+	if (assoc_mgr_update(mysql_conn->update_list)) {
+		/* We only want to update the local cache DBD or ctld */
+		assoc_mgr_update(mysql_conn->update_list);
+		list_flush(mysql_conn->update_list);
 	}
 
-end_it:
+	slurm_mutex_lock(&as_mysql_cluster_list_lock);
+	assoc_mgr_lock(&locks);
+	update_full_asset_query();
+	itr = list_iterator_create(as_mysql_total_cluster_list);
+	while ((cluster_name = list_next(itr)))
+		update_asset_views(mysql_conn, cluster_name);
+	list_iterator_destroy(itr);
+	assoc_mgr_unlock(&locks);
+	slurm_mutex_unlock(&as_mysql_cluster_list_lock);
+
 	return rc;
 }
 

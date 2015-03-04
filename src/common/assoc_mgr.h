@@ -464,7 +464,7 @@ extern int load_assoc_mgr_state(char *state_save_location);
  * Refresh the lists if when running_cache is set this will load new
  * information from the database (if any) and update the cached list.
  */
-extern int assoc_mgr_refresh_lists(void *db_conn);
+extern int assoc_mgr_refresh_lists(void *db_conn, uint16_t cache_level);
 
 /*
  * Sets the uids of users added to the system after the start of the

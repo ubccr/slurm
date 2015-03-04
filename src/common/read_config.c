@@ -3355,6 +3355,9 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 			    "AccountingStorageAssets", hashtbl))
 		conf->accounting_storage_assets =
 			xstrdup(DEFAULT_ACCOUNTING_ASSETS);
+	else
+		xstrfmtcat(conf->accounting_storage_assets,
+			   ",%s", DEFAULT_ACCOUNTING_ASSETS);
 
 	if (s_p_get_string(&temp_str, "AccountingStorageEnforce", hashtbl)) {
 		if (slurm_strcasestr(temp_str, "1")
