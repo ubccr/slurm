@@ -36,6 +36,7 @@
 \*****************************************************************************/
 
 #include "as_mysql_asset.h"
+#include "as_mysql_usage.h"
 #include "src/common/xstring.h"
 
 extern int update_full_asset_query(void)
@@ -254,6 +255,11 @@ update_views:
 		list_flush(mysql_conn->update_list);
 	}
 
+	/* For some reason we are unable to update the views while
+	   rollup is running so we have to wait for it to finish with
+	   the usage_rollup_lock.
+	*/
+	slurm_mutex_lock(&usage_rollup_lock);
 	slurm_mutex_lock(&as_mysql_cluster_list_lock);
 	assoc_mgr_lock(&locks);
 	update_full_asset_query();
@@ -263,6 +269,7 @@ update_views:
 	list_iterator_destroy(itr);
 	assoc_mgr_unlock(&locks);
 	slurm_mutex_unlock(&as_mysql_cluster_list_lock);
+	slurm_mutex_unlock(&usage_rollup_lock);
 
 	return rc;
 }

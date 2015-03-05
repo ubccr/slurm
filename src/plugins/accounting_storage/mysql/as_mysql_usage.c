@@ -43,8 +43,7 @@
 
 time_t global_last_rollup = 0;
 pthread_mutex_t rollup_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static pthread_mutex_t usage_rollup_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t usage_rollup_lock = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
 	uint16_t archive_data;
