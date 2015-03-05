@@ -1591,8 +1591,8 @@ extern int as_mysql_cluster_get_assets(mysql_conn_t *mysql_conn,
 		"select cluster_nodes%s from "
 		"\"%s_%s\" where time_end=0 and node_name='' limit 1",
 		full_asset_query, cluster_rec->name, event_view);
-	debug4("%d(%s:%d) query\n%s",
-	       mysql_conn->conn, THIS_FILE, __LINE__, query);
+	if (debug_flags & DEBUG_FLAG_DB_ASSET)
+		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
 		return SLURM_ERROR;
@@ -1601,11 +1601,11 @@ extern int as_mysql_cluster_get_assets(mysql_conn_t *mysql_conn,
 	itr = list_iterator_create(assoc_mgr_asset_list);
 	if ((row = mysql_fetch_row(result))) {
 		slurmdb_asset_rec_t *asset_rec, *loc_asset_rec;
-		int i = 1;
+		int i = 0;
 
-		if (row[1] && row[1][0]) {
+		if (row[0] && row[0][0]) {
 			xfree(cluster_rec->nodes);
-			cluster_rec->nodes = xstrdup(row[1]);
+			cluster_rec->nodes = xstrdup(row[0]);
 		}
 
 		if (!cluster_rec->assets)
@@ -1614,7 +1614,7 @@ extern int as_mysql_cluster_get_assets(mysql_conn_t *mysql_conn,
 		else
 			list_flush(cluster_rec->assets);
 
-		i = 1;
+		i = 0;
 		while ((asset_rec = list_next(itr))) {
 			i++;
 			/* Skip if the asset is NULL,
@@ -1623,8 +1623,7 @@ extern int as_mysql_cluster_get_assets(mysql_conn_t *mysql_conn,
 			 */
 			if (!row[i] || !row[i][0])
 				continue;
-			loc_asset_rec = slurmdb_copy_asset_rec(
-				asset_rec);
+			loc_asset_rec = slurmdb_copy_asset_rec(asset_rec);
 			loc_asset_rec->count = slurm_atoul(row[i]);
 			list_append(cluster_rec->assets, loc_asset_rec);
 		}
