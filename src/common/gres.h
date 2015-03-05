@@ -349,6 +349,11 @@ extern char *gres_get_node_drain(List gres_list);
 extern char *gres_get_node_used(List gres_list);
 
 /*
+ * Give the total system count of a given gres
+ */
+extern uint64_t gres_get_system_cnt(char *name);
+
+/*
  * Fill in an array of GRES type ids contained within the given node gres_list
  *		and an array of corresponding counts of those GRES types.
  * IN gres_list - a List of GRES types found on a node.

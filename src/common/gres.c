@@ -118,6 +118,7 @@ typedef struct slurm_gres_context {
 	slurm_gres_ops_t ops;			/* pointers to plugin symbols */
 	uint32_t	plugin_id;		/* key for searches */
 	plugrack_t	plugin_list;		/* plugrack info */
+	uint64_t        total_cnt;
 } slurm_gres_context_t;
 
 /* Generic gres data structure for adding to a list. Depending upon the
@@ -505,6 +506,7 @@ extern int gres_plugin_reconfig(bool *did_change)
 	int rc = SLURM_SUCCESS;
 	char *plugin_names = slurm_get_gres_plugins();
 	bool plugin_change;
+	int i;
 
 	if (did_change)
 		*did_change = false;
@@ -518,6 +520,10 @@ extern int gres_plugin_reconfig(bool *did_change)
 		plugin_change = true;
 	else
 		plugin_change = false;
+
+	for (i=0; i < gres_context_cnt; i++)
+		gres_context[i].total_cnt = 0;
+
 	slurm_mutex_unlock(&gres_context_lock);
 
 	if (plugin_change) {
@@ -1477,6 +1483,9 @@ static int _node_config_init(char *node_name, char *orig_config,
 		      context_ptr->gres_name,
 		      context_ptr->gres_name_colon,
 		      context_ptr->gres_name_colon_len);
+
+	context_ptr->total_cnt += gres_data->gres_cnt_config;
+
 	/* Use count from recovered state, if higher */
 	gres_data->gres_cnt_avail  = MAX(gres_data->gres_cnt_avail,
 					 gres_data->gres_cnt_config);
@@ -1875,6 +1884,9 @@ static int _node_reconfig(char *node_name, char *orig_config, char **new_config,
 		      context_ptr->gres_name,
 		      context_ptr->gres_name_colon,
 		      context_ptr->gres_name_colon_len);
+
+	context_ptr->total_cnt += gres_data->gres_cnt_config;
+
 	if ((gres_data->gres_cnt_config == 0) || (fast_schedule > 0))
 		gres_data->gres_cnt_avail = gres_data->gres_cnt_config;
 	else if (gres_data->gres_cnt_found != NO_VAL64)
@@ -2451,6 +2463,26 @@ extern char *gres_get_node_used(List gres_list)
 
 	return gres_used;
 }
+
+extern uint64_t gres_get_system_cnt(char *name)
+{
+	uint64_t count = 0;
+	int i;
+
+	if (!name)
+		return 0;
+
+	slurm_mutex_lock(&gres_context_lock);
+	for (i=0; i < gres_context_cnt; i++) {
+		if (!strcmp(gres_context[i].gres_name, name)) {
+			count = gres_context[i].total_cnt;
+			break;
+		}
+	}
+	slurm_mutex_unlock(&gres_context_lock);
+	return count;
+}
+
 
 static void _job_state_delete(void *gres_data)
 {

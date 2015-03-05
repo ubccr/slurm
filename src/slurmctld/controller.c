@@ -1883,6 +1883,9 @@ extern void set_cluster_assets(void)
 		} else if (!strcmp(asset_rec->type, "mem")) {
 			mem_asset = asset_rec;
 			continue;
+		} else if (!strcmp(asset_rec->type, "gres")) {
+			asset_rec->count = gres_get_system_cnt(asset_rec->name);
+			continue;
 		}
 		/* FIXME: set up the other assets here that aren't specific */
 	}
