@@ -248,12 +248,13 @@ extern int as_mysql_add_assets(mysql_conn_t *mysql_conn,
 	list_iterator_destroy(itr);
 	xfree(user_name);
 
-update_views:
-	if (assoc_mgr_update(mysql_conn->update_list)) {
+	if (list_count(mysql_conn->update_list)) {
 		/* We only want to update the local cache DBD or ctld */
 		assoc_mgr_update(mysql_conn->update_list);
 		list_flush(mysql_conn->update_list);
 	}
+
+update_views:
 
 	/* For some reason we are unable to update the views while
 	   rollup is running so we have to wait for it to finish with
