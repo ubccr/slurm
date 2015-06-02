@@ -86,14 +86,14 @@
 %endif
 
 Name:    slurm
-Version: 14.11.5
+Version: 14.11.7
 Release: 1%{?dist}
 
 Summary: Slurm Workload Manager
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-14.11.5.tar.bz2
+Source: slurm-14.11.7.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: http://slurm.schedmd.com/
 
@@ -412,7 +412,7 @@ Gives the ability for Slurm to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-14.11.5
+%setup -n slurm-14.11.7
 
 %build
 %configure \
@@ -611,7 +611,7 @@ Cflags: -I\${includedir}
 Libs: -L\${libdir} -lslurm
 Description: Slurm API
 Name: slurm
-Version: 14.11.5
+Version: 14.11.7
 EOF
 
 %if %{slurm_with bluegene}
