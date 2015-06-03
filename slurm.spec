@@ -85,7 +85,7 @@
 
 Name:    slurm
 Version: 14.11.5
-Release: 1%{?dist}
+Release: 3%{?dist}
 
 Summary: Slurm Workload Manager
 
