@@ -1545,8 +1545,9 @@ static void _set_options(int argc, char **argv)
 		case LONG_OPT_NTASKSPERNODE:
 			opt.ntasks_per_node = _get_int(optarg,
 						       "ntasks-per-node");
-			setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d",
-				opt.ntasks_per_node);
+			if (opt.ntasks_per_node > 0)
+				setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d",
+					opt.ntasks_per_node);
 			break;
 		case LONG_OPT_NTASKSPERSOCKET:
 			opt.ntasks_per_socket = _get_int(optarg,
@@ -2901,7 +2902,7 @@ static void _usage(void)
 "              [--input file] [--output file] [--error file]\n"
 "              [--time-min=minutes] [--licenses=names] [--clusters=cluster_names]\n"
 "              [--workdir=directory] [--share] [-m dist] [-J jobname]\n"
-"              [--jobid=id] [--verbose] [--gid=group] [--uid=user] [-W sec] \n"
+"              [--jobid=id] [--verbose] [--gid=group] [--uid=user]\n"
 "              [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "              [--account=name] [--dependency=type:jobid] [--comment=name]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */

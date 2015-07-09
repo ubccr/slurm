@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Test that switch windows in uses are not re-used.
@@ -86,7 +86,7 @@ expect {
 }
 log_user 1
 if {$step_delay == 0} {
-	send_user "\nWARNING: not running compatable switch, this test is not applicable\n"
+	send_user "\nWARNING: not running compatible switch, this test is not applicable\n"
 	exit $exit_code
 }
 

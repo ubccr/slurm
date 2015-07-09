@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Test scancel state and name filters (--state and --name options).
@@ -44,7 +44,7 @@ set job_id2     0
 print_header $test_id
 
 if {[test_wiki_sched] == 1} {
-	send_user "\nWARNING: not compatable with sched/wiki (Maui)\n"
+	send_user "\nWARNING: not compatible with sched/wiki (Maui)\n"
 	send_user "         or sched/wiki2 (Moab) schedulers\n"
 	exit $exit_code
 }

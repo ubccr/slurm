@@ -109,6 +109,9 @@
 /* Enables module specific debugging */
 #define _DEBUG 0
 
+static uint16_t _allocate_sc(struct job_record *job_ptr, bitstr_t *core_map,
+			      bitstr_t *part_core_map, const uint32_t node_i,
+			      bool entire_sockets_only);
 static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 			uint32_t min_nodes, uint32_t max_nodes,
 			uint32_t req_nodes, uint32_t cr_node_cnt,
@@ -125,10 +128,6 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *node_map,
 			uint32_t min_nodes, uint32_t max_nodes,
 			uint32_t req_nodes, uint32_t cr_node_cnt,
 			uint16_t *cpu_cnt);
-
-static uint16_t _allocate_sc(struct job_record *job_ptr, bitstr_t *core_map,
-			      bitstr_t *part_core_map, const uint32_t node_i,
-			      bool entire_sockets_only);
 
 /* _allocate_sockets - Given the job requirements, determine which sockets
  *                     from the given node can be allocated (if any) to this
@@ -499,6 +498,11 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 	gres_plugin_job_core_filter(job_ptr->gres_list, gres_list, test_only,
 				    core_map, core_start_bit, core_end_bit,
 				    node_ptr->name);
+	gres_cores = gres_plugin_job_test(job_ptr->gres_list,
+					  gres_list, test_only,
+					  core_map, core_start_bit,
+					  core_end_bit, job_ptr->job_id,
+					  node_ptr->name);
 
 	if (cr_type & CR_CORE) {
 		cpus = _allocate_cores(job_ptr, core_map, part_core_map,
@@ -544,11 +548,6 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 		}
 	}
 
-	gres_cores = gres_plugin_job_test(job_ptr->gres_list,
-					  gres_list, test_only,
-					  core_map, core_start_bit,
-					  core_end_bit, job_ptr->job_id,
-					  node_ptr->name);
 	gres_cpus = gres_cores;
 	if (gres_cpus != NO_VAL)
 		gres_cpus *= cpus_per_core;

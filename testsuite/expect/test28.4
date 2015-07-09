@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Validates that scontrol update will update job using
@@ -112,7 +112,7 @@ expect {
 		send_user "\nFAILURE: sbatch did not submit jobs\n"
 		set exit_code 1
 	}
-	timout {
+	timeout {
 		send_user "\nFAILURE: sbatch not responding\n"
 		set exit_code 1
 	}

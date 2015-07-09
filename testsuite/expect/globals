@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Establish global state information for SLURM test suite
 #
@@ -180,7 +180,6 @@ cset bin_sleep  "sleep"
 cset bin_sort   "sort"
 cset bin_touch  "touch"
 cset bin_uname	"uname"
-cset bin_usleep "usleep"
 cset bin_wc	"wc"
 cset bin_printenv "printenv"
 
@@ -193,7 +192,7 @@ cset bin_printenv "printenv"
 cset max_job_delay 120
 
 #
-# Files must be propogated between nodes within this number of seconds.
+# Files must be propagated between nodes within this number of seconds.
 # The delay may be due to NFS.
 #
 cset max_file_delay 90
@@ -211,7 +210,7 @@ cset max_stress_tasks 4
 #
 # The error message that the "sleep" command prints when we run "sleep aaa".
 #
-cset sleep_error_message "(invalid time interval)|(bad character in argument)"
+cset sleep_error_message "(invalid time interval)|(bad character in argument)|(usage: sleep seconds)"
 
 # Other common variables
 set alpha                "\[a-zA-Z\]+"
@@ -423,7 +422,7 @@ proc get_my_gid {  } {
 ################################################################
 
 proc kill_salloc {  } {
-	global bin_id bin_pkill bin_sleep bin_usleep number
+	global bin_id bin_pkill bin_sleep number
 
 	spawn $bin_id -u
 	expect {
@@ -459,7 +458,7 @@ proc kill_salloc {  } {
 ################################################################
 
 proc kill_srun {  } {
-	global bin_id bin_pkill bin_sleep bin_usleep number
+	global bin_id bin_pkill bin_sleep number
 
 	spawn $bin_id -u
 	expect {
@@ -784,7 +783,7 @@ proc wait_for_all_jobs { job_name incr_sleep } {
 #
 # Proc: test_fast_schedule_2
 #
-# Purpose: Determine if we are runnning FastSchedule=2 usually meaning we are pretending we have more resources than reality.
+# Purpose: Determine if we are running FastSchedule=2 usually meaning we are pretending we have more resources than reality.
 # This is based upon
 # the value of FastSchedule in the slurm.conf.
 #
@@ -1469,7 +1468,7 @@ proc test_front_end { } {
 #
 # Proc: test_multiple_slurmd
 #
-# Returns 1 if running multple slurmd per node
+# Returns 1 if running multiple slurmd per node
 #
 ################################################################
 
@@ -2746,7 +2745,7 @@ proc get_node_cnt { } {
 proc get_node_cnt_in_part { partition } {
 	global scontrol number
 
-#	log_user 0
+	log_user 0
 	set node_cnt 0
 	set scon_pid [spawn -noecho $scontrol show partition $partition]
 	expect {
@@ -2763,7 +2762,7 @@ proc get_node_cnt_in_part { partition } {
 		eof {
 		}
 	}
-#	log_user 1
+	log_user 1
 
 	return $node_cnt
 }
@@ -3340,4 +3339,42 @@ proc get_srun_ports { } {
 	log_user 1
 
 	return $ports
+}
+
+#####################################################################
+#
+# Proc: available_nodes_hostnames
+#
+# Purpose: Get all idle nodes in the system
+#
+# Returns: idle nodes
+#
+#####################################################################
+
+proc available_nodes_hostnames { partition } {
+
+	global sinfo alpha_numeric_nodelist exit_code
+
+	log_user 0
+	set idle_nodelist ""
+	if {[string compare $partition ""] == 0} {
+		spawn $sinfo -tidle -h -o%N
+	} else {
+		spawn $sinfo -tidle -h -o%N -p$partition
+	}
+	expect {
+		-re "($alpha_numeric_nodelist)" {
+			set idle_nodelist $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sinfo is not responding\n"
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	return $idle_nodelist
 }

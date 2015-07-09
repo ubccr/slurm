@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of BLUEGENE SLURM functionality
 #          Test creation of all blocks 1 midplane and smaller.
@@ -172,12 +172,12 @@ proc run_bgp_test { } {
 print_header $test_id
 
 if {[test_bluegene] == 0} {
-	send_user "\nWARNING: This test is only compatable with bluegene systems\n"
+	send_user "\nWARNING: This test is only compatible with bluegene systems\n"
 	exit $exit_code
 }
 
 if {[string compare [get_bluegene_layout] Dynamic]} {
-	send_user "\nWARNING: This test is only compatable with dynamic bluegene systems\n"
+	send_user "\nWARNING: This test is only compatible with dynamic bluegene systems\n"
 	exit $exit_code
 }
 

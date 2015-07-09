@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Confirm that sgather help option works (--help option).
@@ -52,7 +52,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: sgather is not resonponding\n"
+		send_user "\nFAILURE: sgather is not responding\n"
 		set exit_code 1
 	}
 	eof {

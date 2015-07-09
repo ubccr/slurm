@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Bluegene/Q only: Test to make sure if a nodeboard goes unavailable
@@ -160,7 +160,7 @@ if {$a_size>2} {
 	set geom "1x1x1x2"
 	set z_flag 1
 } else {
-	send_user "\nFAILURE: not enough dimenstions\n"
+	send_user "\nFAILURE: not enough dimentions\n"
 	exit 1
 }
 

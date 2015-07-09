@@ -1,6 +1,66 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 14.11.8
+==========================
+ -- Eliminate need for user to set user_id on job_update calls.
+ -- Correct list of unavailable nodes reported in a job's "reason" field when
+    that job can not start.
+ -- Map job --mem-per-cpu=0 to --mem=0.
+ -- Fix squeue -o %m and %d unit conversion to Megabytes.
+ -- Fix issue with incorrect time calculation in the priority plugin when
+    a job runs past it's time limit.
+ -- Prevent users from setting job's partition to an invalid partition.
+ -- Fix sreport core dump when requesting
+    'job SizesByAccount grouping=individual'.
+ -- select/linear: Correct count of CPUs allocated to job on system with
+    hyperthreads.
+ -- Fix race condition where last array task might not get updated in the db.
+ -- CRAY - Remove libpmi from rpm install
+ -- Fix squeue -o %X output to correctly handle NO_VAL and suffix.
+ -- When deleting a job from the system set the job_id to 0 to avoid memory
+    corruption if thread uses the pointer basing validity off the id.
+ -- Fix issue where sbatch would set ntasks-per-node to 0 making any srun
+    afterward cause a divide by zero error.
+ -- switch/cray: Refine logic to set PMI_CRAY_NO_SMP_ENV environment variable.
+ -- When sacctmgr loads archives with version less than 14.11 set the array
+    task id to NO_VAL, so sacct can display the job ids correctly.
+ -- When using memory cgroup if a task uses more memory than requested
+    the failures are logged into memory.failcnt count file by cgroup
+    and the user is notified by slurmstepd about it.
+ -- Fix scheduling inconsistency with GRES bound to specific CPUs.
+ -- If user belongs to a group which has split entries in /etc/group
+    search for its username in all groups.
+ -- Do not consider nodes explicitly powered up as DOWN with reason of "Node
+    unexpected rebooted".
+ -- Use correct slurmd spooldir when creating cpu-frequency locks.
+ -- Note that TICKET_BASED fairshare will be deprecated in the future. Consider
+    using the FAIR_TREE algorithm instead.
+ -- Set job's reason to BadConstaints when job can't run on any node.
+ -- Prevent abort on update of reservation with no nodes (licenses only).
+ -- Prevent slurmctld from dumping core ifjob_resrcs is missing in the
+    job data structure.
+ -- Fix squeue to print array task ids according to man page when
+    SLURM_BITSTR_LEN is defined in the environment.
+ -- In squeue sort jobs based on array job ID if available.
+ -- Fix the calculation of job energy by not including the NO_VAL values.
+ -- Advanced reservation fixes: enable update of bluegene reservation, avoid
+    abort on multi-core reservations.
+ -- Set the totalview_stepid to the value of the job step instead of NO_VAL.
+ -- Fix slurmdbd core dump if the daemon does not have connection with
+    the database.
+ -- Display error message when attempting to modify priority of a held job.
+ -- Backfill scheduler: The configured backfill_interval value (default 30
+    seconds) is now interpretted as a maximum run time for the backfill
+    scheduler. Once reached, the scheduler will build a new job queue and
+    start over, even if not all jobs have been tested.
+ -- Backfill scheduler now considers OverTimeLimit and KillWait configuration
+    parameters to estimate when running jobs will exit.
+ -- Correct task layout with CR_Pack_Node option and more than 1 CPU per task.
+ -- Fix the scontrol man page describing the release argument.
+ -- When job QOS is modified, do so before attempting to change partition in
+    order to validate the partition's Allow/DenyQOS parameter.
+
 * Changes in Slurm 14.11.7
 ==========================
  -- Initialize some variables used with the srun --no-alloc option that may
@@ -48,7 +108,6 @@ documents those changes that are of interest to users and administrators.
  -- Make srun wait KillWait time when a task is cancelled.
  -- switch/cray: Revert logic added to 14.11.6 that set "PMI_CRAY_NO_SMP_ENV=1"
     if CR_PACK_NODES is configured.
- -- Prevent users from setting job's partition to an invalid partition.
 
 * Changes in Slurm 14.11.6
 ==========================

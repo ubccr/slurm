@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Validates the rpm build is accepting the prefix and that
@@ -78,7 +78,7 @@ if {[test_cray] || [test_alps]} {
 
 set timeout 1000
 exec $bin_rm -fr /tmp/slurm $tar_name /tmp/built_rpms
-spawn $bin_cp -L -r -v $src_dir /tmp/slurm
+spawn $bin_cp -L -R -v $src_dir /tmp/slurm
 expect {
 	timeout {
 		send_user "\nFAILURE: $src_dir was not copied\n"
