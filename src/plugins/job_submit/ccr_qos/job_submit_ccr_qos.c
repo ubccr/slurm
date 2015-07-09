@@ -16,7 +16,7 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 
 	if(job_desc->partition){
 		if( strcmp( job_desc->partition, "supporters") == 0 ){
-			info("Job: %d was submitted to supporters, moving to general compute and setting qos\n", job_desc->job_id);
+			info("User: %u submitted a job to supporters, moving to general compute and setting qos\n", submit_uid);
 			
 			// Delete the old partition and add the new one
 			xfree(job_desc->partition);
@@ -24,13 +24,13 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 
 			// Remove any existing QOS, shouldn't be any, but just to be safe
 			if (job_desc->qos){
-				info("Clearing existing QOS (%s) from job: %d", job_desc->qos, job_desc->job_id);
+				info("Clearing existing QOS (%s)", job_desc->qos);
                 		xfree(job_desc->qos);
 			}
 
 			// Add the new qos
 			xstrcat(job_desc->qos, "supporters");
-			info("Job: %d now has qos: %s\n", job_desc->job_id, job_desc->qos);
+			info("Job now has qos: %s\n", job_desc->qos);
 		}
 	}
 
