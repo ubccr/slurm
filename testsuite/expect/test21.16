@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          sacctmgr add multiple users
@@ -179,7 +179,7 @@ incr exit_code [remove_user "" "" "$tu1,$tu2,$tu3"]
 #
 # From here we test all the limits associated with multiple users
 #
-incr exit_code [add_qos "$dqos1"]
+incr exit_code [add_qos "$dqos1" ""]
 if { $exit_code } {
 	remove_qos "$dqos1"
 	exit $exit_code

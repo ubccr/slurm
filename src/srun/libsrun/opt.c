@@ -1778,7 +1778,8 @@ static void _opt_args(int argc, char **argv)
 
 #endif
 	/* make sure we have allocated things correctly */
-	xassert((command_pos + command_args) <= opt.argc);
+	if (command_args)
+		xassert((command_pos + command_args) <= opt.argc);
 
 	for (i = command_pos; i < opt.argc; i++) {
 		if (!rest || !rest[i-command_pos])
@@ -1995,6 +1996,12 @@ static bool _opt_verify(void)
 #endif
 		verified = false;
 	}
+
+	if (!opt.ntasks_per_node) {
+		error("ntasks-per-node is 0");
+		verified = false;
+	}
+
 
 	/* bound max_threads/cores from ntasks_cores/sockets */
 	if (opt.ntasks_per_core > 0) {

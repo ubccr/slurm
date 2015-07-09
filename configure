@@ -777,6 +777,7 @@ HAVE_NUMA_FALSE
 HAVE_NUMA_TRUE
 NUMA_LIBS
 DL_LIBS
+SUCMD
 WITH_GNU_LD_FALSE
 WITH_GNU_LD_TRUE
 WITH_CXX_FALSE
@@ -1691,10 +1692,10 @@ Optional Features:
                           Run SLURM in an emulated Cray mode
   --enable-native-cray    Run SLURM natively on a Cray without ALPS
   --enable-cray-network   Run SLURM on a non-Cray system with a Cray network
-  --enable-developer      enable developer options (-Werror - also sets
-                          --enable-debug as well)
-  --enable-debug          enable debugging code for development (automatically
-                          set if --enable-developer is used)
+  --enable-developer      enable developer options (asserts, -Werror - also
+                          sets --enable-debug as well)
+  --disable-debug         disable debugging symbols and compile with
+                          optimizations
   --enable-memory-leak-debug
                           enable memory leak debugging code for development
   --enable-front-end      enable slurmd operation on a front-end
@@ -18017,6 +18018,52 @@ else
 fi
 
 
+# Extract the first word of "su", so it can be a program name with args.
+set dummy su; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_SUCMD+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $SUCMD in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_SUCMD="$SUCMD" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_SUCMD="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  test -z "$ac_cv_path_SUCMD" && ac_cv_path_SUCMD="/bin/su"
+  ;;
+esac
+fi
+SUCMD=$ac_cv_path_SUCMD
+if test -n "$SUCMD"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $SUCMD" >&5
+$as_echo "$SUCMD" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+
+cat >>confdefs.h <<_ACEOF
+#define SUCMD "$SUCMD"
+_ACEOF
+
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for library containing socket" >&5
 $as_echo_n "checking for library containing socket... " >&6; }
@@ -18252,7 +18299,7 @@ for ac_header in mcheck.h values.h socket.h sys/socket.h  \
 		 pty.h utmp.h \
 		 sys/syslog.h linux/sched.h \
 		 kstat.h paths.h limits.h sys/statfs.h sys/ptrace.h \
-		 sys/termios.h float.h
+		 sys/termios.h float.h sys/statvfs.h
 
 do :
   as_ac_Header=`$as_echo "ac_cv_header_$ac_header" | $as_tr_sh`
@@ -19515,6 +19562,8 @@ for ac_func in \
    get_current_dir_name \
    faccessat \
    eaccess \
+   statvfs \
+   statfs \
 
 do :
   as_ac_var=`$as_echo "ac_cv_func_$ac_func" | $as_tr_sh`
@@ -20969,6 +21018,46 @@ if test "x$ac_cv_lib_curses_initscr" = xyes; then :
   ac_have_curses=yes
 fi
 
+   { $as_echo "$as_me:${as_lineno-$LINENO}: checking for tgetent in -ltinfo" >&5
+$as_echo_n "checking for tgetent in -ltinfo... " >&6; }
+if ${ac_cv_lib_tinfo_tgetent+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-ltinfo  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char tgetent ();
+int
+main ()
+{
+return tgetent ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_tinfo_tgetent=yes
+else
+  ac_cv_lib_tinfo_tgetent=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_tinfo_tgetent" >&5
+$as_echo "$ac_cv_lib_tinfo_tgetent" >&6; }
+if test "x$ac_cv_lib_tinfo_tgetent" = xyes; then :
+  ac_have_tinfo=yes
+fi
+
 
 
    if test "$ac_have_ncurses" = "yes"; then
@@ -20979,6 +21068,9 @@ fi
       NCURSES="-lcurses"
       NCURSES_HEADER="curses.h"
       ac_have_some_curses="yes"
+   fi
+   if test "$ac_have_tinfo" = "yes"; then
+     NCURSES="$NCURSES -ltinfo"
    fi
 
    if test "$ac_have_some_curses" = "yes"; then
@@ -22550,10 +22642,14 @@ $as_echo "doh!" >&6; }
 fi
 
   if test "$x_ac_developer" = yes; then
-     test "$GCC" = yes && CFLAGS="$CFLAGS -Werror"
-     test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Werror"
-     # automatically turn on --enable-debug if being a developer
-     x_ac_debug=yes
+    test "$GCC" = yes && CFLAGS="$CFLAGS -Werror"
+    test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Werror"
+    # automatically turn on --enable-debug if being a developer
+    x_ac_debug=yes
+  else
+
+$as_echo "#define NDEBUG 1" >>confdefs.h
+
   fi
   { $as_echo "$as_me:${as_lineno-$LINENO}: result: ${x_ac_developer=no}" >&5
 $as_echo "${x_ac_developer=no}" >&6; }
@@ -22570,6 +22666,8 @@ $as_echo "doh!" >&6; }
              as_fn_error $? "bad value \"$enableval\" for --enable-debug" "$LINENO" 5 ;;
       esac
 
+else
+  x_ac_debug=yes
 
 fi
 
@@ -22578,10 +22676,6 @@ fi
     # is the only one that is looked at.
     test "$GCC" = yes && CFLAGS="$CFLAGS -Wall -g -O0 -fno-strict-aliasing"
     test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Wall -g -O0 -fno-strict-aliasing"
-  else
-
-$as_echo "#define NDEBUG 1" >>confdefs.h
-
   fi
   { $as_echo "$as_me:${as_lineno-$LINENO}: result: ${x_ac_debug=no}" >&5
 $as_echo "${x_ac_debug=no}" >&6; }

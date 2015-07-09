@@ -1,4 +1,4 @@
-.TH "cray.conf" "5" "December 2013" "cray.conf 2.6" "Slurm configuration file"
+.TH "cray.conf" "5" "Slurm Configuration File" "April 2015" "Slurm Configuration File"
 
 .SH "NAME"
 cray.conf \- Slurm configuration file for the Cray\-specific information
@@ -17,7 +17,7 @@ Parameter names are case insensitive.
 Any text following a "#" in the configuration file is treated
 as a comment through the end of that line.
 Changes to the configuration file take effect upon restart of
-SLURM daemons, daemon receipt of the SIGHUP signal, or execution
+Slurm daemons, daemon receipt of the SIGHUP signal, or execution
 of the command "scontrol reconfigure" unless otherwise noted.
 .LP
 The configuration parameters available include:
@@ -54,6 +54,12 @@ Fully qualified pathname to the apkill command.
 The default value is \fI/usr/bin/apkill\fR.
 
 .TP
+\fBNoAPIDSignalOnKill\fR=Yes
+When set to yes this will make it so the slurmctld will not signal the apid's
+in a batch job.  Instead it relies on the rpc coming from the slurmctld to
+kill the job to end things correctly.
+
+.TP
 \fBSDBdb\fR=<dbname>
 Name of the ALPS database.
 The default value is \fIXTAdmin\fR.
@@ -82,11 +88,10 @@ The default value is NULL, which will load the user name from the \fImy.cnf\fR f
 \fBSubAllocate\fR=Yes
 Only allocate requested node resources instead of the whole node.  In both
 cases the user will be charged for the entire node.
-This is the Slurm <=2.5 behavior.
 
 .TP
 \fBSyncTimeout\fR=<seconds>
-SLURM does not normally schedule jobs while its job or node state information
+Slurm does not normally schedule jobs while its job or node state information
 is out of synchronization with that of ALPS. This parameter specifies a maximum
 time to defer job scheduling while waiting for consistent state.  The
 inconsistent state might be caused by a variety of hardware or software
@@ -113,15 +118,15 @@ SDBdb=XT5istanbul
 .SH "COPYING"
 Copyright (C) 2011-2013 SchedMD LLC.
 .LP
-This file is part of SLURM, a resource management program.
+This file is part of Slurm, a resource management program.
 For details, see <http://slurm.schedmd.com/>.
 .LP
-SLURM is free software; you can redistribute it and/or modify it under
+Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
 Software Foundation; either version 2 of the License, or (at your option)
 any later version.
 .LP
-SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 details.

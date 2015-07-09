@@ -125,6 +125,7 @@ List   job_list = NULL;		/* job_record list */
 time_t last_job_update;		/* time of last update to job records */
 
 /* Local variables */
+static int      bf_min_age_reserve = 0;
 static uint32_t highest_prio = 0;
 static uint32_t lowest_prio  = TOP_PRIORITY;
 static int      hash_table_size = 0;
@@ -1845,7 +1846,7 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 	job_ptr->direct_set_prio = direct_set_prio;
 	job_ptr->db_index     = db_index;
 	job_ptr->derived_ec   = derived_ec;
-	job_ptr->end_time     = end_time;
+	job_ptr->end_time_exp = job_ptr->end_time = end_time;
 	job_ptr->exit_code    = exit_code;
 	job_ptr->group_id     = group_id;
 	job_ptr->job_state    = job_state;
@@ -3707,7 +3708,7 @@ static int _select_nodes_parts(struct job_record *job_ptr, bool test_only,
 			if (job_limits_check(&job_ptr, false) != WAIT_NO_REASON)
 				continue;
 			rc = select_nodes(job_ptr, test_only,
-					  select_node_bitmap, err_msg);
+					  select_node_bitmap, NULL, err_msg);
 			if ((rc != ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE) &&
 			    (rc != ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE) &&
 			    (rc != ESLURM_RESERVATION_BUSY) &&
@@ -3722,7 +3723,7 @@ static int _select_nodes_parts(struct job_record *job_ptr, bool test_only,
 		if (job_limits_check(&job_ptr, false) != WAIT_NO_REASON)
 			test_only = true;
 		rc = select_nodes(job_ptr, test_only, select_node_bitmap,
-				  err_msg);
+				  NULL, err_msg);
 	}
 
 	return rc;
@@ -3755,7 +3756,9 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 			struct job_record **job_pptr, char **err_msg,
 			uint16_t protocol_version)
 {
-	static int defer_sched = -1;
+	static time_t sched_update = 0;
+	static int defer_sched = 0;
+	char *sched_params, *tmp_ptr;
 	int error_code, i;
 	bool no_alloc, top_prio, test_only, too_fragmented, independent;
 	struct job_record *job_ptr;
@@ -3821,12 +3824,21 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 	else
 		too_fragmented = false;
 
-	if (defer_sched == -1) {
-		char *sched_params = slurm_get_sched_params();
+	if (sched_update != slurmctld_conf.last_update) {
+		sched_update = slurmctld_conf.last_update;
+		sched_params = slurm_get_sched_params();
 		if (sched_params && strstr(sched_params, "defer"))
 			defer_sched = 1;
 		else
 			defer_sched = 0;
+		if (sched_params &&
+		    (tmp_ptr = strstr(sched_params, "bf_min_age_reserve="))) {
+			bf_min_age_reserve = atoi(tmp_ptr + 19);
+			if (bf_min_age_reserve < 0)
+				bf_min_age_reserve = 0;
+		} else {
+			bf_min_age_reserve = 0;
+		}
 		xfree(sched_params);
 	}
 	if (defer_sched == 1)
@@ -3837,6 +3849,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 	else
 		top_prio = true;	/* don't bother testing,
 					 * it is not runable anyway */
+
 	if (immediate && (too_fragmented || (!top_prio) || (!independent))) {
 		job_ptr->job_state  = JOB_FAILED;
 		job_ptr->exit_code  = 1;
@@ -4008,6 +4021,7 @@ static int _job_signal(struct job_record *job_ptr, uint16_t signal,
 
 	/* let node select plugin do any state-dependent signalling actions */
 	select_g_job_signal(job_ptr, signal);
+	last_job_update = now;
 
 	/* save user ID of the one who requested the job be cancelled */
 	if (signal == SIGKILL)
@@ -4025,7 +4039,6 @@ static int _job_signal(struct job_record *job_ptr, uint16_t signal,
 	}
 
 	if (IS_JOB_PENDING(job_ptr) && (signal == SIGKILL)) {
-		last_job_update		= now;
 		job_ptr->job_state	= JOB_CANCELLED;
 		job_ptr->start_time	= now;
 		job_ptr->end_time	= now;
@@ -4192,6 +4205,10 @@ extern int job_str_signal(char *job_id_str, uint16_t signal, uint16_t flags,
 		info("%s: 1 invalid job id %s", __func__, job_id_str);
 		return ESLURM_INVALID_JOB_ID;
 	}
+	if ((end_ptr[0] == '_') && (end_ptr[1] == '*'))
+		end_ptr += 2;	/* Defaults to full job array */
+
+	last_job_update = now;
 	job_id = (uint32_t) long_id;
 	if (end_ptr[0] == '\0') {	/* Single job (or full job array) */
 		int jobs_done = 0, jobs_signalled = 0;
@@ -4273,7 +4290,7 @@ extern int job_str_signal(char *job_id_str, uint16_t signal, uint16_t flags,
 		goto endit;
 	}
 
-	/* Find some job record and validate the user cancelling the job */
+	/* Find some job record and validate the user signalling the job */
 	job_ptr = find_job_record(job_id);
 	if (job_ptr == NULL) {
 		job_ptr = job_array_hash_j[JOB_HASH_INX(job_id)];
@@ -4804,13 +4821,13 @@ static int _get_job_parts(job_desc_msg_t * job_desc,
 				part_ptr = list_peek(part_ptr_list);
 		}
 		if (part_ptr == NULL) {
-			info("_valid_job_part: invalid partition specified: %s",
-			     job_desc->partition);
+			info("%s: invalid partition specified: %s",
+			     __func__, job_desc->partition);
 			return ESLURM_INVALID_PARTITION_NAME;
 		}
 	} else {
 		if (default_part_loc == NULL) {
-			error("_valid_job_part: default partition not set");
+			error("%s: default partition not set", __func__);
 			return ESLURM_DEFAULT_PARTITION_NOT_SET;
 		}
 		part_ptr = default_part_loc;
@@ -5639,13 +5656,21 @@ static bool _parse_array_tok(char *tok, bitstr_t *array_bitmap, uint32_t max)
 	char *end_ptr = NULL;
 	int i, first, last, step = 1;
 
+	if (tok[0] == '[')	/* Strip leading "[" */
+		tok++;
 	first = strtol(tok, &end_ptr, 10);
+	if (end_ptr[0] == ']')	/* Strip trailing "]" */
+		end_ptr++;
 	if (first < 0)
 		return false;
 	if (end_ptr[0] == '-') {
 		last = strtol(end_ptr + 1, &end_ptr, 10);
+		if (end_ptr[0] == ']')	/* Strip trailing "]" */
+			end_ptr++;
 		if (end_ptr[0] == ':') {
 			step = strtol(end_ptr + 1, &end_ptr, 10);
+			if (end_ptr[0] == ']')	/* Strip trailing "]" */
+				end_ptr++;
 			if ((end_ptr[0] != '\0') && (end_ptr[0] != '%'))
 				return false;
 			if (step <= 0)
@@ -7015,6 +7040,10 @@ static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate,
 		}
 	} else if (!_validate_min_mem_partition(job_desc_msg, part_ptr, part_list))
 		return ESLURM_INVALID_TASK_MEMORY;
+	if (job_desc_msg->pn_min_memory == MEM_PER_CPU) {
+		/* Map --mem-per-cpu=0 to --mem=0 for simpler logic */
+		job_desc_msg->pn_min_memory = 0;
+	}
 
 	/* Validate a job's accounting frequency, if specified */
 	if (acct_gather_check_acct_freq_task(
@@ -7171,6 +7200,7 @@ static void _list_delete_job(void *job_entry)
 	} else {
 		job_count -= job_array_size;
 	}
+	job_ptr->job_id = 0;
 	xfree(job_ptr);
 }
 
@@ -7202,7 +7232,7 @@ static int _list_find_job_old(void *job_entry, void *key)
 	struct job_record *job_ptr = (struct job_record *)job_entry;
 	uint16_t cleaning = 0;
 
-	if (IS_JOB_COMPLETING(job_ptr)) {
+	if (IS_JOB_COMPLETING(job_ptr) && !LOTS_OF_AGENTS) {
 		kill_age = now - (slurmctld_conf.kill_wait +
 				  2 * slurm_get_msg_timeout());
 		if (job_ptr->time_last_active < kill_age) {
@@ -8536,6 +8566,8 @@ extern void sync_job_priorities(void)
 static bool _top_priority(struct job_record *job_ptr)
 {
 	struct job_details *detail_ptr = job_ptr->details;
+	time_t now = time(NULL);
+	int pend_time;
 	bool top;
 
 #ifdef HAVE_BG
@@ -8575,6 +8607,15 @@ static bool _top_priority(struct job_record *job_ptr)
 				/* Job is hung in pending & completing state,
 				 * indicative of job requeue */
 				continue;
+			}
+
+			if (bf_min_age_reserve) {
+				if (job_ptr2->details->begin_time == 0)
+					continue;
+				pend_time = difftime(now, job_ptr2->
+						     details->begin_time);
+				if (pend_time < bf_min_age_reserve)
+					continue;
 			}
 			if (!acct_policy_job_runnable_state(job_ptr2) ||
 			    !misc_policy_job_runnable_state(job_ptr2) ||
@@ -8693,6 +8734,11 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 #endif
 	memset(&acct_policy_limit_set, 0, sizeof(acct_policy_limit_set_t));
 
+	if (job_specs->user_id == NO_VAL) {
+		/* Used by job_submit/lua to find default partition and
+		 * access control logic below to validate partition change */
+		job_specs->user_id = job_ptr->user_id;
+	}
 	error_code = job_submit_plugin_modify(job_specs, job_ptr,
 					      (uint32_t) uid);
 	if (error_code != SLURM_SUCCESS)
@@ -8880,6 +8926,50 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 		     job_ptr->wait4switch, job_ptr->job_id);
 	}
 
+	/* NOTE: Update QOS before updating partition in order to enforce
+	 * AllowQOS and DenyQOS partition configuration options */
+	if (job_specs->qos) {
+		if (!authorized && !IS_JOB_PENDING(job_ptr))
+			error_code = ESLURM_JOB_NOT_PENDING;
+		else {
+			slurmdb_qos_rec_t qos_rec;
+			slurmdb_qos_rec_t *new_qos_ptr;
+			char *resv_name;
+
+			if (job_specs->reservation
+			    && job_specs->reservation[0] != '\0')
+				resv_name = job_specs->reservation;
+			else
+				resv_name = job_ptr->resv_name;
+
+			memset(&qos_rec, 0, sizeof(slurmdb_qos_rec_t));
+			qos_rec.name = job_specs->qos;
+
+			new_qos_ptr = _determine_and_validate_qos(
+				resv_name, job_ptr->assoc_ptr,
+				authorized, &qos_rec, &error_code);
+			if (error_code == SLURM_SUCCESS) {
+				info("%s: setting QOS to %s for job_id %u",
+				     __func__, job_specs->qos, job_ptr->job_id);
+				if (job_ptr->qos_id != qos_rec.id) {
+					job_ptr->qos_id = qos_rec.id;
+					job_ptr->qos_ptr = new_qos_ptr;
+					if (authorized)
+						job_ptr->limit_set_qos =
+							ADMIN_SET_LIMIT;
+					else
+						job_ptr->limit_set_qos = 0;
+					update_accounting = true;
+				} else {
+					debug("sched: %s: new QOS identical to old QOS %u",
+					      __func__, job_ptr->job_id);
+				}
+			}
+		}
+	}
+	if (error_code != SLURM_SUCCESS)
+		goto fini;
+
 	if (job_specs->partition
 	    && !xstrcmp(job_specs->partition, job_ptr->partition)) {
 		debug("sched: update_job: new partition identical to "
@@ -8965,17 +9055,21 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 				&tmp_part_ptr, part_ptr_list,
 				job_ptr->assoc_ptr, job_ptr->qos_ptr);
 
-			xfree(job_ptr->partition);
-			job_ptr->partition = xstrdup(job_specs->partition);
-			job_ptr->part_ptr = tmp_part_ptr;
-			xfree(job_ptr->priority_array);	/* Rebuilt in plugin */
-			FREE_NULL_LIST(job_ptr->part_ptr_list);
-			job_ptr->part_ptr_list = part_ptr_list;
-			part_ptr_list = NULL;	/* nothing to free */
-			info("update_job: setting partition to %s for "
-			     "job_id %u", job_specs->partition,
-			     job_ptr->job_id);
-			update_accounting = true;
+			if (!error_code) {
+				xfree(job_ptr->partition);
+				job_ptr->partition =
+					xstrdup(job_specs->partition);
+				job_ptr->part_ptr = tmp_part_ptr;
+				xfree(job_ptr->priority_array);	/* Rebuilt in
+								   plugin */
+				FREE_NULL_LIST(job_ptr->part_ptr_list);
+				job_ptr->part_ptr_list = part_ptr_list;
+				part_ptr_list = NULL;	/* nothing to free */
+				info("update_job: setting partition to %s for "
+				     "job_id %u", job_specs->partition,
+				     job_ptr->job_id);
+				update_accounting = true;
+			}
 		}
 		FREE_NULL_LIST(part_ptr_list);	/* error clean-up */
 
@@ -9047,50 +9141,6 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 		}
 	}
 
-	if (error_code != SLURM_SUCCESS)
-		goto fini;
-
-	if (job_specs->qos) {
-
-		if (!authorized && !IS_JOB_PENDING(job_ptr))
-			error_code = ESLURM_JOB_NOT_PENDING;
-		else {
-			slurmdb_qos_rec_t qos_rec;
-			slurmdb_qos_rec_t *new_qos_ptr;
-			char *resv_name;
-
-			if (job_specs->reservation
-			    && job_specs->reservation[0] != '\0')
-				resv_name = job_specs->reservation;
-			else
-				resv_name = job_ptr->resv_name;
-
-			memset(&qos_rec, 0, sizeof(slurmdb_qos_rec_t));
-			qos_rec.name = job_specs->qos;
-
-			new_qos_ptr = _determine_and_validate_qos(
-				resv_name, job_ptr->assoc_ptr,
-				authorized, &qos_rec, &error_code);
-			if (error_code == SLURM_SUCCESS) {
-				info("update_job: setting qos to %s "
-				     "for job_id %u",
-				     job_specs->qos, job_ptr->job_id);
-				if (job_ptr->qos_id != qos_rec.id) {
-					job_ptr->qos_id = qos_rec.id;
-					job_ptr->qos_ptr = new_qos_ptr;
-					if (authorized)
-						job_ptr->limit_set_qos =
-							ADMIN_SET_LIMIT;
-					else
-						job_ptr->limit_set_qos = 0;
-					update_accounting = true;
-				} else
-					debug("sched: update_job: new qos "
-					      "identical to old qos %u",
-					      job_ptr->job_id);
-			}
-		}
-	}
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
 
@@ -9221,19 +9271,14 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 
 	if ((job_specs->pn_min_cpus != (uint16_t) NO_VAL) &&
 	    (job_specs->pn_min_cpus != 0)) {
-		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
+
+		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL)) {
 			error_code = ESLURM_JOB_NOT_PENDING;
-		else if (authorized
-			 || (detail_ptr->pn_min_cpus
-			     > job_specs->pn_min_cpus)) {
+		}else {
 			detail_ptr->pn_min_cpus = job_specs->pn_min_cpus;
 			info("update_job: setting pn_min_cpus to %u for "
 			     "job_id %u", job_specs->pn_min_cpus,
 			     job_ptr->job_id);
-		} else {
-			error("Attempt to increase pn_min_cpus for job %u",
-			      job_ptr->job_id);
-			error_code = ESLURM_ACCESS_DENIED;
 		}
 	}
 	if (error_code != SLURM_SUCCESS)
@@ -9379,6 +9424,7 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 				    (list_is_empty(job_ptr->step_list) == 0)) {
 					_xmit_new_end_time(job_ptr);
 				}
+				job_ptr->end_time_exp = job_ptr->end_time;
 			}
 			info("sched: update_job: setting time_limit to %u for "
 			     "job_id %u", job_specs->time_limit,
@@ -9547,6 +9593,7 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 			   (job_specs->priority != INFINITE)) {
 			info("ignore priority reset request on held job %u",
 			     job_ptr->job_id);
+			error_code = ESLURM_JOB_HELD;
 		} else if (authorized ||
 			 (job_ptr->priority > job_specs->priority)) {
 			if (job_specs->priority != 0)
@@ -9555,7 +9602,12 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 				job_ptr->direct_set_prio = 0;
 				set_job_prio(job_ptr);
 			} else {
-				job_ptr->direct_set_prio = 1;
+				if (admin || (job_specs->priority == 0)) {
+					/* Only administrator can make
+					 * persistent change to a job's
+					 * priority, except holding a job */
+					job_ptr->direct_set_prio = 1;
+				}
 				job_ptr->priority = job_specs->priority;
 			}
 			info("sched: update_job: setting priority to %u for "
@@ -9614,14 +9666,18 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 		goto fini;
 
 	if (job_specs->pn_min_memory != NO_VAL) {
-		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
+		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL)) {
 			error_code = ESLURM_JOB_NOT_PENDING;
-		else if (job_specs->pn_min_memory
-			 == detail_ptr->pn_min_memory)
+		} else if (job_specs->pn_min_memory
+			   == detail_ptr->pn_min_memory) {
 			debug("sched: update_job: new memory limit identical "
 			      "to old limit for job %u", job_ptr->job_id);
-		else if (authorized) {
+		} else {
 			char *entity;
+			if (job_specs->pn_min_memory == MEM_PER_CPU) {
+				/* Map --mem-per-cpu=0 to --mem=0 */
+				job_specs->pn_min_memory = 0;
+			}
 			if (job_specs->pn_min_memory & MEM_PER_CPU)
 				entity = "cpu";
 			else
@@ -9636,32 +9692,21 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 			 * since if set by a super user it be set correctly */
 			job_ptr->limit_set_pn_min_memory =
 				acct_policy_limit_set.pn_min_memory;
-		} else {
-			error("sched: Attempt to modify pn_min_memory for "
-			      "job %u", job_ptr->job_id);
-			error_code = ESLURM_ACCESS_DENIED;
 		}
 	}
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
 
 	if (job_specs->pn_min_tmp_disk != NO_VAL) {
-		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
+
+		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL)) {
 			error_code = ESLURM_JOB_NOT_PENDING;
-		else if (authorized
-			 || (detail_ptr->pn_min_tmp_disk
-			     > job_specs->pn_min_tmp_disk)) {
+		} else {
 			detail_ptr->pn_min_tmp_disk =
 				job_specs->pn_min_tmp_disk;
 			info("sched: update_job: setting job_min_tmp_disk to "
 			     "%u for job_id %u", job_specs->pn_min_tmp_disk,
 			     job_ptr->job_id);
-		} else {
-
-			error("sched: Attempt to modify pn_min_tmp_disk "
-			      "for job %u",
-			      job_ptr->job_id);
-			error_code = ESLURM_ACCESS_DENIED;
 		}
 	}
 	if (error_code != SLURM_SUCCESS)
@@ -11455,7 +11500,7 @@ void batch_requeue_fini(struct job_record  *job_ptr)
 	/* Clear everything so this appears to be a new job and then restart
 	 * it in accounting. */
 	job_ptr->start_time = 0;
-	job_ptr->end_time = 0;
+	job_ptr->end_time_exp = job_ptr->end_time = 0;
 	job_ptr->total_cpus = 0;
 	job_ptr->pre_sus_time = 0;
 	job_ptr->suspend_time = 0;
@@ -11513,6 +11558,8 @@ void job_fini (void)
 	xfree(job_hash);
 	xfree(job_array_hash_j);
 	xfree(job_array_hash_t);
+	xfree(requeue_exit);
+	xfree(requeue_exit_hold);
 }
 
 /* Record the start of one job array task */
@@ -12176,7 +12223,8 @@ static int _job_suspend(struct job_record *job_ptr, uint16_t op, bool indf_susp)
 		    (!job_ptr->preempt_time)) {
 			debug3("Job %u resumed, updating end_time",
 			       job_ptr->job_id);
-			job_ptr->end_time = now + (job_ptr->time_limit * 60)
+			job_ptr->end_time_exp = job_ptr->end_time =
+				now + (job_ptr->time_limit * 60)
 				- job_ptr->pre_sus_time;
 		}
 		resume_job_step(job_ptr);
@@ -12631,6 +12679,9 @@ extern int job_requeue2(uid_t uid, requeue_msg_t *req_ptr,
 		rc = ESLURM_INVALID_JOB_ID;
 		goto reply;
 	}
+	if ((end_ptr[0] == '_') && (end_ptr[1] == '*'))
+		end_ptr += 2;	/* Defaults to full job array */
+
 	job_id = (uint32_t) long_id;
 	if (end_ptr[0] == '\0') {	/* Single job (or full job array) */
 		struct job_record *job_ptr_done = NULL;
@@ -13784,8 +13835,8 @@ init_requeue_policy(void)
 		xfree(sched_params);
 	}
 
-	info("%s: kill_invalid_depend is set to %d",
-	     __func__, kill_invalid_dep);
+	debug2("%s: kill_invalid_depend is set to %d",
+	       __func__, kill_invalid_dep);
 }
 
 /* _make_requeue_array()
@@ -13797,48 +13848,38 @@ init_requeue_policy(void)
 static int32_t *
 _make_requeue_array(char *conf_buf, uint32_t *num)
 {
-	char *p;
-	char *p0;
-	char cnum[12];
-	int cc;
-	int n;
-	int32_t *ar;
+	hostset_t hs;
+	char *tok = NULL, *end_ptr = NULL;
+	int32_t *ar = NULL, cc = 0;
+	long val;
 
-	if (conf_buf == NULL) {
-		*num = 0;
-		return NULL;
+	*num = 0;
+	if (conf_buf == NULL)
+		return ar;
+
+	xstrfmtcat(tok, "[%s]", conf_buf);
+	hs = hostset_create(tok);
+	xfree(tok);
+	if (!hs) {
+		error("%s: exit values: %s", __func__, conf_buf);
+		return ar;
 	}
 
-	info("%s: exit values: %s", __func__, conf_buf);
+	debug("%s: exit values: %s", __func__, conf_buf);
 
-	p0 = p = xstrdup(conf_buf);
-	/* First tokenize the string removing ,
-	 */
-	for (cc = 0; p[cc] != 0; cc++) {
-		if (p[cc] == ',')
-			p[cc] = ' ';
+	ar = xmalloc(sizeof(int32_t) * hostset_count(hs));
+	while ((tok = hostset_shift(hs))) {
+		val = strtol(tok, &end_ptr, 10);
+		if ((end_ptr[0] == '\0') && (val >= 0)) {
+			ar[cc++] = val;
+		} else {
+			error("%s: exit values: %s (%s)",
+			      __func__, conf_buf, tok);
+		}
+		free(tok);
 	}
-
-	/* Count the number of exit values
-	 */
-	cc = 0;
-	while (sscanf(p, "%s%n", cnum, &n) != EOF) {
-		++cc;
-		p += n;
-	}
-
-	ar = xmalloc(cc * sizeof(int));
-
-	cc = 0;
-	p = p0;
-	while (sscanf(p, "%s%n", cnum, &n) != EOF) {
-		ar[cc] = atoi(cnum);
-		++cc;
-		p += n;
-	}
-
 	*num = cc;
-	xfree(p0);
+	hostset_destroy(hs);
 
 	return ar;
 }
@@ -13891,7 +13932,7 @@ _set_job_requeue_exit_value(struct job_record *job_ptr)
 extern void job_end_time_reset(struct job_record  *job_ptr)
 {
 	if (job_ptr->preempt_time)
-		return;
+		return; /* Preemption in progress */
 	if (job_ptr->time_limit == INFINITE) {
 		job_ptr->end_time = job_ptr->start_time +
 				    (365 * 24 * 60 * 60); /* secs in year */
@@ -13899,6 +13940,7 @@ extern void job_end_time_reset(struct job_record  *job_ptr)
 		job_ptr->end_time = job_ptr->start_time +
 				    (job_ptr->time_limit * 60);	/* secs */
 	}
+	job_ptr->end_time_exp = job_ptr->end_time;
 }
 
 /*

@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Test of --signal option.
@@ -40,7 +40,7 @@ set file_prog    "test$test_id.prog"
 print_header $test_id
 
 if { [test_launch_poe] } {
-	send_user "\nWARNING: This test is incompatable with launch/poe systems\n"
+	send_user "\nWARNING: This test is incompatible with launch/poe systems\n"
 	exit $exit_code
 }
 

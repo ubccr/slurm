@@ -21,7 +21,7 @@ You should be familiar with the Slurm's mode of operation on Linux clusters
 before studying the differences in Cray system operation described in this
 document.</p>
 
-<p>Since version 2.3, Slurm is designed to operate as a job scheduler over
+<p>Slurm is designed to operate as a job scheduler over
 Cray's Application Level Placement Scheduler (ALPS).
 Use Slurm's <i>sbatch</i> or <i>salloc</i> commands to create a resource
 allocation in ALPS.
@@ -29,14 +29,14 @@ Then use ALPS' <i>aprun</i> command to launch parallel jobs within the resource
 allocation.
 The resource allocation is terminated once the the batch script or the
 <i>salloc</i> command terminates.
-With 2.5 there is a <i>launch/aprun</i> plugin that allow users to use
+Slurm includes a <i>launch/aprun</i> plugin that allow users to use
 <i>srun</i> to wrap <i>aprun</i> and translate <i>srun</i> options
 into the equivalent <i>aprun</i> options. Not all <i>srun</i> options
 can be translated so there are options that are not available.
 The <i>srun</i> option <i>--launcher-opts=</i> can be used
 to specify <i>aprun</i> options which lack an equivalent within <i>srun</i>.
 For example, <i>srun --launcher-opts="-a xt" -n 4 a.out</i>.
-Since <i>aprun</i> is used to launch tasks (the equivalent of a SLURM
+Since <i>aprun</i> is used to launch tasks (the equivalent of a Slurm
 job step), the job steps will not be visible using Slurm commands.
 Other than Slurm's <i>srun</i> command being replaced by <i>aprun</i>
 and the job steps not being visible, all other Slurm commands will operate
@@ -176,11 +176,8 @@ batch job with a node count specification of zero.</p>
 <pre>
 sbatch -N0 pre_process.bash
 </pre>
-<p><b>Note</b>: Support for Cray job allocations with zero compute nodes was
-added to Slurm version 2.4. Earlier versions of Slurm will return an error for
-zero compute node job requests.</p>
 <p><b>Note</b>: Job allocations with zero compute nodes can only be made in
-SLURM partitions explicitly configured with <b>MinNodes=0</b> (the default
+Slurm partitions explicitly configured with <b>MinNodes=0</b> (the default
 minimum node count for a partition is one compute node).</p>
 
 <h3>External Node Use</h3>
@@ -425,6 +422,19 @@ cores or threads).
 the plugin name was changed to <i>select/alps</i> to allow
 for <a href='cray.shtml'>Native Slurm</a> on a Cray.</b></p>
 
+<p>If you are experiencing performance issues with many jobs you may
+  consider using the <i>slurm.conf</i>
+  option <i>SchedulerParameters=inventory_interval=#</i> option.
+  On a Cray system using Slurm on top of ALPS this limits the amount of times
+  a Basil Inventory call is made.  Normally this call happens every scheduling
+  consideration to attempt to close a node state change window with respects to
+  what ALPS has.  This call is rather slow, so making it less
+  frequently improves performance dramatically, but in the situation
+  where a node changes state the window is as large as this setting.
+  In an HTC environment this setting is a must and we advise around 10
+  seconds.
+</p>
+
 <p>Note that the system topology is based upon information gathered from
 the ALPS database and is based upon the ALPS_NIDORDER configuration in
 <i>/etc/sysconfig/alps</i>. Excerpts of a <i>slurm.conf</i> file for
@@ -616,7 +626,7 @@ from the user's environment, lower limits may apply to user jobs, but this
 script will insure that higher limits are possible. Copy the file
 <i>contribs/cray/etc_sysconfig_slurm</i> into <i>/etc/sysconfig/slurm</i>
 for these limits to take effect. This script is executed from
-<i>/etc/init.d/slurm</i>, which is typically executed to start the SLURM
+<i>/etc/init.d/slurm</i>, which is typically executed to start the Slurm
 daemons. An excerpt of <i>contribs/cray/etc_sysconfig_slurm</i> is shown
 below.</p>
 
@@ -698,6 +708,6 @@ Stop the <i>slurmctld</i> daemon, delete the files, and restart the daemon.</p>
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 29 October 2014</p>
+<p style="text-align:center;">Last modified 15 April 2015</p>
 
 <!--#include virtual="footer.txt"-->

@@ -896,7 +896,6 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 			      " %m, but continuing anyway.");
 		}
 	}
-	req->job_core_spec = arg.job_core_spec;
 
 	/* If uid is the SlurmUser or root and the credential is bad,
 	 * then do not attempt validating the credential */
@@ -1073,6 +1072,7 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 		req->job_mem_lim *= job_cpus;
 	} else
 		req->job_mem_lim  = arg.job_mem_limit;
+	req->job_core_spec = arg.job_core_spec;
 	req->node_cpus = step_cpus;
 #if 0
 	info("%u.%u node_id:%d mem orig:%u cpus:%u limit:%u",
@@ -1983,9 +1983,10 @@ _load_job_limits(void)
 		if (fd == -1)
 			continue;	/* step completed */
 
-		if (!stepd_get_mem_limits(fd, stepd->protocol_version,
-					  &stepd_mem_info)) {
-			error("Error reading step %u.%u memory limits",
+		if (stepd_get_mem_limits(fd, stepd->protocol_version,
+					  &stepd_mem_info) != SLURM_SUCCESS) {
+			error("Error reading step %u.%u memory limits from "
+			      "slurmstepd",
 			      stepd->jobid, stepd->stepid);
 			close(fd);
 			continue;

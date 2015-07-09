@@ -150,7 +150,7 @@ _proc_cluster(void)
 	int filter_cnt = 0;
 	int rc;
 
-	if (has_default_opt()) {
+	if (has_default_opt() && !has_job_steps()) {
 		rc = _signal_job_by_str();
 		return rc;
 	}
@@ -539,15 +539,25 @@ _cancel_jobs (int filter_cnt)
 		error("pthread_cond_init error %m");
 
 	_cancel_jobs_by_state(JOB_PENDING, filter_cnt);
-	_cancel_jobs_by_state(JOB_END, filter_cnt);
+	/* Wait for any cancel of pending jobs to complete before starting
+	 * cancellation of running jobs so that we don't have a race condition
+	 * with pending jobs getting scheduled while running jobs are also
+	 * being cancelled. */
+	pthread_mutex_lock( &num_active_threads_lock );
+	while (num_active_threads > 0) {
+		pthread_cond_wait(&num_active_threads_cond,
+				  &num_active_threads_lock);
+	}
+	pthread_mutex_unlock(&num_active_threads_lock);
 
+	_cancel_jobs_by_state(JOB_END, filter_cnt);
 	/* Wait for any spawned threads that have not finished */
 	pthread_mutex_lock( &num_active_threads_lock );
 	while (num_active_threads > 0) {
-		pthread_cond_wait( &num_active_threads_cond,
-				   &num_active_threads_lock );
+		pthread_cond_wait(&num_active_threads_cond,
+				  &num_active_threads_lock);
 	}
-	pthread_mutex_unlock( &num_active_threads_lock );
+	pthread_mutex_unlock(&num_active_threads_lock);
 
 	slurm_attr_destroy(&attr);
 	slurm_mutex_destroy(&num_active_threads_lock);
@@ -756,8 +766,7 @@ _signal_job_by_str(void)
 		opt.signal = SIGKILL;
 
 	for (i = 0; opt.job_list[i]; i++) {
-		verbose("Terminating job %s", opt.job_list[i]);
-
+		verbose("Signalling job %s", opt.job_list[i]);
 		cc = slurm_kill_job2(opt.job_list[i], opt.signal, 0);
 		if ((cc != SLURM_SUCCESS) && (opt.verbose != -1)) {
 			error("slurm_kill_job2() failed %s", slurm_strerror(errno));

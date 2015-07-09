@@ -2226,6 +2226,8 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 	}
 
 	if (IS_NODE_NO_RESPOND(node_ptr)) {
+		if (IS_NODE_POWER_UP(node_ptr))
+			node_ptr->last_response = now;
 		node_ptr->node_state &= (~NODE_STATE_NO_RESPOND);
 		node_ptr->node_state &= (~NODE_STATE_POWER_UP);
 		last_node_update = time (NULL);
@@ -2290,7 +2292,9 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			   ((slurmctld_conf.ret2service == 2) ||
 			    !xstrcmp(node_ptr->reason, "Scheduled reboot") ||
 			    ((slurmctld_conf.ret2service == 1) &&
-			     !xstrcmp(node_ptr->reason, "Not responding")))) {
+			     !xstrcmp(node_ptr->reason, "Not responding") &&
+			     (node_ptr->boot_time <
+			      node_ptr->last_response)))) {
 			if (reg_msg->job_count) {
 				node_ptr->node_state = NODE_STATE_ALLOCATED |
 					node_flags;
@@ -2314,15 +2318,22 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		} else if (node_ptr->last_response
 			   && (node_ptr->boot_time > node_ptr->last_response)
 			   && (slurmctld_conf.ret2service != 2)) {
-			if (!node_ptr->reason) {
+			if (!node_ptr->reason ||
+			    (node_ptr->reason &&
+			     !xstrcmp(node_ptr->reason, "Not responding"))) {
+				if (node_ptr->reason)
+					xfree(node_ptr->reason);
 				node_ptr->reason_time = now;
 				node_ptr->reason_uid =
 					slurm_get_slurm_user_id();
 				node_ptr->reason = xstrdup(
 					"Node unexpectedly rebooted");
 			}
-			info("Node %s unexpectedly rebooted",
-			     reg_msg->node_name);
+			info("%s: Node %s unexpectedly rebooted boot_time %d "
+			     "last response %d",
+			     __func__, reg_msg->node_name,
+			     (int)node_ptr->boot_time,
+			     (int)node_ptr->last_response);
 			_make_node_down(node_ptr, now);
 			kill_running_job_by_node_name(reg_msg->node_name);
 			last_node_update = now;
@@ -2708,6 +2719,17 @@ extern int validate_nodes_via_front_end(
 		if (reg_msg->energy)
 			memcpy(node_ptr->energy, reg_msg->energy,
 			       sizeof(acct_gather_energy_t));
+
+		if (slurmctld_init_db &&
+		    !IS_NODE_DOWN(node_ptr) &&
+		    !IS_NODE_DRAIN(node_ptr) && !IS_NODE_FAIL(node_ptr)) {
+			/* reason information is handled in
+			   clusteracct_storage_g_node_up()
+			*/
+			clusteracct_storage_g_node_up(
+				acct_db_conn, node_ptr, now);
+		}
+
 	}
 
 	if (reg_hostlist) {
@@ -2750,14 +2772,13 @@ static void _node_did_resp(front_end_record_t *fe_ptr)
 	time_t now = time(NULL);
 
 	fe_ptr->last_response = now;
-#ifndef HAVE_ALPS_CRAY
-	/* This is handled by the select/cray plugin */
+
 	if (IS_NODE_NO_RESPOND(fe_ptr)) {
 		info("Node %s now responding", fe_ptr->name);
 		last_front_end_update = now;
 		fe_ptr->node_state &= (~NODE_STATE_NO_RESPOND);
 	}
-#endif
+
 	node_flags = fe_ptr->node_state & NODE_STATE_FLAGS;
 	if (IS_NODE_UNKNOWN(fe_ptr)) {
 		last_front_end_update = now;

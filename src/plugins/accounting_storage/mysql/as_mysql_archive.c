@@ -48,6 +48,9 @@
 
 #define SLURMDBD_2_5_VERSION   11	/* slurm version 2.5 */
 
+#define MAX_PURGE_LIMIT 50000 /* Number of records that are purged at a time
+				 so that locks can be periodically released. */
+
 typedef struct {
 	char *cluster_nodes;
 	char *cpu_count;
@@ -397,6 +400,8 @@ enum {
 	STEP_REQ_COUNT,
 };
 
+static void _init_local_job(local_job_t *);
+
 /* if this changes you will need to edit the corresponding
  * enum below */
 static char *suspend_req_inx[] = {
@@ -472,12 +477,12 @@ static void _pack_local_job(local_job_t *object,
 	packstr(object->name, buffer);
 	packstr(object->nodelist, buffer);
 	packstr(object->node_inx, buffer);
-	packstr(object->partition, buffer);
-	packstr(object->priority, buffer);
-	packstr(object->qos, buffer);
-	packstr(object->req_cpus, buffer);
-	packstr(object->req_mem, buffer);
-	packstr(object->resvid, buffer);
+	packstr(object->partition, buffer); /* priority */
+	packstr(object->priority, buffer);  /* qos */
+	packstr(object->qos, buffer);       /* req_cpus */
+	packstr(object->req_cpus, buffer);  /* req_mem */
+	packstr(object->req_mem, buffer);   /* resvid */
+	packstr(object->resvid, buffer);    /* partition */
 	packstr(object->start, buffer);
 	packstr(object->state, buffer);
 	packstr(object->submit, buffer);
@@ -494,6 +499,21 @@ static int _unpack_local_job(local_job_t *object,
 			     uint16_t rpc_version, Buf buffer)
 {
 	uint32_t tmp32;
+
+	/* For protocols <= 14_11, job_req_inx and it's corresponding enum,
+	 * were out of sync. This caused the following variables to have the
+	 * corresponding values:
+	 * job->partition = priority
+	 * job->priority  = qos
+	 * job->qos       = req_cpus
+	 * job->req_cpus  = req_mem
+	 * job->req_mem   = resvid
+	 * job->resvid    = partition
+	 *
+	 * The values were packed in the above order. To unpack the values
+	 * into the correct variables, the unpacking order is changed to
+	 * accomodate the shift in values. job->partition is unpacked before
+	 * job->start instead of after job->node_inx. */
 
 	if (rpc_version >= SLURM_14_11_PROTOCOL_VERSION) {
 		unpackstr_ptr(&object->account, &tmp32, buffer);
@@ -517,12 +537,12 @@ static int _unpack_local_job(local_job_t *object,
 		unpackstr_ptr(&object->name, &tmp32, buffer);
 		unpackstr_ptr(&object->nodelist, &tmp32, buffer);
 		unpackstr_ptr(&object->node_inx, &tmp32, buffer);
-		unpackstr_ptr(&object->partition, &tmp32, buffer);
 		unpackstr_ptr(&object->priority, &tmp32, buffer);
 		unpackstr_ptr(&object->qos, &tmp32, buffer);
 		unpackstr_ptr(&object->req_cpus, &tmp32, buffer);
 		unpackstr_ptr(&object->req_mem, &tmp32, buffer);
 		unpackstr_ptr(&object->resvid, &tmp32, buffer);
+		unpackstr_ptr(&object->partition, &tmp32, buffer);
 		unpackstr_ptr(&object->start, &tmp32, buffer);
 		unpackstr_ptr(&object->state, &tmp32, buffer);
 		unpackstr_ptr(&object->submit, &tmp32, buffer);
@@ -550,12 +570,12 @@ static int _unpack_local_job(local_job_t *object,
 		unpackstr_ptr(&object->name, &tmp32, buffer);
 		unpackstr_ptr(&object->nodelist, &tmp32, buffer);
 		unpackstr_ptr(&object->node_inx, &tmp32, buffer);
-		unpackstr_ptr(&object->partition, &tmp32, buffer);
 		unpackstr_ptr(&object->priority, &tmp32, buffer);
 		unpackstr_ptr(&object->qos, &tmp32, buffer);
 		unpackstr_ptr(&object->req_cpus, &tmp32, buffer);
 		unpackstr_ptr(&object->req_mem, &tmp32, buffer);
 		unpackstr_ptr(&object->resvid, &tmp32, buffer);
+		unpackstr_ptr(&object->partition, &tmp32, buffer);
 		unpackstr_ptr(&object->start, &tmp32, buffer);
 		unpackstr_ptr(&object->state, &tmp32, buffer);
 		unpackstr_ptr(&object->submit, &tmp32, buffer);
@@ -583,11 +603,11 @@ static int _unpack_local_job(local_job_t *object,
 		unpackstr_ptr(&object->name, &tmp32, buffer);
 		unpackstr_ptr(&object->nodelist, &tmp32, buffer);
 		unpackstr_ptr(&object->node_inx, &tmp32, buffer);
-		unpackstr_ptr(&object->partition, &tmp32, buffer);
 		unpackstr_ptr(&object->priority, &tmp32, buffer);
 		unpackstr_ptr(&object->qos, &tmp32, buffer);
 		unpackstr_ptr(&object->req_cpus, &tmp32, buffer);
 		unpackstr_ptr(&object->resvid, &tmp32, buffer);
+		unpackstr_ptr(&object->partition, &tmp32, buffer);
 		unpackstr_ptr(&object->start, &tmp32, buffer);
 		unpackstr_ptr(&object->state, &tmp32, buffer);
 		unpackstr_ptr(&object->submit, &tmp32, buffer);
@@ -1633,12 +1653,12 @@ static uint32_t _archive_jobs(mysql_conn_t *mysql_conn, char *cluster_name,
 		job.name = row[JOB_REQ_NAME];
 		job.nodelist = row[JOB_REQ_NODELIST];
 		job.node_inx = row[JOB_REQ_NODE_INX];
-		job.partition = row[JOB_REQ_PARTITION];
-		job.priority = row[JOB_REQ_PRIORITY];
-		job.qos = row[JOB_REQ_QOS];
-		job.req_cpus = row[JOB_REQ_REQ_CPUS];
-		job.req_mem = row[JOB_REQ_REQ_MEM];
-		job.resvid = row[JOB_REQ_RESVID];
+		job.partition = row[JOB_REQ_PARTITION]; /* priority */
+		job.priority = row[JOB_REQ_PRIORITY];   /* qos */
+		job.qos = row[JOB_REQ_QOS];             /* cpus_req */
+		job.req_cpus = row[JOB_REQ_REQ_CPUS];   /* mem_req */
+		job.req_mem = row[JOB_REQ_REQ_MEM];     /* id_resv */
+		job.resvid = row[JOB_REQ_RESVID];       /* partition */
 		job.start = row[JOB_REQ_START];
 		job.state = row[JOB_REQ_STATE];
 		job.submit = row[JOB_REQ_SUBMIT];
@@ -1683,8 +1703,9 @@ static char *_load_jobs(uint16_t rpc_version, Buf buffer,
 	}
 	xstrcat(insert, ") values ");
 	xstrcat(format, ")");
-	for(i=0; i<rec_cnt; i++) {
-		memset(&object, 0, sizeof(local_job_t));
+	for(i = 0; i < rec_cnt; i++) {
+
+		_init_local_job(&object);
 		if (_unpack_local_job(&object, rpc_version, buffer)
 		    != SLURM_SUCCESS) {
 			error("issue unpacking");
@@ -1692,6 +1713,7 @@ static char *_load_jobs(uint16_t rpc_version, Buf buffer,
 			xfree(insert);
 			break;
 		}
+
 		if (i)
 			xstrcat(insert, ", ");
 
@@ -1738,6 +1760,17 @@ static char *_load_jobs(uint16_t rpc_version, Buf buffer,
 	xfree(format);
 
 	return insert;
+}
+
+/* _init_local_job()
+ */
+static void
+_init_local_job(local_job_t *job)
+{
+	/* Init the array_taskid to NO_VAL
+	 */
+	memset(job, 0, sizeof(local_job_t));
+	xstrcat(job->array_taskid, "4294967294");
 }
 
 /* returns count of resvations archived or SLURM_ERROR on error */
@@ -2232,11 +2265,16 @@ static int _execute_archive(mysql_conn_t *mysql_conn,
 				return rc;
 		}
 		query = xstrdup_printf("delete from \"%s_%s\" where "
-				       "time_start <= %ld && time_end != 0",
-				       cluster_name, event_table, curr_end);
+				       "time_start <= %ld && time_end != 0 "
+				       "LIMIT %d",
+				       cluster_name, event_table, curr_end,
+				       MAX_PURGE_LIMIT);
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-		rc = mysql_db_query(mysql_conn, query);
+
+		while ((rc = mysql_db_delete_affected_rows(
+						mysql_conn, query)) > 0);
+
 		xfree(query);
 		if (rc != SLURM_SUCCESS) {
 			error("Couldn't remove old event data");
@@ -2269,11 +2307,15 @@ exit_events:
 				return rc;
 		}
 		query = xstrdup_printf("delete from \"%s_%s\" where "
-				       "time_start <= %ld && time_end != 0",
-				       cluster_name, suspend_table, curr_end);
+				       "time_start <= %ld && time_end != 0 "
+				       "LIMIT %d",
+				       cluster_name, suspend_table, curr_end,
+				       MAX_PURGE_LIMIT);
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-		rc = mysql_db_query(mysql_conn, query);
+
+		while ((rc = mysql_db_delete_affected_rows(
+						mysql_conn, query)) > 0);
 		xfree(query);
 		if (rc != SLURM_SUCCESS) {
 			error("Couldn't remove old suspend data");
@@ -2307,11 +2349,16 @@ exit_suspend:
 		}
 
 		query = xstrdup_printf("delete from \"%s_%s\" where "
-				       "time_start <= %ld && time_end != 0",
-				       cluster_name, step_table, curr_end);
+				       "time_start <= %ld && time_end != 0 "
+				       "LIMIT %d",
+				       cluster_name, step_table, curr_end,
+				       MAX_PURGE_LIMIT);
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-		rc = mysql_db_query(mysql_conn, query);
+
+		while ((rc = mysql_db_delete_affected_rows(
+						mysql_conn, query)) > 0);
+
 		xfree(query);
 		if (rc != SLURM_SUCCESS) {
 			error("Couldn't remove old step data");
@@ -2345,11 +2392,15 @@ exit_steps:
 
 		query = xstrdup_printf("delete from \"%s_%s\" "
 				       "where time_submit <= %ld "
-				       "&& time_end != 0",
-				       cluster_name, job_table, curr_end);
+				       "&& time_end != 0 LIMIT %d",
+				       cluster_name, job_table, curr_end,
+				       MAX_PURGE_LIMIT);
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-		rc = mysql_db_query(mysql_conn, query);
+
+		while ((rc = mysql_db_delete_affected_rows(
+						mysql_conn, query)) > 0);
+
 		xfree(query);
 		if (rc != SLURM_SUCCESS) {
 			error("Couldn't remove old job data");
@@ -2383,11 +2434,15 @@ exit_jobs:
 
 		query = xstrdup_printf("delete from \"%s_%s\" "
 				       "where time_start <= %ld "
-				       "&& time_end != 0",
-				       cluster_name, resv_table, curr_end);
+				       "&& time_end != 0 LIMIT %d",
+				       cluster_name, resv_table, curr_end,
+				       MAX_PURGE_LIMIT);
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-		rc = mysql_db_query(mysql_conn, query);
+
+		while ((rc = mysql_db_delete_affected_rows(
+						mysql_conn, query)) > 0);
+
 		xfree(query);
 		if (rc != SLURM_SUCCESS) {
 			error("Couldn't remove old resv data");

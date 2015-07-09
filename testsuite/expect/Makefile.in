@@ -321,6 +321,7 @@ SSL_CPPFLAGS = @SSL_CPPFLAGS@
 SSL_LDFLAGS = @SSL_LDFLAGS@
 SSL_LIBS = @SSL_LIBS@
 STRIP = @STRIP@
+SUCMD = @SUCMD@
 UTIL_LIBS = @UTIL_LIBS@
 VERSION = @VERSION@
 abs_builddir = @abs_builddir@
@@ -793,6 +794,7 @@ EXTRA_DIST = \
 	test20.9			\
 	test20.10			\
 	test20.11			\
+	test20.12			\
 	test21.1			\
 	test21.2			\
 	test21.3			\
@@ -912,8 +914,7 @@ EXTRA_DIST = \
 	etc.33.1.4/testcases		\
 	etc.33.1.4/topology.conf	\
 	test34.1			\
-	test34.2			\
-	usleep
+	test34.2
 
 all: all-am
 

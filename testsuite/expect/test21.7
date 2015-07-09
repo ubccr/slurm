@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          sacctmgr list clusters
@@ -72,7 +72,7 @@ if { [test_account_storage] == 0 } {
 }
 
 #
-# Remove any vesitgial clusters
+# Remove any vestigial clusters
 #
 remove_cluster "$tc1,$tc2,$tc3"
 

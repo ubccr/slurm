@@ -1,7 +1,7 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
-#          checks that the --array environment varibles are correct, and
+#          checks that the --array environment variables are correct, and
 #          checks that the --output and --error files were created and
 #          contain the correct information.
 #
@@ -181,7 +181,7 @@ for {set index 0} {$index < $array_end} {incr index} {
 	set err_match 0
 	spawn $bin_cat test$test_id-$job_id\_$index\.error
 	expect {
-		-re "invalid time" {
+		-re "$sleep_error_message" {
 			send_user "\nDo not worry this error is expected\n"
 			incr err_match
 		}

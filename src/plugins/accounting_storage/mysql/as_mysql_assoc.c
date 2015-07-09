@@ -890,6 +890,7 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 			list_iterator_destroy(qos_itr);
 			if (delta_itr)
 				list_iterator_destroy(delta_itr);
+			FREE_NULL_LIST(delta_qos_list);
 			if (list_count(mod_assoc->qos_list)
 			    || !list_count(assoc->qos_list))
 				modified = 1;
@@ -2981,6 +2982,7 @@ end_it:
 
 	if (rc != SLURM_ERROR) {
 		_make_sure_users_have_default(mysql_conn, added_user_list);
+		FREE_NULL_LIST(added_user_list);
 
 		if (txn_query) {
 			xstrcat(txn_query, ";");
@@ -3037,8 +3039,7 @@ end_it:
 			list_destroy(assoc_list);
 		}
 	} else {
-		if (added_user_list)
-			list_destroy(added_user_list);
+		FREE_NULL_LIST(added_user_list);
 		xfree(txn_query);
 		reset_mysql_conn(mysql_conn);
 	}

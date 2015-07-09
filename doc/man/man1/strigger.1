@@ -1,4 +1,4 @@
-.TH STRIGGER "1" "June 2015" "strigger 14.03" "Slurm components"
+.TH strigger "1" "Slurm Commands" "April 2015" "Slurm Commands"
 
 .SH "NAME"
 strigger \- Used set, get or clear Slurm trigger information.
@@ -173,7 +173,7 @@ with the \fB\-\-jobid\fR option. When the \fB\-\-jobid\fR option is
 used in conjunction with the \fB\-\-up\fR, \fB\-\-down\fR or
 \fB\-\-drained\fR option,
 all nodes allocated to that job will considered the nodes used as a
-trigger event.Since this option's argument is optional, for proper
+trigger event. Since this option's argument is optional, for proper
 parsing the single letter option must be followed immediately with
 the value and not include a space between them. For example "\-ntux"
 and not "\-n tux".
@@ -278,6 +278,15 @@ Name of the user requesting the action
 \fBPROGRAM\fP
 Pathname of the program to execute when the event occurs
 
+.SH "ENVIRONMENT VARIABLES"
+.PP
+Some \fBstrigger\fR options may be set via environment variables. These
+environment variables, along with their corresponding options, are listed below.
+(Note: commandline options will always override these settings)
+.TP 20
+\fBSLURM_CONF\fR
+The location of the Slurm configuration file.
+
 .SH "EXAMPLES"
 Execute the program "/usr/sbin/primary_slurmctld_failure" whenever the
 primary slurmctld fails.
@@ -299,7 +308,7 @@ strigger \-\-set \-\-primary_slurmctld_failure \\
 Execute the program "/usr/sbin/slurm_admin_notify" whenever
 any node in the cluster goes down. The subject line will include
 the node names which have entered the down state (passed as an
-argument to the script by SLURM).
+argument to the script by Slurm).
 
 .nf
 > cat /usr/sbin/slurm_admin_notify
@@ -374,15 +383,15 @@ Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 .br
 Copyright (C) 2010\-2013 SchedMD LLC.
 .LP
-This file is part of SLURM, a resource management program.
+This file is part of Slurm, a resource management program.
 For details, see <http://slurm.schedmd.com/>.
 .LP
-SLURM is free software; you can redistribute it and/or modify it under
+Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
 Software Foundation; either version 2 of the License, or (at your option)
 any later version.
 .LP
-SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 details.

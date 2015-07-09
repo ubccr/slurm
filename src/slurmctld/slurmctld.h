@@ -556,7 +556,7 @@ struct job_record {
 					 * by the job, decremented while job is
 					 * completing (N/A for bluegene
 					 * systems) */
-	uint16_t cr_enabled;            /* specify if if Consumable Resources
+	uint16_t cr_enabled;            /* specify if Consumable Resources
 					 * is enabled. Needed since CR deals
 					 * with a finer granularity in its
 					 * node/cpu scheduling (available cpus
@@ -574,6 +574,8 @@ struct job_record {
 	time_t end_time;		/* time execution ended, actual or
 					 * expected. if terminated from suspend
 					 * state, this is time suspend began */
+	time_t end_time_exp;		/* when we believe the job is
+					   going to end. */
 	bool epilog_running;		/* true of EpilogSlurmctld is running */
 	uint32_t exit_code;		/* exit code for job (status from
 					 * wait call) */

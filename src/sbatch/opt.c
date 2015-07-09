@@ -61,6 +61,7 @@
 #  include <limits.h>
 #endif
 
+#include <ctype.h>
 #include <fcntl.h>
 #include <stdarg.h>		/* va_start   */
 #include <stdio.h>
@@ -820,6 +821,7 @@ char *process_options_first_pass(int argc, char **argv)
 			break;
 		case LONG_OPT_WRAP:
 			opt.wrap = xstrdup(optarg);
+			opt.job_name = xstrdup("wrap");
 			break;
 		default:
 			/* will be parsed in second pass function */
@@ -1030,7 +1032,7 @@ static void _opt_batch_script(const char * file, const void *body, int size)
 	argv = xmalloc(sizeof(char *));
 	argv[0] = "sbatch";
 
-	while((line = _next_line(body, size, &state)) != NULL) {
+	while ((line = _next_line(body, size, &state)) != NULL) {
 		lineno++;
 		if (!strncmp(line, magic_word1, magic_word_len1))
 			ptr = line + magic_word_len1;
@@ -1043,7 +1045,19 @@ static void _opt_batch_script(const char * file, const void *body, int size)
 				warned = 1;
 			}
 		} else {
+			/* Stop parsing script if not a comment */
+			bool is_cmd = false;
+			for (i = 0; line[i]; i++) {
+				if (isspace(line[i]))
+					continue;
+				if (line[i] == '#')
+					break;
+				is_cmd = true;
+				break;
+			}
 			xfree(line);
+			if (is_cmd)
+				break;
 			continue;
 		}
 
@@ -1531,8 +1545,9 @@ static void _set_options(int argc, char **argv)
 		case LONG_OPT_NTASKSPERNODE:
 			opt.ntasks_per_node = _get_int(optarg,
 						       "ntasks-per-node");
-			setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d",
-				opt.ntasks_per_node);
+			if (opt.ntasks_per_node > 0)
+				setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d",
+					opt.ntasks_per_node);
 			break;
 		case LONG_OPT_NTASKSPERSOCKET:
 			opt.ntasks_per_socket = _get_int(optarg,
@@ -2077,7 +2092,7 @@ static void _parse_pbs_resource_list(char *rl)
 				opt.ntasks_per_node = _get_int(temp, "mpiprocs");
 				xfree(temp);
 			}
-#ifdef HAVE_ALPS_CRAY
+#if defined(HAVE_ALPS_CRAY) || defined(HAVE_NATIVE_CRAY)
 		/*
 		 * NB: no "mppmem" here since it specifies per-PE memory units,
 		 *     whereas SLURM uses per-node and per-CPU memory units.
@@ -2117,7 +2132,7 @@ static void _parse_pbs_resource_list(char *rl)
 				opt.ntasks_set = true;
 			}
 			xfree(temp);
-#endif	/* HAVE_ALPS_CRAY */
+#endif	/* HAVE_ALPS_CRAY || HAVE_NATIVE_CRAY */
 		} else if (!strncasecmp(rl+i, "naccelerators=", 14)) {
 			i += 14;
 			temp = _get_pbs_option_value(rl, &i, ',');
@@ -2277,7 +2292,7 @@ static bool _opt_verify(void)
 	if ((opt.job_name == NULL) && (opt.script_argc > 0))
 		opt.job_name = base_name(opt.script_argv[0]);
 	if (opt.job_name)
-		setenv("SLURM_JOB_NAME", opt.job_name, 0);
+		setenv("SLURM_JOB_NAME", opt.job_name, 1);
 
 	/* check for realistic arguments */
 	if (opt.ntasks < 0) {
@@ -2887,7 +2902,7 @@ static void _usage(void)
 "              [--input file] [--output file] [--error file]\n"
 "              [--time-min=minutes] [--licenses=names] [--clusters=cluster_names]\n"
 "              [--workdir=directory] [--share] [-m dist] [-J jobname]\n"
-"              [--jobid=id] [--verbose] [--gid=group] [--uid=user] [-W sec] \n"
+"              [--jobid=id] [--verbose] [--gid=group] [--uid=user]\n"
 "              [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "              [--account=name] [--dependency=type:jobid] [--comment=name]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */

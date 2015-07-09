@@ -568,7 +568,10 @@ static void _throttle_start(int *active_rpc_cnt)
 		pthread_cond_wait(&throttle_cond, &throttle_mutex);
 	}
 	slurm_mutex_unlock(&throttle_mutex);
-	usleep(1);
+	if (LOTS_OF_AGENTS)
+		usleep(1000);
+	else
+		usleep(1);
 }
 static void _throttle_fini(int *active_rpc_cnt)
 {
@@ -1590,6 +1593,7 @@ static void _slurm_rpc_dump_partitions(slurm_msg_t * msg)
  * the epilog denoting the completion of a job it its entirety */
 static void  _slurm_rpc_epilog_complete(slurm_msg_t * msg)
 {
+	static int active_rpc_cnt = 0;
 	static time_t config_update = 0;
 	static bool defer_sched = false;
 	DEF_TIMERS;
@@ -1619,11 +1623,13 @@ static void  _slurm_rpc_epilog_complete(slurm_msg_t * msg)
 		config_update = slurmctld_conf.last_update;
 	}
 
+	_throttle_start(&active_rpc_cnt);
 	lock_slurmctld(job_write_lock);
 	if (job_epilog_complete(epilog_msg->job_id, epilog_msg->node_name,
 				epilog_msg->return_code))
 		run_scheduler = true;
 	unlock_slurmctld(job_write_lock);
+	_throttle_fini(&active_rpc_cnt);
 	END_TIMER2("_slurm_rpc_epilog_complete");
 
 	if (epilog_msg->return_code)
@@ -1646,7 +1652,7 @@ static void  _slurm_rpc_epilog_complete(slurm_msg_t * msg)
 		 * calls can be very high for large machine or large number
 		 * of managed jobs.
 		 */
-		if (!defer_sched)
+		if (!LOTS_OF_AGENTS && !defer_sched)
 			(void) schedule(0);	/* Has own locking */
 		schedule_node_save();		/* Has own locking */
 		schedule_job_save();		/* Has own locking */
@@ -4163,9 +4169,6 @@ static int _launch_batch_step(job_desc_msg_t *job_desc_msg, uid_t uid,
 	agent_arg_t *agent_arg_ptr;
 	struct node_record *node_ptr;
 
-	if (job_desc_msg->array_inx && job_desc_msg->array_inx[0])
-		return ESLURM_INVALID_ARRAY;
-
 	/*
 	 * Create a job step. Note that a credential is not necessary,
 	 * since the slurmctld will be submitting this job directly to
@@ -4173,6 +4176,9 @@ static int _launch_batch_step(job_desc_msg_t *job_desc_msg, uid_t uid,
 	 */
 	job_step_create_request_msg_t req_step_msg;
 	struct step_record *step_rec;
+
+	if (job_desc_msg->array_inx && job_desc_msg->array_inx[0])
+		return ESLURM_INVALID_ARRAY;
 
 	/*
 	 * As far as the step record in slurmctld goes, we are just

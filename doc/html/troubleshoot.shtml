@@ -78,7 +78,7 @@ Note: All running jobs and other state information will be lost.</li>
 
 <h2><a name="sched">Jobs are not getting scheduled</a></h2>
 
-<p>This is dependent upon the scheduler used by SLURM.
+<p>This is dependent upon the scheduler used by Slurm.
 Executing the command "<i>scontrol show config | grep SchedulerType</i>"
 to determine this.
 For any scheduler, you can check priorities of jobs using the
@@ -118,7 +118,7 @@ Please refer to its documentation for help.</li>
 <h2><a name="completing">Jobs and nodes are stuck in COMPLETING state</a></h2>
 
 <p>This is typically due to non-killable processes associated with the job.
-SLURM will continue to attempt terminating the processes with SIGKILL, but
+Slurm will continue to attempt terminating the processes with SIGKILL, but
 some jobs may stuck performing I/O and non-killable.
 This is typically due to a file system problem and may be addressed in
 a couple of ways.</p>
@@ -130,7 +130,11 @@ and "<i>scontrol update NodeName=&lt;node&gt; State=resume</i>").
 This permits other jobs to use the node, but leaves the non-killable
 process in place.
 If the process should ever complete the I/O, the pending SIGKILL
-should terminate it immediately.</li>
+should terminate it immediately. <b>-OR-</b></li>
+<li>Use the <b>UnkillableStepProgram</b> and <b>UnkillableStepTimeout</b>
+configuration parameters to automatically respond to processes which can not
+be killed, by sending email or rebooting the node. For more information,
+see the <i>slurm.conf</i> documentation.</li>
 </ol>
 
 <p class="footer"><a href="#top">top</a></p>
@@ -208,13 +212,13 @@ must exist.</li>
 <li>Check that compatible versions of Slurm exists on all of
 the nodes (execute "<i>sinfo -V</i>" or "<i>rpm -qa | grep slurm</i>").
 The Slurm version numbers contain three digits, which represent
-the major, minor and micro release numbers in that order (e.g. 2.5.3 is
-major=2, minor=5, micro=3).
+the major, minor and micro release numbers in that order (e.g. 14.11.3 is
+major=14, minor=11, micro=3).
 Changes in the RPCs (remote procedure calls) and state files will only be made
 if the major and/or minor release number changes.
 Slurm daemons will support RPCs and state files from the two previous minor or
-releases (e.g. a version 2.6.x SlurmDBD will support slurmctld daemons and
-commands with a version of 2.4.x or 2.5.x).</li>
+releases (e.g. a version 15.08.x SlurmDBD will support slurmctld daemons and
+commands with a version of 14.03.x or 14.11.x).</li>
 </ol>
 <p class="footer"><a href="#top">top</a></p>
 
@@ -301,6 +305,6 @@ partition 000.
 </ol>
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 6 January 20124</p>
+<p style="text-align:center;">Last modified 15 April 2015</p>
 
 <!--#include virtual="footer.txt"-->

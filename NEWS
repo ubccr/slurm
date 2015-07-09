@@ -1,5 +1,209 @@
- This file describes changes in recent versions of Slurm. It primarily
+This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
+
+* Changes in Slurm 14.11.8
+==========================
+ -- Eliminate need for user to set user_id on job_update calls.
+ -- Correct list of unavailable nodes reported in a job's "reason" field when
+    that job can not start.
+ -- Map job --mem-per-cpu=0 to --mem=0.
+ -- Fix squeue -o %m and %d unit conversion to Megabytes.
+ -- Fix issue with incorrect time calculation in the priority plugin when
+    a job runs past it's time limit.
+ -- Prevent users from setting job's partition to an invalid partition.
+ -- Fix sreport core dump when requesting
+    'job SizesByAccount grouping=individual'.
+ -- select/linear: Correct count of CPUs allocated to job on system with
+    hyperthreads.
+ -- Fix race condition where last array task might not get updated in the db.
+ -- CRAY - Remove libpmi from rpm install
+ -- Fix squeue -o %X output to correctly handle NO_VAL and suffix.
+ -- When deleting a job from the system set the job_id to 0 to avoid memory
+    corruption if thread uses the pointer basing validity off the id.
+ -- Fix issue where sbatch would set ntasks-per-node to 0 making any srun
+    afterward cause a divide by zero error.
+ -- switch/cray: Refine logic to set PMI_CRAY_NO_SMP_ENV environment variable.
+ -- When sacctmgr loads archives with version less than 14.11 set the array
+    task id to NO_VAL, so sacct can display the job ids correctly.
+ -- When using memory cgroup if a task uses more memory than requested
+    the failures are logged into memory.failcnt count file by cgroup
+    and the user is notified by slurmstepd about it.
+ -- Fix scheduling inconsistency with GRES bound to specific CPUs.
+ -- If user belongs to a group which has split entries in /etc/group
+    search for its username in all groups.
+ -- Do not consider nodes explicitly powered up as DOWN with reason of "Node
+    unexpected rebooted".
+ -- Use correct slurmd spooldir when creating cpu-frequency locks.
+ -- Note that TICKET_BASED fairshare will be deprecated in the future. Consider
+    using the FAIR_TREE algorithm instead.
+ -- Set job's reason to BadConstaints when job can't run on any node.
+ -- Prevent abort on update of reservation with no nodes (licenses only).
+ -- Prevent slurmctld from dumping core ifjob_resrcs is missing in the
+    job data structure.
+ -- Fix squeue to print array task ids according to man page when
+    SLURM_BITSTR_LEN is defined in the environment.
+ -- In squeue sort jobs based on array job ID if available.
+ -- Fix the calculation of job energy by not including the NO_VAL values.
+ -- Advanced reservation fixes: enable update of bluegene reservation, avoid
+    abort on multi-core reservations.
+ -- Set the totalview_stepid to the value of the job step instead of NO_VAL.
+ -- Fix slurmdbd core dump if the daemon does not have connection with
+    the database.
+ -- Display error message when attempting to modify priority of a held job.
+ -- Backfill scheduler: The configured backfill_interval value (default 30
+    seconds) is now interpretted as a maximum run time for the backfill
+    scheduler. Once reached, the scheduler will build a new job queue and
+    start over, even if not all jobs have been tested.
+ -- Backfill scheduler now considers OverTimeLimit and KillWait configuration
+    parameters to estimate when running jobs will exit.
+ -- Correct task layout with CR_Pack_Node option and more than 1 CPU per task.
+ -- Fix the scontrol man page describing the release argument.
+ -- When job QOS is modified, do so before attempting to change partition in
+    order to validate the partition's Allow/DenyQOS parameter.
+
+* Changes in Slurm 14.11.7
+==========================
+ -- Initialize some variables used with the srun --no-alloc option that may
+    cause random failures.
+ -- Add SchedulerParameters option of sched_min_interval that controls the
+    minimum time interval between any job scheduling action. The default value
+    is zero (disabled).
+ -- Change default SchedulerParameters=max_sched_time from 4 seconds to 2.
+ -- Refactor scancel so that all pending jobs are cancelled before starting
+    cancellation of running jobs. Otherwise they happen in parallel and the
+    pending jobs can be scheduled on resources as the running jobs are being
+    cancelled.
+ -- ALPS - Add new cray.conf variable NoAPIDSignalOnKill.  When set to yes this
+    will make it so the slurmctld will not signal the apid's in a batch job.
+    Instead it relies on the rpc coming from the slurmctld to kill the job to
+    end things correctly.
+ -- ALPS - Have the slurmstepd running a batch job wait for an ALPS release
+    before ending the job.
+ -- Initialize variables in consumable resource plugin to prevent core dump.
+ -- Fix scancel bug which could return an error on attempt to signal a job step.
+ -- In slurmctld communication agent, make the thread timeout be the configured
+    value of MessageTimeout rather than 30 seconds.
+ -- sshare -U/--Users only flag was used uninitialized.
+ -- Cray systems, add "plugstack.conf.template" sample SPANK configuration file.
+ -- BLUEGENE - Set DB2NOEXITLIST when starting the slurmctld daemon to avoid
+    random crashing in db2 when the slurmctld is exiting.
+ -- Make full node reservations display correctly the core count instead of
+    cpu count.
+ -- Preserve original errno on execve() failure in task plugin.
+ -- Add SLURM_JOB_NAME env variable to an salloc's environment.
+ -- Overwrite SLURM_JOB_NAME in an srun when it gets an allocation.
+ -- Make sure each job has a wckey if that is something that is tracked.
+ -- Make sure old step data is cleared when job is requeued.
+ -- Load libtinfo as needed when building ncurses tools.
+ -- Fix small memory leak in backup controller.
+ -- Fix segfault when backup controller takes control for second time.
+ -- Cray - Fix backup controller running native Slurm.
+ -- Provide prototypes for init_setproctitle()/fini_setproctitle on NetBSD.
+ -- Add configuration test to find out the full path to su command.
+ -- preempt/job_prio plugin: Fix for possible infinite loop when identifying
+    preemptable jobs.
+ -- preempt/job_prio plugin: Implement the concept of Warm-up Time here. Use
+    the QoS GraceTime as the amount of time to wait before preempting.
+    Basically, skip preemption if your time is not up.
+ -- Make srun wait KillWait time when a task is cancelled.
+ -- switch/cray: Revert logic added to 14.11.6 that set "PMI_CRAY_NO_SMP_ENV=1"
+    if CR_PACK_NODES is configured.
+
+* Changes in Slurm 14.11.6
+==========================
+ -- If SchedulerParameters value of bf_min_age_reserve is configured, then
+    a newly submitted job can start immediately even if there is a higher
+    priority non-runnable job which has been waiting for less time than
+    bf_min_age_reserve.
+ -- qsub wrapper modified to export "all" with -V option
+ -- RequeueExit and RequeueExitHold configuration parameters modified to accept
+    numeric ranges. For example "RequeueExit=1,2,3,4" and "RequeueExit=1-4" are
+    equivalent.
+ -- Correct the job array specification parser to accept brackets in job array
+    expression (e.g. "123_[4,7-9]").
+ -- Fix for misleading job submit failure errors sent to users. Previous error
+    could indicate why specific nodes could not be used (e.g. too small memory)
+    when other nodes could be used, but were not for another reason.
+ -- Fix squeue --array to display correctly the array elements when the
+    % separator is specified at the array submission time.
+ -- Fix priority from not being calculated correctly due to memory issues.
+ -- Fix a transient pending reason 'JobId=job_id has invalid QOS'.
+ -- A non-administrator change to job priority will not be persistent except
+    for holding the job. User's wanting to change a job priority on a persistent
+    basis should reset it's "nice" value.
+ -- Print buffer sizes as unsigned values when failed to pack messages.
+ -- Fix race condition where sprio would print factors without weights applied.
+ -- Document the sacct option JobIDRaw which for arrays prints the jobid instead
+    of the arrayTaskId.
+ -- Allow users to modify MinCPUsNode, MinMemoryNode and MinTmpDiskNode of
+    their own jobs.
+ -- Increase the jobid print field in SQUEUE_FORMAT in
+    opt_modulefiles_slurm.in.
+ -- Enable compiling without optimizations and with debugging symbols by
+    default. Disable this by configuring with --disable-debug.
+ -- job_submit/lua plugin: Add mail_type and mail_user fields.
+ -- Correct output message from sshare.
+ -- Use standard statvfs(2) syscall if available, in preference to
+    non-standard statfs.
+ -- Add a new option -U/--Users to sshare to display only users
+    information, parent and ancestors are not printed.
+ -- Purge 50000 records at a time so that locks can released periodically.
+ -- Fix potentially uninitialized variables
+ -- ALPS - Fix issue where a frontend node could become unresponsive and never
+    added back into the system.
+ -- Gate epilog complete messages as done with other messages
+ -- If we have more than a certain number of agents (50) wait longer when gating
+    rpcs.
+ -- FrontEnd - ping non-responding or down nodes.
+ -- switch/cray: If CR_PACK_NODES is configured, then set the environment
+    variable "PMI_CRAY_NO_SMP_ENV=1"
+ -- Fix invalid memory reference in SlurmDBD when putting a node up.
+ -- Allow opening of plugstack.conf even when a symlink.
+ -- Fix scontrol reboot so that rebooted nodes will not be set down with reason
+    'Node xyz unexpectedly rebooted' but will be correctly put back to service.
+ -- CRAY - Throttle the post NHC operations as to not hog the job write lock
+    if many steps/jobs finish at once.
+ -- Disable changes to GRES count while jobs are running on the node.
+ -- CRAY - Fix issue with scontrol reconfig.
+ -- slurmd: Remove wrong reporting of "Error reading step  ... memory limit".
+    The logic was treating success as an error.
+ -- Eliminate "Node ping apparently hung" error messages.
+ -- Fix average CPU frequency calculation.
+ -- When allocating resources with resolution of sockets, charge the job for all
+    CPUs on allocated sockets rather than just the CPUs on used cores.
+ -- Prevent slurmdbd error if cluster added or removed while rollup in progress.
+    Removing a cluster can cause slurmdbd to abort. Adding a cluster can cause
+    the slurmdbd rollup to hang.
+ -- sview - When right clicking on a tab make sure we don't display the page
+    list, but only the column list.
+ -- FRONTEND - If doing a clean start make sure the nodes are brought up in the
+    database.
+ -- MySQL - Fix issue when using the TrackSlurmctldDown and nodes are down at
+    the same time, don't double bill the down time.
+ -- MySQL - Various memory leak fixes.
+ -- sreport - Fix Energy displays
+ -- Fix node manager logic to keep unexpectedly rebooted node in state
+    NODE_STATE_DOWN even if already down when rebooted.
+ -- Fix for array jobs submitted to multiple partitions not starting.
+ -- CRAY - Enable ALPs mpp compatibility code in sbatch for native Slurm.
+ -- ALPS - Move basil_inventory to less confusing function.
+ -- Add SchedulerParameters option of "sched_max_job_start="  to limit the
+    number of jobs that can be started in any single execution of the main
+    scheduling logic.
+ -- Fixed compiler warnings generated by gcc version >= 4.6.
+ -- sbatch to stop parsing script for "#SBATCH" directives after first command,
+    which matches the documentation.
+ -- Overwrite the SLURM_JOB_NAME in sbatch if already exist in the environment
+    and use the one specified on the command line --job-name.
+ -- Remove xmalloc_nz from unpack functions.  If the unpack ever failed the
+    free afterwards would not have zeroed out memory on the variables that
+    didn't get unpacked.
+ -- Improve database interaction from controller.
+ -- Fix for data shift when loading job archives.
+ -- ALPS - Added new SchedulerParameters=inventory_interval to specify how
+    often an inventory request is handled.
+ -- ALPS - Don't run a release on a reservation on the slurmctld for a batch
+    job.  This is already handled on the stepd when the script finishes.
 
 * Changes in Slurm 14.11.5
 ==========================

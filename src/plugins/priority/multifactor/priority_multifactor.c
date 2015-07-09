@@ -902,7 +902,8 @@ static void _init_grp_used_cpu_run_secs(time_t last_ran)
  * futher processing is needed.
  */
 static int _apply_new_usage(struct job_record *job_ptr,
-			    time_t start_period, time_t end_period)
+			    time_t start_period, time_t end_period,
+			    bool adjust_for_end)
 {
 	slurmdb_qos_rec_t *qos;
 	slurmdb_association_rec_t *assoc;
@@ -912,6 +913,12 @@ static int _apply_new_usage(struct job_record *job_ptr,
 	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK,
 				   WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
+	/* If end_time_exp is NO_VAL we have already ran the end for
+	 * this job.  We don't want to do it again, so just exit.
+	 */
+	if (job_ptr->end_time_exp == (time_t)NO_VAL)
+		return SLURM_SUCCESS;
+
 	/* Even if job_ptr->qos_ptr->usage_factor is 0 we need to
 	 * handle other non-usage variables here
 	 * (grp_used_cpu_run_secs), so don't return.
@@ -920,7 +927,11 @@ static int _apply_new_usage(struct job_record *job_ptr,
 	if (job_ptr->start_time > start_period)
 		start_period = job_ptr->start_time;
 
-	if (job_ptr->end_time
+	/* Only change the end_time if we are at the end of the job.
+	 * If the job is running over the time limit the end_time will
+	 * be in the past.
+	 */
+	if (job_ptr->end_time && adjust_for_end
 	    && (end_period > job_ptr->end_time))
 		end_period = job_ptr->end_time;
 
@@ -954,12 +965,24 @@ static int _apply_new_usage(struct job_record *job_ptr,
 		*/
 		cpu_run_delta = job_ptr->total_cpus *
 			(job_time_limit_ends - (uint64_t)start_period);
+	} else if (end_period > job_ptr->end_time_exp) {
+		int end_exp = difftime(job_ptr->end_time_exp, start_period);
+
+		if (end_exp <= 0)
+			cpu_run_delta = 0;
+		else
+			cpu_run_delta = job_ptr->total_cpus * end_exp;
 	} else
 		cpu_run_delta = job_ptr->total_cpus * run_delta;
 
+	/* make sure we only run through this once at the end */
+	if (adjust_for_end)
+		job_ptr->end_time_exp = (time_t)NO_VAL;
+
 	if (priority_debug)
-		info("job %u ran for %g seconds on %u cpus",
-		     job_ptr->job_id, run_delta, job_ptr->total_cpus);
+		info("job %u ran for %g seconds on %u cpus, cpu_delta %"PRIu64,
+		     job_ptr->job_id, run_delta, job_ptr->total_cpus,
+		     cpu_run_delta);
 
 	/* get the time in decayed fashion */
 	run_decay = run_delta * pow(decay_factor, run_delta);
@@ -1088,7 +1111,7 @@ static void _ticket_based_decay(List job_list, time_t start_time)
 		    && g_last_ran)
 			_apply_new_usage(job_ptr,
 					 g_last_ran,
-					 start_time);
+					 start_time, 0);
 
 		if (IS_JOB_PENDING(job_ptr) && job_ptr->assoc_ptr) {
 			assoc_mgr_lock(&locks);
@@ -1136,14 +1159,19 @@ static void _ticket_based_decay(List job_list, time_t start_time)
 }
 
 
-static void _decay_apply_new_usage_and_weighted_factors(
+static int _decay_apply_new_usage_and_weighted_factors(
 	struct job_record *job_ptr,
 	time_t *start_time_ptr)
 {
+	/* Always return SUCCESS so that list_for_each will
+	 * continue processing list of jobs. */
+
 	if (!decay_apply_new_usage(job_ptr, start_time_ptr))
-		return;
+		return SLURM_SUCCESS;
 
 	decay_apply_weighted_factors(job_ptr, start_time_ptr);
+
+	return SLURM_SUCCESS;
 }
 
 
@@ -1845,7 +1873,7 @@ extern void priority_p_job_end(struct job_record *job_ptr)
 	if (priority_debug)
 		info("priority_p_job_end: called for job %u", job_ptr->job_id);
 
-	_apply_new_usage(job_ptr, g_last_ran, time(NULL));
+	_apply_new_usage(job_ptr, g_last_ran, time(NULL), 1);
 }
 
 extern bool decay_apply_new_usage(struct job_record *job_ptr,
@@ -1860,16 +1888,19 @@ extern bool decay_apply_new_usage(struct job_record *job_ptr,
 	if (((flags & PRIORITY_FLAGS_CALCULATE_RUNNING) ||
 	     !IS_JOB_PENDING(job_ptr)) &&
 	    job_ptr->start_time && job_ptr->assoc_ptr) {
-		if (!_apply_new_usage(job_ptr, g_last_ran, *start_time_ptr))
+		if (!_apply_new_usage(job_ptr, g_last_ran, *start_time_ptr, 0))
 			return false;
 	}
 	return true;
 }
 
 
-extern void decay_apply_weighted_factors(struct job_record *job_ptr,
+extern int decay_apply_weighted_factors(struct job_record *job_ptr,
 					 time_t *start_time_ptr)
 {
+	/* Always return SUCCESS so that list_for_each will
+	 * continue processing list of jobs. */
+
 	/*
 	 * Priority 0 is reserved for held
 	 * jobs. Also skip priority
@@ -1878,13 +1909,14 @@ extern void decay_apply_weighted_factors(struct job_record *job_ptr,
 	if ((job_ptr->priority == 0) ||
 	    (!IS_JOB_PENDING(job_ptr) &&
 	     !(flags & PRIORITY_FLAGS_CALCULATE_RUNNING)))
-		return;
+		return SLURM_SUCCESS;
 
 	job_ptr->priority = _get_priority_internal(*start_time_ptr, job_ptr);
 	last_job_update = time(NULL);
 	debug2("priority for job %u is now %u",
 	       job_ptr->job_id, job_ptr->priority);
 
+	return SLURM_SUCCESS;
 }
 
 

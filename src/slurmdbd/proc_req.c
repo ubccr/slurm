@@ -2777,10 +2777,15 @@ static int _node_state(slurmdbd_conn_t *slurmdbd_conn,
 		       _node_state_string(node_state_msg->new_state),
 		       node_state_msg->reason,
 		       (long)node_state_msg->event_time);
+		/* clusteracct_storage_g_node_up can change the reason
+		 * field so copy it to avoid memory issues.
+		 */
+		node_ptr.reason = xstrdup(node_state_msg->reason);
 		rc = clusteracct_storage_g_node_up(
 			slurmdbd_conn->db_conn,
 			&node_ptr,
 			node_state_msg->event_time);
+		xfree(node_ptr.reason);
 	} else {
 		debug2("DBD_NODE_STATE: NODE:%s STATE:%s "
 		       "REASON:%s UID:%u TIME:%ld",
@@ -3450,6 +3455,8 @@ static int _remove_res(slurmdbd_conn_t *slurmdbd_conn,
 	pack16((uint16_t) DBD_GOT_LIST, *out_buffer);
 	slurmdbd_pack_list_msg(&list_msg, slurmdbd_conn->rpc_version,
 			       DBD_GOT_LIST, *out_buffer);
+	FREE_NULL_LIST(list_msg.my_list);
+
 	return rc;
 }
 

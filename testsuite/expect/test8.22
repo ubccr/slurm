@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Bluegene/Q only: Stress test of running many job step allocations
@@ -44,7 +44,7 @@ set mpicc_opts       "-q64"
 print_header $test_id
 
 if {([test_bluegene] == 0) || [string compare [get_bluegene_type] "Q"]} {
-	send_user "\nWARNING: This test is only compatable with Bluegene/Q systems\n"
+	send_user "\nWARNING: This test is only compatible with Bluegene/Q systems\n"
 	exit $exit_code
 }
 

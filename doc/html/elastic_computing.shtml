@@ -4,7 +4,7 @@
 
 <h2>Overview</h2>
 
-<p>Slurm version 2.4 has the ability to support a cluster that grows and
+<p>Slurm has the ability to support a cluster that grows and
 shrinks on demand, typically relying upon a service such as
 <a href="http://aws.amazon.com/ec2/">Amazon Elastic Computing Cloud (Amazon EC2)</a>
 for resources.
@@ -128,7 +128,7 @@ allocated, the <i>ResumeProgram</i> is executed and should do the following:</p>
 Note that configuration file will generally be identical on all nodes and not
 include NodeAddr or NodeHostname configuration parameters for any nodes in the
 cloud.
-SLURM commands executed on this node only need to communicate with the
+Slurm commands executed on this node only need to communicate with the
 slurmctld daemon on the ControlMachine.
 <li>Notify the slurmctld daemon of the node's hostname and network address:<br>
 <i>scontrol update nodename=ec0 nodeaddr=123.45.67.89 nodehostname=whatever</i><br>
@@ -165,6 +165,6 @@ expands (adds resources).</li>
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 15 May 2012</p>
+<p style="text-align:center;">Last modified 15 April 2015</p>
 
 <!--#include virtual="footer.txt"-->

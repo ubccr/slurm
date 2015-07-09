@@ -585,6 +585,7 @@ test20.8   Test the qalter -N option for changing the name of a job.
 test20.9   Test for the qalter --man option
 test20.10  Test for the qrerun --help option
 test20.11  Test for the qrerun --man option
+test20.12  Test for qsub -V/-v arguments and their interaction with sbatch scripts
 
 
 test21.#   Testing of sacctmgr commands and options.
@@ -712,7 +713,7 @@ test32.5   Validates that sgather -k keeps the original source file.
 test32.6   Validates that sgather -C compress the copied file.
 test32.7   Validates that sgather -f ignores nonexistent source files.
 test32.8   Validates that sgather -F changes the fanout message.
-test32.9   Validates that sgather -p option perserves file state.
+test32.9   Validates that sgather -p option preserves file state.
 test32.10  Validates that sgather -r copies files recursively.
 test32.11  Validates that sgather -v prints the output logging of the job.
 test32.12  Validates that sgather -t changes the timeout message.

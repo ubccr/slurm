@@ -791,7 +791,8 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 	bitstr_t *core_bitmap;
 
 	if (!job || !job->core_bitmap) {
-		error("job %u has no job_resrcs info", job_ptr->job_id);
+		error("%s: job %u has no job_resrcs info",
+		      __func__, job_ptr->job_id);
 		return SLURM_ERROR;
 	}
 
@@ -1139,7 +1140,8 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 		return SLURM_SUCCESS;
 	}
 	if (!job || !job->core_bitmap) {
-		error("job %u has no job_resrcs info", job_ptr->job_id);
+		error("%s: job %u has no job_resrcs info",
+		      __func__, job_ptr->job_id);
 		return SLURM_ERROR;
 	}
 
@@ -1283,8 +1285,8 @@ static int _rm_job_from_one_node(struct job_record *job_ptr,
 	List gres_list;
 
 	if (!job || !job->core_bitmap) {
-		error("select/cons_res: job %u has no job_resrcs info",
-		      job_ptr->job_id);
+		error("%s: select/cons_res: job %u has no job_resrcs info",
+		      __func__, job_ptr->job_id);
 		return SLURM_ERROR;
 	}
 
@@ -1658,6 +1660,28 @@ top:	orig_map = bit_copy(save_bitmap);
 	return rc;
 }
 
+/* For a given job already past it's end time, guess when it will actually end.
+ * Used for backfill scheduling. */
+static time_t _guess_job_end(struct job_record * job_ptr, time_t now)
+{
+	time_t end_time;
+
+	if (slurmctld_conf.over_time_limit == 0) {
+		end_time = job_ptr->end_time +
+			   slurmctld_conf.kill_wait;
+	} else if (slurmctld_conf.over_time_limit == (uint16_t) INFINITE) {
+		end_time = now + (365 * 24 * 60 * 60);	/* one year */
+	} else {
+		end_time = job_ptr->end_time +
+			   slurmctld_conf.kill_wait +
+			   (slurmctld_conf.over_time_limit  * 60);
+	}
+	if (end_time <= now)
+		end_time = now + 1;
+
+	return end_time;
+}
+
 /* _will_run_test - determine when and where a pending job can start, removes
  *	jobs from node table at termination time and run _test_job() after
  *	each one. Used by SLURM's sched/backfill plugin and Moab. */
@@ -1782,11 +1806,13 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 					 future_part, future_usage,
 					 exc_core_bitmap);
 			if (rc == SLURM_SUCCESS) {
-				if (tmp_job_ptr->end_time <= now)
-					job_ptr->start_time = now + 1;
-				else
+				if (tmp_job_ptr->end_time <= now) {
+					job_ptr->start_time =
+						_guess_job_end(tmp_job_ptr,now);
+				} else {
 					job_ptr->start_time = tmp_job_ptr->
 						end_time;
+				}
 				break;
 			}
 		}

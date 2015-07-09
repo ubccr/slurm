@@ -63,6 +63,7 @@
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/uid.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/io.h"
@@ -127,7 +128,10 @@ znovu:
 		       	return 1;
 	       	}
 	}
-
+	if (*gid != 0) {
+		if (slurm_find_group_user(pwd, *gid))
+			return 1;
+	}
 	/* root user may have launched this job for this user, but
 	 * root did not explicitly set the gid. This would set the
 	 * gid to 0. In this case we should set the appropriate
@@ -206,10 +210,22 @@ _job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
 		return;
 	}
 
+#if defined(HAVE_NATIVE_CRAY)
+	for (i = 0; i < job->nnodes; i++) {
+		int j;
+		for (j = 1; j < job->task_cnts[i]; j++) {
+			if (gtid[i][j] != gtid[i][j-1] + 1) {
+				job->non_smp = 1;
+				break;
+			}
+		}
+	}
+#endif
+
 	job->task = (stepd_step_task_info_t **)
 		xmalloc(job->node_tasks * sizeof(stepd_step_task_info_t *));
 
-	for (i = 0; i < job->node_tasks; i++){
+	for (i = 0; i < job->node_tasks; i++) {
 		in = _expand_stdio_filename(ifname, gtid[node_id][i], job);
 		out = _expand_stdio_filename(ofname, gtid[node_id][i], job);
 		err = _expand_stdio_filename(efname, gtid[node_id][i], job);

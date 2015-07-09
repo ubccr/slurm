@@ -51,6 +51,8 @@
 					 *   total thread count is product of
 					 *   MAX_AGENT_CNT and
 					 *   (AGENT_THREAD_COUNT + 2) */
+#define LOTS_OF_AGENTS_CNT 50
+#define LOTS_OF_AGENTS ((get_agent_count() <= LOTS_OF_AGENTS_CNT) ? 0 : 1)
 
 typedef struct agent_arg {
 	uint32_t	node_count;	/* number of nodes to communicate
@@ -86,7 +88,7 @@ extern void agent_queue_request(agent_arg_t *agent_arg_ptr);
  * agent_retry - Agent for retrying pending RPCs. One pending request is
  *	issued if it has been pending for at least min_wait seconds
  * IN min_wait - Minimum wait time between re-issue of a pending RPC
- * IN mai_too - Send pending email too, note this performed using a
+ * IN mail_too - Send pending email too, note this performed using a
  *		fork/waitpid, so it can take longer than just creating
  *		a pthread to send RPCs
  * RET count of queued requests remaining

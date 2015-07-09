@@ -351,11 +351,15 @@ int print_job_from_format(squeue_job_rec_t *job_rec_ptr, List list)
 		xfree(job_rec_ptr->job_ptr->partition);
 		job_rec_ptr->job_ptr->partition = xstrdup(job_rec_ptr->
 							  part_name);
-		
+
 	}
 	if (job_rec_ptr->job_ptr->array_task_str && params.array_flag) {
+		char *p;
+
 		if (max_array_size == -1)
 			max_array_size = slurm_get_max_array_size();
+		if ((p = strchr(job_rec_ptr->job_ptr->array_task_str, '%')))
+			*p = 0;
 		bitmap = bit_alloc(max_array_size);
 		bit_unfmt(bitmap, job_rec_ptr->job_ptr->array_task_str);
 		xfree(job_rec_ptr->job_ptr->array_task_str);
@@ -455,20 +459,36 @@ int _print_job_core_spec(job_info_t * job, int width, bool right, char* suffix)
 	if (job == NULL) 	/* Print the Header instead */
 		_print_str("CORE_SPEC", width, right, true);
 	else
-		_print_int(job->core_spec, width, right, true);
+		if (job->core_spec == (uint16_t) NO_VAL)
+			_print_str("*", width, right, true);
+		else
+			_print_int(job->core_spec, width, right, true);
+	if (suffix)
+		printf("%s", suffix);
 	return SLURM_SUCCESS;
 }
 
 int _print_job_job_id(job_info_t * job, int width, bool right, char* suffix)
 {
 	char id[FORMAT_STRING_SIZE];
+	int len;
+	char *buf;
 
 	if (job == NULL) {	/* Print the Header instead */
 		_print_str("JOBID", width, right, true);
 	} else if (job->array_task_str) {
-		snprintf(id, FORMAT_STRING_SIZE, "%u_[%s]",
-			 job->array_job_id, job->array_task_str);
-		_print_str(id, width, right, true);
+		if (getenv("SLURM_BITSTR_LEN")) {
+			len = strlen(job->array_task_str) + 64;
+			buf = xmalloc(len);
+			sprintf(buf, "%u_[%s]\n", job->array_job_id,
+				job->array_task_str);
+			_print_str(buf, width, right, false);
+			xfree(buf);
+		} else {
+			snprintf(id, FORMAT_STRING_SIZE, "%u_[%s]",
+				 job->array_job_id, job->array_task_str);
+			_print_str(id, width, right, true);
+		}
 	} else if (job->array_task_id != NO_VAL) {
 		snprintf(id, FORMAT_STRING_SIZE, "%u_%u",
 			 job->array_job_id, job->array_task_id);
@@ -1161,7 +1181,7 @@ int _print_pn_min_memory(job_info_t * job, int width, bool right_justify,
 	    	tmp_char[0] = '\0';
 		job->pn_min_memory &= (~MEM_PER_CPU);
 		convert_num_unit((float)job->pn_min_memory, min_mem,
-				 sizeof(min_mem), UNIT_NONE);
+				 sizeof(min_mem), UNIT_MEGA);
 		strcat(tmp_char, min_mem);
 		_print_str(tmp_char, width, right_justify, true);
 	}
@@ -1181,7 +1201,7 @@ _print_pn_min_tmp_disk(job_info_t * job, int width, bool right_justify,
 		_print_str("MIN_TMP_DISK", width, right_justify, true);
 	else {
 		convert_num_unit((float)job->pn_min_tmp_disk,
-				 tmp_char, sizeof(tmp_char), UNIT_NONE);
+				 tmp_char, sizeof(tmp_char), UNIT_MEGA);
 		_print_str(tmp_char, width, right_justify, true);
 	}
 

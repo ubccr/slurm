@@ -356,6 +356,7 @@ SSL_CPPFLAGS = @SSL_CPPFLAGS@
 SSL_LDFLAGS = @SSL_LDFLAGS@
 SSL_LIBS = @SSL_LIBS@
 STRIP = @STRIP@
+SUCMD = @SUCMD@
 UTIL_LIBS = @UTIL_LIBS@
 VERSION = @VERSION@
 abs_builddir = @abs_builddir@
@@ -425,6 +426,7 @@ EXTRA_DIST = \
 	libalps_test_programs.tar.gz	\
 	opt_modulefiles_slurm.in	\
 	pam_job.c 			\
+	plugstack.conf.template		\
 	slurm.conf.template		\
 	slurmconfgen.py.in
 

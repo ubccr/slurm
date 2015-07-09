@@ -110,6 +110,8 @@ PKG_PROG_PKG_CONFIG([0.9.0])
 AM_CONDITIONAL(WITH_CXX, test -n "$ac_ct_CXX")
 AM_CONDITIONAL(WITH_GNU_LD, test "$with_gnu_ld" = "yes")
 
+AC_PATH_PROG([SUCMD], [su], [/bin/su])
+AC_DEFINE_UNQUOTED([SUCMD], ["$SUCMD"], [Define path to su command])
 
 dnl Checks for libraries
 dnl
@@ -129,7 +131,7 @@ AC_CHECK_HEADERS(mcheck.h values.h socket.h sys/socket.h  \
 		 pty.h utmp.h \
 		 sys/syslog.h linux/sched.h \
 		 kstat.h paths.h limits.h sys/statfs.h sys/ptrace.h \
-		 sys/termios.h float.h
+		 sys/termios.h float.h sys/statvfs.h
 		)
 AC_HEADER_SYS_WAIT
 AC_HEADER_TIME
@@ -203,6 +205,8 @@ AC_CHECK_FUNCS( \
    get_current_dir_name \
    faccessat \
    eaccess \
+   statvfs \
+   statfs \
 )
 
 AC_CHECK_DECLS([hstrerror, strsignal, sys_siglist])

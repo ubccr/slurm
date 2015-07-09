@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Test scancel verbose option (--verbose option).
@@ -98,7 +98,7 @@ exec $bin_rm -f $file_in
 
 spawn $scancel --verbose $job_id1
 expect {
-	-re "Terminating job" {
+	-re "Signalling job" {
 		incr matches
 		exp_continue
 	}

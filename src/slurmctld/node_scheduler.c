@@ -1540,6 +1540,7 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
  * IN select_node_bitmap - bitmap of nodes to be used for the
  *	job's resource allocation (not returned if NULL), caller
  *	must free
+ * IN unavail_node_str - Nodes which are currently unavailable.
  * OUT err_msg - if not NULL set to error message for job, caller must xfree
  * RET 0 on success, ESLURM code from slurm_errno.h otherwise
  * globals: list_part - global list of partition info
@@ -1554,7 +1555,8 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
  *	3) Call allocate_nodes() to perform the actual allocation
  */
 extern int select_nodes(struct job_record *job_ptr, bool test_only,
-			bitstr_t **select_node_bitmap, char **err_msg)
+			bitstr_t **select_node_bitmap, char *unavail_node_str,
+			char **err_msg)
 {
 	int error_code = SLURM_SUCCESS, i, node_set_size = 0;
 	bitstr_t *select_bitmap = NULL;
@@ -1772,19 +1774,18 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 
 		/* Non-fatal errors for job below */
 		} else if (error_code == ESLURM_NODE_NOT_AVAIL) {
-			char *tmp_nodelist;
 			/* Required nodes are down or drained */
 			debug3("JobId=%u required nodes not avail",
 			       job_ptr->job_id);
 			job_ptr->state_reason = WAIT_NODE_NOT_AVAIL;
 			xfree(job_ptr->state_desc);
-			bit_not(avail_node_bitmap);
-			tmp_nodelist = bitmap2node_name(avail_node_bitmap);
-			bit_not(avail_node_bitmap);
 			xstrfmtcat(job_ptr->state_desc,
-				   "ReqNodeNotAvail(Unavailable:%s)",
-				   tmp_nodelist);
-			xfree(tmp_nodelist);
+				   "ReqNodeNotAvail, May be reserved for other job");
+			if (unavail_node_str) {
+				xstrfmtcat(job_ptr->state_desc,
+					   ", UnavailableNodes:%s",
+					   unavail_node_str);
+			}
 			last_job_update = now;
 		} else if ((error_code == ESLURM_RESERVATION_NOT_USABLE) ||
 			   (error_code == ESLURM_RESERVATION_BUSY)) {
@@ -1808,13 +1809,16 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		goto cleanup;
 	}
 
-	/* This job may be getting requeued, clear vestigial
-	 * state information before over-writing and leaking
-	 * memory. */
+	/* This job may be getting requeued, clear vestigial state information
+	 * before over-writing and leaking memory or referencing old GRES or
+	 * step data. */
 	FREE_NULL_BITMAP(job_ptr->node_bitmap);
 	xfree(job_ptr->nodes);
 	xfree(job_ptr->sched_nodes);
 	job_ptr->exit_code = 0;
+	gres_plugin_job_clear(job_ptr->gres_list);
+	step_list_purge(job_ptr);
+	job_ptr->step_list = list_create(NULL);
 
 	job_ptr->node_bitmap = select_bitmap;
 
@@ -1833,8 +1837,6 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	}
 
 	job_end_time_reset(job_ptr);
-	/* Clear any vestigial GRES in case job was requeued */
-	gres_plugin_job_clear(job_ptr->gres_list);
 
 	job_array_post_sched(job_ptr);
 	if (select_g_job_begin(job_ptr) != SLURM_SUCCESS) {
@@ -2518,15 +2520,23 @@ static int _build_node_list(struct job_record *job_ptr,
 		info("No nodes satisfy job %u requirements in partition %s",
 		     job_ptr->job_id, job_ptr->part_ptr->name);
 		xfree(node_set_ptr);
+		xfree(job_ptr->state_desc);
 		if (job_ptr->resv_name) {
 			job_ptr->state_reason = WAIT_RESERVATION;
 			rc = ESLURM_NODES_BUSY;
 		} else if ((slurmctld_conf.fast_schedule == 0) &&
 			   (_no_reg_nodes() > 0)) {
 			rc = ESLURM_NODES_BUSY;
+		} else {
+			job_ptr->state_reason = FAIL_BAD_CONSTRAINTS;
 		}
 		return rc;
 	}
+
+	/* Clear message about any nodes which fail to satisfy specific
+	 * job requirements as there are some nodes which can be used */
+	if (err_msg)
+		xfree(*err_msg);
 
 	/* If any nodes are powered down, put them into a new node_set
 	 * record with a higher scheduling weight. This means we avoid

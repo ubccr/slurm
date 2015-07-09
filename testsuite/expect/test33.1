@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose:  Test of route/topology plugin
 #
@@ -42,7 +42,7 @@ source ./globals
 # -- lines beginning with # are comments.
 # -- line beginning with a line feed ends a testcase.
 # -- The first line in the testcase is the node list expression to be split
-#    The followiing lines in the testcase are the expected resulting node lists.
+#    The following lines in the testcase are the expected resulting node lists.
 
 set test_id     "33.1"
 set exit_code   0
@@ -88,14 +88,14 @@ proc run_config { test_config } {
 file delete $test_prog
 
 if {[test_aix]} {
-	send_user "$bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir}  ${build_dir}/src/api/libslurm.o  -ldl\n"
-	exec       $bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir}  ${build_dir}/src/api/libslurm.o  -ldl
+	send_user "$bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir} -I${build_dir} ${build_dir}/src/api/libslurm.o  -ldl\n"
+	exec       $bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir} -I${build_dir} ${build_dir}/src/api/libslurm.o  -ldl
 } elseif [file exists ${slurm_dir}/lib64/libslurm.so] {
-	send_user "$bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir}  ${build_dir}/src/api/libslurm.o  -ldl\n"
-	exec       $bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir}  ${build_dir}/src/api/libslurm.o  -ldl
+	send_user "$bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir} -I${build_dir} ${build_dir}/src/api/libslurm.o  -ldl\n"
+	exec       $bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir} -I${build_dir} ${build_dir}/src/api/libslurm.o  -ldl
 } else {
-	send_user "$bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir}  ${build_dir}/src/api/libslurm.o  -ldl\n"
-	exec       $bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir}  ${build_dir}/src/api/libslurm.o  -ldl
+	send_user "$bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir} -I${build_dir} ${build_dir}/src/api/libslurm.o  -ldl\n"
+	exec       $bin_cc ${test_prog}.c -g -pthread -export-dynamic -o ${test_prog} -I${src_dir} -I${build_dir} ${build_dir}/src/api/libslurm.o  -ldl
 }
 exec $bin_chmod 700 $test_prog
 

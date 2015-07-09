@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Validate salloc --exclusive with -n will give all cpus on node
@@ -70,7 +70,7 @@ proc check_alloc { } {
 	}
 
 	# Wait a bit for sacct to populate
-	sleep 5
+	sleep 10
 
 	spawn $sacct --job=$job_id --allocation -oalloccpus --noheader
 	expect {
