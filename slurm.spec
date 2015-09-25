@@ -388,6 +388,15 @@ Slurm lua bindings
 Includes the Slurm proctrack/lua and job_submit/lua plugin
 %endif
 
+%package seff
+Summary: Mail tool that includes job statistics in user notification email
+Group: Development/System
+Requires: slurm
+%description seff
+Mail program used directly by the Slurm daemons. On completion of a job,
+wait for it's accounting information to be available and include that
+information in the email body.
+
 %package sjstat
 Summary: Perl tool to print Slurm job state information
 Group: Development/System
@@ -781,8 +790,10 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root,0755)
 %{_datadir}/doc
 %{_bindir}/s*
+%exclude %{_bindir}/seff
 %exclude %{_bindir}/sjobexitmod
 %exclude %{_bindir}/sjstat
+%exclude %{_bindir}/smail
 %{_sbindir}/slurmctld
 %{_sbindir}/slurmd
 %{_sbindir}/slurmstepd
@@ -1043,6 +1054,12 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/job_submit_lua.so
 %{_libdir}/slurm/proctrack_lua.so
 %endif
+#############################################################################
+
+%files seff
+%defattr(-,root,root)
+%{_bindir}/seff
+%{_bindir}/smail
 #############################################################################
 
 %files sjstat
