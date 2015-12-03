@@ -7,8 +7,7 @@
 
 const char plugin_name[]="Save script jobsubmit plugin";
 const char plugin_type[]="job_submit/save_script";
-const uint32_t plugin_version   = 110;
-const uint32_t min_plug_version = 100;
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char **err_msg) {
 
