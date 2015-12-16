@@ -87,7 +87,7 @@
 
 Name:    slurm
 Version: 15.08.5
-Release: 2.1.ccr%{?dist}
+Release: 2.2.ccr%{?dist}
 
 Summary: Slurm Workload Manager
 
