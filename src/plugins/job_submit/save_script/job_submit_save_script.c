@@ -13,7 +13,7 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 
         if( job_desc->script != NULL){
 
-		char tmpfile[] = "/projects/slurm/jobscripts/queued/jobscript-XXXXXX";
+		char tmpfile[] = "/projects/ccr/slurm/jobscripts/queued/jobscript-XXXXXX";
 
 		int sts = mkstemp( tmpfile );
 
