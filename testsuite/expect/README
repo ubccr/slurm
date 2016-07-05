@@ -212,6 +212,7 @@ test1.97   Test that --ntask-per-node and -c options are enforced
 test1.98   AVAILBLE...
 test1.99   Validate that SrunPortRange is enforced when using srun
 test1.100  Test of pack/nopack task distribution.
+test1.101  Test of --bcast option.
 **NOTE**   The above tests for multiple processor/partition systems only
 
 test2.#    Testing of scontrol options (to be run as unprivileged user).
@@ -302,6 +303,7 @@ test5.8    Confirm that squeue reports a proper version number (--version
 	   option).
 test5.9    Validate that squeue -O displays correct job/step format.
 test5.10   Validate that squeue --priority is listing jobs by priority.
+test5.11   Validate that job node estimation is accurate.
 
 
 test6.#    Testing of scancel options.
@@ -571,7 +573,7 @@ test17.38  Test for sbatch --signal.
 test17.39  Validate dependecy OR option.
 test17.40  Test of --thread-spec option.
 test17.41  Validate that sbatch, srun, salloc return partition error message.
-
+test17.43  Test sbatch handling of very long lines in script
 
 test19.#   Testing of strigger options.
 =======================================

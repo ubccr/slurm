@@ -40,9 +40,6 @@
 #  include "config.h"
 #endif
 
-#if !defined(__FreeBSD__)
-#include <net/if.h>
-#endif
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
@@ -55,6 +52,11 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+
+/* net/if.h must come after sys/types.h on NetBSD */
+#if !defined(__FreeBSD__)
+#include <net/if.h>
+#endif
 
 #include "slurm/slurm_errno.h"
 #include "src/common/slurm_xlator.h"
@@ -834,8 +836,6 @@ extern int switch_p_build_node_info(switch_node_info_t *switch_node)
 	gen_node_info->node_name = xstrdup(hostname);
 	if (getifaddrs(&if_array) == 0) {
 		for (if_rec = if_array; if_rec; if_rec = if_rec->ifa_next) {
-			if (!if_rec->ifa_addr->sa_data)
-				continue;
 #if !defined(__FreeBSD__)
 	   		if (if_rec->ifa_flags & IFF_LOOPBACK)
 				continue;

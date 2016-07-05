@@ -67,9 +67,9 @@ static pthread_mutex_t sinfo_cnt_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  sinfo_cnt_cond  = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t sinfo_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/************
- * Funtions *
- ************/
+/*************
+ * Functions *
+ *************/
 static int  _bg_report(block_info_msg_t *block_ptr);
 void *      _build_part_info(void *args);
 static int  _build_sinfo_data(List sinfo_list,
@@ -344,6 +344,7 @@ _query_server(partition_info_msg_t ** part_pptr,
 					alloc_cpus *= single_node_cpus;
 			}
 			idle_cpus = node_ptr->cpus - alloc_cpus;
+
 			select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 						     SELECT_NODEDATA_SUBCNT,
 						     NODE_STATE_ERROR,
@@ -735,6 +736,9 @@ static void _sort_hostlist(List sinfo_list)
 static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 {
 	uint32_t tmp = 0;
+
+	if (params.node_flag)
+		return false;
 
 	if (params.match_flags.hostnames_flag &&
 	    (hostlist_find(sinfo_ptr->hostnames,

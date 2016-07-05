@@ -135,7 +135,9 @@ static void _calc_part_tres(struct part_record *part_ptr)
 }
 
 /*
- * Calcuate and populate the number of tres' for all partitions.
+ * Calcuate and populate the number of tres' for all
+ * partitions. Partition write and Node read lock should be set before
+ * calling this.
  */
 extern void set_partition_tres()
 {
@@ -1535,7 +1537,12 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 		qos_list_build(part_ptr->allow_qos,&part_ptr->allow_qos_bitstr);
 	}
 
-	if (part_desc->qos_char) {
+	if (part_desc->qos_char && part_desc->qos_char[0] == '\0') {
+		info("%s: removing partition QOS %s from partition %s",
+		     __func__, part_ptr->qos_char, part_ptr->name);
+		xfree(part_ptr->qos_char);
+		part_ptr->qos_ptr = NULL;
+	} else if (part_desc->qos_char) {
 		slurmdb_qos_rec_t qos_rec, *backup_qos_ptr = part_ptr->qos_ptr;
 
 		memset(&qos_rec, 0, sizeof(slurmdb_qos_rec_t));
@@ -1549,6 +1556,11 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 			error_code = ESLURM_INVALID_QOS;
 			part_ptr->qos_ptr = backup_qos_ptr;
 		} else {
+			info("%s: changing partition QOS from "
+			     "%s to %s for partition %s",
+			     __func__, part_ptr->qos_char, part_desc->qos_char,
+			     part_ptr->name);
+
 			xfree(part_ptr->qos_char);
 			part_ptr->qos_char = xstrdup(part_desc->qos_char);
 		}

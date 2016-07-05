@@ -37,9 +37,11 @@
 \*****************************************************************************/
 
 #include "scontrol.h"
+#include "src/common/slurm_strcasestr.h"
 
 static uint32_t tres_cnt = 0;
 static char **tres_names = NULL;
+static uint32_t req_flags = 0;
 
 static void _print_tres_line(const char *name, uint64_t *limits, uint64_t *used,
 			     uint64_t divider, bool last)
@@ -82,7 +84,7 @@ endit:
 	printf("%s", new_line_char);
 }
 
-static void _print_assoc_mgr_info(const char *name, assoc_mgr_info_msg_t *msg)
+static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 {
 	ListIterator itr;
 	slurmdb_user_rec_t *user_rec;
@@ -98,7 +100,8 @@ static void _print_assoc_mgr_info(const char *name, assoc_mgr_info_msg_t *msg)
 	tres_names = msg->tres_names;
 
 	if (!msg->user_list || !list_count(msg->user_list)) {
-		printf("\nNo users currently cached in Slurm.\n\n");
+		if (req_flags & ASSOC_MGR_INFO_FLAG_USERS)
+			printf("\nNo users currently cached in Slurm.\n\n");
 	} else {
 		printf("\nUser Records\n\n");
 
@@ -116,7 +119,9 @@ static void _print_assoc_mgr_info(const char *name, assoc_mgr_info_msg_t *msg)
 	}
 
 	if (!msg->assoc_list || !list_count(msg->assoc_list)) {
-		printf("\nNo associations currently cached in Slurm.\n\n");
+		if (req_flags & ASSOC_MGR_INFO_FLAG_ASSOC)
+			printf("\nNo associations currently "
+			       "cached in Slurm.\n\n");
 	} else {
 		printf("\nAssociation Records\n\n");
 
@@ -145,14 +150,19 @@ static void _print_assoc_mgr_info(const char *name, assoc_mgr_info_msg_t *msg)
 			       "%u/%.2f/%u/%.2f%s",
 			       assoc_rec->shares_raw,
 			       assoc_rec->usage->shares_norm,
-			       assoc_rec->usage->level_shares,
+			       (assoc_rec->usage->level_shares == NO_VAL) ?
+			       1 : assoc_rec->usage->level_shares,
 			       assoc_rec->usage->fs_factor,
 			       new_line_char);
 
 			printf("UsageRaw/Norm/Efctv=%.2Lf/%.2Lf/%.2Lf%s",
 			       assoc_rec->usage->usage_raw,
-			       assoc_rec->usage->usage_norm,
-			       assoc_rec->usage->usage_efctv,
+			       (assoc_rec->usage->usage_norm ==
+				(long double)NO_VAL) ?
+			       1 : assoc_rec->usage->usage_norm,
+			       (assoc_rec->usage->usage_efctv ==
+				(long double)NO_VAL) ?
+			       1 : assoc_rec->usage->usage_efctv,
 			       new_line_char);
 
 			if (assoc_rec->parent_acct)
@@ -162,9 +172,11 @@ static void _print_assoc_mgr_info(const char *name, assoc_mgr_info_msg_t *msg)
 			else
 				printf("ParentAccount= ");
 
-			printf("Lft-Rgt=%u-%u DefAssoc=%s%s",
+			/* rgt isn't always valid coming from the
+			 * association manager (so don't print it).
+			 */
+			printf("Lft=%u DefAssoc=%s%s",
 			       assoc_rec->lft,
-			       assoc_rec->rgt,
 			       assoc_rec->is_def ? "Yes" : "No",
 			       new_line_char);
 
@@ -257,7 +269,8 @@ static void _print_assoc_mgr_info(const char *name, assoc_mgr_info_msg_t *msg)
 	}
 
 	if (!msg->qos_list || !list_count(msg->qos_list)) {
-		printf("\nNo QOS currently cached in Slurm.\n\n");
+		if (req_flags & ASSOC_MGR_INFO_FLAG_QOS)
+			printf("\nNo QOS currently cached in Slurm.\n\n");
 	} else {
 
 		printf("\nQOS Records\n\n");
@@ -374,40 +387,90 @@ static void _print_assoc_mgr_info(const char *name, assoc_mgr_info_msg_t *msg)
  *
  */
 
-extern void scontrol_print_assoc_mgr_info(const char *name)
+extern void scontrol_print_assoc_mgr_info(int argc, char *argv[])
 {
-	int cc;
+	char *tag = NULL, *val = NULL;
+	int cc, tag_len, i;
 	assoc_mgr_info_request_msg_t req;
 	assoc_mgr_info_msg_t *msg = NULL;
 
-	/* FIXME: add more filtering in the future */
 	memset(&req, 0, sizeof(assoc_mgr_info_request_msg_t));
-	req.flags = ASSOC_MGR_INFO_FLAG_ASSOC | ASSOC_MGR_INFO_FLAG_USERS |
-		ASSOC_MGR_INFO_FLAG_QOS;
-	if (name) {
-		req.user_list = list_create(NULL);
-		list_append(req.user_list, (char *)name);
+
+	for (i = 0; i < argc; ++i) {
+		tag = argv[i];
+		tag_len = strlen(tag);
+		val = strchr(argv[i], '=');
+		if (val) {
+			tag_len = val - argv[i];
+			val++;
+		}
+
+		/* We free every list before creating it. This way we ensure
+		 * we are just appending the last value if user repeats entity.
+		 */
+		if (!val || !val[0]) {
+			fprintf(stderr, "No value given for option %s\n", tag);
+			goto endit;
+		} else if (!strncasecmp(tag, "accounts", MAX(tag_len, 1))) {
+			if (!req.acct_list)
+				req.acct_list = list_create(slurm_destroy_char);
+			slurm_addto_char_list(req.acct_list, val);
+		} else if (!strncasecmp(tag, "flags", MAX(tag_len, 1))) {
+			if (slurm_strcasestr(val, "users"))
+				req.flags |= ASSOC_MGR_INFO_FLAG_USERS;
+			if (slurm_strcasestr(val, "assoc"))
+				req.flags |= ASSOC_MGR_INFO_FLAG_ASSOC;
+			if (slurm_strcasestr(val, "qos"))
+				req.flags |= ASSOC_MGR_INFO_FLAG_QOS;
+
+			if (!req.flags) {
+				fprintf(stderr, "invalid flag '%s', "
+					"valid options are "
+					"'Assoc, QOS, and/or Users'\n",
+					val);
+				goto endit;
+			}
+		} else if (!strncasecmp(tag, "qos", MAX(tag_len, 1))) {
+			if (!req.qos_list)
+				req.qos_list = list_create(slurm_destroy_char);
+			slurm_addto_char_list(req.qos_list, val);
+		} else if (!strncasecmp(tag, "users", MAX(tag_len, 1))) {
+			if (!req.user_list)
+				req.user_list = list_create(slurm_destroy_char);
+			slurm_addto_char_list(req.user_list, val);
+		} else {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr, "invalid entity: %s for keyword"
+					":show assoc_mgr\n", tag);
+			goto endit;
+		}
 	}
+
+	if (!req.flags)
+		req.flags = ASSOC_MGR_INFO_FLAG_ASSOC |
+			ASSOC_MGR_INFO_FLAG_USERS |
+			ASSOC_MGR_INFO_FLAG_QOS;
+
+	req_flags = req.flags;
+
 	/* call the controller to get the meat */
 	cc = slurm_load_assoc_mgr_info(&req, &msg);
 
-	FREE_NULL_LIST(req.user_list);
-
-	if (cc != SLURM_PROTOCOL_SUCCESS) {
+	if (cc == SLURM_PROTOCOL_SUCCESS) {
+		/* print the info
+		 */
+		_print_assoc_mgr_info(msg);
+	} else {
 		/* Hosed, crap out. */
 		exit_code = 1;
 		if (quiet_flag != 1)
 			slurm_perror("slurm_load_assoc_mgr_info error");
-		return;
 	}
 
-	/* print the info
-	 */
-	_print_assoc_mgr_info(name, msg);
-
-	/* free at last
-	 */
 	slurm_free_assoc_mgr_info_msg(msg);
+endit:
+	slurm_free_assoc_mgr_info_request_members(&req);
 
 	return;
 }

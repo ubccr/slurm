@@ -75,6 +75,8 @@
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 #include "src/slurmd/slurmstepd/step_terminate_monitor.h"
 
+#include "src/slurmd/common/task_plugin.h"
+
 static void *_handle_accept(void *arg);
 static int _handle_request(int fd, stepd_step_rec_t *job, uid_t uid, gid_t gid);
 static int _handle_state(int fd, stepd_step_rec_t *job);
@@ -87,6 +89,8 @@ static int _handle_signal_container(int fd, stepd_step_rec_t *job, uid_t uid);
 static int _handle_checkpoint_tasks(int fd, stepd_step_rec_t *job, uid_t uid);
 static int _handle_attach(int fd, stepd_step_rec_t *job, uid_t uid);
 static int _handle_pid_in_container(int fd, stepd_step_rec_t *job);
+static void *_wait_extern_pid(void *args);
+static int _handle_add_extern_pid_internal(stepd_step_rec_t *job, pid_t pid);
 static int _handle_add_extern_pid(int fd, stepd_step_rec_t *job);
 static int _handle_daemon_pid(int fd, stepd_step_rec_t *job);
 static int _handle_notify_job(int fd, stepd_step_rec_t *job, uid_t uid);
@@ -114,6 +118,12 @@ struct request_params {
 	int fd;
 	stepd_step_rec_t *job;
 };
+
+typedef struct {
+	stepd_step_rec_t *job;
+	pid_t pid;
+} extern_pid_t;
+
 
 static pthread_mutex_t message_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t message_cond = PTHREAD_COND_INITIALIZER;
@@ -416,7 +426,7 @@ _handle_accept(void *arg)
 		free_buf(buffer);
 		goto fail;
 	}
-	rc = g_slurm_auth_verify(auth_cred, NULL, 2, NULL);
+	rc = g_slurm_auth_verify(auth_cred, NULL, 2, slurm_get_auth_info());
 	if (rc != SLURM_SUCCESS) {
 		error("Verifying authentication credential: %s",
 		      g_slurm_auth_errstr(g_slurm_auth_errno(auth_cred)));
@@ -1208,34 +1218,141 @@ rwfail:
 	return SLURM_FAILURE;
 }
 
-static int
-_handle_add_extern_pid(int fd, stepd_step_rec_t *job)
+static void _block_on_pid(pid_t pid)
 {
-	int rc = SLURM_SUCCESS;
-	pid_t pid;
-	jobacct_id_t jobacct_id;
+	/* I wish there was another way to wait on a foreign pid, but
+	 * I was unable to find one.
+	 */
+	while (kill(pid, 0) != -1)
+		sleep(1);
+}
 
-	safe_read(fd, &pid, sizeof(pid_t));
+/* Wait for the pid given and when it ends get and children it might
+ * of left behind and wait on them instead.
+ */
+static void *_wait_extern_pid(void *args)
+{
+	extern_pid_t *extern_pid = (extern_pid_t *)args;
 
-	if (job->stepid != SLURM_EXTERN_CONT) {
-		error("_handle_add_extern_pid: non-extern step (%u) given for job %u.",
-		      job->stepid, job->jobid);
-		rc = SLURM_FAILURE;
-		goto send_it;
+	stepd_step_rec_t *job = extern_pid->job;
+	pid_t pid = extern_pid->pid;
+
+	jobacctinfo_t *jobacct = NULL;
+	pid_t *pids = NULL;
+	int npids = 0, i;
+	char	proc_stat_file[256];	/* Allow ~20x extra length */
+	FILE *stat_fp = NULL;
+	int fd;
+	char sbuf[256], *tmp, state[1];
+	int num_read, ppid;
+
+	xfree(extern_pid);
+
+	//info("waiting on pid %d", pid);
+	_block_on_pid(pid);
+	//info("done with pid %d %d: %m", pid, rc);
+	jobacct = jobacct_gather_remove_task(pid);
+	if (jobacct) {
+		job->jobacct->energy.consumed_energy = 0;
+		jobacctinfo_aggregate(job->jobacct, jobacct);
+		jobacctinfo_destroy(jobacct);
+	}
+	acct_gather_profile_g_task_end(pid);
+
+	/* See if we have any children of init left and add them to track. */
+	proctrack_g_get_pids(job->cont_id, &pids, &npids);
+	for (i = 0; i < npids; i++) {
+		snprintf(proc_stat_file, 256, "/proc/%d/stat", pids[i]);
+		if (!(stat_fp = fopen(proc_stat_file, "r")))
+			continue;  /* Assume the process went away */
+		fd = fileno(stat_fp);
+		fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+		num_read = read(fd, sbuf, (sizeof(sbuf) - 1));
+
+		if (num_read <= 0)
+			goto next_pid;
+
+		sbuf[num_read] = '\0';
+
+		/* get to the end of cmd name */
+		tmp = strrchr(sbuf, ')');
+		*tmp = '\0';	/* replace trailing ')' with NULL */
+		/* skip space after ')' too */
+		sscanf(tmp + 2,	"%c %d ", state, &ppid);
+
+		if (ppid == 1) {
+			debug2("adding tracking of orphaned process %d",
+			       pids[i]);
+			_handle_add_extern_pid_internal(job, pids[i]);
+		}
+	next_pid:
+		fclose(stat_fp);
 	}
 
-	debug("_handle_add_extern_pid for job %u.%u, pid %d",
-	      job->jobid, job->stepid, pid);
+	return NULL;
+}
 
+static int _handle_add_extern_pid_internal(stepd_step_rec_t *job, pid_t pid)
+{
+	pthread_t thread_id;
+	pthread_attr_t attr;
+	extern_pid_t *extern_pid;
+	jobacct_id_t jobacct_id;
+	int retries = 0, rc = SLURM_SUCCESS;
 
+	if (job->stepid != SLURM_EXTERN_CONT) {
+		error("%s: non-extern step (%u) given for job %u.",
+		      __func__, job->stepid, job->jobid);
+		return SLURM_FAILURE;
+	}
+
+	debug("%s: for job %u.%u, pid %d",
+	      __func__, job->jobid, job->stepid, pid);
+
+	extern_pid = xmalloc(sizeof(extern_pid_t));
+	extern_pid->job = job;
+	extern_pid->pid = pid;
+
+	/* track pid: add outside of the below thread so that the pam module
+	 * waits until the parent pid is added, before letting the parent spawn
+	 * any children. */
 	jobacct_id.taskid = job->nodeid;
 	jobacct_id.nodeid = job->nodeid;
 	jobacct_id.job = job;
 
 	proctrack_g_add(job, pid);
+	task_g_add_pid(pid);
 	jobacct_gather_add_task(pid, &jobacct_id, 1);
 
-send_it:
+	/* spawn a thread that will wait on the pid given */
+	slurm_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	while (pthread_create(&thread_id, &attr,
+			      &_wait_extern_pid, (void *) extern_pid)) {
+		error("%s: pthread_create: %m", __func__);
+		if (++retries > MAX_RETRIES) {
+			error("%s: Can't create pthread", __func__);
+			rc = SLURM_FAILURE;
+			break;
+		}
+		usleep(10);	/* sleep and again */
+	}
+	slurm_attr_destroy(&attr);
+
+	return rc;
+}
+
+static int
+_handle_add_extern_pid(int fd, stepd_step_rec_t *job)
+{
+	int rc = SLURM_SUCCESS;
+	pid_t pid;
+
+	safe_read(fd, &pid, sizeof(pid_t));
+
+	rc = _handle_add_extern_pid_internal(job, pid);
+
 	/* Send the return code */
 	safe_write(fd, &rc, sizeof(int));
 
@@ -1253,6 +1370,19 @@ _handle_daemon_pid(int fd, stepd_step_rec_t *job)
 	return SLURM_SUCCESS;
 rwfail:
 	return SLURM_FAILURE;
+}
+
+/* Wait for the job to completely start before trying to suspend it. */
+static void _wait_for_job_init(stepd_step_rec_t *job)
+{
+	slurm_mutex_lock(&job->state_mutex);
+	while (1) {
+		if (job->state != SLURMSTEPD_STEP_STARTING) {
+			slurm_mutex_unlock(&job->state_mutex);
+			break;
+		}
+		pthread_cond_wait(&job->state_cond, &job->state_mutex);
+	}
 }
 
 static int
@@ -1275,6 +1405,8 @@ _handle_suspend(int fd, stepd_step_rec_t *job, uid_t uid)
 		errnum = EPERM;
 		goto done;
 	}
+
+	_wait_for_job_init(job);
 
 	if (job->cont_id == 0) {
 		debug ("step %u.%u invalid container [cont_id:%"PRIu64"]",

@@ -71,6 +71,12 @@
 
 #include <sys/resource.h>
 
+/* FIXME: Come up with a real solution for EUID instead of substituting RUID */
+#if defined(__NetBSD__)
+#define eaccess(p,m) (access((p),(m)))
+#define HAVE_EACCESS 1
+#endif
+
 #include "slurm/slurm_errno.h"
 
 #include "src/common/checkpoint.h"
@@ -325,7 +331,8 @@ _build_path(char* fname, char **prog_env)
 	dir = strtok(path_env, ":");
 	while (dir) {
 		snprintf(file_path, len, "%s/%s", dir, file_name);
-		if (stat(file_path, &stat_buf) == 0)
+		if ((stat(file_path, &stat_buf) == 0)
+		    && (! S_ISDIR(stat_buf.st_mode)))
 			break;
 		dir = strtok(NULL, ":");
 	}

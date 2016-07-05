@@ -338,7 +338,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	char time_str[32], *group_name, *spec_name, *user_name;
 	char tmp1[128], tmp2[128], tmp3[128], tmp4[128], tmp5[128], tmp6[128];
 	char *tmp6_ptr;
-	char tmp_line[1024];
+	char tmp_line[1024 * 128];
 	char *ionodes = NULL;
 	uint16_t exit_status = 0, term_sig = 0;
 	job_resources_t *job_resrcs = job_ptr->job_resrcs;
@@ -1312,6 +1312,7 @@ slurm_load_job (job_info_msg_t **resp, uint32_t job_id, uint16_t show_flags)
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
 
+	bzero(&req, sizeof(job_id_msg_t));
 	req.job_id = job_id;
 	req.show_flags = show_flags;
 	req_msg.msg_type = REQUEST_JOB_INFO_SINGLE;
@@ -1563,9 +1564,10 @@ extern int slurm_job_node_ready(uint32_t job_id)
 	slurm_msg_t_init(&req);
 	slurm_msg_t_init(&resp);
 
+	bzero(&msg, sizeof(job_id_msg_t));
+	msg.job_id   = job_id;
 	req.msg_type = REQUEST_JOB_READY;
 	req.data     = &msg;
-	msg.job_id   = job_id;
 
 	if (slurm_send_recv_controller_msg(&req, &resp) < 0)
 		return READY_JOB_ERROR;

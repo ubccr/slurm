@@ -21,7 +21,7 @@ section). If no command is specified, then the value of
 \fBSallocDefaultCommand\fR is not set, then \fBsalloc\fR runs the
 user's default shell.
 
-The following document describes the the influence of various options on the
+The following document describes the influence of various options on the
 allocation of cpus to jobs and tasks.
 .br
 http://slurm.schedmd.com/cpu_management.html
@@ -269,7 +269,7 @@ which will set the governor to the corresponding value.
 If \fBp3\fR is UserSpace, the frequency scaling_speed will be set by a power
 or energy aware scheduling strategy to a value between p1 and p2 that lets the
 job run within the site's power goal. The job may be delayed if p1 is higher
-than a frequency that allows the job to run withing the goal.
+than a frequency that allows the job to run within the goal.
 
 If the current frequency is < min, it will be set to min. Likewise,
 if the current frequency is > max, it will be set to max.
@@ -370,6 +370,9 @@ Any dependency may be satisfied if the "?" separator is used.
 Many jobs can share the same dependency and these jobs may even belong to
 different  users. The  value may be changed after job submission using the
 scontrol command.
+Once a job dependency fails due to the termination state of a preceding job,
+the dependent job will never be run, even if the preceding job is requeued and
+has a different termination state in a subsequent execution.
 .PD
 .RS
 .TP
@@ -515,7 +518,7 @@ name is the name of the "command" specified on the command line.
 .TP
 \fB\-\-jobid\fR=<\fIjobid\fR>
 Allocate resources as the specified job id.
-NOTE: Only valid for user root.
+NOTE: Only valid for users root and SlurmUser.
 
 .TP
 \fB\-K\fR, \fB\-\-kill\-command\fR[=\fIsignal\fR]
@@ -656,7 +659,7 @@ fashion across sockets.
 Notify user by email when certain event types occur.
 Valid \fItype\fR values are NONE, BEGIN, END, FAIL, REQUEUE, ALL (equivalent to
 BEGIN, END, FAIL, REQUEUE, and STAGE_OUT), STAGE_OUT (burst buffer stage out
-completed), TIME_LIMIT, TIME_LIMIT_90 (reached 90 percent of time limit),
+and teardown completed), TIME_LIMIT, TIME_LIMIT_90 (reached 90 percent of time limit),
 TIME_LIMIT_80 (reached 80 percent of time limit), and TIME_LIMIT_50
 (reached 50 percent of time limit).
 Multiple \fItype\fR values may be specified in a comma separated list.
@@ -1184,10 +1187,13 @@ be left in a PENDING state (possibly indefinitely).  The default time
 limit is the partition's default time limit.  When the time limit is reached,
 each task in each job step is sent SIGTERM followed by SIGKILL.  The
 interval between signals is specified by the Slurm configuration
-parameter \fBKillWait\fR.  A time limit of zero requests that no time
-limit be imposed.  Acceptable time formats include "minutes",
-"minutes:seconds", "hours:minutes:seconds", "days\-hours",
-"days\-hours:minutes" and "days\-hours:minutes:seconds".
+parameter \fBKillWait\fR.  The \fBOverTimeLimit\fR configuration parameter may
+permit the job to run longer than scheduled.  Time resolution is one minute
+and second values are rounded up to the next minute.
+
+A time limit of zero requests that no time limit be imposed.  Acceptable time
+formats include "minutes", "minutes:seconds", "hours:minutes:seconds",
+"days\-hours", "days\-hours:minutes" and "days\-hours:minutes:seconds".
 
 .TP
 \fB\-\-thread\-spec\fR=<\fInum\fR>

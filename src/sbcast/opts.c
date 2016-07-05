@@ -55,8 +55,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "src/common/xstring.h"
+#include "src/common/file_bcast.h"
 #include "src/common/proc_args.h"
+#include "src/common/xstring.h"
 
 #include "src/sbcast/sbcast.h"
 
@@ -133,6 +134,7 @@ extern void parse_command_line(int argc, char *argv[])
 			params.job_id = strtol(optarg, &end_ptr, 10);
 			if (end_ptr[0] == '.')
 				params.step_id = strtol(end_ptr+1, NULL, 10);
+			break;
 		case (int)'p':
 			params.preserve = true;
 			break;

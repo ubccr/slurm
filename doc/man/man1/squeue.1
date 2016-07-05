@@ -157,7 +157,7 @@ Generic resources (gres) required by the job or step.
 .TP
 \fB%B\fR
 Executing (batch) host. For an allocated session, this is the host on which
-the session is executing (i.e. the node from which the the \fBsrun\fR or the
+the session is executing (i.e. the node from which the \fBsrun\fR or the
 \fBsalloc\fR command was executed). For a batch job, this is the node executing
 the batch script. In the case of a typical Linux cluster, this would be the
 compute node zero of the allocation. In the case of a BlueGene or a Cray
@@ -184,7 +184,7 @@ Minimum size of temporary disk space (in MB) requested by the job.
 Number of nodes allocated to the job or the minimum number of nodes
 required by a pending job. The actual number of nodes allocated to a pending
 job may exceed this number if the job specified a node range count (e.g.
-minimum and maximum node counts) or the the job specifies a processor
+minimum and maximum node counts) or the job specifies a processor
 count instead of a node count and the cluster contains nodes with varying
 processor counts. As a job is completing this number will reflect the
 current number of nodes allocated.
@@ -195,8 +195,11 @@ Time at which the job ended or is expected to end (based upon its time limit).
 (Valid for jobs only)
 .TP
 \fB%E\fR
-Job dependency. This job will not begin execution until the dependent job
-completes.  A value of zero implies this job has no dependencies.
+Job dependencies remaining. This job will not begin execution until these
+dependent jobs complete. In the case of a job that can not run due to job
+dependencies never being satisfied, the full original job dependency
+specification will be reported. A value of NULL implies this job has no
+dependencies.
 (Valid for jobs only)
 .TP
 \fB%f\fR
@@ -403,7 +406,7 @@ Count of cores reserved on each node for system use (core specialization).
 Nice value (adjustment to a job's scheduling priority).
 (Valid for jobs only)
 .TP
-%Y
+\fB%Y\fR
 For pending jobs, a list of the nodes expected to be used when the job is
 started.
 .TP
@@ -530,8 +533,11 @@ Prints the number of CPUs per tasks allocated to the job.
 (Valid for jobs only)
 .TP
 \fBdependency\fR
-Job dependency. This job will not begin execution until the dependent job
-completes.  A value of zero implies this job has no dependencies.
+Job dependencies remaining. This job will not begin execution until these
+dependent jobs complete. In the case of a job that can not run due to job
+dependencies never being satisfied, the full original job dependency
+specification will be reported. A value of NULL implies this job has no
+dependencies.
 (Valid for jobs only)
 .TP
 \fBderivedec\fR

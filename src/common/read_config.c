@@ -758,20 +758,18 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 			 * Except SocketsPerBoard=# can be used,
 			 * But it can't be used with Sockets=# */
 			n->boards = 1;
-			if (!no_sockets && !no_sockets_per_board) {
-				error("NodeNames=%s Sockets=# and "
-				      "SocketsPerBoard=# is invalid"
-				      ", using SocketsPerBoard",
-				      n->nodenames);
-				n->sockets = sockets_per_board;
-			}
 			if (!no_sockets_per_board) {
+				if (!no_sockets)
+					error("NodeNames=%s Sockets=# and "
+					      "SocketsPerBoard=# is invalid"
+					      ", using SocketsPerBoard",
+					      n->nodenames);
 				n->sockets = sockets_per_board;
-			}
-			if (!no_cpus    &&	/* infer missing Sockets= */
-			    no_sockets) {
+			} else if (!no_cpus && no_sockets) {
+				/* infer missing Sockets= */
 				n->sockets = n->cpus / (n->cores * n->threads);
 			}
+
 			if (n->sockets == 0) { /* make sure sockets != 0 */
 				error("NodeNames=%s Sockets=0 is invalid, "
 				      "reset to 1", n->nodenames);
@@ -816,12 +814,14 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 				      n->nodenames);
 				n->boards = 1;
 			}
-			if (!no_sockets && !no_sockets_per_board) {
-				error("NodeNames=%s Sockets=# and "
-				      "SocketsPerBoard=# is invalid, "
-				      "using SocketsPerBoard", n->nodenames);
-				n->sockets = n->boards * sockets_per_board;
-			} else if (!no_sockets_per_board) {
+
+			if (!no_sockets_per_board) {
+				if (!no_sockets)
+					error("NodeNames=%s Sockets=# and "
+					      "SocketsPerBoard=# is invalid, "
+					      "using SocketsPerBoard",
+					      n->nodenames);
+
 				n->sockets = n->boards * sockets_per_board;
 			} else if (!no_sockets) {
 				error("NodeNames=%s Sockets=# with Boards=# is"
@@ -958,8 +958,6 @@ _parse_srun_ports(const char *str)
 
 	return v;
 hosed:
-	xfree(v[0]);
-	xfree(v[1]);
 	xfree(v);
 	xfree(p);
 
@@ -3371,10 +3369,7 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	}
 #endif
 
-	if (!s_p_get_string(&conf->msg_aggr_params,
-			   "MsgAggregationParams", hashtbl))
-		conf->msg_aggr_params =
-			xstrdup(DEFAULT_MSG_AGGREGATION_PARAMS);
+	s_p_get_string(&conf->msg_aggr_params, "MsgAggregationParams", hashtbl);
 
 	if (!s_p_get_boolean((bool *)&conf->track_wckey,
 			    "TrackWCKey", hashtbl))
@@ -4103,7 +4098,7 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 			      long_suspend_time);
 		} else if ((long_suspend_time > -1) &&
 			   (!strcmp(conf->select_type, "select/bluegene"))) {
-			error("SuspendTime (power save mode) incomptible with "
+			error("SuspendTime (power save mode) incompatible with "
 			      "select/bluegene");
 			return SLURM_ERROR;
 		} else
@@ -4513,6 +4508,11 @@ extern char * debug_flags2str(uint64_t debug_flags)
 			xstrcat(rc, ",");
 		xstrcat(rc, "DB_WCKey");
 	}
+	if (debug_flags & DEBUG_FLAG_ESEARCH) {
+		if (rc)
+			xstrcat(rc, ",");
+		xstrcat(rc, "Elasticsearch");
+	}
 	if (debug_flags & DEBUG_FLAG_ENERGY) {
 		if (rc)
 			xstrcat(rc, ",");
@@ -4703,6 +4703,8 @@ extern int debug_str2flags(char *debug_flags, uint64_t *flags_out)
 			(*flags_out) |= DEBUG_FLAG_DB_USAGE;
 		else if (strcasecmp(tok, "DB_WCKey") == 0)
 			(*flags_out) |= DEBUG_FLAG_DB_WCKEY;
+		else if (strcasecmp(tok, "Elasticsearch") == 0)
+			(*flags_out) |= DEBUG_FLAG_ESEARCH;
 		else if (strcasecmp(tok, "Energy") == 0)
 			(*flags_out) |= DEBUG_FLAG_ENERGY;
 		else if (strcasecmp(tok, "ExtSensors") == 0)

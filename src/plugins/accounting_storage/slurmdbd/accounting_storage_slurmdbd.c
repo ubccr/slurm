@@ -763,7 +763,25 @@ extern int acct_storage_p_add_reservation(void *db_conn,
 {
 	slurmdbd_msg_t req;
 	dbd_rec_msg_t get_msg;
-	int rc, resp_code = SLURM_SUCCESS;
+	int rc;
+
+	if (!resv) {
+		error("No reservation was given to add.");
+		return SLURM_ERROR;
+	}
+
+	if (!resv->id) {
+		error("An id is needed to add a reservation.");
+		return SLURM_ERROR;
+	}
+	if (!resv->time_start) {
+		error("A start time is needed to add a reservation.");
+		return SLURM_ERROR;
+	}
+	if (!resv->cluster || !resv->cluster[0]) {
+		error("A cluster name is needed to add a reservation.");
+		return SLURM_ERROR;
+	}
 
 	memset(&get_msg, 0, sizeof(dbd_rec_msg_t));
 	get_msg.rec = resv;
@@ -771,11 +789,7 @@ extern int acct_storage_p_add_reservation(void *db_conn,
 	req.msg_type = DBD_ADD_RESV;
 	req.data = &get_msg;
 
-	rc = slurm_send_slurmdbd_recv_rc_msg(SLURM_PROTOCOL_VERSION,
-					     &req, &resp_code);
-
-	if (resp_code != SLURM_SUCCESS)
-		rc = resp_code;
+	rc = slurm_send_slurmdbd_msg(SLURM_PROTOCOL_VERSION, &req);
 
 	return rc;
 }
@@ -1134,18 +1148,38 @@ extern int acct_storage_p_modify_reservation(void *db_conn,
 {
 	slurmdbd_msg_t req;
 	dbd_rec_msg_t get_msg;
-	int rc, resp_code = SLURM_SUCCESS;
+	int rc;
+
+	if (!resv) {
+		error("No reservation was given to edit");
+		return SLURM_ERROR;
+	}
+
+	if (!resv->id) {
+		error("An id is needed to edit a reservation.");
+		return SLURM_ERROR;
+	}
+	if (!resv->time_start) {
+		error("A start time is needed to edit a reservation.");
+		return SLURM_ERROR;
+	}
+	if (!resv->cluster || !resv->cluster[0]) {
+		error("A cluster name is needed to edit a reservation.");
+		return SLURM_ERROR;
+	}
+
+	if (!resv->time_start_prev) {
+		error("We need a time to check for last "
+		      "start of reservation.");
+		return SLURM_ERROR;
+	}
 
 	memset(&get_msg, 0, sizeof(dbd_rec_msg_t));
 	get_msg.rec = resv;
 	req.msg_type = DBD_MODIFY_RESV;
 	req.data = &get_msg;
 
-	rc = slurm_send_slurmdbd_recv_rc_msg(SLURM_PROTOCOL_VERSION,
-					     &req, &resp_code);
-
-	if (resp_code != SLURM_SUCCESS)
-		rc = resp_code;
+	rc = slurm_send_slurmdbd_msg(SLURM_PROTOCOL_VERSION, &req);
 
 	return rc;
 }
@@ -1506,7 +1540,27 @@ extern int acct_storage_p_remove_reservation(void *db_conn,
 {
 	slurmdbd_msg_t req;
 	dbd_rec_msg_t get_msg;
-	int rc, resp_code = SLURM_SUCCESS;
+	int rc;
+
+	if (!resv) {
+		error("No reservation was given to remove");
+		return SLURM_ERROR;
+	}
+
+	if (!resv->id) {
+		error("An id is needed to remove a reservation.");
+		return SLURM_ERROR;
+	}
+
+	if (!resv->time_start) {
+		error("A start time is needed to remove a reservation.");
+		return SLURM_ERROR;
+	}
+
+	if (!resv->cluster || !resv->cluster[0]) {
+		error("A cluster name is needed to remove a reservation.");
+		return SLURM_ERROR;
+	}
 
 	memset(&get_msg, 0, sizeof(dbd_rec_msg_t));
 	get_msg.rec = resv;
@@ -1514,11 +1568,7 @@ extern int acct_storage_p_remove_reservation(void *db_conn,
 	req.msg_type = DBD_REMOVE_RESV;
 	req.data = &get_msg;
 
-	rc = slurm_send_slurmdbd_recv_rc_msg(SLURM_PROTOCOL_VERSION,
-					     &req, &resp_code);
-
-	if ((rc == SLURM_SUCCESS) && (resp_code != SLURM_SUCCESS))
-		rc = resp_code;
+	rc = slurm_send_slurmdbd_msg(SLURM_PROTOCOL_VERSION, &req);
 
 	return rc;
 }

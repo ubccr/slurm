@@ -214,9 +214,14 @@ static uint16_t _allocate_sc(struct job_record *job_ptr, bitstr_t *core_map,
 	uint16_t cores_per_socket = select_node_record[node_i].cores;
 	uint16_t threads_per_core = select_node_record[node_i].vpus;
 	uint16_t min_cores = 1, min_sockets = 1, ntasks_per_socket = 0;
-	uint16_t ntasks_per_core = 0xffff;
+	uint16_t ncpus_per_core = 0xffff;	/* Usable CPUs per core */
 	uint32_t free_cpu_count = 0, used_cpu_count = 0, *used_cpu_array = NULL;
 
+	if (entire_sockets_only && job_ptr->details->whole_node &&
+	    (job_ptr->details->core_spec != (uint16_t) NO_VAL)) {
+		/* Ignore specialized cores when allocating "entire" socket */
+		entire_sockets_only = false;
+	}
 	if (job_ptr->details && job_ptr->details->mc_ptr) {
 		uint32_t threads_per_socket;
 		multi_core_data_t *mc_ptr = job_ptr->details->mc_ptr;
@@ -226,18 +231,21 @@ static uint16_t _allocate_sc(struct job_record *job_ptr, bitstr_t *core_map,
 		if (mc_ptr->sockets_per_node != (uint16_t) NO_VAL) {
 			min_sockets = mc_ptr->sockets_per_node;
 		}
-		if (mc_ptr->ntasks_per_core) {
-			ntasks_per_core = mc_ptr->ntasks_per_core;
+		if ((mc_ptr->ntasks_per_core != (uint16_t) INFINITE) &&
+		    (mc_ptr->ntasks_per_core)) {
+			ncpus_per_core = MIN(threads_per_core,
+					     (mc_ptr->ntasks_per_core *
+					      cpus_per_task));
 		}
 		if ((mc_ptr->threads_per_core != (uint16_t) NO_VAL) &&
-		    (mc_ptr->threads_per_core <  ntasks_per_core)) {
-			ntasks_per_core = mc_ptr->threads_per_core;
+		    (mc_ptr->threads_per_core <  ncpus_per_core)) {
+			ncpus_per_core = mc_ptr->threads_per_core;
 		}
 		ntasks_per_socket = mc_ptr->ntasks_per_socket;
 
-		if ((ntasks_per_core != (uint16_t) NO_VAL) &&
-		    (ntasks_per_core != (uint16_t) INFINITE) &&
-		    (ntasks_per_core > threads_per_core)) {
+		if ((ncpus_per_core != (uint16_t) NO_VAL) &&
+		    (ncpus_per_core != (uint16_t) INFINITE) &&
+		    (ncpus_per_core > threads_per_core)) {
 			goto fini;
 		}
 		threads_per_socket = threads_per_core * cores_per_socket;
@@ -282,7 +290,7 @@ static uint16_t _allocate_sc(struct job_record *job_ptr, bitstr_t *core_map,
 	 * Step 2: For core-level and socket-level: apply sockets_per_node
 	 *         and cores_per_socket to the "free" cores.
 	 *
-	 * Step 3: Compute task-related data: ntasks_per_core,
+	 * Step 3: Compute task-related data: ncpus_per_core,
 	 *         ntasks_per_socket, ntasks_per_node and cpus_per_task
 	 *         and determine the number of tasks to run on this node
 	 *
@@ -381,15 +389,12 @@ static uint16_t _allocate_sc(struct job_record *job_ptr, bitstr_t *core_map,
 	 *         ntasks_per_socket, ntasks_per_node and cpus_per_task
 	 *         to determine the number of tasks to run on this node
 	 *
-	 * Note: cpus_per_task and ntasks_per_core need to play nice
+	 * Note: cpus_per_task and ncpus_per_core need to play nice
 	 *       2 tasks_per_core vs. 2 cpus_per_task
 	 */
 	avail_cpus = 0;
 	num_tasks = 0;
-	if (ntasks_per_core != 0xffff) {
-		threads_per_core = MIN(threads_per_core,
-				       (ntasks_per_core * cpus_per_task));
-	}
+	threads_per_core = MIN(threads_per_core, ncpus_per_core);
 
 	for (i = 0; i < sockets; i++) {
 		uint16_t tmp = free_cores[i] * threads_per_core;
@@ -536,8 +541,10 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 	struct node_record *node_ptr = node_record_table_ptr + node_i;
 	List gres_list;
 
-	if (!test_only && IS_NODE_COMPLETING(node_ptr)) {
-		/* Do not allocate more jobs to nodes with completing jobs */
+	if (((job_ptr->bit_flags & BACKFILL_TEST) == 0) &&
+	    !test_only && IS_NODE_COMPLETING(node_ptr)) {
+		/* Do not allocate more jobs to nodes with completing jobs,
+		 * backfill scheduler independently handles completing nodes */
 		cpus = 0;
 		return cpus;
 	}
@@ -849,6 +856,7 @@ bitstr_t *_make_core_bitmap(bitstr_t *node_map, uint16_t core_spec)
 {
 	uint32_t n, c, nodes, size;
 	int spec_cores, res_core, res_sock, res_off;
+	int n_first, n_last;
 	uint32_t coff;
 	uint16_t i;
 	struct node_record *node_ptr;
@@ -861,8 +869,12 @@ bitstr_t *_make_core_bitmap(bitstr_t *node_map, uint16_t core_spec)
 	    (core_spec & CORE_SPEC_THREAD))	/* Reserving threads */
 		core_spec = (uint16_t) NO_VAL;	/* Don't remove cores */
 
-	nodes = bit_size(node_map);
-	for (n = 0; n < nodes; n++) {
+	n_first = bit_ffs(node_map);
+	if (n_first == -1)
+		n_last = -2;
+	else
+		n_last = bit_fls(node_map);
+	for (n = n_first; n <= n_last; n++) {
 		if (!bit_test(node_map, n))
 			continue;
 		c    = cr_get_coremap_offset(n);
@@ -1389,8 +1401,7 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 			xfree(cpus_array);
 		}
 
-		if (details_ptr->contiguous ||
-		    ((rem_nodes <= 0) && (rem_cpus <= 0))) {
+		if ((rem_nodes <= 0) && (rem_cpus <= 0)) {
 			error_code = SLURM_SUCCESS;
 			break;
 		}
@@ -2659,15 +2670,15 @@ static inline void _log_select_maps(char *loc, bitstr_t *node_map,
 				    bitstr_t *core_map)
 {
 #if _DEBUG
-	char str[100];
+	char str[256];
 
 	if (node_map) {
 		bit_fmt(str, (sizeof(str) - 1), node_map);
-		info("%s nodemap: %s", loc, str);
+		info("%s nodemap[0-%d]: %s", loc, bit_size(node_map)-1, str);
 	}
 	if (core_map) {
 		bit_fmt(str, (sizeof(str) - 1), core_map);
-		info("%s coremap: %s", loc, str);
+		info("%s coremap[0-%d]: %s", loc, bit_size(core_map)-1, str);
 	}
 #endif
 }
@@ -2826,13 +2837,13 @@ extern int cr_job_test(struct job_record *job_ptr, bitstr_t *node_bitmap,
 	bitstr_t *orig_map, *avail_cores, *free_cores, *part_core_map = NULL;
 	bitstr_t *tmpcore = NULL, *reqmap = NULL;
 	bool test_only;
-	uint32_t c, i, j, k, n, csize, total_cpus, save_mem = 0;
+	uint32_t c, j, k, n, csize, total_cpus, save_mem = 0;
 	int32_t build_cnt;
 	job_resources_t *job_res;
 	struct job_details *details_ptr;
 	struct part_res_record *p_ptr, *jp_ptr;
 	uint16_t *cpu_count;
-	int first, last;
+	int i, first, last;
 
 	if (gang_mode == -1) {
 		if (slurm_get_preempt_mode() & PREEMPT_MODE_GANG)
@@ -3075,36 +3086,44 @@ extern int cr_job_test(struct job_record *job_ptr, bitstr_t *node_bitmap,
 		return SLURM_ERROR;	/* CLANG false positive */
 	}
 
-	/* remove existing allocations (jobs) from higher-priority partitions
-	 * from avail_cores */
-	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-		info("cons_res: cr_job_test: looking for higher-priority or "
-		     "PREEMPT_MODE_OFF part's to remove from avail_cores");
-	}
-
-	for (p_ptr = cr_part_ptr; p_ptr; p_ptr = p_ptr->next) {
-		if ((p_ptr->part_ptr->priority <= jp_ptr->part_ptr->priority) &&
-		    (p_ptr->part_ptr->preempt_mode != PREEMPT_MODE_OFF)) {
-			if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-				info("cons_res: cr_job_test: continuing on "
-				     "part: %s", p_ptr->part_ptr->name);
-			}
-			continue;
+	if (preempt_by_part) {
+		/* Remove from avail_cores resources allocated to jobs which
+		 * this job can not preempt */
+		if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
+			info("cons_res: cr_job_test: looking for "
+			     "higher-priority or PREEMPT_MODE_OFF part's to "
+			     "remove from avail_cores");
 		}
-		if (!p_ptr->row)
-			continue;
-		for (i = 0; i < p_ptr->num_rows; i++) {
-			if (!p_ptr->row[i].row_bitmap)
+
+		for (p_ptr = cr_part_ptr; p_ptr; p_ptr = p_ptr->next) {
+			if ((p_ptr->part_ptr->priority <=
+			     jp_ptr->part_ptr->priority) &&
+			    (p_ptr->part_ptr->preempt_mode !=
+			     PREEMPT_MODE_OFF)) {
+				if (select_debug_flags &
+				    DEBUG_FLAG_SELECT_TYPE) {
+					info("cons_res: cr_job_test: "
+					     "continuing on part: %s",
+					     p_ptr->part_ptr->name);
+				}
 				continue;
-			bit_copybits(tmpcore, p_ptr->row[i].row_bitmap);
-			bit_not(tmpcore); /* set bits now "free" resources */
-			bit_and(free_cores, tmpcore);
+			}
+			if (!p_ptr->row)
+				continue;
+			for (i = 0; i < p_ptr->num_rows; i++) {
+				if (!p_ptr->row[i].row_bitmap)
+					continue;
+				bit_copybits(tmpcore, p_ptr->row[i].row_bitmap);
+				bit_not(tmpcore); /* add to "free" resources */
+				bit_and(free_cores, tmpcore);
+			}
 		}
 	}
 	if (job_ptr->details->whole_node == 1)
 		_block_whole_nodes(node_bitmap, avail_cores, free_cores);
 	/* make these changes permanent */
 	bit_copybits(avail_cores, free_cores);
+
 	cpu_count = _select_nodes(job_ptr, min_nodes, max_nodes, req_nodes,
 				  node_bitmap, cr_node_cnt, free_cores,
 				  node_usage, cr_type, test_only,

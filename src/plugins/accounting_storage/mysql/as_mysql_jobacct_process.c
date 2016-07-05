@@ -443,7 +443,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 			xstrcat(extra, ")");
 		else {
 			xfree(extra);
-			debug("User %s has no assocations, and is not admin, "
+			debug("User %s has no associations, and is not admin, "
 			      "so not returning any jobs.", user->name);
 			/* This user has no valid associations, so
 			 * they will not have any jobs. */
@@ -458,7 +458,15 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 			       "left join \"%s_%s\" as t2 "
 			       "on t1.id_assoc=t2.id_assoc "
 			       "left join \"%s_%s\" as t3 "
-			       " on t1.id_resv=t3.id_resv ",
+			       "on t1.id_resv=t3.id_resv && "
+			       "((t1.time_start && "
+			       "(t3.time_start < t1.time_start && "
+			       "(t3.time_end >= t1.time_start || "
+			       "t3.time_end = 0))) || "
+			       "((t3.time_start < t1.time_submit && "
+			       "(t3.time_end >= t1.time_submit || "
+			       "t3.time_end = 0)) || "
+			       "(t3.time_start > t1.time_submit)))",
 			       job_fields, cluster_name, job_table,
 			       cluster_name, assoc_table,
 			       cluster_name, resv_table);
@@ -1535,7 +1543,7 @@ extern List as_mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 			is_user_any_coord(mysql_conn, &user);
 		}
 		if (!is_admin && !user.name) {
-			debug("User %u has no assocations, and is not admin, "
+			debug("User %u has no associations, and is not admin, "
 			      "so not returning any jobs.", user.uid);
 			return NULL;
 		}

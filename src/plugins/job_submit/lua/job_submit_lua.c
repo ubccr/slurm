@@ -66,6 +66,7 @@
 
 #include "src/common/slurm_xlator.h"
 #include "src/common/assoc_mgr.h"
+#include "src/common/xlua.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/reservation.h"
@@ -661,6 +662,8 @@ static int _get_job_req_field(const struct job_descriptor *job_desc,
 		lua_pushstring (L, job_desc->acctg_freq);
 	} else if (!strcmp(name, "alloc_node")) {
 		lua_pushstring (L, job_desc->alloc_node);
+	} else if (!strcmp(name, "array_inx")) {
+		lua_pushstring (L, job_desc->array_inx);
 	} else if (!strcmp(name, "begin_time")) {
 		lua_pushnumber (L, job_desc->begin_time);
 	} else if (!strcmp(name, "boards_per_node")) {
@@ -852,6 +855,11 @@ static int _set_job_req_field(lua_State *L)
 		xfree(job_desc->acctg_freq);
 		if (strlen(value_str))
 			job_desc->acctg_freq = xstrdup(value_str);
+	} else if (!strcmp(name, "array_inx")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->array_inx);
+		if (strlen(value_str))
+			job_desc->array_inx = xstrdup(value_str);
 	} else if (!strcmp(name, "begin_time")) {
 		job_desc->begin_time = luaL_checknumber(L, 3);
 	} else if (!strcmp(name, "burst_buffer")) {
@@ -1410,20 +1418,14 @@ static int _load_script(void)
  */
 int init(void)
 {
+	int rc = SLURM_SUCCESS;
+
 	/*
-	 *  Need to dlopen() liblua.so with RTLD_GLOBAL in order to
-	 *   ensure symbols from liblua are available to libs opened
-	 *   by any lua scripts.
+	 * Need to dlopen() the Lua library to ensure plugins see
+	 * appropriate symptoms
 	 */
-	if (!dlopen("liblua.so",       RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua-5.2.so",   RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua5.2.so",    RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua5.2.so.0",  RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua-5.1.so",   RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua5.1.so",    RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua5.1.so.0",  RTLD_NOW | RTLD_GLOBAL)) {
-		return error("Failed to open liblua.so: %s", dlerror());
-	}
+	if ((rc = xlua_dlopen()) != SLURM_SUCCESS)
+		return rc;
 
 	return _load_script();
 }

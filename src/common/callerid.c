@@ -48,11 +48,27 @@
 #endif  /*  HAVE_CONFIG_H */
 
 
-//#ifndef _GNU_SOURCE
-//#define _GNU_SOURCE
-//#endif
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <arpa/inet.h>
 #include <ctype.h>
+
+#ifdef __FreeBSD__
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#endif
+
+/*
+ * FIXME: In in6.h, s6_addr32 def is guarded by #ifdef _KERNEL
+ * Is there a portable interface that could be used instead of accessing
+ * structure members directly?
+ */
+#if defined(__FreeBSD__) || defined(__NetBSD__)
+#define s6_addr32 __u6_addr.__u6_addr32
+#endif
+
 #if HAVE_DIRENT_H
 #  include <dirent.h>
 #endif
@@ -332,10 +348,6 @@ extern int find_pid_by_inode (pid_t *pid_result, ino_t inode)
 		readdir_r(dirp, entryp, &result);
 		if (!result)
 			break;
-		/* This check is probably unnecessary due to the !result check
-		 * but better safe than sorry */
-		else if (!entryp->d_name)
-			continue;
 		/* We're only looking for /proc/[0-9]*  */
 		else if (!isdigit(entryp->d_name[0]))
 			continue;

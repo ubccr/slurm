@@ -106,8 +106,10 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 	struct node_record *node_ptr = node_record_table_ptr + node_i;
 	List gres_list;
 
-	if (!test_only && IS_NODE_COMPLETING(node_ptr)) {
-		/* Do not allocate more jobs to nodes with completing jobs */
+	if (((job_ptr->bit_flags & BACKFILL_TEST) == 0) &&
+	    !test_only && IS_NODE_COMPLETING(node_ptr)) {
+		/* Do not allocate more jobs to nodes with completing jobs,
+		 * backfill scheduler independently handles completing nodes */
 		cpus = 0;
 		return cpus;
 	}
@@ -133,7 +135,7 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 					  core_end_bit, job_ptr->job_id,
 					  node_ptr->name);
 
-	if ((cr_type & CR_MEMORY) && cpus) {
+	if (job_ptr->details && (cr_type & CR_MEMORY) && cpus) {
 		req_mem   = job_ptr->details->pn_min_memory & ~MEM_PER_CPU;
 		avail_mem = select_node_record[node_i].real_memory -
 			    select_node_record[node_i].mem_spec_limit;
@@ -146,9 +148,10 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 	gres_cpus = gres_cores;
 	if (gres_cpus != NO_VAL)
 		gres_cpus *= cpus_per_core;
-	if ((gres_cpus < job_ptr->details->ntasks_per_node) ||
-	    ((job_ptr->details->cpus_per_task > 1) &&
-	     (gres_cpus < job_ptr->details->cpus_per_task)))
+	if ((job_ptr->details) &&
+	    ((gres_cpus < job_ptr->details->ntasks_per_node) ||
+	     ((job_ptr->details->cpus_per_task > 1) &&
+	      (gres_cpus < job_ptr->details->cpus_per_task))))
 		gres_cpus = 0;
 	if (gres_cpus < cpus)
 		cpus = gres_cpus;

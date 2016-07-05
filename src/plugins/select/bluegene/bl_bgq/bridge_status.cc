@@ -402,7 +402,8 @@ static void _handle_bad_nodeboard(const char *nb_name, char* bg_down_node,
 	return;
 }
 
-/* ba_system_mutex && block_state_mutex must be locked before this */
+/* part_write_lock && ba_system_mutex && block_state_mutex must be
+ * locked before this */
 static void _handle_node_change(ba_mp_t *ba_mp, const std::string& cnode_loc,
 				EnumWrapper<Hardware::State> state,
 				List *delete_list, bool print_debug)
@@ -502,10 +503,10 @@ static void _handle_node_change(ba_mp_t *ba_mp, const std::string& cnode_loc,
 		   deadlock */
 		slurm_mutex_unlock(&ba_system_mutex);
 		slurm_mutex_unlock(&block_state_mutex);
-		unlock_slurmctld(job_read_lock);
+		unlock_slurmctld(part_write_lock);
 		_handle_bad_nodeboard(nc_name, bg_down_node,
 				      state, reason, print_debug);
-		lock_slurmctld(job_read_lock);
+		lock_slurmctld(part_write_lock);
 		slurm_mutex_lock(&block_state_mutex);
 		slurm_mutex_lock(&ba_system_mutex);
 	}
@@ -699,6 +700,14 @@ static void _handle_cable_change(int dim, ba_mp_t *ba_mp,
 				continue;
 			if (!*delete_list)
 				*delete_list = list_create(NULL);
+
+			/* If a cable goes bad we have to destroy the block or
+			 * the next job will fail on the block.
+			 */
+			if (bg_conf->layout_mode == LAYOUT_DYNAMIC)
+				bg_record->destroy = 1;
+			else
+				bg_record->state |= BG_BLOCK_ERROR_FLAG;
 
 			debug("_handle_cable_change: going to "
 			      "remove block %s, bad underlying cable.",
@@ -1013,7 +1022,7 @@ static void _handle_midplane_update(ComputeHardware::ConstPtr bgq,
 			   this to finish.
 			*/
 			BOOST_FOREACH(const Node::ConstPtr& cnode_ptr, vec) {
-				lock_slurmctld(job_read_lock);
+				lock_slurmctld(part_write_lock);
 				slurm_mutex_lock(&block_state_mutex);
 				slurm_mutex_lock(&ba_system_mutex);
 				_handle_node_change(ba_mp,
@@ -1022,7 +1031,7 @@ static void _handle_midplane_update(ComputeHardware::ConstPtr bgq,
 						    delete_list, 0);
 				slurm_mutex_unlock(&ba_system_mutex);
 				slurm_mutex_unlock(&block_state_mutex);
-				unlock_slurmctld(job_read_lock);
+				unlock_slurmctld(part_write_lock);
 				if (rt_waiting
 				    || slurmctld_config.shutdown_time)
 					return;
@@ -1071,6 +1080,7 @@ static void _handle_midplane_update(ComputeHardware::ConstPtr bgq,
 					 * needed in _handle_cable_change,
 					 * so lock it first to avoid
 					 * dead lock */
+					lock_slurmctld(node_write_lock);
 					slurm_mutex_lock(&block_state_mutex);
 					slurm_mutex_lock(&ba_system_mutex);
 					_handle_cable_change(
@@ -1079,6 +1089,7 @@ static void _handle_midplane_update(ComputeHardware::ConstPtr bgq,
 						delete_list, 0);
 					slurm_mutex_unlock(&ba_system_mutex);
 					slurm_mutex_unlock(&block_state_mutex);
+					unlock_slurmctld(node_write_lock);
 					if (rt_waiting
 					    || slurmctld_config.shutdown_time)
 						return;
@@ -1128,7 +1139,7 @@ static void _do_hardware_poll(int level, uint16_t *coords,
 		if (initial_poll && bg_conf->sub_mp_sys)
 			delete_it = 1;
 
-		free_block_list(NO_VAL, delete_list, 1, 0);
+		free_block_list(NO_VAL, delete_list, delete_it, 0);
 		list_destroy(delete_list);
 	}
 }
@@ -1483,9 +1494,9 @@ void event_handler::handleNodeStateChangedRealtimeEvent(
 	for (dim = 0; dim < SYSTEM_DIMENSIONS; dim++)
 		coords[dim] = ibm_coords[dim];
 
-	/* job_read_lock and block_state_mutex may be needed in
+	/* part_write_lock and block_state_mutex may be needed in
 	 * _handle_node_change, so lock it first to avoid dead lock */
-	lock_slurmctld(job_read_lock);
+	lock_slurmctld(part_write_lock);
 	slurm_mutex_lock(&block_state_mutex);
 	slurm_mutex_lock(&ba_system_mutex);
 	ba_mp = coord2ba_mp(coords);
@@ -1499,7 +1510,7 @@ void event_handler::handleNodeStateChangedRealtimeEvent(
 		      bridge_hardware_state_string(event.getState()));
 		slurm_mutex_unlock(&ba_system_mutex);
 		slurm_mutex_unlock(&block_state_mutex);
-		unlock_slurmctld(job_read_lock);
+		unlock_slurmctld(part_write_lock);
 		return;
 	}
 
@@ -1512,7 +1523,7 @@ void event_handler::handleNodeStateChangedRealtimeEvent(
 			    &delete_list, 1);
 	slurm_mutex_unlock(&ba_system_mutex);
 	slurm_mutex_unlock(&block_state_mutex);
-	unlock_slurmctld(job_read_lock);
+	unlock_slurmctld(part_write_lock);
 
 	bg_status_process_kill_job_list(kill_job_list, JOB_FAILED, 0);
 
@@ -1547,6 +1558,7 @@ void event_handler::handleTorusCableStateChangedRealtimeEvent(
 
 	/* block_state_mutex may be needed in _handle_cable_change,
 	 * so lock it first to avoid dead lock */
+	lock_slurmctld(node_write_lock);
 	slurm_mutex_lock(&block_state_mutex);
 	slurm_mutex_lock(&ba_system_mutex);
 	from_ba_mp = coord2ba_mp(coords);
@@ -1558,6 +1570,7 @@ void event_handler::handleTorusCableStateChangedRealtimeEvent(
 		      bridge_hardware_state_string(event.getState()));
 		slurm_mutex_unlock(&ba_system_mutex);
 		slurm_mutex_unlock(&block_state_mutex);
+		unlock_slurmctld(node_write_lock);
 		return;
 	}
 
@@ -1566,6 +1579,7 @@ void event_handler::handleTorusCableStateChangedRealtimeEvent(
 			     &delete_list, 1);
 	slurm_mutex_unlock(&ba_system_mutex);
 	slurm_mutex_unlock(&block_state_mutex);
+	unlock_slurmctld(node_write_lock);
 
 	if (delete_list) {
 		free_block_list(NO_VAL, delete_list, 0, 0);

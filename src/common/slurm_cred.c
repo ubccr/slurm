@@ -645,8 +645,8 @@ slurm_cred_copy(slurm_cred_t *cred)
 					  rcred->core_array_size);
 	memcpy(rcred->sockets_per_node, cred->sockets_per_node,
 	       (sizeof(uint16_t) * rcred->core_array_size));
-	cred->sock_core_rep_count = xmalloc(sizeof(uint32_t) *
-					    rcred->core_array_size);
+	rcred->sock_core_rep_count = xmalloc(sizeof(uint32_t) *
+					     rcred->core_array_size);
 	memcpy(rcred->sock_core_rep_count, cred->sock_core_rep_count,
 	       (sizeof(uint32_t) * rcred->core_array_size));
 	rcred->job_constraints = xstrdup(cred->job_constraints);
@@ -1743,10 +1743,10 @@ _pack_cred(slurm_cred_t *cred, Buf buffer, uint16_t protocol_version)
 
 		(void) gres_plugin_job_state_pack(cred->job_gres_list, buffer,
 						  cred->jobid, false,
-						  SLURM_PROTOCOL_VERSION);
+						  protocol_version);
 		gres_plugin_step_state_pack(cred->step_gres_list, buffer,
 					    cred->jobid, cred->stepid,
-					    SLURM_PROTOCOL_VERSION);
+					    protocol_version);
 		pack16(cred->job_core_spec,  buffer);
 		pack32(cred->job_mem_limit,  buffer);
 		pack32(cred->step_mem_limit, buffer);
@@ -1784,10 +1784,10 @@ _pack_cred(slurm_cred_t *cred, Buf buffer, uint16_t protocol_version)
 
 		(void) gres_plugin_job_state_pack(cred->job_gres_list, buffer,
 						  cred->jobid, false,
-						  SLURM_PROTOCOL_VERSION);
+						  protocol_version);
 		gres_plugin_step_state_pack(cred->step_gres_list, buffer,
 					    cred->jobid, cred->stepid,
-					    SLURM_PROTOCOL_VERSION);
+					    protocol_version);
 		pack16(cred->job_core_spec,  buffer);
 		pack32(cred->job_mem_limit,  buffer);
 		pack32(cred->step_mem_limit, buffer);

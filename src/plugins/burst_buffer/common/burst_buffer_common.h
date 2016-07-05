@@ -151,7 +151,7 @@ typedef struct {
  * burst_buffer string field */
 #define BB_JOB_MAGIC		0xDEAD3412
 typedef struct bb_job {
-	char      *account;	 /* Associated account (for limits) */
+	char      *account;	/* Associated account (for limits) */
 	uint32_t   buf_cnt;	/* Number of records in buf_ptr */
 	bb_buf_t  *buf_ptr;	/* Buffer creation records */
 	uint32_t   gres_cnt;	/* number of records in gres_ptr */
@@ -168,6 +168,7 @@ typedef struct bb_job {
 	uint32_t   swap_nodes;	/* Number of nodes needed */
 	uint64_t   total_size;	/* Total bytes required for job (excludes
 				 * persistent buffers) */
+	uint32_t   user_id;	/* user the job runs as */
 } bb_job_t;
 
 /* Persistent buffer requests which are pending */
@@ -320,6 +321,9 @@ extern int bb_pack_usage(uid_t uid, bb_state_t *state_ptr, Buf buffer,
 /* Sort preempt_bb_recs in order of DECREASING use_time */
 extern int bb_preempt_queue_sort(void *x, void *y);
 
+/* Return count of child processes */
+extern int bb_proc_count(void);
+
 /* Remove persistent burst buffer reservation for this job.
  * Call when job starts running or removed from pending state. */
 extern void bb_rm_persist(bb_state_t *state_ptr, uint32_t job_id);
@@ -331,6 +335,9 @@ extern void bb_set_tres_pos(bb_state_t *state_ptr);
 /* For each burst buffer record, set the use_time to the time at which its
  * use is expected to begin (i.e. each job's expected start time) */
 extern void bb_set_use_time(bb_state_t *state_ptr);
+
+/* Terminate any child processes */
+extern void bb_shutdown(void);
 
 /* Sleep function, also handles termination signal */
 extern void bb_sleep(bb_state_t *state_ptr, int add_secs);

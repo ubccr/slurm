@@ -47,7 +47,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <stdbool.h>
 #include <time.h>
 #include <netinet/in.h> /* for ntohs() */
@@ -773,8 +773,8 @@ _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 			info("Job has been cancelled");
 			break;
 		default:
-			error("received spurious message type: %d",
-			      msg->msg_type);
+			error("%s: received spurious message type: %u",
+			      __func__, msg->msg_type);
 	}
 	return rc;
 }

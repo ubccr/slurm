@@ -1972,6 +1972,11 @@ extern char *reservation_flags_string(uint32_t flags)
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "SPEC_NODES");
 	}
+	if (flags & RESERVE_FLAG_ALL_NODES) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "ALL_NODES");
+	}
 	if (flags & RESERVE_FLAG_ANY_NODES) {
 		if (flag_str[0])
 			xstrcat(flag_str, ",");
@@ -2483,7 +2488,7 @@ extern void accounting_enforce_string(uint16_t enforce, char *str, int str_len)
 			strcat(str, ",");
 		strcat(str, "nojobs"); //7 len
 	}
-	if (enforce & ACCOUNTING_ENFORCE_NO_JOBS) {
+	if (enforce & ACCOUNTING_ENFORCE_NO_STEPS) {
 		if (str[0])
 			strcat(str, ",");
 		strcat(str, "nosteps"); //8 len
@@ -3284,11 +3289,13 @@ extern void slurm_free_trigger_msg(trigger_info_msg_t *msg)
 {
 	int i;
 
-	for (i=0; i<msg->record_count; i++) {
-		xfree(msg->trigger_array[i].res_id);
-		xfree(msg->trigger_array[i].program);
+	if (msg->trigger_array) {
+		for (i = 0; i < msg->record_count; i++) {
+			xfree(msg->trigger_array[i].res_id);
+			xfree(msg->trigger_array[i].program);
+		}
+		xfree(msg->trigger_array);
 	}
-	xfree(msg->trigger_array);
 	xfree(msg);
 }
 
@@ -4227,13 +4234,14 @@ slurm_free_assoc_mgr_info_msg(assoc_mgr_info_msg_t *msg)
 	if (msg->tres_names) {
 		int i;
 		for (i=0; i<msg->tres_cnt; i++)
-			xfree(msg->tres_names);
+			xfree(msg->tres_names[i]);
+		xfree(msg->tres_names);
 	}
 	FREE_NULL_LIST(msg->user_list);
 	xfree(msg);
 }
 
-extern void slurm_free_assoc_mgr_info_request_msg(
+extern void slurm_free_assoc_mgr_info_request_members(
 	assoc_mgr_info_request_msg_t *msg)
 {
 	if (!msg)
@@ -4242,6 +4250,15 @@ extern void slurm_free_assoc_mgr_info_request_msg(
 	FREE_NULL_LIST(msg->acct_list);
 	FREE_NULL_LIST(msg->qos_list);
 	FREE_NULL_LIST(msg->user_list);
+}
+
+extern void slurm_free_assoc_mgr_info_request_msg(
+	assoc_mgr_info_request_msg_t *msg)
+{
+	if (!msg)
+		return;
+
+	slurm_free_assoc_mgr_info_request_members(msg);
 	xfree(msg);
 }
 

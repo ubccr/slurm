@@ -67,11 +67,24 @@
 #  include <string.h>
 #endif /* HAVE_CONFIG_H */
 
+#ifdef __FreeBSD__
+#include <sys/param.h>
+#include <sys/cpuset.h>
+typedef cpuset_t cpu_set_t;
+#endif
+
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <math.h>
+
+#ifdef __NetBSD__
+#define CPU_ZERO(c) cpuset_zero(*(c))
+#define CPU_ISSET(i,c) cpuset_isset((i),*(c))
+#define sched_getaffinity sched_getaffinity_np
+#define SCHED_GETAFFINITY_THREE_ARGS
+#endif
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -814,11 +827,12 @@ static int _parse_gres_config(void **dest, slurm_parser_enum_t type,
 		else if ((last[0] == 'm') || (last[0] == 'M'))
 			tmp_uint64 *= (1024 * 1024);
 		else if ((last[0] == 'g') || (last[0] == 'G'))
-			tmp_uint64 *= (1024 * 1024 * 1024);
+			tmp_uint64 *= ((uint64_t)1024 * 1024 * 1024);
 		else if ((last[0] == 't') || (last[0] == 'T'))
-			tmp_uint64 *= (uint64_t)pow(1024, 4);
+			tmp_uint64 *= ((uint64_t)1024 * 1024 * 1024 * 1024);
 		else if ((last[0] == 'p') || (last[0] == 'P'))
-			tmp_uint64 *= (uint64_t)pow(1024, 5);
+			tmp_uint64 *= ((uint64_t)1024 * 1024 * 1024 * 1024 *
+				       1024);
 		else if (last[0] != '\0') {
 			fatal("Invalid gres data for %s, Count=%s", p->name,
 			      tmp_str);
@@ -827,7 +841,7 @@ static int _parse_gres_config(void **dest, slurm_parser_enum_t type,
 			fatal("Invalid gres data for %s, Count does not match "
 			      "File value", p->name);
 		}
-		if ((tmp_uint64 < 0) || (tmp_uint64 >= NO_VAL)) {
+		if (tmp_uint64 >= NO_VAL64) {
 			fatal("Gres %s has invalid count value %"PRIu64,
 			      p->name, tmp_uint64);
 		}
@@ -1505,11 +1519,13 @@ static void _get_gres_cnt(gres_node_state_t *gres_data, char *orig_config,
 			else if ((last_num[0] == 'm') || (last_num[0] == 'M'))
 				tmp_gres_cnt *= (1024 * 1024);
 			else if ((last_num[0] == 'g') || (last_num[0] == 'G'))
-				tmp_gres_cnt *= (1024 * 1024 * 1024);
+				tmp_gres_cnt *= ((uint64_t)1024 * 1024 * 1024);
 			else if ((last_num[0] == 't') || (last_num[0] == 'T'))
-				tmp_gres_cnt *= (uint64_t)pow(1024, 4);
+				tmp_gres_cnt *= ((uint64_t)1024 * 1024 * 1024 *
+						 1024);
 			else if ((last_num[0] == 'p') || (last_num[0] == 'P'))
-				tmp_gres_cnt *= (uint64_t)pow(1024, 5);
+				tmp_gres_cnt *= ((uint64_t)1024 * 1024 * 1024 *
+						 1024 * 1024);
 			else {
 				error("Bad GRES configuration: %s", tok);
 				break;
@@ -2783,7 +2799,7 @@ static int _job_state_validate(char *config, gres_job_state_t **gres_data,
 		/* Did not find this GRES name, check for zero value */
 		num = strrchr(config, ':');
 		if (num) {
-			cnt = strtol(num + 1, &last_num, 10);
+			cnt = strtoll(num + 1, &last_num, 10);
 			if ((last_num[0] != '\0') || (cnt != 0))
 				return SLURM_ERROR;
 		} else
@@ -3927,8 +3943,8 @@ static int _job_alloc(void *job_gres_data, void *node_gres_data,
 		      char *gres_name, uint32_t job_id, char *node_name,
 		      bitstr_t *core_bitmap)
 {
-	int i, j, k, sz1, sz2;
-	uint32_t gres_cnt;
+	int j, k, sz1, sz2;
+	uint64_t gres_cnt, i;
 	gres_job_state_t  *job_gres_ptr  = (gres_job_state_t *)  job_gres_data;
 	gres_node_state_t *node_gres_ptr = (gres_node_state_t *) node_gres_data;
 	bool type_array_updated = false;
@@ -3971,15 +3987,24 @@ static int _job_alloc(void *job_gres_data, void *node_gres_data,
 	 */
 	gres_cnt = job_gres_ptr->gres_cnt_alloc;
 	i = node_gres_ptr->gres_cnt_alloc + gres_cnt;
-	i -= node_gres_ptr->gres_cnt_avail;
-	if (i > 0) {
-		error("gres/%s: job %u node %s overallocated resources by %d",
-		      gres_name, job_id, node_name, i);
+
+	if (i > node_gres_ptr->gres_cnt_avail) {
+		error("gres/%s: job %u node %s overallocated resources by %"
+		      PRIu64", (%"PRIu64" > %"PRIu64")",
+		      gres_name, job_id, node_name,
+		      i - node_gres_ptr->gres_cnt_avail,
+		      i, node_gres_ptr->gres_cnt_avail);
 		/* proceed with request, give job what's available */
 	}
 
-	if (node_offset == 0)	/* Avoids memory leak on requeue */
+	if (!node_offset && job_gres_ptr->gres_cnt_step_alloc) {
+		uint64_t *tmp = xmalloc(sizeof(uint64_t) * node_cnt);
+		memcpy(tmp, job_gres_ptr->gres_cnt_step_alloc,
+		       sizeof(uint64_t) * MIN(node_cnt,
+					      job_gres_ptr->node_cnt));
 		xfree(job_gres_ptr->gres_cnt_step_alloc);
+		job_gres_ptr->gres_cnt_step_alloc = tmp;
+	}
 	if (job_gres_ptr->gres_cnt_step_alloc == NULL) {
 		job_gres_ptr->gres_cnt_step_alloc =
 			xmalloc(sizeof(uint64_t) * node_cnt);
@@ -3997,9 +4022,10 @@ static int _job_alloc(void *job_gres_data, void *node_gres_data,
 			node_gres_ptr->gres_cnt_alloc +=
 				bit_set_count(node_gres_ptr->gres_bit_alloc);
 		} else if (node_gres_ptr->gres_bit_alloc) {
-			gres_cnt = MIN(bit_size(node_gres_ptr->gres_bit_alloc),
-				       bit_size(job_gres_ptr->
-						gres_bit_alloc[node_offset]));
+			gres_cnt = (uint64_t)MIN(
+				bit_size(node_gres_ptr->gres_bit_alloc),
+				bit_size(job_gres_ptr->
+					 gres_bit_alloc[node_offset]));
 			for (i = 0; i < gres_cnt; i++) {
 				if (bit_test(job_gres_ptr->
 					     gres_bit_alloc[node_offset], i) &&
@@ -4015,7 +4041,7 @@ static int _job_alloc(void *job_gres_data, void *node_gres_data,
 		i = bit_size(node_gres_ptr->gres_bit_alloc);
 		if (i < node_gres_ptr->gres_cnt_avail) {
 			error("gres/%s: node %s gres bitmap size bad "
-			      "(%d < %"PRIu64")",
+			      "(%"PRIu64" < %"PRIu64")",
 			      gres_name, node_name,
 			      i, node_gres_ptr->gres_cnt_avail);
 			node_gres_ptr->gres_bit_alloc =
@@ -4231,10 +4257,11 @@ static int _job_dealloc(void *job_gres_data, void *node_gres_data,
 			int node_offset, char *gres_name, uint32_t job_id,
 			char *node_name)
 {
-	int i, j, k, len, gres_cnt, sz1, sz2;
+	int i, j, len, sz1, sz2;
 	gres_job_state_t  *job_gres_ptr  = (gres_job_state_t *)  job_gres_data;
 	gres_node_state_t *node_gres_ptr = (gres_node_state_t *) node_gres_data;
 	bool type_array_updated = false;
+	uint64_t gres_cnt, k;
 
 	/*
 	 * Validate data structures. Either job_gres_data->node_cnt and
@@ -4288,8 +4315,11 @@ static int _job_dealloc(void *job_gres_data, void *node_gres_data,
 		node_gres_ptr->gres_cnt_alloc -= job_gres_ptr->gres_cnt_alloc;
 	} else {
 		node_gres_ptr->gres_cnt_alloc = 0;
-		error("gres/%s: job %u node %s gres count underflow",
-		      gres_name, job_id, node_name);
+		error("gres/%s: job %u node %s gres count underflow "
+		      "(%"PRIu64" %"PRIu64")",
+		      gres_name, job_id, node_name,
+		      node_gres_ptr->gres_cnt_alloc,
+		      job_gres_ptr->gres_cnt_alloc);
 	}
 
 	if (job_gres_ptr->gres_bit_alloc &&
@@ -4297,21 +4327,25 @@ static int _job_dealloc(void *job_gres_data, void *node_gres_data,
 	    node_gres_ptr->topo_gres_bitmap &&
 	    node_gres_ptr->topo_gres_cnt_alloc) {
 		for (i = 0; i < node_gres_ptr->topo_cnt; i++) {
-			sz1 = bit_size(job_gres_ptr->gres_bit_alloc[node_offset]);
+			sz1 = bit_size(
+				job_gres_ptr->gres_bit_alloc[node_offset]);
 			sz2 = bit_size(node_gres_ptr->topo_gres_bitmap[i]);
 			if (sz1 != sz2)
 				continue;
-			gres_cnt = bit_overlap(job_gres_ptr->
-					       gres_bit_alloc[node_offset],
-					       node_gres_ptr->
-					       topo_gres_bitmap[i]);
+			gres_cnt = (uint64_t)bit_overlap(
+				job_gres_ptr->gres_bit_alloc[node_offset],
+				node_gres_ptr->topo_gres_bitmap[i]);
 			if (node_gres_ptr->topo_gres_cnt_alloc[i] >= gres_cnt) {
 				node_gres_ptr->topo_gres_cnt_alloc[i] -=
 					gres_cnt;
 			} else {
 				error("gres/%s: job %u dealloc node %s topo "
-				      "gres count underflow", gres_name, job_id,
-				      node_name);
+				      "gres count underflow "
+				      "(%"PRIu64" %"PRIu64")",
+				      gres_name, job_id,
+				      node_name,
+				      node_gres_ptr->topo_gres_cnt_alloc[i],
+				      gres_cnt);
 				node_gres_ptr->topo_gres_cnt_alloc[i] = 0;
 			}
 			if ((node_gres_ptr->type_cnt == 0) ||
@@ -4329,9 +4363,12 @@ static int _job_dealloc(void *job_gres_data, void *node_gres_data,
 						gres_cnt;
 				} else {
 					error("gres/%s: job %u dealloc node %s "
-					      "type %s gres count underflow",
+					      "type %s gres count underflow "
+					      "(%"PRIu64" %"PRIu64")",
 					      gres_name, job_id, node_name,
-					      node_gres_ptr->type_model[j]);
+					      node_gres_ptr->type_model[j],
+					      node_gres_ptr->type_cnt_alloc[i],
+					      gres_cnt);
 					node_gres_ptr->type_cnt_alloc[j] = 0;
 				}
 			}
@@ -4861,7 +4898,7 @@ static int _step_state_validate(char *config, gres_step_state_t **gres_data,
 {
 	gres_step_state_t *gres_ptr;
 	char *type = NULL, *num = NULL, *last_num = NULL;
-	int cnt;
+	int64_t cnt;
 
 	if (!xstrcmp(config, context_ptr->gres_name)) {
 		cnt = 1;
@@ -4871,7 +4908,7 @@ static int _step_state_validate(char *config, gres_step_state_t **gres_data,
 		num = strrchr(config, ':');
 		if (!num)
 			return SLURM_ERROR;
-		cnt = strtol(num + 1, &last_num, 10);
+		cnt = strtoll(num + 1, &last_num, 10);
 		if (last_num[0] == '\0')
 			;
 		else if ((last_num[0] == 'k') || (last_num[0] == 'K'))
@@ -4888,7 +4925,7 @@ static int _step_state_validate(char *config, gres_step_state_t **gres_data,
 		/* Did not find this GRES name, check for zero value */
 		num = strrchr(config, ':');
 		if (num) {
-			 cnt = strtol(num + 1, &last_num, 10);
+			cnt = strtoll(num + 1, &last_num, 10);
 			if ((last_num[0] != '\0') || (cnt != 0))
 				return SLURM_ERROR;
 		} else
@@ -4978,8 +5015,8 @@ static uint64_t _step_test(void *step_gres_data, void *job_gres_data,
 			gres_cnt = NO_VAL64;
 	} else {
 		/* Note: We already validated the gres count above */
-		debug("gres/%s: %s %u.%u gres_bit_alloc is NULL",
-		      gres_name, __func__, job_id, step_id);
+		debug3("gres/%s: %s %u.%u gres_bit_alloc is NULL",
+		       gres_name, __func__, job_id, step_id);
 		gres_cnt = NO_VAL64;
 	}
 
@@ -5561,20 +5598,28 @@ extern uint64_t gres_plugin_step_count(List step_gres_list, char *gres_name)
  * which are available from the CPUs current allocated to this process */
 static bitstr_t * _get_usable_gres(int context_inx)
 {
+#ifdef __NetBSD__
+	// On NetBSD, cpuset_t is an opaque data type
+	cpuset_t *mask = cpuset_create();
+#else
 	cpu_set_t mask;
+#endif
 	bitstr_t *usable_gres = NULL;
 	int i, i_last, rc;
 	ListIterator iter;
 	gres_slurmd_conf_t *gres_slurmd_conf;
 	int gres_inx = 0;
 
-
 	CPU_ZERO(&mask);
-#ifdef SCHED_GETAFFINITY_THREE_ARGS
+#ifdef __FreeBSD__
+	rc = cpuset_getaffinity(CPU_LEVEL_WHICH, CPU_WHICH_PID, -1,
+				sizeof(mask), &mask);
+#elif defined SCHED_GETAFFINITY_THREE_ARGS
 	rc = sched_getaffinity(0, sizeof(mask), &mask);
 #else
 	rc = sched_getaffinity(0, &mask);
 #endif
+
 	if (rc) {
 		error("sched_getaffinity error: %m");
 		return usable_gres;
@@ -5608,6 +5653,10 @@ static bitstr_t * _get_usable_gres(int context_inx)
 		gres_inx += gres_slurmd_conf->count;
 	}
 	list_iterator_destroy(iter);
+
+#ifdef __NetBSD__
+	cpuset_destroy(mask);
+#endif
 
 	return usable_gres;
 }
@@ -5877,8 +5926,8 @@ static int _step_alloc(void *step_gres_data, void *job_gres_data,
 
 	if ((job_gres_ptr->gres_bit_alloc == NULL) ||
 	    (job_gres_ptr->gres_bit_alloc[node_offset] == NULL)) {
-		debug("gres/%s: %s gres_bit_alloc for %u.%u is NULL",
-		      gres_name, __func__, job_id, step_id);
+		debug3("gres/%s: %s gres_bit_alloc for %u.%u is NULL",
+		       gres_name, __func__, job_id, step_id);
 		return SLURM_SUCCESS;
 	}
 
@@ -6564,7 +6613,7 @@ extern char *gres_2_tres_str(List gres_list, bool is_job, bool locked)
 	ListIterator itr;
 	slurmdb_tres_rec_t *tres_rec;
 	gres_state_t *gres_state_ptr;
-	char *name;
+	int i;
 	uint64_t count;
 	char *tres_str = NULL;
 	static bool first_run = 1;
@@ -6592,31 +6641,26 @@ extern char *gres_2_tres_str(List gres_list, bool is_job, bool locked)
 		if (is_job) {
 			gres_job_state_t *gres_data_ptr = (gres_job_state_t *)
 				gres_state_ptr->gres_data;
-			name = gres_data_ptr->type_model;
 			count = gres_data_ptr->gres_cnt_alloc
 				* (uint64_t)gres_data_ptr->node_cnt;
 		} else {
 			gres_step_state_t *gres_data_ptr = (gres_step_state_t *)
 				gres_state_ptr->gres_data;
-			name = gres_data_ptr->type_model;
 			count = gres_data_ptr->gres_cnt_alloc
 				* (uint64_t)gres_data_ptr->node_cnt;
 		}
 
-		if (!name) {
-			int i;
-			for (i=0; i < gres_context_cnt; i++) {
-				if (gres_context[i].plugin_id ==
-				    gres_state_ptr->plugin_id) {
-					name = gres_context[i].gres_name;
-					break;
-				}
+		for (i = 0; i < gres_context_cnt; i++) {
+			if (gres_context[i].plugin_id ==
+			    gres_state_ptr->plugin_id) {
+				tres_req.name = gres_context[i].gres_name;
+				break;
 			}
+		}
 
-			if (!name) {
-				debug("gres_add_tres: couldn't find name");
-				continue;
-			}
+		if (!tres_req.name) {
+			debug("%s: couldn't find name", __func__);
+			continue;
 		}
 
 		if (!(tres_rec = assoc_mgr_find_tres_rec(&tres_req)))
@@ -6673,27 +6717,23 @@ extern void gres_set_job_tres_cnt(List gres_list,
 	while ((gres_state_ptr = list_next(itr))) {
 		gres_job_state_t *gres_data_ptr = (gres_job_state_t *)
 			gres_state_ptr->gres_data;
-		tres_rec.name = gres_data_ptr->type_model;
 		count = gres_data_ptr->gres_cnt_alloc * (uint64_t)node_cnt;
 
-		if (!tres_rec.name) {
-			for (i=0; i < gres_context_cnt; i++) {
-				if (gres_context[i].plugin_id ==
-				    gres_state_ptr->plugin_id) {
-					tres_rec.name =
-						gres_context[i].gres_name;
-					break;
-				}
-			}
-
-			if (!tres_rec.name) {
-				debug("gres_add_tres: couldn't find name");
-				continue;
+		for (i=0; i < gres_context_cnt; i++) {
+			if (gres_context[i].plugin_id ==
+			    gres_state_ptr->plugin_id) {
+				tres_rec.name =	gres_context[i].gres_name;
+				break;
 			}
 		}
 
+		if (!tres_rec.name) {
+			debug("gres_add_tres: couldn't find name");
+			continue;
+		}
+
 		if ((tres_pos = assoc_mgr_find_tres_pos(
-			     &tres_rec, false)) != -1)
+			     &tres_rec, true)) != -1)
 			tres_cnt[tres_pos] = count;
 	}
 	list_iterator_destroy(itr);

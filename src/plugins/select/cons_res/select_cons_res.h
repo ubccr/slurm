@@ -70,9 +70,9 @@
 struct part_row_data {
 	bitstr_t *row_bitmap;		/* contains core bitmap for all jobs in
 					 * this row */
-	uint32_t num_jobs;		/* Number of jobs in this row */
 	struct job_resources **job_list;/* List of jobs in this row */
 	uint32_t job_list_size;		/* Size of job_list array */
+	uint32_t num_jobs;		/* Number of occupied entries in job_list array */
 };
 
 /* partition CPU allocation data */
@@ -109,6 +109,7 @@ struct node_use_record {
 extern bool     backfill_busy_nodes;
 extern bool     have_dragonfly;
 extern bool     pack_serial_at_end;
+extern bool     preempt_by_part;
 extern bool     preempt_by_qos;
 extern uint64_t select_debug_flags;
 extern uint16_t select_fast_schedule;

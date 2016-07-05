@@ -973,7 +973,7 @@ static int _connect_srun_cr(char *addr)
 	strcpy(sa.sun_path, addr);
 	sa_len = strlen(sa.sun_path) + sizeof(sa.sun_family);
 
-	while ((rc = connect(fd, (struct sockaddr *)&sa, sa_len) < 0) &&
+	while (((rc = connect(fd, (struct sockaddr *)&sa, sa_len)) < 0) &&
 	       (errno == EINTR));
 
 	if (rc < 0) {
@@ -1568,8 +1568,8 @@ _handle_msg(void *arg, slurm_msg_t *msg)
 		_task_user_managed_io_handler(sls, msg);
 		break;
 	default:
-		error("received spurious message type: %u",
-		      msg->msg_type);
+		error("%s: received spurious message type: %u",
+		      __func__, msg->msg_type);
 		break;
 	}
 	return;

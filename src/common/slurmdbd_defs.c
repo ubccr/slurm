@@ -54,7 +54,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <syslog.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -1856,16 +1856,16 @@ static Buf _recv_msg(int read_timeout)
 		return NULL;
 
 	if (!_fd_readable(slurmdbd_fd, read_timeout))
-		return NULL;
+		goto endit;
 	msg_read = read(slurmdbd_fd, &nw_size, sizeof(nw_size));
 	if (msg_read != sizeof(nw_size))
-		return NULL;
+		goto endit;
 	msg_size = ntohl(nw_size);
 	/* We don't error check for an upper limit here
   	 * since size could possibly be massive */
 	if (msg_size < 2) {
 		error("slurmdbd: Invalid msg_size (%u)", msg_size);
-		return NULL;
+		goto endit;
 	}
 
 	msg = xmalloc(msg_size);
@@ -1887,11 +1887,19 @@ static Buf _recv_msg(int read_timeout)
 			      offset, msg_size);
 		}	/* else in shutdown mode */
 		xfree(msg);
-		return NULL;
+		goto endit;
 	}
 
 	buffer = create_buf(msg, msg_size);
 	return buffer;
+
+endit:
+	/* Close it since we abondoned it.  If the connection does still exist
+	 * on the other end we can't rely on it after this point since we didn't
+	 * listen long enough for this response.
+	 */
+	_reopen_slurmdbd_fd();
+	return NULL;
 }
 
 /* Return time in msec since "start time" */
@@ -2129,7 +2137,7 @@ static void *_agent(void *x)
 						      &abs_time);
 			slurm_mutex_unlock(&agent_lock);
 			continue;
-		} else if ((cnt > 0) && ((cnt % 50) == 0))
+		} else if ((cnt > 0) && ((cnt % 100) == 0))
 			info("slurmdbd: agent queue size %u", cnt);
 		/* Leave item on the queue until processing complete */
 		if (agent_list) {

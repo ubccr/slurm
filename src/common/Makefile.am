@@ -33,6 +33,7 @@ noinst_LTLIBRARIES = 			\
 libcommon_la_SOURCES = 			\
 	cpu_frequency.c cpu_frequency.h \
 	assoc_mgr.c assoc_mgr.h 	\
+	file_bcast.c file_bcast.h	\
 	xmalloc.c xmalloc.h 		\
 	xassert.c xassert.h		\
 	xstring.c xstring.h		\
@@ -131,6 +132,7 @@ libcommon_la_SOURCES = 			\
 	layouts_mgr.h layouts_mgr.c	\
 	mapping.c mapping.h		\
 	xcgroup_read_config.c xcgroup_read_config.h \
+	xlua.c xlua.h			\
 	callerid.c callerid.h
 
 EXTRA_libcommon_la_SOURCES = 		\

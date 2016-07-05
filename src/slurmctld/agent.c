@@ -110,7 +110,8 @@ typedef enum {
 	DSH_ACTIVE,     /* Request in progress */
 	DSH_DONE,       /* Request completed normally */
 	DSH_NO_RESP,    /* Request timed out */
-	DSH_FAILED      /* Request resulted in error */
+	DSH_FAILED,     /* Request resulted in error */
+	DSH_DUP_JOBID	/* Request resulted in duplicate job ID error */
 } state_t;
 
 typedef struct thd_complete {
@@ -193,7 +194,7 @@ static void *_wdog(void *args);
 
 static mail_info_t *_mail_alloc(void);
 static void  _mail_free(void *arg);
-static void  _mail_proc(mail_info_t *mi);
+static void *_mail_proc(void *arg);
 static char *_mail_type_str(uint16_t mail_type);
 
 static pthread_mutex_t retry_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -539,6 +540,7 @@ static void _update_wdog_state(thd_t *thread_ptr,
 		thd_comp->retry_cnt++;
 		break;
 	case DSH_FAILED:
+	case DSH_DUP_JOBID:
 		thd_comp->fail_cnt++;
 		break;
 	}
@@ -739,6 +741,17 @@ static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
 				down_msg = ", set to state DRAIN";
 #endif
 				error("Prolog/Epilog failure on nodes %s%s",
+				      node_names, down_msg);
+				break;
+			case DSH_DUP_JOBID:
+#ifdef HAVE_FRONT_END
+				down_msg = "";
+#else
+				drain_nodes(node_names,
+					    "Duplicate jobid", getuid());
+				down_msg = ", set to state DRAIN";
+#endif
+				error("Duplicate jobid on nodes %s%s",
 				      node_names, down_msg);
 				break;
 			case DSH_DONE:
@@ -1012,8 +1025,10 @@ static void *_thread_per_group_rpc(void *args)
 			thread_state = DSH_FAILED;
 			break;
 		case ESLURMD_PROLOG_FAILED:
-		case ESLURM_DUPLICATE_JOB_ID:
 			thread_state = DSH_FAILED;
+			break;
+		case ESLURM_DUPLICATE_JOB_ID:
+			thread_state = DSH_DUP_JOBID;
 			break;
 		case ESLURM_INVALID_JOB_ID:
 			/* Not indicative of a real error */
@@ -1235,7 +1250,7 @@ static void _list_delete_retry(void *retry_entry)
  *	issued if it has been pending for at least min_wait seconds
  * IN min_wait - Minimum wait time between re-issue of a pending RPC
  * IN mail_too - Send pending email too, note this performed using a
- *	fork/waitpid, so it can take longer than just creating  a pthread
+ *	fork/waitpid, so it can take longer than just creating a pthread
  *	to send RPCs
  * RET count of queued requests remaining
  */
@@ -1246,16 +1261,19 @@ extern int agent_retry (int min_wait, bool mail_too)
 	queued_request_t *queued_req_ptr = NULL;
 	agent_arg_t *agent_arg_ptr = NULL;
 	ListIterator retry_iter;
+	pthread_t thread_mail = 0;
+	pthread_attr_t attr_mail;
+	mail_info_t *mi = NULL;
 
 	slurm_mutex_lock(&retry_mutex);
 	if (retry_list) {
 		static time_t last_msg_time = (time_t) 0;
 		uint32_t msg_type[5] = {0, 0, 0, 0, 0}, i = 0;
 		list_size = list_count(retry_list);
-		if ((list_size > 50) &&
+		if ((list_size > 100) &&
 		    (difftime(now, last_msg_time) > 300)) {
 			/* Note sizable backlog of work */
-			info("WARNING: agent retry_list size is %d",
+			info("slurmctld: agent retry_list size is %d",
 				list_size);
 			retry_iter = list_iterator_create(retry_list);
 			while ((queued_req_ptr = (queued_request_t *)
@@ -1347,13 +1365,30 @@ extern int agent_retry (int min_wait, bool mail_too)
 		} else
 			error("agent_retry found record with no agent_args");
 	} else if (mail_too) {
-		mail_info_t *mi = NULL;
+		slurm_mutex_lock(&agent_cnt_mutex);
 		slurm_mutex_lock(&mail_mutex);
-		if (mail_list)
+		while (mail_list && (agent_thread_cnt < MAX_SERVER_THREADS)) {
+			int retries = 0;
 			mi = (mail_info_t *) list_dequeue(mail_list);
+			if (!mi)
+				break;
+
+			agent_thread_cnt++;
+			slurm_attr_init(&attr_mail);
+			if (pthread_attr_setdetachstate
+			    (&attr_mail, PTHREAD_CREATE_DETACHED))
+				error("pthread_attr_setdetachstate error %m");
+			while (pthread_create(&thread_mail, &attr_mail,
+					      _mail_proc, (void *) mi)) {
+				error("pthread_create error %m");
+				if (++retries > MAX_RETRIES)
+					fatal("Can't create pthread");
+				usleep(10000);	/* sleep and retry */
+			}
+			slurm_attr_destroy(&attr_mail);
+		}
 		slurm_mutex_unlock(&mail_mutex);
-		if (mi)
-			_mail_proc(mi);
+		slurm_mutex_unlock(&agent_cnt_mutex);
 	}
 
 	return list_size;
@@ -1540,8 +1575,9 @@ static void _mail_free(void *arg)
 }
 
 /* process an email request and free the record */
-static void _mail_proc(mail_info_t *mi)
+static void *_mail_proc(void *arg)
 {
+	mail_info_t *mi = (mail_info_t *) arg;
 	pid_t pid;
 
 	pid = fork();
@@ -1566,7 +1602,14 @@ static void _mail_proc(mail_info_t *mi)
 		waitpid(pid, NULL, 0);
 	}
 	_mail_free(mi);
-	return;
+	slurm_mutex_lock(&agent_cnt_mutex);
+	if (agent_thread_cnt)
+		agent_thread_cnt--;
+	else
+		error("agent_thread_cnt underflow");
+	slurm_mutex_unlock(&agent_cnt_mutex);
+
+	return (void *) NULL;
 }
 
 static char *_mail_type_str(uint16_t mail_type)
@@ -1580,7 +1623,7 @@ static char *_mail_type_str(uint16_t mail_type)
 	if (mail_type == MAIL_JOB_REQUEUE)
 		return "Requeued";
 	if (mail_type == MAIL_JOB_STAGE_OUT)
-		return "Staged Out";
+		return "StageOut/Teardown";
 	if (mail_type == MAIL_JOB_TIME100)
 		return "Reached time limit";
 	if (mail_type == MAIL_JOB_TIME90)
@@ -1635,8 +1678,8 @@ static void _set_job_time(struct job_record *job_ptr, uint16_t mail_type,
 
 	if ((mail_type == MAIL_JOB_STAGE_OUT) && job_ptr->end_time) {
 		interval = time(NULL) - job_ptr->end_time;
-		snprintf(buf, buf_len, ", StageOut time ");
-		secs2time_str(interval, buf+16, buf_len-16);
+		snprintf(buf, buf_len, " time ");
+		secs2time_str(interval, buf + 6, buf_len - 6);
 		return;
 	}
 }
@@ -1747,11 +1790,8 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 	info("email msg to %s: %s", mi->user_name, mi->message);
 
 	slurm_mutex_lock(&mail_mutex);
-	if (!mail_list) {
+	if (!mail_list)
 		mail_list = list_create(_mail_free);
-		if (!mail_list)
-			fatal("list_create failed");
-	}
 	(void) list_enqueue(mail_list, (void *) mi);
 	slurm_mutex_unlock(&mail_mutex);
 	return;

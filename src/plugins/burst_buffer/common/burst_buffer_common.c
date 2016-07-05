@@ -52,11 +52,17 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if defined(__FreeBSD__) || defined(__NetBSD__)
+#define POLLRDHUP POLLHUP
+#include <signal.h>
+#endif
+
 #include "slurm/slurm.h"
 #include "slurm/slurmdb.h"
 
 #include "src/common/assoc_mgr.h"
 #include "src/common/list.h"
+#include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/parse_config.h"
 #include "src/common/slurm_accounting_storage.h"
@@ -72,6 +78,13 @@
 
 /* For possible future use by burst_buffer/generic */
 #define _SUPPORT_GRES 0
+
+/* Maximum poll wait time for child processes, in milliseconds */
+#define MAX_POLL_WAIT 500
+
+static int bb_plugin_shutdown = 0;
+static int child_proc_count = 0;
+static pthread_mutex_t proc_count_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void	_bb_job_del2(bb_job_t *bb_job);
 static uid_t *	_parse_users(char *buf);
@@ -355,12 +368,12 @@ extern void bb_set_tres_pos(bb_state_t *state_ptr)
 	tres_rec.type = "bb";
 	tres_rec.name = state_ptr->name;
 	inx = assoc_mgr_find_tres_pos(&tres_rec, false);
+	state_ptr->tres_pos = inx;
 	if (inx == -1) {
 		debug("%s: Tres %s not found by assoc_mgr",
 		       __func__, state_ptr->name);
 	} else {
 		state_ptr->tres_id  = assoc_mgr_tres_array[inx]->id;
-		state_ptr->tres_pos = inx;
 	}
 }
 
@@ -1022,6 +1035,24 @@ static int _tot_wait (struct timeval *start_time)
 	return msec_delay;
 }
 
+/* Terminate any child processes */
+extern void bb_shutdown(void)
+{
+	bb_plugin_shutdown = 1;
+}
+
+/* Return count of child processes */
+extern int bb_proc_count(void)
+{
+	int cnt;
+
+	pthread_mutex_lock(&proc_count_mutex);
+	cnt = child_proc_count;
+	pthread_mutex_unlock(&proc_count_mutex);
+
+	return cnt;
+}
+
 /* Execute a script, wait for termination and return its stdout.
  * script_type IN - Type of program being run (e.g. "StartStageIn")
  * script_path IN - Fully qualified pathname of the program to execute
@@ -1066,6 +1097,9 @@ extern char *bb_run_script(char *script_type, char *script_path,
 			return resp;
 		}
 	}
+	pthread_mutex_lock(&proc_count_mutex);
+	child_proc_count++;
+	pthread_mutex_unlock(&proc_count_mutex);
 	if ((cpid = fork()) == 0) {
 		int cc;
 
@@ -1100,6 +1134,9 @@ extern char *bb_run_script(char *script_type, char *script_path,
 			close(pfd[1]);
 		}
 		error("%s: fork(): %m", __func__);
+		pthread_mutex_lock(&proc_count_mutex);
+		child_proc_count--;
+		pthread_mutex_unlock(&proc_count_mutex);
 	} else if (max_wait != -1) {
 		struct pollfd fds;
 		struct timeval tstart;
@@ -1108,21 +1145,28 @@ extern char *bb_run_script(char *script_type, char *script_path,
 		close(pfd[1]);
 		gettimeofday(&tstart, NULL);
 		while (1) {
+			if (bb_plugin_shutdown) {
+				error("%s: killing %s operation on shutdown",
+				      __func__, script_type);
+				break;
+			}
 			fds.fd = pfd[0];
 			fds.events = POLLIN | POLLHUP | POLLRDHUP;
 			fds.revents = 0;
 			if (max_wait <= 0) {
-				new_wait = -1;
+				new_wait = MAX_POLL_WAIT;
 			} else {
 				new_wait = max_wait - _tot_wait(&tstart);
-				if (new_wait <= 0)
+				if (new_wait <= 0) {
+					error("%s: %s poll timeout @ %d msec",
+					      __func__, script_type, max_wait);
 					break;
+				}
+				new_wait = MIN(new_wait, MAX_POLL_WAIT);
 			}
 			i = poll(&fds, 1, new_wait);
 			if (i == 0) {
-				error("%s: %s poll timeout @ %d msec",
-				      __func__, script_type, max_wait);
-				break;
+				continue;
 			} else if (i < 0) {
 				error("%s: %s poll:%m", __func__, script_type);
 				break;
@@ -1147,9 +1191,14 @@ extern char *bb_run_script(char *script_type, char *script_path,
 				}
 			}
 		}
+		killpg(cpid, SIGTERM);
+		usleep(10000);
 		killpg(cpid, SIGKILL);
 		waitpid(cpid, status, 0);
 		close(pfd[0]);
+		pthread_mutex_lock(&proc_count_mutex);
+		child_proc_count--;
+		pthread_mutex_unlock(&proc_count_mutex);
 	} else {
 		waitpid(cpid, status, 0);
 	}
@@ -1322,8 +1371,8 @@ extern void bb_job_log(bb_state_t *state_ptr, bb_job_t *bb_job)
 	int i;
 
 	if (bb_job) {
-		xstrfmtcat(out_buf, "%s: Job:%u ",
-			   state_ptr->name, bb_job->job_id);
+		xstrfmtcat(out_buf, "%s: Job:%u UserID:%u ",
+			   state_ptr->name, bb_job->job_id, bb_job->user_id);
 		for (i = 0; i < bb_job->gres_cnt; i++) {
 			xstrfmtcat(out_buf, "Gres[%d]:%s:%"PRIu64" ",
 				   i, bb_job->gres_ptr[i].name,
@@ -1421,7 +1470,7 @@ extern int bb_post_persist_create(struct job_record *job_ptr,
 	rc = acct_storage_g_add_reservation(acct_db_conn, &resv);
 	xfree(resv.tres_str);
 
-	if (state_ptr->tres_pos) {
+	if (state_ptr->tres_pos > 0) {
 		slurmdb_assoc_rec_t *assoc_ptr = bb_alloc->assoc_ptr;
 
 		while (assoc_ptr) {
@@ -1491,7 +1540,7 @@ extern int bb_post_persist_delete(bb_alloc_t *bb_alloc, bb_state_t *state_ptr)
 	rc = acct_storage_g_remove_reservation(acct_db_conn, &resv);
 	xfree(resv.tres_str);
 
-	if (state_ptr->tres_pos) {
+	if (state_ptr->tres_pos > 0) {
 		slurmdb_assoc_rec_t *assoc_ptr = bb_alloc->assoc_ptr;
 
 		while (assoc_ptr) {

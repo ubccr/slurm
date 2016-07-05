@@ -42,6 +42,7 @@
 #include <pwd.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 #include "src/common/uid.h"
 #include "src/common/xstring.h"
@@ -84,7 +85,7 @@ static int _get_str_inx(char *name)
 		return 0;
 
 	for (j = 1; *name; name++, j++)
-		index += (int)*name * j;
+		index += (int)tolower(*name) * j;
 
 	return index;
 }
@@ -206,11 +207,13 @@ static slurmdb_assoc_rec_t *_find_assoc_rec(
 	while (assoc_ptr) {
 		if ((!assoc->user && (assoc->uid == NO_VAL))
 		    && (assoc_ptr->user || (assoc_ptr->uid != NO_VAL))) {
-			debug("we are looking for a nonuser association");
+			debug3("%s: we are looking for a nonuser association",
+				__func__);
 			goto next;
 		} else if ((!assoc_ptr->user && (assoc_ptr->uid == NO_VAL))
 			   && (assoc->user || (assoc->uid != NO_VAL))) {
-			debug("we are looking for a user association");
+			debug3("%s: we are looking for a user association",
+				__func__);
 			goto next;
 		} else if (assoc->user && assoc_ptr->user
 			   && ((assoc->uid == NO_VAL) ||
@@ -219,21 +222,21 @@ static slurmdb_assoc_rec_t *_find_assoc_rec(
 			 * associations, so use the name instead
 			 */
 			if (strcasecmp(assoc->user, assoc_ptr->user)) {
-				debug("2 not the right user %u != %u",
-				      assoc->uid, assoc_ptr->uid);
+				debug3("%s: 2 not the right user %u != %u",
+				       __func__, assoc->uid, assoc_ptr->uid);
 				goto next;
 			}
 		} else if (assoc->uid != assoc_ptr->uid) {
-			debug("not the right user %u != %u",
-			       assoc->uid, assoc_ptr->uid);
+			debug3("%s: not the right user %u != %u",
+			       __func__, assoc->uid, assoc_ptr->uid);
 			goto next;
 		}
 
 		if (assoc->acct &&
 		    (!assoc_ptr->acct
 		     || strcasecmp(assoc->acct, assoc_ptr->acct))) {
-			debug("not the right account %s != %s",
-			       assoc->acct, assoc_ptr->acct);
+			debug3("%s: not the right account %s != %s",
+			       __func__, assoc->acct, assoc_ptr->acct);
 			goto next;
 		}
 
@@ -241,7 +244,7 @@ static slurmdb_assoc_rec_t *_find_assoc_rec(
 		if (!assoc_mgr_cluster_name && assoc->cluster
 		    && (!assoc_ptr->cluster
 			|| strcasecmp(assoc->cluster, assoc_ptr->cluster))) {
-			debug("not the right cluster");
+			debug3("%s: not the right cluster", __func__);
 			goto next;
 		}
 
@@ -249,7 +252,7 @@ static slurmdb_assoc_rec_t *_find_assoc_rec(
 		    && (!assoc_ptr->partition
 			|| strcasecmp(assoc->partition,
 				      assoc_ptr->partition))) {
-			debug("not the right partition");
+			debug3("%s: not the right partition", __func__);
 			goto next;
 		}
 
@@ -312,8 +315,11 @@ static void _normalize_assoc_shares_fair_tree(
 {
 	slurmdb_assoc_rec_t *fs_assoc = assoc;
 	double shares_norm = 0.0;
-	if (assoc->shares_raw == SLURMDB_FS_USE_PARENT)
+
+	if ((assoc->shares_raw == SLURMDB_FS_USE_PARENT)
+	    && assoc->usage->fs_assoc_ptr)
 		fs_assoc = assoc->usage->fs_assoc_ptr;
+
 	if (fs_assoc->usage->level_shares)
 		shares_norm =
 			(double)fs_assoc->shares_raw /
@@ -1066,15 +1072,16 @@ static int _post_res_list(List res_list)
 	return SLURM_SUCCESS;
 }
 
-/* tres write lock should be locked before calling this return 1 if
- * callback is needed */
+/* assoc, qos and tres write lock should be locked before calling this
+ * return 1 if callback is needed */
 static int _post_tres_list(List new_list, int new_cnt)
 {
 	ListIterator itr;
 	slurmdb_tres_rec_t *tres_rec, **new_array;
 	char **new_name_array;
 	bool changed_size = false, changed_pos = false;
-	int i, new_size, new_name_size, max_cnt = MAX(new_cnt, g_tres_count);
+	int i, new_size, new_name_size;
+	int old_pos[new_cnt];
 
 	xassert(new_list);
 
@@ -1113,101 +1120,29 @@ static int _post_tres_list(List new_list, int new_cnt)
 	}
 	list_iterator_destroy(itr);
 
-	if (changed_size || changed_pos) {
-		if (assoc_mgr_assoc_list) {
-			slurmdb_assoc_rec_t *assoc_rec;
-			uint64_t grp_tres[new_cnt], grp_tres_mins[new_cnt],
-				grp_tres_run_mins[new_cnt], max_tres[new_cnt],
-				max_tres_pn[new_cnt], max_tres_mins[new_cnt],
-				max_tres_run_mins[new_cnt];
-
-			/* update the associations and such here */
-			itr = list_iterator_create(assoc_mgr_assoc_list);
-			while ((assoc_rec = list_next(itr))) {
-				if (changed_size) {
-					xrealloc(assoc_rec->grp_tres_ctld,
-						 new_size);
-					xrealloc(assoc_rec->grp_tres_mins_ctld,
-						 new_size);
-					xrealloc(assoc_rec->
-						 grp_tres_run_mins_ctld,
-						 new_size);
-					xrealloc(assoc_rec->max_tres_ctld,
-						 new_size);
-					xrealloc(assoc_rec->max_tres_pn_ctld,
-						 new_size);
-					xrealloc(assoc_rec->max_tres_mins_ctld,
-						 new_size);
-					xrealloc(assoc_rec->
-						 grp_tres_run_mins_ctld,
-						 new_size);
-				}
-
-				if (changed_pos) {
-					int pos;
-					int array_size =
-						sizeof(uint64_t) * new_cnt;
-					memset(grp_tres, 0, array_size);
-					memset(grp_tres_mins, 0, array_size);
-					memset(grp_tres_run_mins,
-					       0, array_size);
-					memset(max_tres, 0, array_size);
-					memset(max_tres_pn, 0, array_size);
-					memset(max_tres_mins, 0, array_size);
-					memset(max_tres_run_mins,
-					       0, array_size);
-					for (i=0; i<new_cnt; i++) {
-						if (!new_array[i])
-							break;
-
-						pos = slurmdb_get_new_tres_pos(
-							new_array,
-							assoc_mgr_tres_array,
-							i, max_cnt);
-
-						if (pos == NO_VAL)
-							continue;
-						grp_tres[i] = assoc_rec->
-							grp_tres_ctld[pos];
-						grp_tres_mins[i] = assoc_rec->
-							grp_tres_mins_ctld[pos];
-						grp_tres_run_mins[i] =
-							assoc_rec->
-							grp_tres_run_mins_ctld[
-								pos];
-						max_tres[i] = assoc_rec->
-							max_tres_ctld[pos];
-						max_tres_pn[i] = assoc_rec->
-							max_tres_pn_ctld[pos];
-						max_tres_mins[i] = assoc_rec->
-							max_tres_mins_ctld[pos];
-						max_tres_run_mins[i] =
-							assoc_rec->
-							max_tres_run_mins_ctld[
-								pos];
-					}
-					memcpy(assoc_rec->grp_tres_ctld,
-					       grp_tres, array_size);
-					memcpy(assoc_rec->grp_tres_mins_ctld,
-					       grp_tres_mins, array_size);
-					memcpy(assoc_rec->
-					       grp_tres_run_mins_ctld,
-					       grp_tres_run_mins, array_size);
-					memcpy(assoc_rec->max_tres_ctld,
-					       max_tres, array_size);
-					memcpy(assoc_rec->max_tres_pn_ctld,
-					       max_tres_pn, array_size);
-					memcpy(assoc_rec->max_tres_mins_ctld,
-					       max_tres_mins, array_size);
-					memcpy(assoc_rec->
-					       max_tres_run_mins_ctld,
-					       max_tres_run_mins, array_size);
-				}
+	/* If for some reason the position changed
+	 * (new static) we need to move it to it's new place.
+	 */
+	if (changed_pos) {
+		int pos;
+		for (i=0; i<new_cnt; i++) {
+			if (!new_array[i]) {
+				old_pos[i] = -1;
+				continue;
 			}
-			list_iterator_destroy(itr);
-		}
 
+			pos = slurmdb_get_old_tres_pos(new_array,
+						       assoc_mgr_tres_array,
+						       i, g_tres_count);
+
+			if (pos == NO_VAL)
+				old_pos[i] = -1;
+			else
+				old_pos[i] = pos;
+		}
 	}
+
+
 	xfree(assoc_mgr_tres_array);
 	assoc_mgr_tres_array = new_array;
 	new_array = NULL;
@@ -1226,6 +1161,175 @@ static int _post_tres_list(List new_list, int new_cnt)
 
 	g_tres_count = new_cnt;
 
+	if ((changed_size || changed_pos) &&
+	    assoc_mgr_assoc_list && assoc_mgr_qos_list) {
+		uint64_t grp_used_tres[new_cnt],
+			grp_used_tres_run_secs[new_cnt];
+		long double usage_tres_raw[new_cnt];
+		slurmdb_assoc_rec_t *assoc_rec;
+		slurmdb_qos_rec_t *qos_rec;
+		int array_size = sizeof(uint64_t) * new_cnt;
+		int d_array_size = sizeof(long double) * new_cnt;
+		slurmdb_used_limits_t *used_limits;
+		ListIterator itr_user;
+
+		/* update the associations and such here */
+		itr = list_iterator_create(assoc_mgr_assoc_list);
+		while ((assoc_rec = list_next(itr))) {
+
+			assoc_mgr_set_assoc_tres_cnt(assoc_rec);
+
+			if (!assoc_rec->usage)
+				continue;
+
+			/* Need to increase the size of the usage counts. */
+			if (changed_size) {
+				assoc_rec->usage->tres_cnt = new_cnt;
+				xrealloc(assoc_rec->usage->grp_used_tres,
+					 array_size);
+				xrealloc(assoc_rec->usage->
+					 grp_used_tres_run_secs,
+					 array_size);
+				xrealloc(assoc_rec->usage->usage_tres_raw,
+					 d_array_size);
+			}
+
+
+			if (changed_pos) {
+				memset(grp_used_tres, 0, array_size);
+				memset(grp_used_tres_run_secs, 0, array_size);
+				memset(usage_tres_raw, 0, d_array_size);
+
+				for (i=0; i<new_cnt; i++) {
+					if (old_pos[i] == -1)
+						continue;
+
+					grp_used_tres[i] = assoc_rec->
+						usage->grp_used_tres
+						[old_pos[i]];
+					grp_used_tres_run_secs[i] = assoc_rec->
+						usage->grp_used_tres_run_secs
+						[old_pos[i]];
+					usage_tres_raw[i] =
+						assoc_rec->usage->usage_tres_raw
+						[old_pos[i]];
+				}
+				memcpy(assoc_rec->usage->grp_used_tres,
+				       grp_used_tres, array_size);
+				memcpy(assoc_rec->usage->grp_used_tres_run_secs,
+				       grp_used_tres_run_secs, array_size);
+				memcpy(assoc_rec->usage->usage_tres_raw,
+				       usage_tres_raw, d_array_size);
+			}
+		}
+		list_iterator_destroy(itr);
+
+		/* update the qos and such here */
+		itr = list_iterator_create(assoc_mgr_qos_list);
+		while ((qos_rec = list_next(itr))) {
+
+			assoc_mgr_set_qos_tres_cnt(qos_rec);
+
+			if (!qos_rec->usage)
+				continue;
+
+			/* Need to increase the size of the usage counts. */
+			if (changed_size) {
+				qos_rec->usage->tres_cnt = new_cnt;
+				xrealloc(qos_rec->usage->
+					 grp_used_tres,
+					 array_size);
+				xrealloc(qos_rec->usage->
+					 grp_used_tres_run_secs,
+					 array_size);
+				xrealloc(qos_rec->usage->
+					 usage_tres_raw,
+					 d_array_size);
+				if (qos_rec->usage->user_limit_list) {
+					itr_user = list_iterator_create(
+						qos_rec->usage->
+						user_limit_list);
+					while ((used_limits = list_next(
+							itr_user))) {
+						xrealloc(used_limits->
+							 tres,
+							 array_size);
+						xrealloc(used_limits->
+							 tres_run_mins,
+							 array_size);
+					}
+					list_iterator_destroy(itr_user);
+				}
+			}
+
+			/* If for some reason the position changed
+			 * (new static) we need to move it to it's new place.
+			 */
+			if (changed_pos) {
+				memset(grp_used_tres, 0, array_size);
+				memset(grp_used_tres_run_secs, 0, array_size);
+				memset(usage_tres_raw, 0, d_array_size);
+
+				for (i=0; i<new_cnt; i++) {
+					if (old_pos[i] == -1)
+						continue;
+
+					grp_used_tres[i] = qos_rec->
+						usage->grp_used_tres
+						[old_pos[i]];
+					grp_used_tres_run_secs[i] = qos_rec->
+						usage->grp_used_tres_run_secs
+						[old_pos[i]];
+					usage_tres_raw[i] =
+						qos_rec->usage->usage_tres_raw
+						[old_pos[i]];
+				}
+				memcpy(qos_rec->usage->grp_used_tres,
+				       grp_used_tres, array_size);
+				memcpy(qos_rec->usage->grp_used_tres_run_secs,
+				       grp_used_tres_run_secs, array_size);
+				memcpy(qos_rec->usage->usage_tres_raw,
+				       usage_tres_raw, d_array_size);
+				if (qos_rec->usage->user_limit_list) {
+					itr_user = list_iterator_create(
+						qos_rec->usage->
+						user_limit_list);
+					while ((used_limits = list_next(
+							itr_user))) {
+						memset(grp_used_tres, 0,
+						       array_size);
+						memset(grp_used_tres_run_secs,
+						       0, array_size);
+						for (i=0; i<new_cnt; i++) {
+							if (old_pos[i] == -1)
+								continue;
+
+							grp_used_tres[i] =
+								used_limits->
+								tres
+								[old_pos[i]];
+							grp_used_tres_run_secs
+								[i] =
+								used_limits->
+								tres_run_mins
+								[old_pos[i]];
+						}
+
+						memcpy(used_limits->tres,
+						       grp_used_tres,
+						       array_size);
+						memcpy(used_limits->
+						       tres_run_mins,
+						       grp_used_tres_run_secs,
+						       array_size);
+					}
+					list_iterator_destroy(itr_user);
+				}
+			}
+		}
+		list_iterator_destroy(itr);
+	}
+
 	return (changed_size || changed_pos) ? 1 : 0;
 }
 
@@ -1236,7 +1340,7 @@ static int _get_assoc_mgr_tres_list(void *db_conn, int enforce)
 	List new_list = NULL;
 	char *tres_req_str;
 	int changed;
-	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
+	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK,
 				   WRITE_LOCK, NO_LOCK, NO_LOCK };
 
 	memset(&tres_q, 0, sizeof(slurmdb_tres_cond_t));
@@ -3169,9 +3273,9 @@ no_assocs:
 		while ((tmp_char = list_next(qos_itr)))
 			if ((qos_rec = list_find_first(
 				     assoc_mgr_qos_list,
-				     slurmdb_find_tres_in_list,
-				     &tmp_char)))
-				list_append(ret_list, user_rec);
+				     slurmdb_find_qos_in_list_by_name,
+				     tmp_char)))
+				list_append(ret_list, qos_rec);
 		tmp_list = ret_list;
 	} else
 		tmp_list = assoc_mgr_qos_list;
@@ -3203,7 +3307,7 @@ no_qos:
 
 		if (user_itr) {
 			while ((tmp_char = list_next(user_itr)))
-				if (xstrcasecmp(tmp_char, user_rec->name))
+				if (!xstrcasecmp(tmp_char, user_rec->name))
 					break;
 			list_iterator_reset(user_itr);
 			/* not correct user */
@@ -3741,6 +3845,13 @@ extern int assoc_mgr_update_assocs(slurmdb_update_object_t *update, bool locked)
 			*/
 			if (object->uid == INFINITE)
 				addit = true;
+			/* _set_assoc_parent_and_user() may change the uid if
+			 * unset which changes the hash value. */
+			if (object->user &&
+			    (object->uid == NO_VAL || object->uid == 0)) {
+				_delete_assoc_hash(object);
+				addit = true;
+			}
 
 			_set_assoc_parent_and_user(object, reset);
 
@@ -4611,17 +4722,23 @@ extern int assoc_mgr_update_tres(slurmdb_update_object_t *update, bool locked)
 	slurmdb_tres_rec_t *object = NULL;
 
 	ListIterator itr = NULL;
-	List tmp_list = assoc_mgr_tres_list;
+	List tmp_list;
 	bool changed = false, freeit = false;
 	int rc = SLURM_SUCCESS;
-	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
+	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK,
 				   WRITE_LOCK, NO_LOCK, NO_LOCK };
 	if (!locked)
 		assoc_mgr_lock(&locks);
 
-	if (!tmp_list) {
+	if (!assoc_mgr_tres_list) {
 		tmp_list = list_create(slurmdb_destroy_tres_rec);
 		freeit = true;
+	} else {
+		/* Since assoc_mgr_tres_list gets freed later we need
+		 * to swap things out to avoid memory corruption.
+		 */
+		tmp_list = assoc_mgr_tres_list;
+		assoc_mgr_tres_list = NULL;
 	}
 
 	itr = list_iterator_create(tmp_list);

@@ -271,23 +271,10 @@ static void _user_top_tres_report(slurmdb_tres_rec_t *tres,
 	uint32_t tres_energy;
 	uint64_t cluster_energy_cnt = 0, user_energy_cnt = 0;
 
-	if (!(cluster_tres_rec = list_find_first(
-				slurmdb_report_cluster->tres_list,
-				slurmdb_find_tres_in_list,
-				&tres->id))) {
-		info("error, no %s(%d) TRES!", tres->type, tres->id);
-		return;
-	}
-	if (!(tres_rec = list_find_first(slurmdb_report_user->tres_list,
-				slurmdb_find_tres_in_list,
-				&tres->id))) {
-		info("error, no %s(%d) TRES!", tres->type, tres->id);
-		return;
-	}
-	if (!tres_rec->alloc_secs) {
-		debug2("error, no %s(%d) TRES usage", tres->type, tres->id);
-		return;
-	}
+	sreport_set_tres_recs(&cluster_tres_rec, &tres_rec,
+			      slurmdb_report_cluster->tres_list,
+			      slurmdb_report_user->tres_list,
+			      tres);
 
 	field_count = list_count(print_fields_list);
 	iter = list_iterator_create(print_fields_list);
@@ -328,8 +315,11 @@ static void _user_top_tres_report(slurmdb_tres_rec_t *tres,
 			tmp_char = NULL;	/* Not xmalloced */
 			break;
 		case PRINT_USER_USED:
-			field->print_routine(field, tres_rec->alloc_secs,
-					     cluster_tres_rec->alloc_secs,
+			field->print_routine(field,
+					     tres_rec ?
+					     tres_rec->alloc_secs : 0,
+					     cluster_tres_rec ?
+					     cluster_tres_rec->alloc_secs : 0,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_USER_ENERGY:
@@ -369,6 +359,32 @@ static void _user_top_tres_report(slurmdb_tres_rec_t *tres,
 	}
 	list_iterator_destroy(iter);
 	printf("\n");
+}
+
+static void _set_usage_column_width(List print_fields_list,
+				    List slurmdb_report_cluster_list)
+{
+	print_field_t *field, *usage_field = NULL, *energy_field = NULL;
+	ListIterator itr;
+
+	xassert(print_fields_list);
+	xassert(slurmdb_report_cluster_list);
+
+	itr = list_iterator_create(print_fields_list);
+	while ((field = list_next(itr))) {
+		switch (field->type) {
+		case PRINT_USER_USED:
+			usage_field = field;
+			break;
+		case PRINT_USER_ENERGY:
+			energy_field = field;
+			break;
+		}
+	}
+	list_iterator_destroy(itr);
+
+	sreport_set_usage_column_width(usage_field, energy_field,
+				       slurmdb_report_cluster_list);
 }
 
 extern int user_top(int argc, char *argv[])
@@ -431,6 +447,8 @@ extern int user_top(int argc, char *argv[])
 		printf("----------------------------------------"
 		       "----------------------------------------\n");
 	}
+
+	_set_usage_column_width(print_fields_list, slurmdb_report_cluster_list);
 
 	print_fields_header(print_fields_list);
 

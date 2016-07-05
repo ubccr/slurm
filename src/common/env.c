@@ -49,7 +49,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include <signal.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/param.h>		/* MAXPATHLEN */
@@ -1203,6 +1203,12 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 		cpus_per_task = batch->cpus_per_task;
 	else
 		cpus_per_task = 1;	/* default value */
+
+	/* Only overwrite this if it is set.  They are set in
+	 * sbatch directly and could have changed. */
+	if (getenvp(*dest, "SLURM_CPUS_PER_TASK"))
+		env_array_overwrite_fmt(dest, "SLURM_CPUS_PER_TASK", "%u",
+					cpus_per_task);
 
 	if (num_tasks) {
 		env_array_append_fmt(dest, "SLURM_NTASKS", "%u", num_tasks);

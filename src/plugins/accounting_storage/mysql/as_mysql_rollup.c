@@ -310,8 +310,10 @@ static void _add_tres_2_list(List tres_list, char *tres_str, int seconds)
 /* This will destroy the *loc_tres given after it is transfered */
 static void _transfer_loc_tres(List *loc_tres, local_id_usage_t *usage)
 {
-	if (!usage)
+	if (!usage) {
+		FREE_NULL_LIST(*loc_tres);
 		return;
+	}
 
 	if (!usage->loc_tres) {
 		usage->loc_tres = *loc_tres;
@@ -1450,7 +1452,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					loc_tres->time_alloc;
 				char *assoc = NULL;
 				ListIterator tmp_itr = NULL;
-				int resv_unused_secs;
+				int assoc_cnt, resv_unused_secs;
 
 				if (idle <= 0)
 					break; /* since this will be
@@ -1459,8 +1461,10 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 				/* now divide that time by the number of
 				   associations in the reservation and add
 				   them to each association */
-				resv_unused_secs = idle /
-					list_count(r_usage->local_assocs);
+				resv_unused_secs = idle;
+				assoc_cnt = list_count(r_usage->local_assocs);
+				if (assoc_cnt)
+					resv_unused_secs /= assoc_cnt;
 				/* info("resv %d got %d seconds for TRES %u " */
 				/*      "for %d assocs", */
 				/*      r_usage->id, resv_unused_secs, */
@@ -1622,28 +1626,28 @@ extern int as_mysql_nonhour_rollup(mysql_conn_t *mysql_conn,
 	uint16_t track_wckey = slurm_get_track_wckey();
 	char *unit_name;
 
-	if (!slurm_localtime_r(&curr_start, &start_tm)) {
-		error("Couldn't get localtime from start %ld", curr_start);
-		return SLURM_ERROR;
-	}
-
-	start_tm.tm_sec = 0;
-	start_tm.tm_min = 0;
-	start_tm.tm_hour = 0;
-	start_tm.tm_isdst = -1;
-
-	if (run_month) {
-		unit_name = "month";
-		start_tm.tm_mday = 1;
-		start_tm.tm_mon++;
-	} else {
-		unit_name = "day";
-		start_tm.tm_mday++;
-	}
-
-	curr_end = slurm_mktime(&start_tm);
-
 	while (curr_start < end) {
+		if (!slurm_localtime_r(&curr_start, &start_tm)) {
+			error("Couldn't get localtime from start %ld",
+			      curr_start);
+			return SLURM_ERROR;
+		}
+		start_tm.tm_sec = 0;
+		start_tm.tm_min = 0;
+		start_tm.tm_hour = 0;
+		start_tm.tm_isdst = -1;
+
+		if (run_month) {
+			unit_name = "month";
+			start_tm.tm_mday = 1;
+			start_tm.tm_mon++;
+		} else {
+			unit_name = "day";
+			start_tm.tm_mday++;
+		}
+
+		curr_end = slurm_mktime(&start_tm);
+
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
 			DB_DEBUG(mysql_conn->conn,
 				 "curr %s is now %ld-%ld",
@@ -1664,6 +1668,7 @@ extern int as_mysql_nonhour_rollup(mysql_conn_t *mysql_conn,
 			cluster_name,
 			run_month ? assoc_day_table : assoc_hour_table,
 			curr_end, curr_start, now);
+
 		/* We group on deleted here so if there are no entries
 		   we don't get an error, just nothing is returned.
 		   Else we get a bunch of NULL's
@@ -1724,17 +1729,6 @@ extern int as_mysql_nonhour_rollup(mysql_conn_t *mysql_conn,
 		}
 
 		curr_start = curr_end;
-		if (!slurm_localtime_r(&curr_start, &start_tm)) {
-			error("Couldn't get localtime from %s start %ld",
-			      unit_name, curr_start);
-			return SLURM_ERROR;
-		}
-		start_tm.tm_sec = 0;
-		start_tm.tm_min = 0;
-		start_tm.tm_hour = 0;
-		start_tm.tm_mday++;
-		start_tm.tm_isdst = -1;
-		curr_end = slurm_mktime(&start_tm);
 	}
 
 /* 	info("stop start %s", slurm_ctime2(&curr_start)); */
