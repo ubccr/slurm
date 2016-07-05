@@ -99,7 +99,6 @@ static char *_global_auth_key(void);
 static void  _remap_slurmctld_errno(void);
 static int   _unpack_msg_uid(Buf buffer);
 static bool  _is_port_ok(int, uint16_t);
-static void _slurm_set_addr_any(slurm_addr_t * slurm_address, uint16_t port);
 
 #if _DEBUG
 static void _print_data(char *data, int len);
@@ -1496,6 +1495,25 @@ char *slurm_get_accounting_storage_tres(void)
 
 }
 
+/* slurm_set_accounting_storage_tres
+ * sets the value of accounting_storage_tres in slurmctld_conf object
+ * RET 0 or error_code
+ */
+extern int slurm_set_accounting_storage_tres(char *tres)
+{
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		xfree(conf->accounting_storage_tres);
+		conf->accounting_storage_tres = xstrdup(tres);
+		slurm_conf_unlock();
+	}
+	return 0;
+
+}
+
 /* slurm_get_accounting_storage_user
  * returns the storage user from slurmctld_conf object
  * RET char *    - storage user,  MUST be xfreed by caller
@@ -1703,9 +1721,13 @@ extern char *slurm_get_auth_info(void)
 	char *auth_info;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	auth_info = xstrdup(conf->authinfo);
-	slurm_conf_unlock();
+	if (slurmdbd_conf) {
+		auth_info = xstrdup(slurmdbd_conf->auth_info);
+	} else {
+		conf = slurm_conf_lock();
+		auth_info = xstrdup(conf->authinfo);
+		slurm_conf_unlock();
+	}
 
 	return auth_info;
 }
@@ -2715,17 +2737,17 @@ slurm_fd_t slurm_init_msg_engine_port(uint16_t port)
 {
 	slurm_fd_t cc;
 	slurm_addr_t addr;
-	int cnt;
+	int i;
 
-	cnt = 0;
-eagain:
 	slurm_setup_sockaddr(&addr, port);
 	cc = slurm_init_msg_engine(&addr);
-	if (cc < 0 && port == 0) {
-		++cnt;
-		if (cnt <= 5) {
-			usleep(5000);
-			goto eagain;
+	if ((cc < 0) && (port == 0) && (errno == EADDRINUSE)) {
+		/* All ephemeral ports are in use, test other ports */
+		for (i = 10001; i < 65536; i++) {
+			slurm_setup_sockaddr(&addr, i);
+			cc = slurm_init_msg_engine(&addr);
+			if (cc >= 0)
+				break;
 		}
 	}
 	return cc;
@@ -2777,26 +2799,8 @@ slurm_init_msg_engine_ports(uint16_t *ports)
 slurm_fd_t slurm_init_msg_engine_addrname_port(char *addr_name, uint16_t port)
 {
 	slurm_addr_t addr;
-	static uint32_t bind_addr = NO_VAL;
 
-	if (bind_addr == NO_VAL) {
-#ifdef BIND_SPECIFIC_ADDR
-		bind_addr = 1;
-#else
-		char *topology_params = slurm_get_topology_param();
-		if (topology_params &&
-		    slurm_strcasestr(topology_params, "NoInAddrAny"))
-			bind_addr = 1;
-		else
-			bind_addr = 0;
-		xfree(topology_params);
-#endif
-	}
-
-	if (addr_name)
-		slurm_set_addr(&addr, port, addr_name);
-	else
-		_slurm_set_addr_any(&addr, port);
+	slurm_setup_sockaddr(&addr, port);
 
 	return slurm_init_msg_engine(&addr);
 }
@@ -3733,16 +3737,6 @@ size_t slurm_read_stream_timeout(slurm_fd_t open_fd, char *buffer,
  * address conversion and management functions
 \**********************************************************************/
 
-/* slurm_set_addr_any
- * initialized the slurm_address with the supplied port on INADDR_ANY
- * OUT slurm_address	- slurm_addr_t to be filled in
- * IN port		- port in host order
- */
-static void _slurm_set_addr_any(slurm_addr_t * slurm_address, uint16_t port)
-{
-	slurm_set_addr_uint(slurm_address, port, SLURM_INADDR_ANY);
-}
-
 /* slurm_set_addr
  * initializes the slurm_address with the supplied port and host name
  * OUT slurm_address	- slurm_addr_t to be filled in
@@ -4158,7 +4152,7 @@ int slurm_send_only_controller_msg(slurm_msg_t *req)
 		goto cleanup;
 	}
 
-	if ((rc = slurm_send_node_msg(fd, req) < 0)) {
+	if ((rc = slurm_send_node_msg(fd, req)) < 0) {
 		rc = SLURM_ERROR;
 	} else {
 		debug3("slurm_send_only_controller_msg: sent %d", rc);
@@ -4197,7 +4191,7 @@ int slurm_send_only_node_msg(slurm_msg_t *req)
 		return SLURM_SOCKET_ERROR;
 	}
 
-	if ((rc = slurm_send_node_msg(fd, req) < 0)) {
+	if ((rc = slurm_send_node_msg(fd, req)) < 0) {
 		rc = SLURM_ERROR;
 	} else {
 		debug3("slurm_send_only_node_msg: sent %d", rc);
@@ -4613,8 +4607,15 @@ extern void slurm_setup_sockaddr(struct sockaddr_in *sin, uint16_t port)
 		 * a Cray system with RSIP.
 		 */
 		char *topology_params = slurm_get_topology_param();
+		char *var;
+
+		if (run_in_daemon("slurmctld"))
+			var = "NoCtldInAddrAny";
+		else
+			var = "NoInAddrAny";
+
 		if (topology_params &&
-		    slurm_strcasestr(topology_params, "NoInAddrAny")) {
+		    slurm_strcasestr(topology_params, var)) {
 			char host[MAXHOSTNAMELEN];
 
 			if (!gethostname(host, MAXHOSTNAMELEN)) {

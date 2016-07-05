@@ -121,8 +121,13 @@ static void _set_freq(int type, char *freq, char *freq_def)
 static void *_timer_thread(void *args)
 {
 	int i, now, diff;
+
+	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+
 	DEF_TIMERS;
-	while (acct_gather_profile_running) {
+	while (init_run && acct_gather_profile_running) {
+		slurm_mutex_lock(&g_context_lock);
 		START_TIMER;
 		now = time(NULL);
 
@@ -161,6 +166,8 @@ static void *_timer_thread(void *args)
 			acct_gather_profile_timer[i].last_notify = now;
 		}
 		END_TIMER;
+		slurm_mutex_unlock(&g_context_lock);
+
 		usleep(USLEEP_TIME - DELTA_TIMER);
 	}
 
@@ -214,6 +221,8 @@ extern int acct_gather_profile_fini(void)
 	if (!g_context)
 		goto done;
 
+	init_run = false;
+
 	for (i=0; i < PROFILE_CNT; i++) {
 		switch (i) {
 		case PROFILE_ENERGY:
@@ -235,8 +244,12 @@ extern int acct_gather_profile_fini(void)
 		}
 	}
 
+	if (timer_thread_id) {
+		pthread_cancel(timer_thread_id);
+		pthread_join(timer_thread_id, NULL);
+	}
+
 	rc = plugin_context_destroy(g_context);
-	init_run = false;
 	g_context = NULL;
 done:
 	slurm_mutex_unlock(&g_context_lock);
@@ -460,8 +473,6 @@ extern int acct_gather_profile_startpoll(char *freq, char *freq_def)
 
 	/* create polling thread */
 	slurm_attr_init(&attr);
-	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
-		error("pthread_attr_setdetachstate error %m");
 
 	if  (pthread_create(&timer_thread_id, &attr,
 			    &_timer_thread, NULL)) {

@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  backfill.c - simple backfill scheduler plugin.
  *
- *  If a partition is does not have root only access and nodes are not shared
+ *  If a partition does not have root only access and nodes are not shared
  *  then raise the priority of pending jobs if doing so does not adversely
  *  effect the expected initiation of any higher priority job. We do not alter
  *  a job's required or excluded node list, so this is a conservative
@@ -163,7 +163,7 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		       uint32_t req_nodes, bitstr_t *exc_core_bitmap);
 static int  _yield_locks(int usec);
 
-/* Log recousrces to be allocated to a pending job */
+/* Log resources to be allocated to a pending job */
 static void _dump_job_sched(struct job_record *job_ptr, time_t end_time,
 			    bitstr_t *avail_bitmap)
 {
@@ -555,6 +555,11 @@ static void _load_config(void)
 		      max_backfill_job_per_part);
 		max_backfill_job_per_part = 0;
 	}
+	if ((max_backfill_job_per_part != 0) &&
+	    (max_backfill_job_per_part >= max_backfill_job_cnt)) {
+		error("bf_max_job_part >= bf_max_job_test (%u >= %u)",
+		      max_backfill_job_per_part, max_backfill_job_cnt);
+	}
 
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_max_job_start=")))
 		max_backfill_jobs_start = atoi(tmp_ptr + 17);
@@ -570,6 +575,11 @@ static void _load_config(void)
 		error("Invalid SchedulerParameters bf_max_job_user: %d",
 		      max_backfill_job_per_user);
 		max_backfill_job_per_user = 0;
+	}
+	if ((max_backfill_job_per_user != 0) &&
+	    (max_backfill_job_per_user >= max_backfill_job_cnt)) {
+		error("bf_max_job_user >= bf_max_job_test (%u >= %u)",
+		      max_backfill_job_per_user, max_backfill_job_cnt);
 	}
 
 	if (sched_params &&
@@ -712,7 +722,7 @@ extern void *backfill_agent(void *args)
 	return NULL;
 }
 
-/* Clear the start_time for all pending jobs. This is used to insure that a job which
+/* Clear the start_time for all pending jobs. This is used to ensure that a job which
  * can run in multiple partitions has its start_time set to the smallest
  * value in any of those partitions. */
 static void _clear_job_start_times(void)
@@ -807,13 +817,13 @@ static int _attempt_backfill(void)
 	uint32_t time_limit, comp_time_limit, orig_time_limit, part_time_limit;
 	uint32_t min_nodes, max_nodes, req_nodes;
 	bitstr_t *avail_bitmap = NULL, *resv_bitmap = NULL;
-	bitstr_t *exc_core_bitmap = NULL, *non_cg_bitmap = NULL;
+	bitstr_t *exc_core_bitmap = NULL;
 	time_t now, sched_start, later_start, start_res, resv_end, window_end;
 	time_t orig_sched_start, orig_start_time = (time_t) 0;
 	node_space_map_t *node_space;
 	struct timeval bf_time1, bf_time2;
 	int rc = 0;
-	int job_test_count = 0, pend_time;
+	int job_test_count = 0, test_time_count = 0, pend_time;
 	uint32_t *uid = NULL, nuser = 0, bf_parts = 0, *bf_part_jobs = NULL;
 	uint16_t *njobs = NULL;
 	bool already_counted;
@@ -880,9 +890,6 @@ static int _attempt_backfill(void)
 
 	gettimeofday(&bf_time1, NULL);
 
-	non_cg_bitmap = bit_copy(cg_node_bitmap);
-	bit_not(non_cg_bitmap);
-
 	slurmctld_diag_stats.bf_queue_len = list_count(job_queue);
 	slurmctld_diag_stats.bf_queue_len_sum += slurmctld_diag_stats.
 						 bf_queue_len;
@@ -938,8 +945,8 @@ static int _attempt_backfill(void)
 		    (_delta_tv(&start_tv) >= sched_timeout)) {
 			if (debug_flags & DEBUG_FLAG_BACKFILL) {
 				END_TIMER;
-				info("backfill: completed yielding locks "
-				     "after testing %u(%d) jobs, %s",
+				info("backfill: yielding locks after testing "
+				     "%u(%d) jobs, %s",
 				     slurmctld_diag_stats.bf_last_depth,
 				     job_test_count, TIME_STR);
 			}
@@ -957,17 +964,16 @@ static int _attempt_backfill(void)
 				xfree(job_queue_rec);
 				break;
 			}
-			/* cg_node_bitmap may be changed */
-			bit_copybits(non_cg_bitmap, cg_node_bitmap);
-			bit_not(non_cg_bitmap);
 			/* Reset backfill scheduling timers, resume testing */
 			sched_start = time(NULL);
 			gettimeofday(&start_tv, NULL);
 			job_test_count = 0;
+			test_time_count = 0;
 			START_TIMER;
 		}
 
 		job_ptr  = job_queue_rec->job_ptr;
+
 		/* With bf_continue configured, the original job could have
 		 * been cancelled and purged. Validate pointer here. */
 		if ((job_ptr->magic  != JOB_MAGIC) ||
@@ -983,7 +989,12 @@ static int _attempt_backfill(void)
 			if (!job_ptr)	/* All task array elements started */
 				continue;
 		}
+		if (!IS_JOB_PENDING(job_ptr) ||	/* Started in other partition */
+		    (job_ptr->priority == 0))	/* Job has been held */
+			continue;
 
+		part_ptr = job_queue_rec->part_ptr;
+		job_ptr->part_ptr = part_ptr;
 		if (job_ptr->state_reason == FAIL_ACCOUNT) {
 			slurmdb_assoc_rec_t assoc_rec;
 			memset(&assoc_rec, 0, sizeof(slurmdb_assoc_rec_t));
@@ -1038,7 +1049,6 @@ static int _attempt_backfill(void)
 
 		orig_start_time = job_ptr->start_time;
 		orig_time_limit = job_ptr->time_limit;
-		part_ptr = job_queue_rec->part_ptr;
 		xfree(job_queue_rec);
 
 next_task:
@@ -1219,6 +1229,7 @@ next_task:
 			_set_job_time_limit(job_ptr, orig_time_limit);
 			break;
 		}
+		test_time_count++;
 		if (((defer_rpc_cnt > 0) &&
 		     (slurmctld_config.server_thread_count >= defer_rpc_cnt)) ||
 		    (_delta_tv(&start_tv) >= sched_timeout)) {
@@ -1227,10 +1238,10 @@ next_task:
 			_set_job_time_limit(job_ptr, orig_time_limit);
 			if (debug_flags & DEBUG_FLAG_BACKFILL) {
 				END_TIMER;
-				info("backfill: completed yielding locks "
-				     "after testing %u(%d) jobs, %s",
+				info("backfill: yielding locks after testing "
+				     "%u(%d) jobs tested, %u time slots, %s",
 				     slurmctld_diag_stats.bf_last_depth,
-				     job_test_count, TIME_STR);
+				     job_test_count, test_time_count, TIME_STR);
 			}
 			if ((_yield_locks(yield_sleep) && !backfill_continue) ||
 			    (slurmctld_conf.last_update != config_update) ||
@@ -1245,9 +1256,6 @@ next_task:
 				rc = 1;
 				break;
 			}
-			/* cg_node_bitmap may be changed */
-			bit_copybits(non_cg_bitmap, cg_node_bitmap);
-			bit_not(non_cg_bitmap);
 
 			/* With bf_continue configured, the original job could
 			 * have been scheduled or cancelled and purged.
@@ -1262,10 +1270,12 @@ next_task:
 				continue;	/* No available frontend */
 
 			job_ptr->time_limit = save_time_limit;
+			job_ptr->part_ptr = part_ptr;
 			/* Reset backfill scheduling timers, resume testing */
 			sched_start = time(NULL);
 			gettimeofday(&start_tv, NULL);
 			job_test_count = 1;
+			test_time_count = 0;
 			START_TIMER;
 		}
 
@@ -1292,7 +1302,6 @@ next_task:
 		/* Identify usable nodes for this job */
 		bit_and(avail_bitmap, part_ptr->node_bitmap);
 		bit_and(avail_bitmap, up_node_bitmap);
-		bit_and(avail_bitmap, non_cg_bitmap);
 		for (j=0; ; ) {
 			if ((node_space[j].end_time > start_res) &&
 			     node_space[j].next && (later_start == 0))
@@ -1336,7 +1345,7 @@ next_task:
 
 			/* Job can not start until too far in the future */
 			_set_job_time_limit(job_ptr, orig_time_limit);
-			job_ptr->start_time = sched_start + backfill_window;
+			job_ptr->start_time = 0;
 			if ((orig_start_time != 0) &&
 			    (orig_start_time < job_ptr->start_time)) {
 				/* Can start earlier in different partition */
@@ -1358,11 +1367,12 @@ next_task:
 			slurmctld_diag_stats.bf_last_depth_try++;
 			already_counted = true;
 		}
-
 		if (debug_flags & DEBUG_FLAG_BACKFILL_MAP)
 			_dump_job_test(job_ptr, avail_bitmap, start_res);
+		job_ptr->bit_flags |= BACKFILL_TEST;
 		j = _try_sched(job_ptr, &avail_bitmap, min_nodes, max_nodes,
 			       req_nodes, exc_core_bitmap);
+		job_ptr->bit_flags &= ~BACKFILL_TEST;
 
 		now = time(NULL);
 		if (j != SLURM_SUCCESS) {
@@ -1377,6 +1387,12 @@ next_task:
 		if (start_res > job_ptr->start_time) {
 			job_ptr->start_time = start_res;
 			last_job_update = now;
+		}
+		if ((job_ptr->start_time <= now) &&
+		    (bit_overlap(avail_bitmap, cg_node_bitmap) > 0)) {
+			/* Need to wait for in-progress completion/epilog */
+			job_ptr->start_time = now + 1;
+			later_start = 0;
 		}
 		if ((job_ptr->start_time <= now) &&
 		    ((bb = bb_g_job_test_stage_in(job_ptr, true)) != 1)) {
@@ -1454,6 +1470,7 @@ next_task:
 			}
 
 			if ((rc == ESLURM_RESERVATION_BUSY) ||
+			    (rc == ESLURM_ACCOUNTING_POLICY) ||
 			    (rc == ESLURM_POWER_NOT_AVAIL) ||
 			    (rc == ESLURM_POWER_RESERVED)) {
 				/* Unknown future start time, just skip job */
@@ -1464,19 +1481,6 @@ next_task:
 					job_ptr->start_time = 0;
 				_set_job_time_limit(job_ptr, orig_time_limit);
 				continue;
-			} else if (rc == ESLURM_ACCOUNTING_POLICY) {
-				/* Unknown future start time. Determining
-				 * when it can start with certainty requires
-				 * when every running and pending job starts
-				 * and ends and tracking all of there resources.
-				 * That requires very high overhead, that we
-				 * don't want to add. Estimate that it can start
-				 * after the next job ends (or in 5 minutes if
-				 * we don't have that information yet). */
-				if (later_start)
-					job_ptr->start_time = later_start;
-				else
-					job_ptr->start_time = now + 500;
 			} else if (rc != SLURM_SUCCESS) {
 				if (debug_flags & DEBUG_FLAG_BACKFILL) {
 					info("backfill: planned start of job %u"
@@ -1561,6 +1565,19 @@ next_task:
 				info("backfill: table size limit of %u reached",
 				     max_backfill_job_cnt);
 			}
+			if ((max_backfill_job_per_part != 0) &&
+			    (max_backfill_job_per_part >=
+			     max_backfill_job_cnt)) {
+				error("bf_max_job_part >= bf_max_job_test (%u >= %u)",
+				      max_backfill_job_per_part,
+				      max_backfill_job_cnt);
+			} else if ((max_backfill_job_per_user != 0) &&
+				   (max_backfill_job_per_user >=
+				    max_backfill_job_cnt)) {
+				error("bf_max_job_user >= bf_max_job_test (%u >= %u)",
+				      max_backfill_job_per_user,
+				      max_backfill_job_cnt);
+			}
 			break;
 		}
 
@@ -1618,7 +1635,6 @@ next_task:
 	FREE_NULL_BITMAP(avail_bitmap);
 	FREE_NULL_BITMAP(exc_core_bitmap);
 	FREE_NULL_BITMAP(resv_bitmap);
-	FREE_NULL_BITMAP(non_cg_bitmap);
 
 	for (i=0; ; ) {
 		FREE_NULL_BITMAP(node_space[i].avail_bitmap);

@@ -139,10 +139,8 @@ static xcgroup_t job_cpuset_cg;
 static xcgroup_t step_cpuset_cg;
 
 static int _xcgroup_cpuset_init(xcgroup_t* cg);
-char * cpuset_to_str(const cpu_set_t *mask, char *str);
-int str_to_cpuset(cpu_set_t *mask, const char* str);
 
-inline int val_to_char(int v)
+static inline int _val_to_char(int v)
 {
 	if (v >= 0 && v < 10)
 		return '0' + v;
@@ -152,7 +150,7 @@ inline int val_to_char(int v)
 		return -1;
 }
 
-inline int char_to_val(int c)
+static inline int _char_to_val(int c)
 {
 	int cl;
 
@@ -163,61 +161,6 @@ inline int char_to_val(int c)
 		return cl + (10 - 'a');
 	else
 		return -1;
-}
-
-char *cpuset_to_str(const cpu_set_t *mask, char *str)
-{
-	int base;
-	char *ptr = str;
-	char *ret = NULL;
-
-	for (base = CPU_SETSIZE - 4; base >= 0; base -= 4) {
-		char val = 0;
-		if (CPU_ISSET(base, mask))
-			val |= 1;
-		if (CPU_ISSET(base + 1, mask))
-			val |= 2;
-		if (CPU_ISSET(base + 2, mask))
-			val |= 4;
-		if (CPU_ISSET(base + 3, mask))
-			val |= 8;
-		if (!ret && val)
-			ret = ptr;
-		*ptr++ = val_to_char(val);
-	}
-	*ptr = '\0';
-	return ret ? ret : ptr - 1;
-}
-
-int str_to_cpuset(cpu_set_t *mask, const char* str)
-{
-	int len = strlen(str);
-	const char *ptr = str + len - 1;
-	int base = 0;
-
-	/* skip 0x, it's all hex anyway */
-	if (len > 1 && !memcmp(str, "0x", 2L))
-		str += 2;
-
-	CPU_ZERO(mask);
-	while (ptr >= str) {
-		char val = char_to_val(*ptr);
-		if (val == (char) -1)
-			return -1;
-		if (val & 1)
-			CPU_SET(base, mask);
-		if (val & 2)
-			CPU_SET(base + 1, mask);
-		if (val & 4)
-			CPU_SET(base + 2, mask);
-		if (val & 8)
-			CPU_SET(base + 3, mask);
-		len--;
-		ptr--;
-		base += 4;
-	}
-
-	return 0;
 }
 
 /* when cgroups are configured with cpuset, at least
@@ -296,6 +239,61 @@ static int _xcgroup_cpuset_init(xcgroup_t* cg)
 
 #ifdef HAVE_HWLOC
 
+static char *_cpuset_to_str(const cpu_set_t *mask, char *str)
+{
+	int base;
+	char *ptr = str;
+	char *ret = NULL;
+
+	for (base = CPU_SETSIZE - 4; base >= 0; base -= 4) {
+		char val = 0;
+		if (CPU_ISSET(base, mask))
+			val |= 1;
+		if (CPU_ISSET(base + 1, mask))
+			val |= 2;
+		if (CPU_ISSET(base + 2, mask))
+			val |= 4;
+		if (CPU_ISSET(base + 3, mask))
+			val |= 8;
+		if (!ret && val)
+			ret = ptr;
+		*ptr++ = _val_to_char(val);
+	}
+	*ptr = '\0';
+	return ret ? ret : ptr - 1;
+}
+
+static int _str_to_cpuset(cpu_set_t *mask, const char* str)
+{
+	int len = strlen(str);
+	const char *ptr = str + len - 1;
+	int base = 0;
+
+	/* skip 0x, it's all hex anyway */
+	if (len > 1 && !memcmp(str, "0x", 2L))
+		str += 2;
+
+	CPU_ZERO(mask);
+	while (ptr >= str) {
+		char val = _char_to_val(*ptr);
+		if (val == (char) -1)
+			return -1;
+		if (val & 1)
+			CPU_SET(base, mask);
+		if (val & 2)
+			CPU_SET(base + 1, mask);
+		if (val & 4)
+			CPU_SET(base + 2, mask);
+		if (val & 8)
+			CPU_SET(base + 3, mask);
+		len--;
+		ptr--;
+		base += 4;
+	}
+
+	return 0;
+}
+
 static void
 _slurm_chkaffinity(cpu_set_t *mask, stepd_step_rec_t *job, int statval)
 {
@@ -358,7 +356,7 @@ _slurm_chkaffinity(cpu_set_t *mask, stepd_step_rec_t *job, int statval)
 			task_gid,
 			task_lid,
 			mypid,
-			cpuset_to_str(mask, mstr),
+			_cpuset_to_str(mask, mstr),
 			action,
 			status);
 }
@@ -433,10 +431,6 @@ static int _task_cgroup_cpuset_dist_block(
 	hwloc_obj_type_t req_hwtype, uint32_t nobj,
 	stepd_step_rec_t *job, int bind_verbose, hwloc_bitmap_t cpuset);
 
-/* The job has specialized cores, synchronize user mask with available cores */
-static void _validate_mask(uint32_t task_id, hwloc_obj_t obj, cpu_set_t *ts);
-
-
 static int _get_ldom_sched_cpuset(hwloc_topology_t topology,
 		hwloc_obj_type_t hwtype, hwloc_obj_type_t req_hwtype,
 		uint32_t ldom, cpu_set_t *mask)
@@ -455,7 +449,7 @@ static int _get_ldom_sched_cpuset(hwloc_topology_t topology,
 	return true;
 }
 
-int _get_sched_cpuset(hwloc_topology_t topology,
+static int _get_sched_cpuset(hwloc_topology_t topology,
 		hwloc_obj_type_t hwtype, hwloc_obj_type_t req_hwtype,
 		cpu_set_t *mask, stepd_step_rec_t *job)
 {
@@ -534,8 +528,8 @@ int _get_sched_cpuset(hwloc_topology_t topology,
 
 	if (job->cpu_bind_type & CPU_BIND_MASK) {
 		/* convert mask string into cpu_set_t mask */
-		if (str_to_cpuset(mask, mstr) < 0) {
-			error("task/cgroup: str_to_cpuset %s", mstr);
+		if (_str_to_cpuset(mask, mstr) < 0) {
+			error("task/cgroup: _str_to_cpuset %s", mstr);
 			return false;
 		}
 		return true;
@@ -562,7 +556,7 @@ int _get_sched_cpuset(hwloc_topology_t topology,
 		if (len > 1 && !memcmp(mstr, "0x", 2L))
 			curstr += 2;
 		while (ptr >= curstr) {
-			char val = char_to_val(*ptr);
+			char val = _char_to_val(*ptr);
 			if (val == (char) -1)
 				return false;
 			if (val & 1)
@@ -636,6 +630,40 @@ static void _add_hwloc_cpuset(
 	}
 }
 
+static int _get_cpuinfo(uint32_t *nsockets, uint32_t *ncores,
+			uint32_t *nthreads, uint32_t *npus)
+{
+	hwloc_topology_t topology;
+
+	if (hwloc_topology_init(&topology)) {
+		/* error in initialize hwloc library */
+		error("%s: hwloc_topology_init() failed", __func__);
+		return -1;
+	}
+	/* parse full system info */
+	hwloc_topology_set_flags(topology, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM);
+	/* ignores cache, misc */
+	hwloc_topology_ignore_type (topology, HWLOC_OBJ_CACHE);
+	hwloc_topology_ignore_type (topology, HWLOC_OBJ_MISC);
+	/* load topology */
+	if (hwloc_topology_load(topology)) {
+		error("%s: hwloc_topology_load() failed", __func__);
+		hwloc_topology_destroy(topology);
+		return -1;
+	}
+
+	*nsockets = (uint32_t) hwloc_get_nbobjs_by_type(topology,
+							HWLOC_OBJ_SOCKET);
+	*ncores = (uint32_t) hwloc_get_nbobjs_by_type(topology,
+						      HWLOC_OBJ_CORE);
+	*nthreads = (uint32_t) hwloc_get_nbobjs_by_type(topology,
+							HWLOC_OBJ_PU);
+	*npus = (uint32_t) hwloc_get_nbobjs_by_type(topology,
+						    HWLOC_OBJ_PU);
+	hwloc_topology_destroy(topology);
+	return 0;
+}
+
 static int _task_cgroup_cpuset_dist_cyclic(
 	hwloc_topology_t topology, hwloc_obj_type_t hwtype,
 	hwloc_obj_type_t req_hwtype, stepd_step_rec_t *job, int bind_verbose,
@@ -646,23 +674,30 @@ static int _task_cgroup_cpuset_dist_cyclic(
 	uint32_t *c_ixc;	/* core index by socket (current taskid) */
 	uint32_t *c_ixn;	/* core index by socket (next taskid) */
 	uint32_t *t_ix;		/* thread index by core by socket */
-	uint32_t npus, ncores, nsockets;
+	uint32_t npus = 0, nthreads = 0, ncores = 0, nsockets = 0;
 	uint32_t taskid = job->envtp->localid;
 	int spec_thread_cnt = 0;
 	bitstr_t *spec_threads = NULL;
-
-	uint32_t obj_idxs[3], nthreads, cps,
-		 tpc, i, j, sock_loop, ntskip, npdist;;
+	uint32_t obj_idxs[3], cps, tpc, i, j, sock_loop, ntskip, npdist;;
 	bool core_cyclic, core_fcyclic, sock_fcyclic;
 
-	nsockets = (uint32_t) hwloc_get_nbobjs_by_type(topology,
-						       HWLOC_OBJ_SOCKET);
-	ncores = (uint32_t) hwloc_get_nbobjs_by_type(topology,
-						       HWLOC_OBJ_CORE);
-	nthreads = (uint32_t) hwloc_get_nbobjs_by_type(topology,
-						       HWLOC_OBJ_PU);
-	cps = ncores/nsockets;
-	tpc = nthreads/ncores;
+	if (_get_cpuinfo(&nsockets, &ncores, &nthreads, &npus)) {
+		/* Fall back to use allocated resources, but this may result
+		 * in incorrect layout due to a uneven task distribution
+		 * (e.g. 4 cores on socket 0 and 3 cores on socket 1) */
+		nsockets = (uint32_t) hwloc_get_nbobjs_by_type(topology,
+							HWLOC_OBJ_SOCKET);
+		ncores = (uint32_t) hwloc_get_nbobjs_by_type(topology,
+							HWLOC_OBJ_CORE);
+		nthreads = (uint32_t) hwloc_get_nbobjs_by_type(topology,
+							HWLOC_OBJ_PU);
+		npus = (uint32_t) hwloc_get_nbobjs_by_type(topology,
+							   HWLOC_OBJ_PU);
+	}
+	if ((nsockets == 0) || (ncores == 0))
+		return XCGROUP_ERROR;
+	cps = (ncores + nsockets - 1) / nsockets;
+	tpc = (nthreads + ncores - 1) / ncores;
 
 	sock_fcyclic = (job->task_dist & SLURM_DIST_SOCKMASK) ==
 		SLURM_DIST_SOCKCFULL ? true : false;
@@ -677,8 +712,7 @@ static int _task_cgroup_cpuset_dist_cyclic(
 		     format_task_dist_states(job->task_dist), job->task_dist);
 	}
 
-	npus = (uint32_t) hwloc_get_nbobjs_by_type(topology,
-						   HWLOC_OBJ_PU);
+
 
 	t_ix = xmalloc(ncores * sizeof(uint32_t));
 	c_ixc = xmalloc(nsockets * sizeof(uint32_t));
@@ -695,11 +729,11 @@ static int _task_cgroup_cpuset_dist_cyclic(
 	}
 	if ((job->job_core_spec != (uint16_t) NO_VAL) &&
 	    (job->job_core_spec &  CORE_SPEC_THREAD)  &&
-	    (job->job_core_spec != CORE_SPEC_THREAD)){
+	    (job->job_core_spec != CORE_SPEC_THREAD)) {
 		/* Skip specialized threads as needed */
 		int i, t, c, s;
-		int cores = ncores / nsockets;
-		int threads = npus / cores;
+		int cores = (ncores + nsockets - 1) / nsockets;
+		int threads = (npus + cores - 1) / cores;
 		spec_thread_cnt = job->job_core_spec & (~CORE_SPEC_THREAD);
 		spec_threads = bit_alloc(npus);
 		for (t = threads - 1;
@@ -735,7 +769,8 @@ static int _task_cgroup_cpuset_dist_cyclic(
 			obj = hwloc_get_obj_below_by_type(
 				topology, HWLOC_OBJ_SOCKET, s_ix,
 				hwtype, c_ixc[s_ix]);
-			if (obj != NULL) {
+			if ((obj != NULL) &&
+			    (hwloc_bitmap_first(obj->allowed_cpuset) != -1)) {
 				if (hwloc_compare_types(hwtype, HWLOC_OBJ_PU)
 									>= 0) {
 					/* granularity is thread */
@@ -744,7 +779,9 @@ static int _task_cgroup_cpuset_dist_cyclic(
 					obj_idxs[2]=t_ix[(s_ix*cps)+c_ixc[s_ix]];
 					obj = hwloc_get_obj_below_array_by_type(
 						topology, 3, obj_types, obj_idxs);
-					if (obj != NULL) {
+					if ((obj != NULL) &&
+					    (hwloc_bitmap_first(
+					     obj->allowed_cpuset) != -1)) {
 						t_ix[(s_ix*cps)+c_ixc[s_ix]]++;
 						j++;
 						if (i == ntskip)
@@ -810,9 +847,11 @@ static int _task_cgroup_cpuset_dist_cyclic(
 
 	/* should never happen in normal scenario */
 	if (sock_loop > npdist) {
+		char buf[128] = "";
+		hwloc_bitmap_snprintf(buf, sizeof(buf), cpuset);
 		error("task/cgroup: task[%u] infinite loop broken while trying "
-		      "to provision compute elements using %s", taskid,
-		      format_task_dist_states(job->task_dist));
+		      "to provision compute elements using %s (bitmap:%s)",
+		      taskid, format_task_dist_states(job->task_dist), buf);
 		return XCGROUP_ERROR;
 	} else
 		return XCGROUP_SUCCESS;
@@ -832,7 +871,6 @@ static int _task_cgroup_cpuset_dist_block(
 	int spec_thread_cnt = 0;
 	bitstr_t *spec_threads = NULL;
 
-	uint32_t *thread_idx;
 	uint32_t core_idx;
 	bool core_fcyclic, core_block;
 
@@ -848,15 +886,13 @@ static int _task_cgroup_cpuset_dist_block(
 	core_fcyclic = (job->task_dist & SLURM_DIST_COREMASK) ==
 		SLURM_DIST_CORECFULL ? true : false;
 
-	thread_idx = xmalloc(ncores * sizeof(uint32_t));
-
 	if (bind_verbose) {
 		info("task/cgroup: task[%u] using block distribution, "
 		     "task_dist 0x%x", taskid, job->task_dist);
 	}
 
 	if ((hwloc_compare_types(hwtype, HWLOC_OBJ_PU) == 0) && !core_block) {
-		thread_idx = xmalloc(ncores * sizeof(uint32_t));
+		uint32_t *thread_idx = xmalloc(ncores * sizeof(uint32_t));
 		ntskip = taskid;
 		npdist = job->cpus_per_task;
 
@@ -894,9 +930,12 @@ static int _task_cgroup_cpuset_dist_block(
 
 		/* should never happen in normal scenario */
 		if (core_loop > npdist) {
+			char buf[128] = "";
+			hwloc_bitmap_snprintf(buf, sizeof(buf), cpuset);
 			error("task/cgroup: task[%u] infinite loop broken while "
-			      "trying to provision compute elements using %s",
-			      taskid, format_task_dist_states(job->task_dist));
+			      "trying to provision compute elements using %s (bitmap:%s)",
+			      taskid, format_task_dist_states(job->task_dist),
+			      buf);
 			return XCGROUP_ERROR;
 		} else
 			return XCGROUP_SUCCESS;
@@ -1085,7 +1124,7 @@ again:
 			goto again;
 		}
 
-		/* initialize the cpusets as it was inexistant */
+		/* initialize the cpusets as it was non-existent */
 		if (_xcgroup_cpuset_init(&slurm_cg) !=
 		    XCGROUP_SUCCESS) {
 			xfree(slurm_cgpath);
@@ -1200,7 +1239,7 @@ again:
 	 */
 	rc = xcgroup_get_param(&user_cpuset_cg, cpuset_meta, &cpus,&cpus_size);
 	if (rc != XCGROUP_SUCCESS || cpus_size == 1) {
-		/* initialize the cpusets as it was inexistant */
+		/* initialize the cpusets as it was non-existent */
 		if (_xcgroup_cpuset_init(&user_cpuset_cg) !=
 		    XCGROUP_SUCCESS) {
 			xcgroup_delete(&user_cpuset_cg);
@@ -1335,7 +1374,7 @@ extern int task_cgroup_cpuset_set_task_affinity(stepd_step_rec_t *job)
 	hwloc_obj_type_t hwtype;
 	hwloc_obj_type_t req_hwtype;
 	int bind_verbose = 0;
-	int rc = SLURM_SUCCESS, match;
+	int rc = SLURM_SUCCESS;
 	pid_t    pid = job->envtp->task_pid;
 	size_t tssize;
 	uint32_t nldoms;
@@ -1492,37 +1531,25 @@ extern int task_cgroup_cpuset_set_task_affinity(stepd_step_rec_t *job)
 		 * Bind the taskid in accordance with the specified mode
 		 */
 		obj = hwloc_get_obj_by_type(topology, HWLOC_OBJ_MACHINE, 0);
-		match = hwloc_bitmap_isequal(obj->complete_cpuset,
-					     obj->allowed_cpuset);
-		if ((job->job_core_spec == (uint16_t) NO_VAL) && !match) {
-			info("task/cgroup: entire node must be allocated, "
-			     "disabling affinity, task[%u]", taskid);
-			fprintf(stderr, "Requested cpu_bind option requires "
-				"entire node to be allocated; disabling "
-				"affinity\n");
-		} else {
-			if (bind_verbose) {
-				info("task/cgroup: task[%u] is requesting "
-				     "explicit binding mode", taskid);
-			}
-			_get_sched_cpuset(topology, hwtype, req_hwtype, &ts,
-					  job);
-			tssize = sizeof(cpu_set_t);
-			fstatus = SLURM_SUCCESS;
-			if (job->job_core_spec != (uint16_t) NO_VAL)
-				_validate_mask(taskid, obj, &ts);
-			if ((rc = sched_setaffinity(pid, tssize, &ts))) {
-				error("task/cgroup: task[%u] unable to set "
-				      "mask 0x%s", taskid,
-				      cpuset_to_str(&ts, mstr));
-				error("sched_setaffinity rc = %d", rc);
-				fstatus = SLURM_ERROR;
-			} else if (bind_verbose) {
-				info("task/cgroup: task[%u] mask 0x%s",
-				     taskid, cpuset_to_str(&ts, mstr));
-			}
-			_slurm_chkaffinity(&ts, job, rc);
+		if (bind_verbose) {
+			info("task/cgroup: task[%u] is requesting "
+			     "explicit binding mode", taskid);
 		}
+		_get_sched_cpuset(topology, hwtype, req_hwtype, &ts, job);
+		tssize = sizeof(cpu_set_t);
+		fstatus = SLURM_SUCCESS;
+		_validate_mask(taskid, obj, &ts);
+		if ((rc = sched_setaffinity(pid, tssize, &ts))) {
+			error("task/cgroup: task[%u] unable to set "
+			      "mask 0x%s", taskid,
+			      _cpuset_to_str(&ts, mstr));
+			error("sched_setaffinity rc = %d", rc);
+			fstatus = SLURM_ERROR;
+		} else if (bind_verbose) {
+			info("task/cgroup: task[%u] mask 0x%s",
+			     taskid, _cpuset_to_str(&ts, mstr));
+		}
+		_slurm_chkaffinity(&ts, job, rc);
 	} else {
 		/* Bind the detected object to the taskid, respecting the
 		 * granularity, using the designated or default distribution

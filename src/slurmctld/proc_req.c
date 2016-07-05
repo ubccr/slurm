@@ -831,6 +831,7 @@ static void _fill_ctld_conf(slurm_ctl_conf_t * conf_ptr)
 	conf_ptr->resv_over_run       = conf->resv_over_run;
 	conf_ptr->resv_prolog         = xstrdup(conf->resv_prolog);
 	conf_ptr->ret2service         = conf->ret2service;
+	conf_ptr->route_plugin        = xstrdup(conf->route_plugin);
 
 	conf_ptr->salloc_default_command = xstrdup(conf->
 						   salloc_default_command);
@@ -1784,13 +1785,6 @@ static void  _slurm_rpc_epilog_complete(slurm_msg_t *msg,
 
 	job_ptr = find_job_record(epilog_msg->job_id);
 
-	if (!running_composite) {
-		unlock_slurmctld(job_write_lock);
-		_throttle_fini(&active_rpc_cnt);
-	}
-
-	END_TIMER2("_slurm_rpc_epilog_complete");
-
 	if (epilog_msg->return_code)
 		error("%s: epilog error %s Node=%s Err=%s %s",
 		      __func__, jobid2str(job_ptr, jbuf, sizeof(jbuf)),
@@ -1800,6 +1794,13 @@ static void  _slurm_rpc_epilog_complete(slurm_msg_t *msg,
 		debug2("%s: %s Node=%s %s",
 		       __func__, jobid2str(job_ptr, jbuf, sizeof(jbuf)),
 		       epilog_msg->node_name, TIME_STR);
+
+	if (!running_composite) {
+		unlock_slurmctld(job_write_lock);
+		_throttle_fini(&active_rpc_cnt);
+	}
+
+	END_TIMER2("_slurm_rpc_epilog_complete");
 
 	/* Functions below provide their own locking */
 	if (!running_composite && *run_scheduler) {
@@ -1957,15 +1958,24 @@ static void _slurm_rpc_complete_job_allocation(slurm_msg_t * msg)
 	       "uid=%u, JobId=%u rc=%d",
 	       uid, comp_msg->job_id, comp_msg->job_rc);
 
-	job_ptr = find_job_record(comp_msg->job_id);
-	trace_job(job_ptr, __func__, "enter");
 	_throttle_start(&active_rpc_cnt);
 	lock_slurmctld(job_write_lock);
+	job_ptr = find_job_record(comp_msg->job_id);
+	trace_job(job_ptr, __func__, "enter");
 
 	/* do RPC call */
 	/* Mark job and/or job step complete */
 	error_code = job_complete(comp_msg->job_id, uid,
 				  false, false, comp_msg->job_rc);
+	if (error_code)
+		info("%s: %s error %s ",
+		     __func__, jobid2str(job_ptr, jbuf, sizeof(jbuf)),
+		     slurm_strerror(error_code));
+	else
+		debug2("%s: %s %s", __func__,
+		       jobid2str(job_ptr, jbuf, sizeof(jbuf)),
+		       TIME_STR);
+
 	unlock_slurmctld(job_write_lock);
 	_throttle_fini(&active_rpc_cnt);
 	END_TIMER2("_slurm_rpc_complete_job_allocation");
@@ -1978,14 +1988,8 @@ static void _slurm_rpc_complete_job_allocation(slurm_msg_t * msg)
 
 	/* return result */
 	if (error_code) {
-		info("%s: %s error %s ",
-		     __func__, jobid2str(job_ptr, jbuf, sizeof(jbuf)),
-		     slurm_strerror(error_code));
 		slurm_send_rc_msg(msg, error_code);
 	} else {
-		debug2("%s: %s %s", __func__,
-		       jobid2str(job_ptr, jbuf, sizeof(jbuf)),
-		       TIME_STR);
 		slurmctld_diag_stats.jobs_completed++;
 		slurm_send_rc_msg(msg, SLURM_SUCCESS);
 		(void) schedule_job_save();	/* Has own locking */
@@ -5555,6 +5559,7 @@ extern void free_rpc_stats(void)
 inline static void
 _slurm_rpc_kill_job2(slurm_msg_t *msg)
 {
+	static int active_rpc_cnt = 0;
 	DEF_TIMERS;
 	job_step_kill_msg_t *kill;
 	slurmctld_lock_t lock = {READ_LOCK, WRITE_LOCK,
@@ -5569,13 +5574,16 @@ _slurm_rpc_kill_job2(slurm_msg_t *msg)
 	info("%s: REQUEST_KILL_JOB job %s uid %d",
 	     __func__, kill->sjob_id, uid);
 
+	_throttle_start(&active_rpc_cnt);
 	lock_slurmctld(lock);
-
 	cc = job_str_signal(kill->sjob_id,
 			    kill->signal,
 			    kill->flags,
 			    uid,
 			    0);
+	unlock_slurmctld(lock);
+	_throttle_fini(&active_rpc_cnt);
+
 	if (cc == ESLURM_ALREADY_DONE) {
 		debug2("%s: job_str_signal() job %s sig %d returned %s",
 		       __func__, kill->sjob_id,
@@ -5590,7 +5598,6 @@ _slurm_rpc_kill_job2(slurm_msg_t *msg)
 
 	slurm_send_rc_msg(msg, cc);
 
-	unlock_slurmctld(lock);
 	END_TIMER2("_slurm_rpc_kill_job2");
 }
 

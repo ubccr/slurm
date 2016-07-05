@@ -50,7 +50,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/param.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -773,7 +773,7 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 		return SLURM_FAILURE;
 	} else if (pid > 0) {
 		int rc = SLURM_SUCCESS;
-#ifndef SLURMSTEPD_MEMCHECK
+#if (SLURMSTEPD_MEMCHECK == 0)
 		int i;
 		time_t start_time = time(NULL);
 #endif
@@ -797,7 +797,7 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 
 		/* If running under valgrind/memcheck, this pipe doesn't work
 		 * correctly so just skip it. */
-#ifndef SLURMSTEPD_MEMCHECK
+#if (SLURMSTEPD_MEMCHECK == 0)
 		i = read(to_slurmd[0], &rc, sizeof(int));
 		if (i < 0) {
 			error("%s: Can not read return code from slurmstepd "
@@ -831,12 +831,39 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 			error("close read to_slurmd in parent: %m");
 		return rc;
 	} else {
-#ifndef SLURMSTEPD_MEMCHECK
-		char *const argv[2] = { (char *)conf->stepd_loc, NULL};
-#else
+#if (SLURMSTEPD_MEMCHECK == 1)
+		/* memcheck test of slurmstepd, option #1 */
 		char *const argv[3] = {"memcheck",
 				       (char *)conf->stepd_loc, NULL};
+#elif (SLURMSTEPD_MEMCHECK == 2)
+		/* valgrind test of slurmstepd, option #2 */
+		uint32_t job_id = 0, step_id = 0;
+		char log_file[256];
+		char *const argv[13] = {"valgrind", "--tool=memcheck",
+					"--error-limit=no",
+					"--leak-check=summary",
+					"--show-reachable=yes",
+					"--max-stackframe=16777216",
+					"--num-callers=20",
+					"--child-silent-after-fork=yes",
+					"--track-origins=yes",
+					log_file, (char *)conf->stepd_loc,
+					NULL};
+		if (type == LAUNCH_BATCH_JOB) {
+			job_id = ((batch_job_launch_msg_t *)req)->job_id;
+			step_id = ((batch_job_launch_msg_t *)req)->step_id;
+		} else if (type == LAUNCH_TASKS) {
+			job_id = ((launch_tasks_request_msg_t *)req)->job_id;
+			step_id = ((launch_tasks_request_msg_t *)req)->job_step_id;
+		}
+		snprintf(log_file, sizeof(log_file),
+			 "--log-file=/tmp/slurmstepd_valgrind_%u.%u",
+			 job_id, step_id);
+#else
+		/* no memory checking, default */
+		char *const argv[2] = { (char *)conf->stepd_loc, NULL};
 #endif
+		int i;
 		int failed = 0;
 		/* inform slurmstepd about our config */
 		setenv("SLURM_CONF", conf->conffile, 1);
@@ -854,6 +881,18 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 			failed = 2;
 		} else if (pid > 0) { /* child */
 			exit(0);
+		}
+
+		/*
+		 * Just incase we (or someone we are linking to)
+		 * opened a file and didn't do a close on exec.  This
+		 * is needed mostly to protect us against libs we link
+		 * to that don't set the flag as we should already be
+		 * setting it for those that we open.  The number 256
+		 * is an arbitrary number based off test7.9.
+		 */
+		for (i=3; i<256; i++) {
+			(void) fcntl(i, F_SETFD, FD_CLOEXEC);
 		}
 
 		/*
@@ -1672,11 +1711,20 @@ static void _spawn_prolog_stepd(slurm_msg_t *msg)
 	}
 
 	slurm_get_stream_addr(msg->conn_fd, &self);
-
-	debug3("%s: call to _forkexec_slurmstepd", __func__);
-	(void) _forkexec_slurmstepd(LAUNCH_TASKS, (void *)launch_req, cli,
-				     &self, NULL, msg->protocol_version);
-	debug3("%s: return from _forkexec_slurmstepd", __func__);
+	/* Since job could have been killed while the prolog was
+	 * running (especially on BlueGene, which can take minutes
+	 * for partition booting). Test if the credential has since
+	 * been revoked and exit as needed. */
+	if (slurm_cred_revoked(conf->vctx, req->cred)) {
+		info("Job %u already killed, do not launch extern step",
+		     req->job_id);
+	} else {
+		debug3("%s: call to _forkexec_slurmstepd", __func__);
+		(void) _forkexec_slurmstepd(
+			LAUNCH_TASKS, (void *)launch_req, cli,
+			&self, NULL, msg->protocol_version);
+		debug3("%s: return from _forkexec_slurmstepd", __func__);
+	}
 
 	for (i = 0; i < req->nnodes; i++)
 		xfree(launch_req->global_task_ids[i]);
@@ -1923,6 +1971,8 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 	 * if the job was cancelled in the interim, run through the
 	 * abort logic below. */
 	revoked = slurm_cred_revoked(conf->vctx, req->cred);
+	if (revoked)
+		_launch_complete_rm(req->job_id);
 	if (revoked && _is_batch_job_finished(req->job_id)) {
 		/* If configured with select/serial and the batch job already
 		 * completed, consider the job sucessfully launched and do
@@ -5963,7 +6013,7 @@ _rpc_forward_data(slurm_msg_t *msg)
 	memset(&sa, 0, sizeof(sa));
 	sa.sun_family = AF_UNIX;
 	strcpy(sa.sun_path, req->address);
-	while ((rc = connect(fd, (struct sockaddr *)&sa, SUN_LEN(&sa)) < 0) &&
+	while (((rc = connect(fd, (struct sockaddr *)&sa, SUN_LEN(&sa))) < 0) &&
 	       (errno == EINTR));
 	if (rc < 0) {
 		rc = errno;
@@ -6094,7 +6144,7 @@ static void _launch_complete_wait(uint32_t job_id)
 		}
 		if (j < JOB_STATE_CNT)	/* Found job, ready to return */
 			break;
-		if (difftime(time(NULL), start) <= 3) {  /* Retry for 3 secs */
+		if (difftime(time(NULL), start) <= 9) {  /* Retry for 9 secs */
 			debug2("wait for launch of job %u before suspending it",
 			       job_id);
 			gettimeofday(&now, NULL);

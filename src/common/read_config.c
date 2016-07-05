@@ -758,20 +758,18 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 			 * Except SocketsPerBoard=# can be used,
 			 * But it can't be used with Sockets=# */
 			n->boards = 1;
-			if (!no_sockets && !no_sockets_per_board) {
-				error("NodeNames=%s Sockets=# and "
-				      "SocketsPerBoard=# is invalid"
-				      ", using SocketsPerBoard",
-				      n->nodenames);
-				n->sockets = sockets_per_board;
-			}
 			if (!no_sockets_per_board) {
+				if (!no_sockets)
+					error("NodeNames=%s Sockets=# and "
+					      "SocketsPerBoard=# is invalid"
+					      ", using SocketsPerBoard",
+					      n->nodenames);
 				n->sockets = sockets_per_board;
-			}
-			if (!no_cpus    &&	/* infer missing Sockets= */
-			    no_sockets) {
+			} else if (!no_cpus && no_sockets) {
+				/* infer missing Sockets= */
 				n->sockets = n->cpus / (n->cores * n->threads);
 			}
+
 			if (n->sockets == 0) { /* make sure sockets != 0 */
 				error("NodeNames=%s Sockets=0 is invalid, "
 				      "reset to 1", n->nodenames);
@@ -816,12 +814,14 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 				      n->nodenames);
 				n->boards = 1;
 			}
-			if (!no_sockets && !no_sockets_per_board) {
-				error("NodeNames=%s Sockets=# and "
-				      "SocketsPerBoard=# is invalid, "
-				      "using SocketsPerBoard", n->nodenames);
-				n->sockets = n->boards * sockets_per_board;
-			} else if (!no_sockets_per_board) {
+
+			if (!no_sockets_per_board) {
+				if (!no_sockets)
+					error("NodeNames=%s Sockets=# and "
+					      "SocketsPerBoard=# is invalid, "
+					      "using SocketsPerBoard",
+					      n->nodenames);
+
 				n->sockets = n->boards * sockets_per_board;
 			} else if (!no_sockets) {
 				error("NodeNames=%s Sockets=# with Boards=# is"
@@ -3369,10 +3369,7 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	}
 #endif
 
-	if (!s_p_get_string(&conf->msg_aggr_params,
-			   "MsgAggregationParams", hashtbl))
-		conf->msg_aggr_params =
-			xstrdup(DEFAULT_MSG_AGGREGATION_PARAMS);
+	s_p_get_string(&conf->msg_aggr_params, "MsgAggregationParams", hashtbl);
 
 	if (!s_p_get_boolean((bool *)&conf->track_wckey,
 			    "TrackWCKey", hashtbl))
@@ -4101,7 +4098,7 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 			      long_suspend_time);
 		} else if ((long_suspend_time > -1) &&
 			   (!strcmp(conf->select_type, "select/bluegene"))) {
-			error("SuspendTime (power save mode) incomptible with "
+			error("SuspendTime (power save mode) incompatible with "
 			      "select/bluegene");
 			return SLURM_ERROR;
 		} else

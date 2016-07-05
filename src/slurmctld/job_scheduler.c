@@ -225,6 +225,7 @@ static bool _job_runnable_test1(struct job_record *job_ptr, bool sched_plugin)
 		job_ptr->start_time = (time_t) 0;
 	if (job_ptr->priority == 0)	{ /* held */
 		if (job_ptr->state_reason != FAIL_BAD_CONSTRAINTS
+		    && (job_ptr->state_reason != FAIL_BURST_BUFFER_OP)
 		    && (job_ptr->state_reason != WAIT_HELD)
 		    && (job_ptr->state_reason != WAIT_HELD_USER)
 		    && job_ptr->state_reason != WAIT_MAX_REQUEUE) {
@@ -988,7 +989,7 @@ static int _schedule(uint32_t job_limit)
 	/* Locks: Read config, write job, write node, read partition */
 	slurmctld_lock_t job_write_lock =
 	    { READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK };
-	char job_id_str[32];
+	char jbuf[JBUFSIZ];
 	bool is_job_array_head;
 #ifdef HAVE_BG
 	char *ionodes = NULL;
@@ -998,6 +999,7 @@ static int _schedule(uint32_t job_limit)
 	static time_t sched_update = 0;
 	static bool wiki_sched = false;
 	static bool fifo_sched = false;
+	static bool assoc_limit_continue = false;
 	static int sched_timeout = 0;
 	static int sched_max_job_start = 0;
 	static int bf_min_age_reserve = 0;
@@ -1054,6 +1056,11 @@ static int _schedule(uint32_t job_limit)
 
 		sched_params = slurm_get_sched_params();
 
+		if (sched_params &&
+		    (strstr(sched_params, "assoc_limit_continue")))
+			assoc_limit_continue = true;
+		else
+			assoc_limit_continue = false;
 
 		if (sched_params &&
 		    (tmp_ptr=strstr(sched_params, "batch_sched_delay=")))
@@ -1407,32 +1414,24 @@ next_task:
 				}
 			}
 			if (found_resv) {
-				if (job_ptr->state_reason == WAIT_NO_REASON) {
-					job_ptr->state_reason = WAIT_PRIORITY;
-					xfree(job_ptr->state_desc);
-				}
+				job_ptr->state_reason = WAIT_PRIORITY;
+				xfree(job_ptr->state_desc);
 				debug3("sched: JobId=%u. State=PENDING. "
-				       "Reason=%s(Priority). Priority=%u, "
+				       "Reason=Priority. Priority=%u. "
 				       "Resv=%s.",
-				       job_ptr->job_id,
-				       job_reason_string(job_ptr->state_reason),
-				       job_ptr->priority, job_ptr->resv_name);
+				       job_ptr->job_id, job_ptr->priority,
+				       job_ptr->resv_name);
 				continue;
 			}
 		} else if (_failed_partition(job_ptr->part_ptr, failed_parts,
 					     failed_part_cnt)) {
-			if ((job_ptr->state_reason == WAIT_NODE_NOT_AVAIL) ||
-			    (job_ptr->state_reason == WAIT_NO_REASON)) {
-				job_ptr->state_reason = WAIT_PRIORITY;
-				xfree(job_ptr->state_desc);
-				last_job_update = now;
-			}
+			job_ptr->state_reason = WAIT_PRIORITY;
+			xfree(job_ptr->state_desc);
+			last_job_update = now;
 			debug("sched: JobId=%u. State=PENDING. "
-			       "Reason=%s(Priority), Priority=%u, "
-			       "Partition=%s.",
-			       job_ptr->job_id,
-			       job_reason_string(job_ptr->state_reason),
-			       job_ptr->priority, job_ptr->partition);
+			       "Reason=Priority, Priority=%u. Partition=%s.",
+			       job_ptr->job_id, job_ptr->priority,
+			       job_ptr->partition);
 			continue;
 		}
 
@@ -1633,14 +1632,16 @@ next_task:
 				sprintf(tmp_char,"%s",job_ptr->nodes);
 			}
 
-			info("sched: Allocate %s MidplaneList=%s",
+			info("sched: Allocate %s MidplaneList=%s Partition=%s",
 			     jobid2fmt(job_ptr, job_id_buf, sizeof(job_id_buf)),
-			     tmp_char);
+			     tmp_char, job_ptr->part_ptr->name);
 			xfree(ionodes);
 #else
-			info("sched: Allocate %s NodeList=%s #CPUs=%u",
+			info("sched: Allocate %s NodeList=%s #CPUs=%u "
+			     "Partition=%s",
 			     jobid2fmt(job_ptr, job_id_buf, sizeof(job_id_buf)),
-			     job_ptr->nodes, job_ptr->total_cpus);
+			     job_ptr->nodes, job_ptr->total_cpus,
+			     job_ptr->part_ptr->name);
 #endif
 			if (job_ptr->batch_flag == 0)
 				srun_allocate(job_ptr->job_id);
@@ -1666,13 +1667,15 @@ next_task:
 		} else if (error_code == ESLURM_ACCOUNTING_POLICY) {
 			debug3("sched: JobId=%u delayed for accounting policy",
 			       job_ptr->job_id);
-			fail_by_part = true;
+			/* potentially stall the queue */
+			if (!assoc_limit_continue)
+				fail_by_part = true;
 		} else if ((error_code !=
 			    ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE) &&
 			   (error_code != ESLURM_NODE_NOT_AVAIL)      &&
 			   (error_code != ESLURM_INVALID_BURST_BUFFER_REQUEST)){
 			info("sched: schedule: %s non-runnable:%s",
-			     jobid2str(job_ptr, job_id_str, sizeof(job_id_str)),
+			     jobid2str(job_ptr, jbuf, sizeof(jbuf)),
 			     slurm_strerror(error_code));
 			if (!wiki_sched) {
 				last_job_update = now;
@@ -1763,7 +1766,8 @@ next_task:
 	}
 	xfree(sched_part_ptr);
 	xfree(sched_part_jobs);
-	if (slurmctld_config.server_thread_count >= 150) {
+	if ((slurmctld_config.server_thread_count >= 150) &&
+	    (defer_rpc_cnt == 0)) {
 		info("sched: %d pending RPCs at cycle end, consider "
 		     "configuring max_rpc_cnt",
 		     slurmctld_config.server_thread_count);
@@ -2140,7 +2144,7 @@ extern void print_job_dependency(struct job_record *job_ptr)
 {
 	ListIterator depend_iter;
 	struct depend_spec *dep_ptr;
-	char *array_task_id, *dep_flags, *dep_str;
+	char *dep_flags, *dep_str;
 
 	info("Dependency information for job %u", job_ptr->job_id);
 	if ((job_ptr->details == NULL) ||
@@ -2171,12 +2175,17 @@ extern void print_job_dependency(struct job_record *job_ptr)
 			dep_str = "expand";
 		else
 			dep_str = "unknown";
+
 		if (dep_ptr->array_task_id == INFINITE)
-			array_task_id = "_*";
+			info("  %s:%u_* %s",
+			     dep_str, dep_ptr->job_id, dep_flags);
+		else if (dep_ptr->array_task_id == NO_VAL)
+			info("  %s:%u %s",
+			     dep_str, dep_ptr->job_id, dep_flags);
 		else
-			array_task_id = "";
-		info("  %s:%u%s %s",
-		     dep_str, dep_ptr->job_id, array_task_id, dep_flags);
+			info("  %s:%u_%u %s",
+			     dep_str, dep_ptr->job_id,
+			     dep_ptr->array_task_id, dep_flags);
 	}
 	list_iterator_destroy(depend_iter);
 }
@@ -2185,7 +2194,7 @@ static void _depend_list2str(struct job_record *job_ptr, bool set_or_flag)
 {
 	ListIterator depend_iter;
 	struct depend_spec *dep_ptr;
-	char *array_task_id, *dep_str, *sep = "";
+	char *dep_str, *sep = "";
 
 	if (job_ptr->details == NULL)
 		return;
@@ -2216,12 +2225,17 @@ static void _depend_list2str(struct job_record *job_ptr, bool set_or_flag)
 			dep_str = "expand";
 		else
 			dep_str = "unknown";
+
 		if (dep_ptr->array_task_id == INFINITE)
-			array_task_id = "_*";
+			xstrfmtcat(job_ptr->details->dependency, "%s%s:%u_*",
+				   sep, dep_str, dep_ptr->job_id);
+		else if (dep_ptr->array_task_id == NO_VAL)
+			xstrfmtcat(job_ptr->details->dependency, "%s%s:%u",
+				   sep, dep_str, dep_ptr->job_id);
 		else
-			array_task_id = "";
-		xstrfmtcat(job_ptr->details->dependency, "%s%s:%u%s",
-			   sep, dep_str, dep_ptr->job_id, array_task_id);
+			xstrfmtcat(job_ptr->details->dependency, "%s%s:%u_%u",
+				   sep, dep_str, dep_ptr->job_id,
+				   dep_ptr->array_task_id);
 
 		if (set_or_flag)
 			dep_ptr->depend_flags |= SLURM_FLAGS_OR;
@@ -3312,8 +3326,9 @@ static void *_wait_boot(void *arg)
 		unlock_slurmctld(job_write_lock);
 	} while (wait_node_cnt);
 
-	if (job_ptr->details)
-		job_ptr->details->prolog_running--;
+	lock_slurmctld(job_write_lock);
+	prolog_running_decr(job_ptr);
+	unlock_slurmctld(job_write_lock);
 
 	return NULL;
 }

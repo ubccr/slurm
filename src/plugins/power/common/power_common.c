@@ -50,6 +50,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if defined(__FreeBSD__) || defined(__NetBSD__)
+#define POLLRDHUP POLLHUP
+#include <signal.h>
+#endif
+
 #include "slurm/slurm.h"
 
 #include "src/common/list.h"
@@ -235,6 +240,8 @@ extern char *power_run_script(char *script_name, char *script_path,
 			     script_argv[3], script_argv[4], script_argv[5],
 			     script_argv[6], script_argv[7]);
 		}
+		if (data_in)
+			info("%s: %s", __func__, data_in);
 	}
 	if (script_path[0] != '/') {
 		error("%s: %s is not fully qualified pathname (%s)",

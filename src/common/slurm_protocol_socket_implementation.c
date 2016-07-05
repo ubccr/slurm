@@ -49,7 +49,7 @@
 #include <netdb.h>
 #include <errno.h>
 #include <netinet/in.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <signal.h>
@@ -708,15 +708,6 @@ static int _slurm_vfcntl(int fd, int cmd, va_list va )
 			return SLURM_PROTOCOL_ERROR ;
 			break ;
 	}
-}
-
-/* sets the fields of a slurm_addr_t */
-extern void slurm_set_addr_uint (slurm_addr_t *addr, uint16_t port,
-				 uint32_t ipaddr)
-{
-	addr->sin_family      = AF_SLURM ;
-	addr->sin_port	= htons(port);
-	addr->sin_addr.s_addr = htonl(ipaddr);
 }
 
 extern void slurm_set_addr_char (slurm_addr_t * addr, uint16_t port, char *host)

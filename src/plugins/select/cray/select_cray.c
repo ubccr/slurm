@@ -51,7 +51,7 @@
 #endif
 
 #include <stdio.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -336,8 +336,9 @@ static int _run_nhc(nhc_info_t *nhc_info)
 		      "status %u:%u took: %s",
 		      nhc_info->jobid, nhc_info->apid, WEXITSTATUS(status),
 		      WTERMSIG(status), TIME_STR);
-	} else if (debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-		info("_run_nhc jobid %u and apid %"PRIu64" completed took: %s",
+	} else if ((debug_flags & DEBUG_FLAG_SELECT_TYPE) ||
+		   (DELTA_TIMER > 60000000)) {	/* log if over one minute */
+		info("_run_nhc jobid %u and apid %"PRIu64" completion took: %s",
 		     nhc_info->jobid, nhc_info->apid, TIME_STR);
 	}
 fini:
@@ -376,8 +377,6 @@ fini:
  */
 static void _aeld_cleanup(void)
 {
-	aeld_running = 0;
-
 	// Free any used memory
 	pthread_mutex_lock(&aeld_mutex);
 	_clear_event_list(app_list, &app_list_size);
@@ -387,6 +386,8 @@ static void _aeld_cleanup(void)
 	event_list_capacity = 0;
 	xfree(event_list);
 	pthread_mutex_unlock(&aeld_mutex);
+
+	aeld_running = 0;
 }
 
 /*
@@ -429,6 +430,9 @@ static void _clear_event_list(alpsc_ev_app_t *list, int32_t *size)
  */
 static void _start_session(alpsc_ev_session_t **session, int *sessionfd)
 {
+	static time_t start_time = (time_t) 0;
+	static int start_count = 0;
+	time_t now;
 	int rv;
 	char *errmsg;
 
@@ -461,6 +465,15 @@ static void _start_session(alpsc_ev_session_t **session, int *sessionfd)
 		sleep(AELD_SESSION_INTERVAL);
 	}
 
+	now = time(NULL);
+	if (start_time != now) {
+		start_time = now;
+		start_count = 1;
+	} else if (++start_count == 3) {
+		error("%s: aeld connection restart exceed threshold, find and "
+		      "remove other program using the aeld socket, likely "
+		      "another slurmctld instance", __func__);
+	}
 	debug("%s: Created aeld session fd %d", __func__, *sessionfd);
 	return;
 }
@@ -522,12 +535,20 @@ static void *_aeld_event_loop(void *args)
 			// Clear the event list
 			_clear_event_list(event_list, &event_list_size);
 			pthread_mutex_unlock(&aeld_mutex);
-			if (rv > 0) {
+			/*
+			 * For this application info call, some errors do
+			 * not require exiting the current session and
+			 * creating a new session.
+			 */
+			if (rv > 2) {
 				_handle_aeld_error(
 					"alpsc_ev_set_application_info",
 					errmsg, rv, &session);
 				_start_session(&session, &sessionfd);
 				fds[0].fd = sessionfd;
+			} else if ((rv == 1) || (rv == 2)) {
+				error("alpsc_ev_set_application_info rv %d, %s",
+				      rv, errmsg);
 			}
 		} else {
 			pthread_mutex_unlock(&aeld_mutex);
@@ -536,6 +557,7 @@ static void *_aeld_event_loop(void *args)
 
 	error("%s: poll failed: %m", __func__);
 	_aeld_cleanup();
+
 	return NULL;
 }
 
@@ -675,9 +697,10 @@ static void _update_app(struct job_record *job_ptr,
 	_initialize_event(&app, job_ptr, step_ptr, state);
 
 	// If there are no nodes, set_application_info will fail
-	if (app.nodes == NULL || app.num_nodes == 0) {
-		debug("Job %"PRIu32".%"PRIu32" has no nodes, skipping",
-		      job_ptr->job_id, step_ptr->step_id);
+	if ((app.nodes == NULL) || (app.num_nodes == 0) ||
+	    (app.app_name == NULL) || ((app.app_name)[0] == '\0')) {
+		debug("Job %"PRIu32".%"PRIu32" has no nodes or app name, "
+		      "skipping", job_ptr->job_id, step_ptr->step_id);
 		_free_event(&app);
 		return;
 	}
@@ -766,12 +789,16 @@ static void _start_aeld_thread()
 	debug("cray: %s", __func__);
 
 	// Spawn the aeld thread, only in slurmctld.
-	if (run_in_daemon("slurmctld")) {
+	if (!aeld_running && run_in_daemon("slurmctld")) {
 		pthread_attr_t attr;
-
+		aeld_running = 1;
 		slurm_attr_init(&attr);
-		if (pthread_create(&aeld_thread, &attr, _aeld_event_loop, NULL))
+		if (pthread_create(&aeld_thread, &attr, _aeld_event_loop,
+				   NULL)) {
 			error("pthread_create of message thread: %m");
+			aeld_running = 0;
+		}
+
 		slurm_attr_destroy(&attr);
 	}
 }
@@ -787,7 +814,6 @@ static void _stop_aeld_thread()
 
 	pthread_cancel(aeld_thread);
 	pthread_join(aeld_thread, NULL);
-	aeld_running = 0;
 }
 #endif
 
@@ -1811,12 +1837,16 @@ extern int select_p_job_begin(struct job_record *job_ptr)
 	xassert(job_ptr->select_jobinfo->data);
 
 	jobinfo = job_ptr->select_jobinfo->data;
+	jobinfo->cleaning = CLEANING_INIT;	/* Reset needed if requeued */
 
 	slurm_mutex_lock(&blade_mutex);
 
-	if (!jobinfo->blade_map)
+	if (!jobinfo->blade_map) {
 		jobinfo->blade_map = bit_alloc(blade_cnt);
-
+	} else {	/* Clear vestigial bitmap in case job requeued */
+		bit_nclear(jobinfo->blade_map, 0,
+			   bit_size(jobinfo->blade_map) - 1);
+	}
 	_set_job_running(job_ptr);
 
 	/* char *tmp3 = bitmap2node_name(blade_nodes_running_npc); */

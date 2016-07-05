@@ -1074,6 +1074,7 @@ pack_msg(slurm_msg_t const *msg, Buf buffer)
 		_pack_update_job_step_msg((step_update_request_msg_t *)
 					  msg->data, buffer,
 					  msg->protocol_version);
+		break;
 	case REQUEST_JOB_END_TIME:
 	case REQUEST_JOB_ALLOCATION_INFO:
 	case REQUEST_JOB_ALLOCATION_INFO_LITE:
@@ -6005,6 +6006,7 @@ static void _xlate_task_str(job_info_t *job_ptr)
 		if (is_step) {
 			xstrfmtcat(out_buf, "%d-%d:%d",
 				   i_first, i_last, i_step);
+			goto out;
 		}
 	}
 
@@ -6041,6 +6043,7 @@ static void _xlate_task_str(job_info_t *job_ptr)
 		}
 	}
 
+out:
 	if (job_ptr->array_max_tasks)
 		xstrfmtcat(out_buf, "%c%u", '%', job_ptr->array_max_tasks);
 

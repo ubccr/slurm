@@ -59,18 +59,19 @@
 #  include "src/common/unsetenv.h"
 #endif
 
-#include <sys/wait.h>
-#include <sys/stat.h>
-#include <sys/param.h>
-#include <sys/poll.h>
-#include <unistd.h>
-#include <pwd.h>
 #include <grp.h>
+#include <poll.h>
+#include <pthread.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/utsname.h>
+#include <sys/param.h>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 #if HAVE_STDLIB_H
 #  include <stdlib.h>
@@ -197,6 +198,7 @@ static int  _send_exit_msg(stepd_step_rec_t *job, uint32_t *tid, int n,
 static void _wait_for_children_slurmstepd(stepd_step_rec_t *job);
 static int  _send_pending_exit_msgs(stepd_step_rec_t *job);
 static void _send_step_complete_msgs(stepd_step_rec_t *job);
+static void _set_job_state(stepd_step_rec_t *job, slurmstepd_state_t new_state);
 static void _wait_for_all_tasks(stepd_step_rec_t *job);
 static int  _wait_for_any_task(stepd_step_rec_t *job, bool waitflag);
 
@@ -841,7 +843,7 @@ _one_step_complete_msg(stepd_step_rec_t *job, int first, int last)
 		/* this is the base of the tree, but we are doing
 		 * message aggr so send it to the slurmd to handle */
 		req.msg_type = REQUEST_STEP_COMPLETE_AGGR;
-		slurm_set_addr_char(&req.address, conf->port, "localhost");
+		slurm_set_addr_char(&req.address, conf->port, conf->hostname);
 		for (i = 0; i <= REVERSE_TREE_PARENT_RETRY; i++) {
 			if (i)
 				sleep(1);
@@ -974,6 +976,14 @@ extern void agent_queue_request(void *dummy)
 	      "checkpoint plugin");
 }
 
+static void _set_job_state(stepd_step_rec_t *job, slurmstepd_state_t new_state)
+{
+	slurm_mutex_lock(&job->state_mutex);
+	job->state = new_state;
+	pthread_cond_signal(&job->state_cond);
+	slurm_mutex_unlock(&job->state_mutex);
+}
+
 static int _spawn_job_container(stepd_step_rec_t *job)
 {
 	jobacctinfo_t *jobacct = NULL;
@@ -1002,6 +1012,7 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 		exit(0);
 	} else if (pid < 0) {
 		error("fork: %m");
+		_set_job_state(job, SLURMSTEPD_STEP_ENDING);
 		return SLURM_ERROR;
 	}
 
@@ -1015,7 +1026,7 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 	jobacct_gather_add_task(pid, &jobacct_id, 1);
 	container_g_add_cont(job->jobid, job->cont_id);
 
-	job->state = SLURMSTEPD_STEP_RUNNING;
+	_set_job_state(job, SLURMSTEPD_STEP_RUNNING);
 	if (!conf->job_acct_gather_freq)
 		jobacct_gather_stat_task(0);
 
@@ -1222,7 +1233,7 @@ job_manager(stepd_step_rec_t *job)
 	xsignal_block (mgr_sigarray);
 	reattach_job = job;
 
-	job->state = SLURMSTEPD_STEP_RUNNING;
+	_set_job_state(job, SLURMSTEPD_STEP_RUNNING);
 
 	/* Attach slurmstepd to system cgroups, if configured */
 	attach_system_cgroup_pid(getpid());
@@ -1241,7 +1252,7 @@ job_manager(stepd_step_rec_t *job)
 	acct_gather_profile_g_node_step_end();
 	acct_gather_profile_fini();
 
-	job->state = SLURMSTEPD_STEP_ENDING;
+	_set_job_state(job, SLURMSTEPD_STEP_ENDING);
 
 	if (!job->batch &&
 	    (switch_g_job_fini(job->switch_job) < 0)) {
@@ -1260,6 +1271,7 @@ fail2:
 	 * terminated before the switch window can be released by
 	 * switch_g_job_postfini().
 	 */
+	_set_job_state(job, SLURMSTEPD_STEP_ENDING);
 	step_terminate_monitor_start(job->jobid, job->stepid);
 	if (job->cont_id != 0) {
 		proctrack_g_signal(job->cont_id, SIGKILL);
@@ -1312,6 +1324,7 @@ fail1:
 	/* If interactive job startup was abnormal,
 	 * be sure to notify client.
 	 */
+	_set_job_state(job, SLURMSTEPD_STEP_ENDING);
 	if (rc != 0) {
 		error("job_manager exiting abnormally, rc = %d", rc);
 		_send_launch_resp(job, rc);
@@ -1834,12 +1847,13 @@ _send_pending_exit_msgs(stepd_step_rec_t *job)
 	int  nsent  = 0;
 	int  status = 0;
 	bool set    = false;
-	uint32_t  tid[job->node_tasks];
+	uint32_t *tid;
 
 	/*
 	 * Collect all exit codes with the same status into a
 	 * single message.
 	 */
+	tid = xmalloc(sizeof(uint32_t) * job->node_tasks);
 	for (i = 0; i < job->node_tasks; i++) {
 		stepd_step_task_info_t *t = job->task[i];
 
@@ -1860,6 +1874,7 @@ _send_pending_exit_msgs(stepd_step_rec_t *job)
 		debug2("Aggregated %d task exit messages", nsent);
 		_send_exit_msg(job, tid, nsent, status);
 	}
+	xfree(tid);
 
 	return nsent;
 }
@@ -1922,7 +1937,7 @@ _wait_for_any_task(stepd_step_rec_t *job, bool waitflag)
 				debug("No child processes");
 				if (completed == 0)
 					completed = -1;
-				goto done;
+				break;
 			} else if (errno == EINTR) {
 				debug("wait3 was interrupted");
 				continue;
@@ -1931,7 +1946,7 @@ _wait_for_any_task(stepd_step_rec_t *job, bool waitflag)
 				continue;
 			}
 		} else if (pid == 0) { /* WNOHANG and no pids available */
-			goto done;
+			break;
 		}
 
 		/************* acct stuff ********************/
@@ -2003,7 +2018,6 @@ _wait_for_any_task(stepd_step_rec_t *job, bool waitflag)
 
 	} while ((pid > 0) && !waitflag);
 
-done:
 	return completed;
 }
 
@@ -2331,7 +2345,7 @@ _send_complete_batch_script_msg(stepd_step_rec_t *job, int err, int status)
 			 * may get a new job to launch */
 			if (i == 0) {
 				slurm_set_addr_char(&req_msg.address,
-						    conf->port, "localhost");
+						    conf->port, conf->hostname);
 			}
 			msg_rc = slurm_send_recv_rc_msg_only_one(&req_msg,
 								 &rc, 0);
@@ -2592,7 +2606,7 @@ _get_primary_group(const char *user, gid_t *gid)
 	int cc;
 
 	cc = getpwnam_r(user, &pwd, buf, sizeof(buf), &pwd0);
-	if (cc != 0) {
+	if ((cc != 0) || (pwd0 == NULL)) {
 		error("%s: getpwnam_r() failed: %m", __func__);
 		return -1;
 	}
@@ -2783,7 +2797,7 @@ _run_script_as_user(const char *name, const char *path, stepd_step_rec_t *job,
 		while (1) {
 			execve(path, argv, env);
 			error("execve(%s): %m", path);
-			if ((errno == ENFILE) || (errno = ENOMEM)) {
+			if ((errno == ENFILE) || (errno == ENOMEM)) {
 				/* System limit on open files or memory reached,
 				 * retry after short delay */
 				sleep(1);

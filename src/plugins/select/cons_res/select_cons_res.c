@@ -178,6 +178,7 @@ uint16_t cr_type = CR_CPU; /* cr_type is overwritten in init() */
 bool     backfill_busy_nodes  = false;
 bool     have_dragonfly       = false;
 bool     pack_serial_at_end   = false;
+bool     preempt_by_part      = false;
 bool     preempt_by_qos       = false;
 uint64_t select_debug_flags   = 0;
 uint16_t select_fast_schedule = 0;
@@ -777,8 +778,8 @@ static void _build_row_bitmaps(struct part_res_record *p_ptr,
  * - add 'struct job_resources' resources to 'struct part_res_record'
  * - add job's memory requirements to 'struct node_res_record'
  *
- * if action = 0 then add cores and memory (starting new job)
- * if action = 1 then only add memory (adding suspended job)
+ * if action = 0 then add cores, memory + GRES (starting new job)
+ * if action = 1 then add memory + GRES (adding suspended job)
  * if action = 2 then only add cores (suspended job is resumed)
  */
 static int _add_job_to_res(struct job_record *job_ptr, int action)
@@ -787,7 +788,7 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 	struct node_record *node_ptr;
 	struct part_res_record *p_ptr;
 	List gres_list;
-	int i, n;
+	int i, i_first, i_last, n;
 	bitstr_t *core_bitmap;
 
 	if (!job || !job->core_bitmap) {
@@ -802,7 +803,12 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE)
 		_dump_job_res(job);
 
-	for (i = 0, n = -1; i < select_node_cnt; i++) {
+	i_first = bit_ffs(job->node_bitmap);
+	if (i_first == -1)
+		i_last = -2;
+	else
+		i_last = bit_fls(job->node_bitmap);
+	for (i = i_first, n = -1; i <= i_last; i++) {
 		if (!bit_test(job->node_bitmap, i))
 			continue;
 		n++;
@@ -881,7 +887,7 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 			/* No row available to record this job */
 		}
 		/* update the node state */
-		for (i = 0, n = -1; i < select_node_cnt; i++) {
+		for (i = i_first, n = -1; i <= i_last; i++) {
 			if (bit_test(job->node_bitmap, i)) {
 				n++;
 				if (job->cpus[n] == 0)
@@ -1124,8 +1130,8 @@ static int _job_expand(struct job_record *from_job_ptr,
  * - subtract 'struct job_resources' resources from 'struct part_res_record'
  * - subtract job's memory requirements from 'struct node_res_record'
  *
- * if action = 0 then subtract cores and memory (running job was terminated)
- * if action = 1 then only subtract memory (suspended job was terminated)
+ * if action = 0 then subtract cores, memory + GRES (running job was terminated)
+ * if action = 1 then subtract memory + GRES (suspended job was terminated)
  * if action = 2 then only subtract cores (job is suspended)
  *
  */
@@ -1248,16 +1254,14 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 				break;
 			}
 		}
-
 		if (n) {
 			/* job was found and removed, so refresh the bitmaps */
 			_build_row_bitmaps(p_ptr, job_ptr);
-
 			/* Adjust the node_state of all nodes affected by
 			 * the removal of this job. If all cores are now
 			 * available, set node_state = NODE_CR_AVAILABLE
 			 */
-			for (i = 0, n = -1; i < select_node_cnt; i++) {
+			for (i = first_bit, n = -1; i <= last_bit; i++) {
 				if (bit_test(job->node_bitmap, i) == 0)
 					continue;
 				n++;
@@ -1720,9 +1724,26 @@ static time_t _guess_job_end(struct job_record * job_ptr, time_t now)
 	return end_time;
 }
 
+/* Return TRUE if job is in the processing of cleaning up.
+ * This is used for Cray systems to indicate the Node Health Check (NHC)
+ * is still running. Until NHC completes, the job's resource use persists
+ * the select/cons_res plugin data structures. */
+static bool _job_cleaning(struct job_record *job_ptr)
+{
+	uint16_t cleaning = 0;
+
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
+				    SELECT_JOBDATA_CLEANING,
+				    &cleaning);
+	if (cleaning)
+		return true;
+	return false;
+}
+
 /* _will_run_test - determine when and where a pending job can start, removes
  *	jobs from node table at termination time and run _test_job() after
- *	each one. Used by SLURM's sched/backfill plugin and Moab. */
+ *	each job (or a few jobs that end close in time). Used by SLURM's
+ *	sched/backfill plugin and Moab. */
 static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			  uint32_t min_nodes, uint32_t max_nodes,
 			  uint32_t req_nodes, uint16_t job_node_req,
@@ -1785,7 +1806,8 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	job_iterator = list_iterator_create(job_list);
 	while ((tmp_job_ptr = (struct job_record *) list_next(job_iterator))) {
 		if (!IS_JOB_RUNNING(tmp_job_ptr) &&
-		    !IS_JOB_SUSPENDED(tmp_job_ptr))
+		    !IS_JOB_SUSPENDED(tmp_job_ptr) &&
+		    !_job_cleaning(tmp_job_ptr))
 			continue;
 		if (tmp_job_ptr->end_time == 0) {
 			error("Job %u has zero end_time", tmp_job_ptr->job_id);
@@ -1825,21 +1847,51 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 		}
 	}
 
-	/* Remove the running jobs one at a time from exp_node_cr and try
-	 * scheduling the pending job after each one. */
+	/* Remove the running jobs from exp_node_cr and try scheduling the
+	 * pending job after each one (or a few jobs that end close in time). */
 	if (rc != SLURM_SUCCESS) {
+		int time_window = 0;
+		bool more_jobs = true;
 		list_sort(cr_job_list, _cr_job_list_sort);
 		job_iterator = list_iterator_create(cr_job_list);
-		while ((tmp_job_ptr = list_next(job_iterator))) {
-		        int ovrlap;
-			bit_or(bitmap, orig_map);
-			ovrlap = bit_overlap(bitmap, tmp_job_ptr->node_bitmap);
-			if (ovrlap == 0)	/* job has no usable nodes */
-				continue;	/* skip it */
-			debug2("cons_res: _will_run_test, job %u: overlap=%d",
-			       tmp_job_ptr->job_id, ovrlap);
-			_rm_job_from_res(future_part, future_usage,
-					 tmp_job_ptr, 0);
+		while (more_jobs) {
+			struct job_record *first_job_ptr = NULL;
+			struct job_record *last_job_ptr = NULL;
+			struct job_record *next_job_ptr = NULL;
+			int overlap, rm_job_cnt = 0;
+			while (true) {
+				tmp_job_ptr = list_next(job_iterator);
+				if (!tmp_job_ptr) {
+					more_jobs = false;
+					break;
+				}
+				bit_or(bitmap, orig_map);
+				overlap = bit_overlap(bitmap,
+						      tmp_job_ptr->node_bitmap);
+				if (overlap == 0)  /* job has no usable nodes */
+					continue;  /* skip it */
+				debug2("cons_res: _will_run_test, job %u: overlap=%d",
+				       tmp_job_ptr->job_id, overlap);
+				if (!first_job_ptr)
+					first_job_ptr = tmp_job_ptr;
+				last_job_ptr = tmp_job_ptr;
+				_rm_job_from_res(future_part, future_usage,
+						 tmp_job_ptr, 0);
+				if (rm_job_cnt++ > 20)
+					break;
+				next_job_ptr = list_peek_next(job_iterator);
+				if (!next_job_ptr) {
+					more_jobs = false;
+					break;
+				} else if (next_job_ptr->end_time >
+				 	   (first_job_ptr->end_time +
+					    time_window)) {
+					break;
+				}
+			}
+			if (!last_job_ptr)
+				break;
+			time_window += 60;
 			rc = cr_job_test(job_ptr, bitmap, min_nodes,
 					 max_nodes, req_nodes,
 					 SELECT_MODE_WILL_RUN, tmp_cr_type,
@@ -1848,12 +1900,13 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 					 exc_core_bitmap, backfill_busy_nodes,
 					 qos_preemptor, true);
 			if (rc == SLURM_SUCCESS) {
-				if (tmp_job_ptr->end_time <= now) {
+				if (last_job_ptr->end_time <= now) {
 					job_ptr->start_time =
-						_guess_job_end(tmp_job_ptr,now);
+						_guess_job_end(last_job_ptr,
+							       now);
 				} else {
-					job_ptr->start_time = tmp_job_ptr->
-						end_time;
+					job_ptr->start_time =
+						last_job_ptr->end_time;
 				}
 				break;
 			}
@@ -2033,11 +2086,15 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 	xfree(sched_params);
 
 	preempt_type = slurm_get_preempt_type();
-	if (preempt_type && strstr(preempt_type, "qos"))
-		preempt_by_qos = true;
-	else
-		preempt_by_qos = false;
-	xfree(preempt_type);
+	preempt_by_part = false;
+	preempt_by_qos = false;
+	if (preempt_type) {
+		if (strstr(preempt_type, "partition"))
+			preempt_by_part = true;
+		if (strstr(preempt_type, "qos"))
+			preempt_by_qos = true;
+		xfree(preempt_type);
+	}
 
 	/* initial global core data structures */
 	select_state_initializing = true;
@@ -2221,7 +2278,7 @@ extern int select_p_job_ready(struct job_record *job_ptr)
 		return READY_NODE_STATE;
 	i_last  = bit_fls(job_ptr->node_bitmap);
 
-	for (i=i_first; i<=i_last; i++) {
+	for (i = i_first; i <= i_last; i++) {
 		if (bit_test(job_ptr->node_bitmap, i) == 0)
 			continue;
 		node_ptr = node_record_table_ptr + i;
@@ -2476,10 +2533,15 @@ extern int select_p_select_nodeinfo_set(struct job_record *job_ptr)
 	xassert(job_ptr);
 	xassert(job_ptr->magic == JOB_MAGIC);
 
-	if (!IS_JOB_RUNNING(job_ptr) && !IS_JOB_SUSPENDED(job_ptr))
+	if (IS_JOB_RUNNING(job_ptr))
+		rc = _add_job_to_res(job_ptr, 0);
+	else if (IS_JOB_SUSPENDED(job_ptr)) {
+		if (job_ptr->priority == 0)
+			rc = _add_job_to_res(job_ptr, 1);
+		else	/* Gang schedule suspend */
+			rc = _add_job_to_res(job_ptr, 0);
+	} else
 		return SLURM_SUCCESS;
-
-	rc = _add_job_to_res(job_ptr, 0);
 	gres_plugin_job_state_log(job_ptr->gres_list, job_ptr->job_id);
 
 	return rc;
@@ -2666,7 +2728,8 @@ extern int select_p_reconfigure(void)
 {
 	ListIterator job_iterator;
 	struct job_record *job_ptr;
-	int rc = SLURM_SUCCESS;
+	int cleaning_job_cnt = 0, rc = SLURM_SUCCESS, run_time;
+	time_t now = time(NULL);
 
 	info("cons_res: select_p_reconfigure");
 	select_debug_flags = slurm_get_debug_flags();
@@ -2683,11 +2746,30 @@ extern int select_p_reconfigure(void)
 			_add_job_to_res(job_ptr, 0);
 		} else if (IS_JOB_SUSPENDED(job_ptr)) {
 			/* add the job in a suspended state */
-			_add_job_to_res(job_ptr, 2);
+			if (job_ptr->priority == 0)
+				(void) _add_job_to_res(job_ptr, 1);
+			else	/* Gang schedule suspend */
+				(void) _add_job_to_res(job_ptr, 0);
+		} else if (_job_cleaning(job_ptr)) {
+			cleaning_job_cnt++;
+			run_time = (int) difftime(now, job_ptr->end_time);
+			info("Job %u is cleaning (Node Health Check running for %d secs)",
+			     job_ptr->job_id, run_time);
+			/* Ideally we want to avoid using this job's resources
+			 * until Node Health Check completes, but current logic
+			 * (line below commented out) will let release resources
+			 * from hung NHC for use by other jobs with
+			 * "scontrol reconfig" command. */
+			//_add_job_to_res(job_ptr, 0);
 		}
 	}
 	list_iterator_destroy(job_iterator);
 	select_state_initializing = false;
+
+	if (cleaning_job_cnt) {
+		info("%d jobs are in cleaning state (running Node Health Check)",
+		     cleaning_job_cnt);
+	}
 
 	return SLURM_SUCCESS;
 }
@@ -2697,8 +2779,9 @@ extern int select_p_reconfigure(void)
 /* Adding a filter for setting cores based on avail bitmap */
 bitstr_t *_make_core_bitmap_filtered(bitstr_t *node_map, int filter)
 {
-	uint32_t n, c, nodes, size;
+	uint32_t c, size;
 	uint32_t coff;
+	int n, n_first, n_last, nodes;
 
 	nodes = bit_size(node_map);
 	size = cr_get_coremap_offset(nodes);
@@ -2709,11 +2792,15 @@ bitstr_t *_make_core_bitmap_filtered(bitstr_t *node_map, int filter)
 	if (!filter)
 		return core_map;
 
-	nodes = bit_size(node_map);
-	for (n = 0; n < nodes; n++) {
+	n_first = bit_ffs(node_map);
+	if (n_first == -1)
+		n_last = -2;
+	else
+		n_last = bit_fls(node_map);
+	for (n = n_first; n <= n_last; n++) {
 		if (bit_test(node_map, n)) {
 			c = cr_get_coremap_offset(n);
-			coff = cr_get_coremap_offset(n+1);
+			coff = cr_get_coremap_offset(n + 1);
 			while (c < coff) {
 				bit_set(core_map, c++);
 			}

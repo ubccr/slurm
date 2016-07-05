@@ -415,6 +415,7 @@ EXTRA_DIST = \
 	test17.39			\
 	test17.40			\
 	test17.41			\
+	test17.43			\
 	test19.1			\
 	test19.2			\
 	test19.3			\
@@ -487,6 +488,7 @@ EXTRA_DIST = \
 	inc21.30.14			\
 	inc21.30.15			\
 	inc21.30.16			\
+	inc21.30.17			\
 	inc21.34.1			\
 	inc21.34.2			\
 	inc21.34_test			\

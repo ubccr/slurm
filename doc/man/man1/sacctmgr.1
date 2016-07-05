@@ -1,4 +1,4 @@
-.TH sacctmgr "1" "Slurm Commands" "April 2015" "Slurm Commands"
+.TH sacctmgr "1" "Slurm Commands" "March 2016" "Slurm Commands"
 
 .SH "NAME"
 sacctmgr \- Used to view and modify Slurm account information.
@@ -189,7 +189,7 @@ in\-turn update the underlying associations.
 .TP
 \fIcluster\fP
 The \fIClusterName\fR parameter in the \fIslurm.conf\fR configuration
-file, used to differentiate accounts from on different machines.
+file, used to differentiate accounts on different machines.
 
 .TP
 \fIconfiguration\fP
@@ -397,7 +397,7 @@ Valid <operator> values include:
 Set \fIQosLevel\fP to the specified value. \fBNote:\fR the QOS that can be used
 at a given account in the hierarchy are inherited by the children of that account.
 By assigning QOS with the \fB=\fR sign only the assigned QOS can be used by the
-account and its childern.
+account and its children.
 .TP
 \fB+=\fR
 Add the specified <qos> value to the current \fIQosLevel\fP. The account will
@@ -717,11 +717,6 @@ When a slurmctld registers with the database the port the controller
 is listening on is placed here.
 
 .TP
-\fITRES\fP
-Trackable RESources (BB (Burst buffer), CPU, Energy, GRES, License, Memory, and
-Node) this cluster is accounting for.
-
-.TP
 \fIFlags\fP
 Attributes possessed by the cluster.
 
@@ -741,6 +736,12 @@ The numeric value of the select plugin the cluster is using.
 \fIRPC\fP
 When a slurmctld registers with the database the rpc version the controller
 is running is placed here.
+
+.TP
+\fITRES\fP
+Trackable RESources (BB (Burst buffer), CPU, Energy, GRES, License, Memory, and
+Node) this cluster is accounting for.
+
 .P
 NOTE: You can also view the information about the root association for
 the cluster.  The Association format fields are described
@@ -849,10 +850,6 @@ The name of the cluster event happened on.
 The hostlist of nodes on a cluster in a cluster event.
 
 .TP
-\fITRES\fP
-Number of TRES involved with the event.
-
-.TP
 \fIDuration\fP
 Time period the event was around for.
 
@@ -888,6 +885,10 @@ On a node event this is the formatted state of the node during the event.
 \fIStateRaw\fP
 On a node event this is the numeric value of the state of the node
 during the event.
+
+.TP
+\fITRES\fP
+Number of TRES involved with the event.
 
 .TP
 \fIUser\fP
@@ -945,11 +946,11 @@ will be held until their Fairshare Usage goes above the Threshold.
 .TP
 \fINoReserve\fP
 If this flag is set and backfill scheduling is used, jobs using this QOS will
-not reserve resources in the backfill schedule's  map of resources allocated
+not reserve resources in the backfill schedule's map of resources allocated
 through time. This flag is intended for use with a QOS that may be preempted
-by jobs associated with all other QOS (e.g use with a "standby" QOS). If the
-allocated is used with a QOS which can not be preempted by all other QOS, it
-could result in starvation of larger jobs.
+by jobs associated with all other QOS (e.g use with a "standby" QOS). If this
+flag is used with a QOS which can not be preempted by all other QOS, it could
+result in starvation of larger jobs.
 .TP
 \fIPartitionMaxNodes\fP
 If set jobs using this QOS will be able to
@@ -961,7 +962,7 @@ override the requested partition's MinNodes limit.
 .TP
 \fIOverPartQOS\fP
 If set jobs using this QOS will be able to
-override any limits used by the the requested partition's QOS limits.
+override any limits used by the requested partition's QOS limits.
 .TP
 \fIPartitionTimeLimit\fP
 If set jobs using this QOS will be able to

@@ -7,7 +7,10 @@ Over 170 individuals have contributed to the project.
 Lead Slurm developers are:
 <ul>
 <li>Danny Auble (SchedMD)</li>
+<li>Brian Christiansen (SchedMD)</li>
 <li>Morris Jette (SchedMD)</li>
+<li>Alejandro (Alex) Sanchez (SchedMD)</li>
+<li>Tim Wickberg (SchedMD)</li>
 </ul>
 
 <p>Slurm contributors include:</p>
@@ -70,7 +73,6 @@ Lead Slurm developers are:
 <li>Sourav Chakraborty (The Ohio State University)</li>
 <li>Fran&ccedil;ois Chevallier (CEA)</li>
 <li>Daniel Christians (HP)</li>
-<li>Brian Christiansen (SchedMD)</li>
 <li>Gilles Civario (Bull)</li>
 <li>Chuck Clouston (Bull)</li>
 <li>J.T. Conklin</li>
@@ -111,6 +113,7 @@ Lead Slurm developers are:
 <li>Takao Hatazaki (HP)</li>
 <li>Matthieu Hautreux (CEA, France)</li>
 <li>Dave Henseler (Cray)</li>
+<li>John Hensley (University of Michigan)</li>
 <li>Chris Holmes (HP)</li>
 <li>David H&ouml;ppner</li>
 <li>Axel Huebl (TU Dresden, Germany)</li>
@@ -180,6 +183,7 @@ Lead Slurm developers are:
 <li>Martin Perry (Bull)</li>
 <li>Dan Phung (Lawrence Livermore National Laboratory/Columbia University)</li>
 <li>Ashley Pittman (Quadrics, UK)</li>
+<li>Maksym Planeta</li>
 <li>Josko Plazonic (Princecton University)</li>
 <li>Artem Polyakov (ISP SB RAS, Russia)</li>
 <li>Ludovic Prevost (NEC, France)</li>
@@ -204,7 +208,6 @@ Lead Slurm developers are:
 <li>Aleksej Saushev</li>
 <li>Uwe Sauter (High Performance Computing Center Stuttgart, Germany)</li>
 <li>Chris Scheller (University of Michigan)</li>
-<li>Alejandro (Alex) Sanchez (SchedMD)</li>
 <li>Rod Schultz (Bull)</li>
 <li>Samuel Senoner (Vienna University of Technology, Austria)</li>
 <li>David Singleton</li>
@@ -227,11 +230,12 @@ Lead Slurm developers are:
 <br>
 <li>Garrison Vaughan</li>
 <br>
+<li>Yu Watanabe</li>
 <li>Pythagoras Watson  (Lawrence Livermore National Laboratory)</li>
 <li>Daniel M. Weeks (Rensselaer Polytechnic Institute)</li>
 <li>Nathan Weeks (Iowa State University)</li>
 <li>Andy Wettstein (University of Chicago)</li>
-<li>Tim Wickberg (SchedMD)</li>
+<li>Jeff White</li>
 <li>Chandler Wilkerson (Rice University)</li>
 <li>Ramiro Brito Willmersdorf (Universidade Federal de Pemambuco, Brazil)</li>
 <li>Jay Windley (Linux NetworX)</li>

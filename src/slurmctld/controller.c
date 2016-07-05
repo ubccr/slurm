@@ -128,12 +128,6 @@
 				 * check-in before we ping them */
 #define SHUTDOWN_WAIT     2	/* Time to wait for backup server shutdown */
 
-#if (0)
-/* If defined and FastSchedule=0 in slurm.conf, then report the CPU count that a
- * node registers with rather than the CPU count defined for the node in slurm.conf */
-#define SLURM_NODE_ACCT_REGISTER 1
-#endif
-
 /**************************************************************************\
  * To test for memory leaks, set MEMORY_LEAK_DEBUG to 1 using
  * "configure --enable-memory-leak-debug" then execute
@@ -239,6 +233,8 @@ static void *       _slurmctld_rpc_mgr(void *no_data);
 static void *       _slurmctld_signal_hand(void *no_data);
 static void         _test_thread_limit(void);
 inline static void  _update_cred_key(void);
+static bool	    _verify_clustername(void);
+static void	    _create_clustername_file(void);
 static void         _update_nice(void);
 inline static void  _usage(char *prog_name);
 static bool         _valid_controller(void);
@@ -255,7 +251,7 @@ int main(int argc, char *argv[])
 		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
 	slurm_trigger_callbacks_t callbacks;
 	char *dir_name;
-
+	bool create_clustername_file;
 	/*
 	 * Make sure we have no extra open files which
 	 * would be propagated to spawned tasks.
@@ -277,6 +273,13 @@ int main(int argc, char *argv[])
 	slurm_conf_reinit(slurm_conf_filename);
 
 	update_logging();
+
+	/* Verify clustername from conf matches value in spool dir
+	 * exit if inconsistent to protect state files from corruption.
+	 * This needs to be done before we kill the old one just incase we
+	 * fail. */
+	create_clustername_file = _verify_clustername();
+
 	_update_nice();
 	_kill_old_slurmctld();
 
@@ -307,6 +310,10 @@ int main(int argc, char *argv[])
 	 */
 	_init_pidfile();
 	_become_slurm_user();
+
+	if (create_clustername_file)
+		_create_clustername_file();
+
 	if (daemonize)
 		_set_work_dir();
 
@@ -664,7 +671,7 @@ int main(int argc, char *argv[])
 
 	/* Purge our local data structures */
 	job_fini();
-	part_fini();	/* part_fini() must preceed node_fini() */
+	part_fini();	/* part_fini() must precede node_fini() */
 	node_fini();
 	purge_front_end_state();
 	resv_fini();
@@ -1175,12 +1182,12 @@ static int _accounting_cluster_ready(void)
 	time_t event_time = time(NULL);
 	bitstr_t *total_node_bitmap = NULL;
 	char *cluster_nodes = NULL, *cluster_tres_str;
-	slurmctld_lock_t node_read_lock = {
-		NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK };
+	slurmctld_lock_t node_write_lock = {
+		NO_LOCK, NO_LOCK, WRITE_LOCK, WRITE_LOCK };
 	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
 				   WRITE_LOCK, NO_LOCK, NO_LOCK };
 
-	lock_slurmctld(node_read_lock);
+	lock_slurmctld(node_write_lock);
 	/* Now get the names of all the nodes on the cluster at this
 	   time and send it also.
 	*/
@@ -1197,7 +1204,7 @@ static int _accounting_cluster_ready(void)
 		assoc_mgr_tres_list, TRES_STR_FLAG_SIMPLE);
 	assoc_mgr_unlock(&locks);
 
-	unlock_slurmctld(node_read_lock);
+	unlock_slurmctld(node_write_lock);
 
 	rc = clusteracct_storage_g_cluster_tres(acct_db_conn,
 						cluster_nodes,
@@ -1903,7 +1910,9 @@ static void *_slurmctld_background(void *no_data)
 
 		if (difftime(now, last_node_acct) >= PERIODIC_NODE_ACCT) {
 			/* Report current node state to account for added
-			 * or reconfigured nodes */
+			 * or reconfigured nodes.  Locks are done
+			 * inside _accounting_cluster_ready, don't
+			 * lock here. */
 			now = time(NULL);
 			last_node_acct = now;
 			_accounting_cluster_ready();
@@ -2101,6 +2110,7 @@ extern void set_cluster_tres(bool assoc_mgr_locked)
 	struct node_record *node_ptr;
 	slurmdb_tres_rec_t *tres_rec, *cpu_tres = NULL, *mem_tres = NULL;
 	int i;
+	char *unique_tres = NULL;
 	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
 				   WRITE_LOCK, NO_LOCK, NO_LOCK };
 
@@ -2118,6 +2128,14 @@ extern void set_cluster_tres(bool assoc_mgr_locked)
 			      tres_rec->id);
 			continue; /* this should never happen */
 		}
+
+		if (unique_tres)
+			xstrfmtcat(unique_tres, ",%s",
+				   assoc_mgr_tres_name_array[i]);
+		else
+			unique_tres = xstrdup(assoc_mgr_tres_name_array[i]);
+
+
 		/* reset them now since we are about to add to them */
 		tres_rec->count = 0;
 		if (tres_rec->id == TRES_CPU) {
@@ -2140,6 +2158,9 @@ extern void set_cluster_tres(bool assoc_mgr_locked)
 		/* FIXME: set up the other tres here that aren't specific */
 	}
 
+	slurm_set_accounting_storage_tres(unique_tres);
+	xfree(unique_tres);
+
 	cluster_cpus = 0;
 
 	node_ptr = node_record_table_ptr;
@@ -2148,7 +2169,6 @@ extern void set_cluster_tres(bool assoc_mgr_locked)
 		if (node_ptr->name == '\0')
 			continue;
 
-#ifdef SLURM_NODE_ACCT_REGISTER
 		if (slurmctld_conf.fast_schedule) {
 			cpu_count += node_ptr->config_ptr->cpus;
 			mem_count += node_ptr->config_ptr->real_memory;
@@ -2156,11 +2176,7 @@ extern void set_cluster_tres(bool assoc_mgr_locked)
 			cpu_count += node_ptr->cpus;
 			mem_count += node_ptr->real_memory;
 		}
-#else
-		cpu_count += node_ptr->config_ptr->cpus;
-		mem_count += node_ptr->config_ptr->real_memory;
 
-#endif
 		cluster_cpus += cpu_count;
 		if (mem_tres)
 			mem_tres->count += mem_count;
@@ -2531,6 +2547,70 @@ static void _update_nice(void)
 		error("Unable to reset nice value to %d: %m", new_nice);
 }
 
+/* Verify that ClusterName from slurm.conf matches the state directory.
+ * If mismatched exit to protect state files from corruption.
+ * If the clustername file does not exist, return true so we can create it later
+ * after dropping privileges. */
+static bool _verify_clustername(void)
+{
+	FILE *fp;
+	char *filename = NULL;
+	char name[512];
+	bool create_file = false;
+	xstrfmtcat(filename, "%s/clustername",
+		   slurmctld_conf.state_save_location);
+
+	if ((fp = fopen(filename, "r"))) {
+		/* read value and compare */
+		fgets(name, sizeof(name), fp);
+		fclose(fp);
+		if (xstrcmp(name, slurmctld_conf.cluster_name)) {
+			fatal("CLUSTER NAME MISMATCH.\n"
+			      "slurmctld has been started with \""
+			      "ClusterName=%s\", but read \"%s\" from "
+			      "the state files in StateSaveLocation.\n"
+			      "Running multiple clusters from a shared "
+			      "StateSaveLocation WILL CAUSE CORRUPTION.\n"
+			      "Remove %s to override this safety check if "
+			      "this is intentional (e.g., the ClusterName "
+			      "has changed).", name,
+			      slurmctld_conf.cluster_name, filename);
+			exit(1);
+		}
+	} else if (slurmctld_conf.cluster_name)
+		create_file = true;
+
+	xfree(filename);
+
+	return create_file;
+}
+
+static void _create_clustername_file(void)
+{
+	FILE *fp;
+	char *filename = NULL;
+
+	if (!slurmctld_conf.cluster_name)
+		return;
+
+	filename = xstrdup_printf("%s/clustername",
+				  slurmctld_conf.state_save_location);
+
+	debug("creating clustername file: %s", filename);
+	if (!(fp = fopen(filename, "w"))) {
+		fatal("%s: failed to create file %s", __func__, filename);
+		exit(1);
+	}
+
+	if (fputs(slurmctld_conf.cluster_name, fp) < 0) {
+		fatal("%s: failed to write to file %s", __func__, filename);
+		exit(1);
+	}
+	fclose(fp);
+
+	xfree(filename);
+}
+
 /* Kill the currently running slurmctld
  * NOTE: No need to lock the config data since we are still single-threaded */
 static void _kill_old_slurmctld(void)
@@ -2620,6 +2700,18 @@ static void *_assoc_cache_mgr(void *no_data)
 		assoc_mgr_refresh_lists(acct_db_conn, 0);
 		if (running_cache)
 			unlock_slurmctld(job_write_lock);
+		else if (g_tres_count != slurmctld_tres_cnt) {
+			/* This has to be done outside of the job write lock.
+			 * This should only happen in very rare situations
+			 * where we have state, but the database some how has
+			 * changed out from under us. */
+			unlock_slurmctld(job_write_lock);
+			info("TRES in database does not match cache "
+			     "(%u != %u).  Updating...",
+			     g_tres_count, slurmctld_tres_cnt);
+			_init_tres();
+			lock_slurmctld(job_write_lock);
+		}
 		slurm_mutex_unlock(&assoc_cache_mutex);
 	}
 

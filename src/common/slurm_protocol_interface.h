@@ -90,7 +90,7 @@ typedef enum slurm_socket_type {
  **  MIDDLE LAYER FUNCTIONS  **
  \*******************************/
 
-/* The must have funtions are required to implement a low level plugin
+/* The must have functions are required to implement a low level plugin
  * for the slurm protocol the general purpose functions just wrap
  * standard socket calls, so if the underlying layer implements a
  * socket like interface, it can be used as a low level transport
@@ -171,14 +171,6 @@ extern int slurm_recv_timeout ( slurm_fd_t open_fd, char *buffer ,
 /***************************/
 /* slurm address functions */
 /***************************/
-/* build a slurm address bassed upon ip address and port number
- * OUT slurm_address - the constructed slurm_address
- * IN port - port to be used
- * IN ip_address - the IP address to connect with
- */
-extern void slurm_set_addr_uint ( slurm_addr_t * slurm_address ,
-				  uint16_t port , uint32_t ip_address ) ;
-
 /* build a slurm address bassed upon host name and port number
  * OUT slurm_address - the constructed slurm_address
  * IN port - port to be used

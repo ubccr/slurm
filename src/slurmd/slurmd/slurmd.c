@@ -1456,7 +1456,7 @@ _slurmd_init(void)
 	/*
 	 * Build nodes table like in slurmctld
 	 * This is required by the topology stack
-	 * Node tables setup must preceed _read_config() so that the
+	 * Node tables setup must precede _read_config() so that the
 	 * proper hostname is set.
 	 */
 	slurm_conf_init(conf->conffile);
@@ -2082,8 +2082,10 @@ static int _core_spec_init(void)
 		debug("Using core_spec/cray to manage specialized cores");
 		return SLURM_SUCCESS;
 	}
-	if (!check_cgroup_job_confinement()) {
-		error("Resource spec: cgroup job confinement not configured");
+	if (!check_corespec_cgroup_job_confinement()) {
+		error("Resource spec: cgroup job confinement not configured. "
+		     "CoreSpec requires TaskPlugin=task/cgroup and "
+		     "ConstrainCores=yes in cgroup.conf");
 		return SLURM_ERROR;
 	}
 
@@ -2157,6 +2159,12 @@ static int _memory_spec_init(void)
 		info ("Resource spec: Reserved system memory limit not "
 		      "configured for this node");
 		return SLURM_SUCCESS;
+	}
+	if (!check_memspec_cgroup_job_confinement()) {
+		error("Resource spec: cgroup job confinement not configured. "
+		      "MemSpecLimit requires TaskPlugin=task/cgroup and "
+		      "ConstrainRAMSpace=yes in cgroup.conf");
+		return SLURM_ERROR;
 	}
 	if (init_system_memory_cgroup() != SLURM_SUCCESS) {
 		error("Resource spec: unable to initialize system "

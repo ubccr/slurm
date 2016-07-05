@@ -70,12 +70,12 @@
 #  include <stdlib.h>	/* for abort() */
 #endif
 
-#include <sys/poll.h>
+#include <poll.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/unistd.h>
 
 #include "slurm/slurm_errno.h"
 #include "src/common/fd.h"
@@ -266,7 +266,9 @@ static int _fd_writeable(int fd)
 	 * gone, but getting 0 back from a nonblocking read means just that.
 	 */
 	if ((ufds.revents & POLLHUP) || fstat(fd, &stat_buf) ||
-	    (S_ISSOCK(stat_buf.st_mode) && (recv(fd, &temp, 1, 0) == 0)))
+	    ((S_ISSOCK(stat_buf.st_mode) &&
+	     (rc = recv(fd, &temp, 1, MSG_DONTWAIT) <= 0) &&
+	     ((rc == 0) || ((errno != EAGAIN) && (errno != EWOULDBLOCK))))))
 		return -1;
 	else if ((ufds.revents & POLLNVAL)
 		 || (ufds.revents & POLLERR)
@@ -313,7 +315,7 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
 	}
 
 	/* Only take the first one here.  In some situations it can change. */
-	if (!slurm_prog_name && log->argv0 && (strlen(log->argv0) > 1))
+	if (!slurm_prog_name && log->argv0 && (strlen(log->argv0) > 0))
 		slurm_prog_name = xstrdup(log->argv0);
 
 	if (!log->fpfx)

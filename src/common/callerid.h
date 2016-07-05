@@ -38,6 +38,12 @@
 #define _SLURM_CALLERID_H
 
 #include <arpa/inet.h>
+#include <sys/types.h>
+
+#ifdef __FreeBSD__
+#include <sys/socket.h>
+#include <netinet/in.h>
+#endif
 
 typedef struct callerid_conn {
 	uint32_t port_dst;

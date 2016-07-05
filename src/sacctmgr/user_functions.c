@@ -562,7 +562,7 @@ static int _check_coord_request(slurmdb_user_cond_t *user_cond, bool check)
 			list_iterator_reset(itr2);
 			if (!acct_rec) {
 				fprintf(stderr,
-					" You specified a non-existant "
+					" You specified a non-existent "
 					"account '%s'.\n", name);
 				exit_code=1;
 				rc = SLURM_ERROR;
@@ -596,7 +596,7 @@ static int _check_coord_request(slurmdb_user_cond_t *user_cond, bool check)
 			list_iterator_reset(itr2);
 			if (!user_rec) {
 				fprintf(stderr,
-					" You specified a non-existant "
+					" You specified a non-existent "
 					"user '%s'.\n", name);
 				exit_code=1;
 				rc = SLURM_ERROR;
@@ -1204,8 +1204,11 @@ no_default:
 
 	if (user_str) {
 		printf(" Adding User(s)\n%s", user_str);
-		printf(" Settings =\n");
-		printf("  Default Account = %s\n", default_acct);
+		if (default_acct || default_wckey ||
+		    (admin_level != SLURMDB_ADMIN_NOTSET))
+			printf(" Settings =\n");
+		if (default_acct)
+			printf("  Default Account = %s\n", default_acct);
 		if (default_wckey)
 			printf("  Default WCKey   = %s\n", default_wckey);
 
@@ -1933,11 +1936,30 @@ extern int sacctmgr_delete_user(int argc, char *argv[])
 		while((object = list_next(itr))) {
 			printf("  %s\n", object);
 			if (cond_set & 2) {
+				char *tmp = strstr(object, "U = ")+4;
+				int i = 0;
+
+				/* If the association has a partition on
+				 * it we need to get only the name portion, so
+				 * break on the first non alphanum char.
+				 */
+				while (tmp[i]) {
+					if (!(tmp[i] >= '0' && tmp[i] <= '9') &&
+					    !(tmp[i] >= 'a' && tmp[i] <= 'z') &&
+					    !(tmp[i] >= 'A' && tmp[i] <= 'Z') &&
+					    tmp[i] != '_' && tmp[i] != '.' &&
+					    tmp[i] != '-' && tmp[i] != '@') {
+						tmp[i] = '\0';
+						break;
+					}
+					i++;
+					continue;
+				}
+
 				if (!del_user_list)
 					del_user_list = list_create(
 						slurm_destroy_char);
-				slurm_addto_char_list(del_user_list,
-						      strstr(object, "U = ")+4);
+				slurm_addto_char_list(del_user_list, tmp);
 			}
 		}
 		list_iterator_destroy(itr);

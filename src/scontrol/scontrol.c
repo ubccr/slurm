@@ -120,7 +120,7 @@ main (int argc, char *argv[])
 	log_init("scontrol", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
 	if (getenv ("SCONTROL_ALL"))
-		all_flag= 1;
+		all_flag = 1;
 	if ((env_val = getenv("SLURM_CLUSTERS"))) {
 		if (!(clusters = slurmdb_get_info_cluster(env_val))) {
 			print_db_notok(env_val, 1);
@@ -388,18 +388,23 @@ _write_config (void)
 
 
 	if (error_code == SLURM_SUCCESS) {
+		int save_all_flag = all_flag;
+		all_flag = 1;
+
 		/* now gather node info */
-		error_code = scontrol_load_nodes(&node_info_ptr, 0);
+		error_code = scontrol_load_nodes(&node_info_ptr, SHOW_ALL);
 
 		if (error_code) {
 			exit_code = 1;
 			if (quiet_flag != 1)
 				slurm_perror ("slurm_load_node error");
+			all_flag = save_all_flag;
 			return;
 		}
 
 		/* now gather partition info */
 		error_code = scontrol_load_partitions(&part_info_ptr);
+		all_flag = save_all_flag;
 		if (error_code) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1470,10 +1475,11 @@ _show_it (int argc, char *argv[])
 		return;
 	}
 
-	if (strncasecmp (argv[1], "layouts", MAX(tag_len, 2)) != 0)
+	if (strncasecmp (argv[1], "layouts", MAX(tag_len, 2)) == 0 ||
+	    strncasecmp (argv[1], "assoc_mgr", MAX(tag_len, 2)) == 0)
 		allow_opt = true;
 
-	if (argc > 3 && allow_opt) {
+	if (argc > 3 && !allow_opt) {
 		exit_code = 1;
 		if (quiet_flag != 1)
 			fprintf(stderr,
@@ -1505,7 +1511,7 @@ _show_it (int argc, char *argv[])
 		scontrol_print_burst_buffer ();
 	} else if (!strncasecmp(tag, "assoc_mgr", MAX(tag_len, 2)) ||
 		   !strncasecmp(tag, "cache", MAX(tag_len, 2))) {
-		scontrol_print_assoc_mgr_info(val);
+		scontrol_print_assoc_mgr_info(argc - 2, argv + 2);
 	} else if (strncasecmp (tag, "config", MAX(tag_len, 1)) == 0) {
 		_print_config (val);
 	} else if (strncasecmp (tag, "daemons", MAX(tag_len, 1)) == 0) {

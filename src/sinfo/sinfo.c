@@ -67,9 +67,9 @@ static pthread_mutex_t sinfo_cnt_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  sinfo_cnt_cond  = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t sinfo_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/************
- * Funtions *
- ************/
+/*************
+ * Functions *
+ *************/
 static int  _bg_report(block_info_msg_t *block_ptr);
 void *      _build_part_info(void *args);
 static int  _build_sinfo_data(List sinfo_list,
@@ -344,6 +344,7 @@ _query_server(partition_info_msg_t ** part_pptr,
 					alloc_cpus *= single_node_cpus;
 			}
 			idle_cpus = node_ptr->cpus - alloc_cpus;
+
 			select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 						     SELECT_NODEDATA_SUBCNT,
 						     NODE_STATE_ERROR,

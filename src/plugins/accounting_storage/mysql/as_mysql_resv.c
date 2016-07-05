@@ -98,9 +98,11 @@ static int _setup_resv_limits(slurmdb_reservation_rec_t *resv,
 	}
 
 	if (resv->name) {
+		char *tmp_char = slurm_add_slash_to_quotes(resv->name);
 		xstrcat(*cols, ", resv_name");
-		xstrfmtcat(*vals, ", '%s'", resv->name);
-		xstrfmtcat(*extra, ", resv_name='%s'", resv->name);
+		xstrfmtcat(*vals, ", '%s'", tmp_char);
+		xstrfmtcat(*extra, ", resv_name='%s'", tmp_char);
+		xfree(tmp_char);
 	}
 
 	if (resv->nodes) {
@@ -215,7 +217,7 @@ extern int as_mysql_add_resv(mysql_conn_t *mysql_conn,
 		*query = NULL;
 
 	if (!resv) {
-		error("No reservation was given to edit");
+		error("No reservation was given to add.");
 		return SLURM_ERROR;
 	}
 
@@ -454,16 +456,25 @@ extern int as_mysql_remove_resv(mysql_conn_t *mysql_conn,
 				slurmdb_reservation_rec_t *resv)
 {
 	int rc = SLURM_SUCCESS;
-	char *query = NULL;//, *tmp_extra = NULL;
+	char *query = NULL;
 
 	if (!resv) {
-		error("No reservation was given to edit");
+		error("No reservation was given to remove");
 		return SLURM_ERROR;
 	}
 
-	if (!resv->id || !resv->time_start || !resv->cluster) {
-		error("We need an id, start time, and cluster "
-		      "name to edit a reservation.");
+	if (!resv->id) {
+		error("An id is needed to remove a reservation.");
+		return SLURM_ERROR;
+	}
+
+	if (!resv->time_start) {
+		error("A start time is needed to remove a reservation.");
+		return SLURM_ERROR;
+	}
+
+	if (!resv->cluster || !resv->cluster[0]) {
+		error("A cluster name is needed to remove a reservation.");
 		return SLURM_ERROR;
 	}
 

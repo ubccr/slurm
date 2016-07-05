@@ -52,6 +52,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if defined(__FreeBSD__) || defined(__NetBSD__)
+#define POLLRDHUP POLLHUP
+#include <signal.h>
+#endif
+
 #include "slurm/slurm.h"
 #include "slurm/slurmdb.h"
 
@@ -363,12 +368,12 @@ extern void bb_set_tres_pos(bb_state_t *state_ptr)
 	tres_rec.type = "bb";
 	tres_rec.name = state_ptr->name;
 	inx = assoc_mgr_find_tres_pos(&tres_rec, false);
+	state_ptr->tres_pos = inx;
 	if (inx == -1) {
 		debug("%s: Tres %s not found by assoc_mgr",
 		       __func__, state_ptr->name);
 	} else {
 		state_ptr->tres_id  = assoc_mgr_tres_array[inx]->id;
-		state_ptr->tres_pos = inx;
 	}
 }
 
@@ -1465,7 +1470,7 @@ extern int bb_post_persist_create(struct job_record *job_ptr,
 	rc = acct_storage_g_add_reservation(acct_db_conn, &resv);
 	xfree(resv.tres_str);
 
-	if (state_ptr->tres_pos) {
+	if (state_ptr->tres_pos > 0) {
 		slurmdb_assoc_rec_t *assoc_ptr = bb_alloc->assoc_ptr;
 
 		while (assoc_ptr) {
@@ -1535,7 +1540,7 @@ extern int bb_post_persist_delete(bb_alloc_t *bb_alloc, bb_state_t *state_ptr)
 	rc = acct_storage_g_remove_reservation(acct_db_conn, &resv);
 	xfree(resv.tres_str);
 
-	if (state_ptr->tres_pos) {
+	if (state_ptr->tres_pos > 0) {
 		slurmdb_assoc_rec_t *assoc_ptr = bb_alloc->assoc_ptr;
 
 		while (assoc_ptr) {

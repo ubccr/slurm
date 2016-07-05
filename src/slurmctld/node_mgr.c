@@ -335,7 +335,7 @@ extern int load_all_node_state ( bool state_only )
 	if (ver_str && !xstrcmp(ver_str, NODE_STATE_VERSION))
 		safe_unpack16(&protocol_version, buffer);
 
-	if (protocol_version == (uint16_t)NO_VAL) {
+	if (!protocol_version || (protocol_version == (uint16_t)NO_VAL)) {
 		error("*****************************************************");
 		error("Can not recover node state, data version incompatible");
 		error("*****************************************************");
@@ -557,6 +557,27 @@ extern int load_all_node_state ( bool state_only )
 				node_ptr->reason_time = reason_time;
 				node_ptr->reason_uid = reason_uid;
 			}
+			if (!slurmctld_conf.fast_schedule) {
+				/* Accounting will need to know the
+				 * last state here otherwise we will
+				 * report incorrect information
+				 * waiting for the node to register. */
+				node_ptr->cpus          = cpus;
+				node_ptr->boards        = boards;
+				node_ptr->sockets       = sockets;
+				node_ptr->cores         = cores;
+				node_ptr->core_spec_cnt =
+					core_spec_cnt;
+				xfree(node_ptr->cpu_spec_list);
+				node_ptr->cpu_spec_list =
+					cpu_spec_list;
+				cpu_spec_list = NULL; /* Nothing to free */
+				node_ptr->threads       = threads;
+				node_ptr->real_memory   = real_memory;
+				node_ptr->mem_spec_limit =
+					mem_spec_limit;
+				node_ptr->tmp_disk      = tmp_disk;
+			}
 			node_ptr->gres_list	= gres_list;
 			gres_list		= NULL;	/* Nothing to free */
 		} else {
@@ -603,6 +624,7 @@ extern int load_all_node_state ( bool state_only )
 			node_ptr->part_cnt      = 0;
 			xfree(node_ptr->part_pptr);
 			node_ptr->cpus          = cpus;
+			node_ptr->boards        = boards;
 			node_ptr->sockets       = sockets;
 			node_ptr->cores         = cores;
 			node_ptr->core_spec_cnt = core_spec_cnt;
@@ -615,11 +637,13 @@ extern int load_all_node_state ( bool state_only )
 
 		if (node_ptr) {
 			node_cnt++;
-			if (obj_protocol_version != (uint16_t)NO_VAL)
+			if (obj_protocol_version &&
+			    (obj_protocol_version != (uint16_t)NO_VAL))
 				node_ptr->protocol_version =
 					obj_protocol_version;
 			else
 				node_ptr->protocol_version = protocol_version;
+
 			if (!IS_NODE_POWER_SAVE(node_ptr))
 				node_ptr->last_idle = now;
 			select_g_update_node_state(node_ptr);
@@ -1117,8 +1141,17 @@ void set_slurmd_addr (void)
 			continue;
 		if (IS_NODE_FUTURE(node_ptr))
 			continue;
-		if (IS_NODE_CLOUD(node_ptr) && IS_NODE_POWER_SAVE(node_ptr))
+		if (IS_NODE_CLOUD(node_ptr)) {
+                    if (slurmctld_conf.suspend_time < 1 ||
+                        slurmctld_conf.resume_program == NULL ||
+                        slurmctld_conf.suspend_program == NULL)
+                            error("%s: Node %s configured with CLOUD state but "
+                                  "missing any of SuspendTime, SuspendProgram "
+                                  "or ResumeProgram options",__func__,
+				  node_ptr->name);
+		    if (IS_NODE_POWER_SAVE(node_ptr))
 			continue;
+		}
 		if (node_ptr->port == 0)
 			node_ptr->port = slurmctld_conf.slurmd_port;
 		slurm_set_addr(&node_ptr->slurm_addr, node_ptr->port,

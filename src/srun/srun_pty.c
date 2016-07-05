@@ -45,14 +45,10 @@
 #include <pthread.h>
 #endif
 
-#ifdef HAVE_SYS_TERMIOS_H
-#  include <sys/termios.h>
-#endif
-
 #include <signal.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/poll.h>
+#include <poll.h>
 
 #include "slurm/slurm_errno.h"
 

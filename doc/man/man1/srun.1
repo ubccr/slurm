@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "November 2015" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "January 2016" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -10,7 +10,7 @@ srun \- Run parallel jobs
 Run a parallel job on cluster managed by Slurm.  If necessary, srun will
 first create a resource allocation in which to run the parallel job.
 
-The following document describes the the influence of various options on the
+The following document describes the influence of various options on the
 allocation of cpus to jobs and tasks.
 .br
 http://slurm.schedmd.com/cpu_management.html
@@ -21,7 +21,7 @@ http://slurm.schedmd.com/cpu_management.html
 .TP
 \fB\-\-accel\-bind\fR=<\fIoptions\fR>
 Control how tasks are bound to generic resources of type gpu, mic and nic.
-Multiple options may be specified. Supported options are as include:
+Multiple options may be specified. Supported options include:
 .RS
 .TP
 \fBg\fR
@@ -145,7 +145,7 @@ Copy executable file to allocated compute nodes.
 If a file name is specified, copy the executable to the specified destination
 file path. If no path is specified, copy the file to a file named
 "slurm_bcast_<job_id>.<step_id>" in the current working.
-For example, "srun \-\-bcast=/tmp/mine -N3 a.out" will copy the file "a.out"
+For example, "srun \-\-bcast=/tmp/mine \-N3 a.out" will copy the file "a.out"
 from your current directory to the file "/tmp/mine" on each of the three
 allocated compute nodes and execute that file.
 
@@ -454,7 +454,7 @@ which will set the governor to the corresponding value.
 If \fBp3\fR is UserSpace, the frequency scaling_speed will be set by a power
 or energy aware scheduling strategy to a value between p1 and p2 that lets the
 job run within the site's power goal. The job may be delayed if p1 is higher
-than a frequency that allows the job to run withing the goal.
+than a frequency that allows the job to run within the goal.
 
 If the current frequency is < min, it will be set to min. Likewise,
 if the current frequency is > max, it will be set to max.
@@ -676,7 +676,11 @@ Environment variable names may be specified to propagate the current
 value of those variables (e.g. "\-\-export=EDITOR") or specific values
 for the variables may be exported (e.g.. "\-\-export=EDITOR=/bin/vi")
 in addition to the environment variables that would otherwise be set.
-By default all environment variables are propagated.
+By default all environment variables are propagated. With "\-\-export=NONE"
+no environment variables will be propagated unless explicitly listed (e.g.,
+"\-\-export=NONE,PATH=/bin,SHELL=/bin/bash"). Regardless of this setting,
+the appropriate "SLURM_*" task environment variables are always exported to the
+environment.
 
 .TP
 \fB\-\-gid\fR=<\fIgroup\fR>
@@ -771,6 +775,7 @@ properly displaying the contents of the slurm_jobacct.log file when the
 Initiate a job step under an already allocated job with job id \fIid\fR.
 Using this option will cause \fBsrun\fR to behave exactly as if the
 SLURM_JOB_ID environment variable was set.
+NOTE: For job allocations, this is only valid for users root and SlurmUser.
 
 .TP
 \fB\-K\fR, \fB\-\-kill\-on\-bad\-exit\fR[=0|1]
@@ -979,7 +984,7 @@ configuration parameter.
 Notify user by email when certain event types occur.
 Valid \fItype\fR values are NONE, BEGIN, END, FAIL, REQUEUE, ALL (equivalent to
 BEGIN, END, FAIL, REQUEUE, and STAGE_OUT), STAGE_OUT (burst buffer stage out
-completed), TIME_LIMIT, TIME_LIMIT_90 (reached 90 percent of time limit),
+and teardown completed), TIME_LIMIT, TIME_LIMIT_90 (reached 90 percent of time limit),
 TIME_LIMIT_80 (reached 80 percent of time limit), and TIME_LIMIT_50
 (reached 50 percent of time limit).
 Multiple \fItype\fR values may be specified in a comma separated list.
@@ -1709,20 +1714,18 @@ very small memory computers.
 
 .TP
 \fB\-t\fR, \fB\-\-time\fR=<\fItime\fR>
-Set a limit on the total run time of the job or job step.  If the
-requested time limit for a job exceeds the partition's time limit,
-the job will be left in a PENDING state (possibly indefinitely).
-If the requested time limit for a job step exceeds the partition's
-time limit, the job step will not be initiated.  The default time
+Set a limit on the total run time of the job allocation.  If the
+requested time limit exceeds the partition's time limit, the job will
+be left in a PENDING state (possibly indefinitely).  The default time
 limit is the partition's default time limit.  When the time limit is reached,
 each task in each job step is sent SIGTERM followed by SIGKILL.  The
-limit is for the job, all job steps are signaled. If the time limit is
-for a single job step within an existing job allocation, only that job
-step will be affected. A job time limit supersedes all job step time
-limits. The interval between SIGTERM and SIGKILL is specified by the
-Slurm configuration parameter \fBKillWait\fR.  A time limit of zero
-requests that no time limit be imposed.  Acceptable time formats
-include "minutes", "minutes:seconds", "hours:minutes:seconds",
+interval between signals is specified by the Slurm configuration
+parameter \fBKillWait\fR.  The \fBOverTimeLimit\fR configuration parameter may
+permit the job to run longer than scheduled.  Time resolution is one minute
+and second values are rounded up to the next minute.
+
+A time limit of zero requests that no time limit be imposed.  Acceptable time
+formats include "minutes", "minutes:seconds", "hours:minutes:seconds",
 "days\-hours", "days\-hours:minutes" and "days\-hours:minutes:seconds".
 
 .TP
@@ -2564,7 +2567,11 @@ This is set only if the system has the topology/tree plugin configured.
 The value will be set component types listed in \fBSLURM_TOPOLOGY_ADDR\fR.
 Each component will be identified as either "switch" or "node".
 A period is used to separate each hardware component type.
-
+.TP
+\fBSLURMD_NODENAME\fR
+Name of the node running the task. In the case of a parallel job executing on
+multiple compute nodes, the various tasks will have this environment variable
+set to different values on each compute node.
 .TP
 \fBSRUN_DEBUG\fR
 Set to the logging level of the \fBsrun\fR command.

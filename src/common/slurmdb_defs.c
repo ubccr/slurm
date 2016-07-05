@@ -150,7 +150,7 @@ static int _sort_children_list(void *v1, void *v2)
 	assoc_a = *(slurmdb_hierarchical_rec_t **)v1;
 	assoc_b = *(slurmdb_hierarchical_rec_t    **)v2;
 
-	/* Since all these assocations are on the same level we don't
+	/* Since all these associations are on the same level we don't
 	 * have to check the lfts
 	 */
 
@@ -3553,20 +3553,21 @@ extern void slurmdb_transfer_tres_time(
 	FREE_NULL_LIST(job_tres_list);
 }
 
-extern int slurmdb_get_new_tres_pos(slurmdb_tres_rec_t **new_array,
+extern int slurmdb_get_old_tres_pos(slurmdb_tres_rec_t **new_array,
 				    slurmdb_tres_rec_t **old_array,
-				    int cur_pos, int max_cnt)
+				    int cur_pos, int old_cnt)
 {
 	int j, pos = NO_VAL;
 
 	/* This means the tres didn't change order */
-	if (new_array[cur_pos]->id == old_array[cur_pos]->id)
+	if ((cur_pos < old_cnt) &&
+	    (new_array[cur_pos]->id == old_array[cur_pos]->id))
 		pos = cur_pos;
 	else {
 		/* This means we might of changed the location or it
 		 * wasn't there before so break
 		 */
-		for (j=0; j<max_cnt; j++)
+		for (j=0; j<old_cnt; j++)
 			if (new_array[cur_pos]->id == old_array[j]->id) {
 				pos = j;
 				break;
@@ -3594,7 +3595,7 @@ extern void slurmdb_set_new_tres_cnt(uint64_t **tres_cnt_in,
 		if (!new_array[i])
 			break;
 
-		pos = slurmdb_get_new_tres_pos(
+		pos = slurmdb_get_old_tres_pos(
 			new_array, old_array, i, max_cnt);
 
 		if (pos != i)

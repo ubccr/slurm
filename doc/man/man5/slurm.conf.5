@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "Slurm Configuration File" "November 2015" "Slurm Configuration File"
+.TH "slurm.conf" "5" "Slurm Configuration File" "January 2016" "Slurm Configuration File"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -1571,6 +1571,12 @@ maximum power consumption.
 The default value is 50 percent.
 Supported by the power/cray plugin.
 .TP
+\fBget_timeout=#\fR
+Amount of time allowed to get power state information in milliseconds.
+The default value is 5,000 milliseconds or 5 seconds.
+Supported by the power/cray plugin and represents the time allowed for the
+capmc command to respond to various "get" options.
+.TP
 \fBincrease_rate=#\fR
 Specifies the maximum rate of change in the power cap for a node where the
 actual power usage is within \fBupper_threshold\fR (see below) of the power cap.
@@ -1604,6 +1610,12 @@ be increased to the maximum.
 The default value is 300 seconds.
 Supported by the power/cray plugin.
 .TP
+\fBset_timeout=#\fR
+Amount of time allowed to set power state information in milliseconds.
+The default value is 30,000 milliseconds or 30 seconds.
+Supported by the power/cray plugin and represents the time allowed for the
+capmc command to respond to various "set" options.
+.TP
 \fBset_watts=#\fR
 Specifies the power limit to be set on every compute nodes managed by Slurm.
 Every node gets this same power cap and there is no variation through time
@@ -1635,7 +1647,7 @@ Enables gang scheduling and/or controls the mechanism used to preempt
 jobs.  When the \fBPreemptType\fR parameter is set to enable preemption, the
 \fBPreemptMode\fR selects the default mechanism used to preempt the lower
 priority jobs for the cluster. \fBPreemptMode\fR may be specified on a
-per partition basis to over ride this default value if
+per partition basis to override this default value if
 \fBPreemptType=preempt/partition_prio\fR, but a valid default \fBPreemptMode\fR
 value must be specified for the cluster as a whole when preemption is enabled.
 The \fBGANG\fR option is used to
@@ -1666,6 +1678,8 @@ not recommended.
 .TP
 \fBREQUEUE\fR
 preempts jobs by requeuing them (if possible) or canceling them.
+For jobs to be requeued they must have the \-\-requeue sbatch option set
+or the cluster wide JobRequeue parameter in slurm.conf must be set to one.
 .TP
 \fBSUSPEND\fR
 If PreemptType=preempt/partition_prio is configured then suspend and
@@ -1738,6 +1752,7 @@ The keywords below have no associated value
 \fBACCRUE_ALWAYS\fR
 If set, priority age factor will be increased despite job dependencies
 or holds.
+.TP
 \fBCALCULATE_RUNNING\fR
 If set, priorities will be recalculated not only for pending jobs, but also
 running and suspended jobs.
@@ -2216,7 +2231,7 @@ in power save mode is assigned work to perform.
 For reasons of reliability, \fBResumeProgram\fR may execute more than once
 for a node when the \fBslurmctld\fR daemon crashes and is restarted.
 If \fBResumeProgram\fR is unable to restore a node to service, it should
-requeue any node associated with the node and set the node state to DRAIN.
+requeue any job associated with the node and set the node state to DRAIN.
 The program executes as \fBSlurmUser\fR.
 The argument to the program will be the names of nodes to
 be removed from power savings mode (using Slurm's hostlist
@@ -2358,11 +2373,22 @@ For example, on Cray systems add "\-\-gres=craynetwork:0" as shown below:
     SallocDefaultCommand = "srun \-n1 \-N1 \-\-mem\-per\-cpu=0 \-\-gres=craynetwork:0 \-\-pty \-\-preserve\-env \-\-mpi=none $SHELL"
 .fi
 
+For systems with TaskPlugin set, adding an option of "\-\-cpu_bind=no" is
+recommended if the default shell should have access to all of the CPUs
+allocated to the job on that node, otherwise the shell may be limited to a
+single cpu or core.
+
 .TP
 \fBSchedulerParameters\fR
 The interpretation of this parameter varies by \fBSchedulerType\fR.
 Multiple options may be comma separated.
 .RS
+.TP
+\fBassoc_limit_continue\fR
+If set, continue to schedule lower priority jobs in each partition if the
+higher priority jobs cannot start due to association limits. Setting this
+can improve throughput and utlization, but may potentially starve larger
+jobs and prevent them from launching indefinitely.
 .TP
 \fBbatch_sched_delay=#\fR
 How long, in seconds, the scheduling of batch jobs can be delayed.
@@ -2389,7 +2415,7 @@ extended period of time.
 Setting this option will cause the backfill scheduler to continue processing
 pending jobs from its original job list after releasing locks even if job
 or node state changes.
-This can result in lower priority jobs from being backfill scheduled instead
+This can result in lower priority jobs being backfill scheduled instead
 of newly arrived higher priority jobs, but will permit more queued jobs to be
 considered for backfill scheduling.
 .TP
@@ -2419,7 +2445,8 @@ scheduler. This can be especially helpful for systems with large numbers of
 partitions and jobs.
 The default value is 0, which means no limit.
 This option applies only to \fBSchedulerType=sched/backfill\fR.
-Also see the \fBpartition_job_depth\fR option.
+Also see the \fBpartition_job_depth\fR and \fBbf_max_job_test\fR options.
+Set \fBbf_max_job_test\fR to a value much higher than \fBbf_max_job_part\fR.
 .TP
 \fBbf_max_job_start=#\fR
 The maximum number of jobs which can be initiated in a single iteration
@@ -2445,16 +2472,20 @@ queue with jobs that cannot start and that prevent jobs from other users
 to start.  This is similar to the MAXIJOB limit in Maui.
 The default value is 0, which means no limit.
 This option applies only to \fBSchedulerType=sched/backfill\fR.
+Also see the \fBbf_max_job_part\fR and \fBbf_max_job_test\fR options.
+Set \fBbf_max_job_test\fR to a value much higher than \fBbf_max_job_user\fR.
 .TP
 \fBbf_min_age_reserve=#\fR
-The backfill scheduler will not reserve resources for pending jobs until they
-have been pending and runnable for at least the specified number of seconds.
+The backfill and main scheduling logic will not reserve resources for pending
+jobs until they have been pending and runnable for at least the specified
+number of seconds.
 In addition, jobs waiting for less than the specified number of seconds will
 not prevent a newly submitted job from starting immediately, even if the newly
 submitted job has a lower priority.
 This can be valuable if jobs lack time limits or all time limits have the same
 value.
 The default value is zero, which will reserve resources for any pending job
+and delay initiation of lower priority jobs.
 .TP
 \fBbf_resolution=#\fR
 The number of seconds in the resolution of data maintained about when jobs
@@ -2501,18 +2532,12 @@ The default value is 2,000,000 microseconds (2 seconds).
 .TP
 \fBdefault_queue_depth=#\fR
 The default number of jobs to attempt scheduling (i.e. the queue depth) when a
-running job completes or other routine actions occur. The full queue will be
-tested on a less frequent basis as defined by the \fBsched_interval\fR option
-described below. The default value is 100.
+running job completes or other routine actions occur, however the frequency
+with which the scheduler is run may be limited by using the \fBdefer\fR or
+\fBsched_min_interval\fR parameters described below.
+The full queue will be tested on a less frequent basis as defined by the
+\fBsched_interval\fR option described below. The default value is 100.
 See the \fBpartition_job_depth\fR option to limit depth by partition.
-In the case of large clusters (more than 1000 nodes), configuring a relatively
-small value may be desirable.
-Specifying a large value (say 1000 or higher) can be expected to result in
-poor system responsiveness since this scheduling logic will not release
-locks for other events to occur.
-It would be better to let the backfill scheduler process a larger number of jobs
-(see \fBbf_max_job_test\fR, \fBbf_continue\fR  and other options here for more
-information).
 .TP
 \fBdefer\fR
 Setting this option will avoid attempting to schedule each job
@@ -2532,7 +2557,7 @@ separate socket by default. Use the Ignore_NUMA option to report the correct
 socket count, but \fBnot\fR optimize resource allocations on the NUMA nodes.
 .TP
 \fBinventory_interval=#\fR
-On a Cray system using Slurm on top of ALPS this limits the amount of times
+On a Cray system using Slurm on top of ALPS this limits the number of times
 a Basil Inventory call is made.  Normally this call happens every scheduling
 consideration to attempt to close a node state change window with respects to
 what ALPS has.  This call is rather slow, so making it less frequently improves
@@ -2842,7 +2867,7 @@ use the least loaded nodes in selected partitions.
 .TP
 \fBCR_Pack_Nodes\fR
 If a job allocation contains more resources than will be used for launching
-tasks (e.g. if whole nodes are allocated to a job), then rather than 
+tasks (e.g. if whole nodes are allocated to a job), then rather than
 distributing a job's tasks evenly across it's allocated nodes, pack them as
 tightly as possible on these nodes.
 For example, consider a job allocation containing two \fBentire\fR nodes with
@@ -2958,6 +2983,11 @@ NOTE: Either \fBslurmctld\fR and \fBslurmd\fR daemons must not
 execute on the same nodes or the values of \fBSlurmctldPort\fR and
 \fBSlurmdPort\fR must be different.
 
+\fBNote\fR: On Cray systems, Realm-Specific IP Addressing (RSIP) will
+automatically try to interact with anything opened on ports 8192\-60000.
+Configure SlurmctldPort to use a port outside of the configured SrunPortRange
+and RSIP's port range.
+
 .TP
 \fBSlurmctldTimeout\fR
 The interval, in seconds, that the backup controller waits for the
@@ -3039,6 +3069,11 @@ NOTE: Either slurmctld and slurmd daemons must not execute
 on the same nodes or the values of \fBSlurmctldPort\fR and \fBSlurmdPort\fR
 must be different.
 
+\fBNote\fR: On Cray systems, Realm-Specific IP Addressing (RSIP) will
+automatically try to interact with anything opened on ports 8192\-60000.
+Configure SlurmdPort to use a port outside of the configured SrunPortRange
+and RSIP's port range.
+
 .TP
 \fBSlurmdSpoolDir\fR
 Fully qualified pathname of a directory into which the \fBslurmd\fR
@@ -3103,7 +3138,13 @@ By default these ports are ephemeral meaning the port numbers are selected
 by the kernel. Using this parameter allow sites to configure a range of ports
 from which srun ports will be selected. This is useful if sites want to
 allow only certain port range on their network.
-\fBNote\fR. A sufficient number of ports must be configured based on the
+
+\fBNote\fR: On Cray systems, Realm-Specific IP Addressing (RSIP) will
+automatically try to interact with anything opened on ports 8192\-60000.
+Configure SrunPortRange to use a range of ports above those used by RSIP,
+ideally 1000 or more ports, for example "SrunPortRange=60001\-63000".
+
+\fBNote\fR: A sufficient number of ports must be configured based on the
 estimated number of srun on the submission nodes considering that srun opens
 3 listening ports plus 2 more for every 48 hosts. Example:
 .RS
@@ -3379,7 +3420,12 @@ The default value is "/tmp".
 Comma separated options identifing network topology options.
 The value of "dragonfly" is valid when TopologyPlugin=topology/tree.
 The value of "NoInAddrAny" is used to directly bind to the address of what
-the node resolves to instead of binding messages to any address on the node.
+the node resolves to instead of binding messages to any address on the node
+which is the default. This option is for all daemons/clients except for the
+slurmctld.
+The value of "NoCtldInAddrAny" is used to directly bind to the address of what
+the node resolves to running the slurmctld instead of binding messages to any
+address on the node, which is the default.
 
 .TP
 \fBTopologyPlugin\fR
@@ -3714,8 +3760,10 @@ Also see \fBFeature\fR.
 \fBMemSpecLimit\fR
 Limit on combined real memory allocation for compute node daemons
 (slurmd, slurmstepd), in megabytes. This memory is not available to job
-allocations. The deamons won't be killed when they exhaust the memory allocation
-(ie. the OOM Killer is disabled for the daemon's memory cgroup).
+allocations. The daemons won't be killed when they exhaust the memory allocation
+(ie. the OOM Killer is disabled for the daemon's memory cgroup). This option has
+no effect unless cgroup job confinement is also configured
+(\fBTaskPlugin=task/cgroup\fR with \fBConstrainRAMSpace=yes\fR in cgroup.conf).
 
 .TP
 \fBPort\fR
@@ -3724,7 +3772,12 @@ to for work on this particular node. By default there is a single port number
 for all \fBslurmd\fR daemons on all compute nodes as defined by the
 \fBSlurmdPort\fR configuration parameter. Use of this option is not generally
 recommended except for development or testing purposes. If multiple
-\fBslurmd\fR daemons execute on a node this can specify a range of ports
+\fBslurmd\fR daemons execute on a node this can specify a range of ports.
+
+\fBNote\fR: On Cray systems, Realm-Specific IP Addressing (RSIP) will
+automatically try to interact with anything opened on ports 8192\-60000.
+Configure Port to use a port outside of the configured SrunPortRange and
+RSIP's port range.
 
 .TP
 \fBProcs\fR
@@ -3995,6 +4048,11 @@ to for work on this particular frontend node. By default there is a single port
 number for all \fBslurmd\fR daemons on all frontend nodes as defined by the
 \fBSlurmdPort\fR configuration parameter. Use of this option is not generally
 recommended except for development or testing purposes.
+
+\fBNote\fR: On Cray systems, Realm-Specific IP Addressing (RSIP) will
+automatically try to interact with anything opened on ports 8192\-60000.
+Configure Port to use a port outside of the configured SrunPortRange and
+RSIP's port range.
 
 .TP
 \fBReason\fR

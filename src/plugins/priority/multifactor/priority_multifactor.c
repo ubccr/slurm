@@ -100,6 +100,7 @@ time_t last_job_update __attribute__((weak_import)) = (time_t) 0;
 uint16_t part_max_priority __attribute__((weak_import)) = 0;
 slurm_ctl_conf_t slurmctld_conf __attribute__((weak_import));
 int slurmctld_tres_cnt __attribute__((weak_import)) = 0;
+int accounting_enforce __attribute__((weak_import)) = 0;
 #else
 void *acct_db_conn = NULL;
 uint32_t cluster_cpus = NO_VAL;
@@ -108,6 +109,7 @@ time_t last_job_update = (time_t) 0;
 uint16_t part_max_priority = 0;
 slurm_ctl_conf_t slurmctld_conf;
 int slurmctld_tres_cnt = 0;
+int accounting_enforce = 0;
 #endif
 
 /*
@@ -442,8 +444,7 @@ static int _set_children_usage_efctv(List children_list)
  */
 static double _get_fairshare_priority(struct job_record *job_ptr)
 {
-	slurmdb_assoc_rec_t *job_assoc =
-		(slurmdb_assoc_rec_t *)job_ptr->assoc_ptr;
+	slurmdb_assoc_rec_t *job_assoc;
 	slurmdb_assoc_rec_t *fs_assoc = NULL;
 	double priority_fs = 0.0;
 	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
@@ -452,7 +453,12 @@ static double _get_fairshare_priority(struct job_record *job_ptr)
 	if (!calc_fairshare)
 		return 0;
 
+	assoc_mgr_lock(&locks);
+
+	job_assoc = (slurmdb_assoc_rec_t *)job_ptr->assoc_ptr;
+
 	if (!job_assoc) {
+		assoc_mgr_unlock(&locks);
 		error("Job %u has no association.  Unable to "
 		      "compute fairshare.", job_ptr->job_id);
 		return 0;
@@ -463,8 +469,6 @@ static double _get_fairshare_priority(struct job_record *job_ptr)
 		fs_assoc = job_assoc->usage->fs_assoc_ptr;
 	else
 		fs_assoc = job_assoc;
-
-	assoc_mgr_lock(&locks);
 
 	if (fuzzy_equal(fs_assoc->usage->usage_efctv, NO_VAL))
 		priority_p_set_assoc_usage(fs_assoc);
@@ -822,7 +826,7 @@ static void _handle_qos_tres_run_secs(long double *tres_run_decay,
 {
 	int i;
 
-	if (!qos)
+	if (!qos || !(accounting_enforce & ACCOUNTING_ENFORCE_LIMITS))
 		return;
 
 	for (i=0; i<slurmctld_tres_cnt; i++) {
@@ -866,7 +870,7 @@ static void _handle_assoc_tres_run_secs(long double *tres_run_decay,
 {
 	int i;
 
-	if (!assoc)
+	if (!assoc || !(accounting_enforce & ACCOUNTING_ENFORCE_LIMITS))
 		return;
 
 	for (i=0; i<slurmctld_tres_cnt; i++) {
@@ -1040,7 +1044,8 @@ static int _apply_new_usage(struct job_record *job_ptr,
 
 	if ((uint64_t)start_period >= job_time_limit_ends)
 		tres_time_delta = 0;
-	else if (IS_JOB_FINISHED(job_ptr) || IS_JOB_COMPLETING(job_ptr)) {
+	else if (IS_JOB_FINISHED(job_ptr) || IS_JOB_COMPLETING(job_ptr) ||
+		 IS_JOB_RESIZING(job_ptr)) {
 		/* If a job is being requeued sometimes the state will
 		   be pending + completing so handle that the same as
 		   finished so we don't leave time in the mix.
@@ -1115,8 +1120,9 @@ static int _apply_new_usage(struct job_record *job_ptr,
 					  job_ptr->job_id, qos);
 	}
 
-	/* sanity check, there should always be a part_ptr here */
-	if (job_ptr->part_ptr)
+	/* sanity check, there should always be a part_ptr here, but only do
+	 * the qos if it isn't the same qos as the job is using */
+	if (job_ptr->part_ptr && (job_ptr->part_ptr->qos_ptr != qos))
 		qos = (slurmdb_qos_rec_t *)job_ptr->part_ptr->qos_ptr;
 	else
 		qos = NULL;

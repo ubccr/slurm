@@ -124,7 +124,8 @@ static void _push_to_hashtbl(pid_t ppid, pid_t pid,
 
 static int _get_myname(char *s)
 {
-	char path[PATH_MAX], rbuf[1024];
+	char path[PATH_MAX], *rbuf;
+	ssize_t buf_used;
 	int fd;
 
 	sprintf(path, "/proc/%ld/stat", (long)getpid());
@@ -132,16 +133,21 @@ static int _get_myname(char *s)
 		error("Cannot open /proc/getpid()/stat");
 		return -1;
 	}
-	if (read(fd, rbuf, 1024) <= 0) {
+	rbuf = xmalloc(4096);
+	buf_used = read(fd, rbuf, 4096);
+	if ((buf_used <= 0) || (buf_used >= 4096)) {
 		error("Cannot read /proc/getpid()/stat");
+		xfree(rbuf);
 		close(fd);
 		return -1;
 	}
 	close(fd);
 	if (sscanf(rbuf, "%*d %s ", s) != 1) {
 		error("Cannot get the command name from /proc/getpid()/stat");
+		xfree(rbuf);
 		return -1;
 	}
+	xfree(rbuf);
 	return 0;
 }
 
@@ -149,7 +155,8 @@ static xppid_t **_build_hashtbl(void)
 {
 	DIR *dir;
 	struct dirent *de;
-	char path[PATH_MAX], *endptr, *num, rbuf[1024];
+	char path[PATH_MAX], *endptr, *num, *rbuf;
+	ssize_t buf_used;
 	char myname[1024], cmd[1024];
 	char state;
 	int fd;
@@ -167,6 +174,7 @@ static xppid_t **_build_hashtbl(void)
 	hashtbl = (xppid_t **)xmalloc(HASH_LEN * sizeof(xppid_t *));
 
 	slurm_seterrno(0);
+	rbuf = xmalloc(4096);
 	while ((de = readdir(dir)) != NULL) {
 		num = de->d_name;
 		if ((num[0] < '0') || (num[0] > '9'))
@@ -183,7 +191,8 @@ static xppid_t **_build_hashtbl(void)
 		if ((fd = open(path, O_RDONLY)) < 0) {
 			continue;
 		}
-		if (read(fd, rbuf, 1024) <= 0) {
+		buf_used = read(fd, rbuf, 4096);
+		if ((buf_used <= 0) || (buf_used >= 4096)) {
 			close(fd);
 			continue;
 		}
@@ -202,6 +211,7 @@ static xppid_t **_build_hashtbl(void)
 		_push_to_hashtbl((pid_t)ppid, (pid_t)pid,
 				 strcmp(myname, cmd), cmd, hashtbl);
 	}
+	xfree(rbuf);
 	closedir(dir);
 	return hashtbl;
 }
