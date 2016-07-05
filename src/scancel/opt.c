@@ -3,6 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2010-2015 SchedMD LLC.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -118,10 +119,10 @@ static void _opt_args(int, char **);
 /* verify options sanity  */
 static bool _opt_verify(void);
 
-static void _xlate_job_step_ids(char **rest);
+static char **_xlate_job_step_ids(char **rest);
 
 /* translate job state name to number */
-static uint16_t _xlate_state_name(const char *state_name, bool env_var);
+static uint32_t _xlate_state_name(const char *state_name, bool env_var);
 
 /* translate name name to number */
 static uint16_t _xlate_signal_name(const char *signal_name);
@@ -151,14 +152,11 @@ int initialize_and_process_args(int argc, char *argv[])
 
 }
 
-/* has_default_opt()
- *
- * No getopt() options were specified, only the
+/*
+ * No job filtering options were specified (e.g. by user or state), only the
  * job ids is on the command line.
- *
  */
-bool
-has_default_opt(void)
+extern bool has_default_opt(void)
 {
 	if (opt.account == NULL
 	    && opt.batch == false
@@ -167,7 +165,7 @@ has_default_opt(void)
 	    && opt.partition == NULL
 	    && opt.qos == NULL
 	    && opt.reservation == NULL
-	    && opt.signal == (uint16_t) - 1
+	    && opt.signal == (uint16_t) NO_VAL
 	    && opt.state == JOB_END
 	    && opt.user_id == 0
 	    && opt.user_name == NULL
@@ -190,13 +188,13 @@ extern bool has_job_steps(void)
 	return false;
 }
 
-static uint16_t
+static uint32_t
 _xlate_state_name(const char *state_name, bool env_var)
 {
-	int i = job_state_num(state_name);
+	uint32_t i = job_state_num(state_name);
 
-	if (i >= 0)
-		return (uint16_t) i;
+	if (i != NO_VAL)
+		return i;
 
 	if (env_var) {
 		fprintf(stderr, "Unrecognized SCANCEL_STATE value: %s\n",
@@ -260,6 +258,7 @@ static void _opt_default(void)
 	xfree(launch_type);
 }
 #endif
+	opt.full	= false;
 	opt.interactive	= false;
 	opt.job_cnt	= 0;
 	opt.job_list    = NULL;
@@ -268,7 +267,7 @@ static void _opt_default(void)
 	opt.partition	= NULL;
 	opt.qos		= NULL;
 	opt.reservation	= NULL;
-	opt.signal	= (uint16_t)-1; /* no signal specified */
+	opt.signal	= (uint16_t) NO_VAL;
 	opt.state	= JOB_END;
 	opt.user_id	= 0;
 	opt.user_name	= NULL;
@@ -299,12 +298,24 @@ static void _opt_env(void)
 		else if (strcasecmp(val, "F") == 0)
 			opt.batch       = false;
 		else
-			error ("Unrecognized SCANCEL_BATCH value: %s",
-				val);
+			error ("Unrecognized SCANCEL_BATCH value: %s", val);
 	}
 
 	if (getenv("SCANCEL_CTLD"))
 		opt.ctld = true;
+
+	if ( (val=getenv("SCANCEL_FULL")) ) {
+		if (strcasecmp(val, "true") == 0)
+			opt.full       = true;
+		else if (strcasecmp(val, "T") == 0)
+			opt.full       = true;
+		else if (strcasecmp(val, "false") == 0)
+			opt.full       = false;
+		else if (strcasecmp(val, "F") == 0)
+			opt.full       = false;
+		else
+			error ("Unrecognized SCANCEL_FULL value: %s", val);
+	}
 
 	if ( (val=getenv("SCANCEL_INTERACTIVE")) ) {
 		if (strcasecmp(val, "true") == 0)
@@ -364,16 +375,18 @@ static void _opt_env(void)
  */
 static void _opt_args(int argc, char **argv)
 {
-	int opt_char;
-	int option_index;
+	char **rest = NULL;
+	int i, opt_char, option_index;
 	static struct option long_options[] = {
 		{"account",	required_argument, 0, 'A'},
 		{"batch",	no_argument,       0, 'b'},
 		{"ctld",	no_argument,	   0, OPT_LONG_CTLD},
+		{"full",	no_argument,       0, 'f'},
 		{"help",        no_argument,       0, OPT_LONG_HELP},
 		{"interactive", no_argument,       0, 'i'},
 		{"cluster",     required_argument, 0, 'M'},
 		{"clusters",    required_argument, 0, 'M'},
+		{"jobname",     required_argument, 0, 'n'},
 		{"name",        required_argument, 0, 'n'},
 		{"nodelist",    required_argument, 0, 'w'},
 		{"partition",   required_argument, 0, 'p'},
@@ -390,8 +403,8 @@ static void _opt_args(int argc, char **argv)
 		{NULL,          0,                 0, 0}
 	};
 
-	while((opt_char = getopt_long(argc, argv, "A:biM:n:p:Qq:R:s:t:u:vVw:",
-				      long_options, &option_index)) != -1) {
+	while ((opt_char = getopt_long(argc, argv, "A:bfiM:n:p:Qq:R:s:t:u:vVw:",
+				       long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
 			fprintf(stderr,
@@ -408,13 +421,15 @@ static void _opt_args(int argc, char **argv)
 		case OPT_LONG_CTLD:
 			opt.ctld = true;
 			break;
+		case (int)'f':
+			opt.full = true;
+			break;
 		case (int)'i':
 			opt.interactive = true;
 			break;
 		case (int)'M':
 			opt.ctld = true;
-			if (opt.clusters)
-				list_destroy(opt.clusters);
+			FREE_NULL_LIST(opt.clusters);
 			opt.clusters = slurmdb_get_info_cluster(optarg);
 			if (!opt.clusters) {
 				print_db_notok(optarg, 0);
@@ -467,22 +482,28 @@ static void _opt_args(int argc, char **argv)
 		}
 	}
 
-	if (optind < argc) {
-		char **rest = argv + optind;
-		opt.job_list = rest;
-		_xlate_job_step_ids(rest);
+	if (optind < argc)
+		rest = argv + optind;
+	if (rest && (rest[0][0] >= '0') && (rest[0][0] <= '9')) {
+		opt.job_list = _xlate_job_step_ids(rest);
+	} else if (rest) {
+		for (i = optind; i < argc; i++) {
+			if (opt.job_name)
+				xstrcat(opt.job_name, ",");
+			xstrcat(opt.job_name, argv[i]);
+		}
 	}
 
 	if (!_opt_verify())
 		exit(1);
 }
 
-static void
+static char **
 _xlate_job_step_ids(char **rest)
 {
-	int buf_size, buf_offset, i;
+	int buf_size, buf_offset, id_args_size, i, j;
 	long job_id, tmp_l;
-	char *next_str;
+	char **id_args = NULL, *next_str;
 
 	opt.job_cnt = 0;
 
@@ -492,10 +513,21 @@ _xlate_job_step_ids(char **rest)
 	opt.job_id   = xmalloc(buf_size * sizeof(uint32_t));
 	opt.step_id  = xmalloc(buf_size * sizeof(uint32_t));
 
-	for (i = 0; rest[i] && (buf_offset < buf_size); i++) {
-		job_id = strtol(rest[i], &next_str, 10);
+	id_args_size = 128;
+	id_args = xmalloc(sizeof(char *) * id_args_size);
+	for (i = 0; rest[i]; i++) {
+		id_args[i] = xstrdup(rest[i]);
+		if ((i + 4) >= id_args_size) {
+			id_args_size *= 2;
+			id_args = xrealloc(id_args, sizeof(char *) *
+					   id_args_size);
+		}
+	}
+
+	for (i = 0; id_args[i] && (buf_offset < buf_size); i++) {
+		job_id = strtol(id_args[i], &next_str, 10);
 		if (job_id <= 0) {
-			error ("Invalid job_id %s", rest[i]);
+			error ("Invalid job_id %s", id_args[i]);
 			exit (1);
 		}
 		opt.job_id[buf_offset] = job_id;
@@ -505,20 +537,20 @@ _xlate_job_step_ids(char **rest)
 			char save_char, *next_elem;
 			char *end_char = strchr(next_str + 2, ']');
 			if (!end_char || (end_char[1] != '\0')) {
-				error ("Invalid job id %s", rest[i]);
+				error ("Invalid job id %s", id_args[i]);
 				exit (1);
 			}
 			save_char = end_char[1];
 			end_char[1] = '\0';
 			hl = hostlist_create(next_str + 1);
 			if (!hl) {
-				error ("Invalid job id %s", rest[i]);
+				error ("Invalid job id %s", id_args[i]);
 				exit (1);
 			}
 			while ((next_elem = hostlist_shift(hl))) {
 				tmp_l = strtol(next_elem, &next_str, 10);
 				if (tmp_l < 0) {
-					error ("Invalid job id %s", rest[i]);
+					error ("Invalid job id %s", id_args[i]);
 					exit (1);
 				}
 				opt.job_id[buf_offset]   = job_id;
@@ -531,11 +563,14 @@ _xlate_job_step_ids(char **rest)
 			hostlist_destroy(hl);
 			end_char[1] = save_char;
 			/* No step ID support for job array range */
-			break;
+			continue;
+		} else if ((next_str[0] == '_') && (next_str[1] == '*')) {
+			opt.array_id[buf_offset] = INFINITE;
+			next_str += 2;
 		} else if (next_str[0] == '_') {
 			tmp_l = strtol(&next_str[1], &next_str, 10);
 			if (tmp_l < 0) {
-				error ("Invalid job id %s", rest[i]);
+				error ("Invalid job id %s", id_args[i]);
 				exit (1);
 			}
 			opt.array_id[buf_offset] = tmp_l;
@@ -547,7 +582,7 @@ _xlate_job_step_ids(char **rest)
 		if (next_str[0] == '.') {
 			tmp_l = strtol(&next_str[1], &next_str, 10);
 			if (tmp_l < 0) {
-				error ("Invalid job id %s", rest[i]);
+				error ("Invalid job id %s", id_args[i]);
 				exit (1);
 			}
 			opt.step_id[buf_offset] = tmp_l;
@@ -555,12 +590,26 @@ _xlate_job_step_ids(char **rest)
 			opt.step_id[buf_offset] = SLURM_BATCH_SCRIPT;
 		buf_offset++;
 
-		if (next_str[0] != '\0') {
-			error ("Invalid job ID %s", rest[i]);
+		if ((next_str[0] == ',') && (next_str[0] != '\0')) {
+			/* Shift args if job IDs are comma separated.
+			 * Commas may be embedded in the task IDs, so we can't
+			 * simply split the string on commas. */
+			if ((i + 4) >= id_args_size) {
+				id_args_size *= 2;
+				id_args = xrealloc(id_args, sizeof(char *) *
+						   id_args_size);
+			}
+			for (j = id_args_size - 1; j > (i + 1); j--)
+				id_args[j] = id_args[j-1];
+			next_str[0] = '\0';
+			id_args[i+1] = xstrdup(next_str + 1);
+		} else if (next_str[0] != '\0') {
+			error ("Invalid job ID %s", id_args[i]);
 			exit (1);
 		}
 	}
 	opt.job_cnt = buf_offset;
+	return id_args;
 }
 
 
@@ -606,27 +655,52 @@ static void _opt_list(void)
 	info("account        : %s", opt.account);
 	info("batch          : %s", tf_(opt.batch));
 	info("ctld           : %s", tf_(opt.ctld));
+	info("full           : %s", tf_(opt.full));
 	info("interactive    : %s", tf_(opt.interactive));
 	info("job_name       : %s", opt.job_name);
 	info("nodelist       : %s", opt.nodelist);
 	info("partition      : %s", opt.partition);
 	info("qos            : %s", opt.qos);
 	info("reservation    : %s", opt.reservation);
-	info("signal         : %u", opt.signal);
+	if (opt.signal != (uint16_t) NO_VAL)
+		info("signal         : %u", opt.signal);
 	info("state          : %s", job_state_string(opt.state));
 	info("user_id        : %u", opt.user_id);
 	info("user_name      : %s", opt.user_name);
 	info("verbose        : %d", opt.verbose);
 	info("wckey          : %s", opt.wckey);
 
-	for (i=0; i<opt.job_cnt; i++) {
-		info("job_steps      : %u.%u ", opt.job_id[i], opt.step_id[i]);
+	for (i = 0; i < opt.job_cnt; i++) {
+		if (opt.step_id[i] == SLURM_BATCH_SCRIPT) {
+			if (opt.array_id[i] == NO_VAL) {
+				info("job_id[%d]      : %u",
+				     i, opt.job_id[i]);
+			} else if (opt.array_id[i] == INFINITE) {
+				info("job_id[%d]      : %u_*",
+				     i, opt.job_id[i]);
+			} else {
+				info("job_id[%d]      : %u_%u",
+				     i, opt.job_id[i], opt.array_id[i]);
+			}
+		} else {
+			if (opt.array_id[i] == NO_VAL) {
+				info("job_step_id[%d] : %u.%u",
+				     i, opt.job_id[i], opt.step_id[i]);
+			} else if (opt.array_id[i] == INFINITE) {
+				info("job_step_id[%d] : %u_*.%u",
+				     i, opt.job_id[i], opt.step_id[i]);
+			} else {
+				info("job_step_id[%d] : %u_%u.%u",
+				     i, opt.job_id[i], opt.array_id[i],
+				     opt.step_id[i]);
+			}
+		}
 	}
 }
 
 static void _usage(void)
 {
-	printf("Usage: scancel [-A account] [--batch] [--interactive] [-n job_name]\n");
+	printf("Usage: scancel [-A account] [--batch] [--full] [--interactive] [-n job_name]\n");
 	printf("               [-p partition] [-Q] [-q qos] [-R reservation][-s signal | integer]\n");
 	printf("               [-t PENDING | RUNNING | SUSPENDED] [--usage] [-u user_name]\n");
 	printf("               [-V] [-v] [-w hosts...] [--wckey=wckey] [job_id[_array_id][.step_id]]\n");
@@ -638,6 +712,7 @@ static void _help(void)
 	printf("  -A, --account=account           act only on jobs charging this account\n");
 	printf("  -b, --batch                     signal batch shell for specified job\n");
 /*	printf("      --ctld                      send request directly to slurmctld\n"); */
+	printf("  -f, --full                      signal batch shell and all steps for specified job\n");
 	printf("  -i, --interactive               require response from user for each job\n");
 	printf("  -n, --name=job_name             act only on jobs with this name\n");
 	printf("  -p, --partition=partition       act only on jobs in this partition\n");

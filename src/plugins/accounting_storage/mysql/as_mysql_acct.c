@@ -131,10 +131,28 @@ extern int as_mysql_add_accts(mysql_conn_t *mysql_conn, uint32_t uid,
 	char *extra = NULL, *tmp_extra = NULL;
 
 	int affect_rows = 0;
-	List assoc_list = list_create(slurmdb_destroy_association_rec);
+	List assoc_list = list_create(slurmdb_destroy_assoc_rec);
 
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return ESLURM_DB_CONNECTION;
+
+	if (!is_user_min_admin_level(mysql_conn, uid, SLURMDB_ADMIN_OPERATOR)) {
+		slurmdb_user_rec_t user;
+
+		memset(&user, 0, sizeof(slurmdb_user_rec_t));
+		user.uid = uid;
+
+		if (!is_user_any_coord(mysql_conn, &user)) {
+			error("Only admins/operators/coordinators "
+			      "can add accounts");
+			return ESLURM_ACCESS_DENIED;
+		}
+		/* If the user is a coord of any acct they can add
+		 * accounts they are only able to make associations to
+		 * these accounts if they are coordinators of the
+		 * parent they are trying to add to
+		 */
+	}
 
 	user_name = uid_to_string((uid_t) uid);
 	itr = list_iterator_create(acct_list);
@@ -208,7 +226,7 @@ extern int as_mysql_add_accts(mysql_conn_t *mysql_conn, uint32_t uid,
 
 		if (!assoc_list)
 			assoc_list =
-				list_create(slurmdb_destroy_association_rec);
+				list_create(slurmdb_destroy_assoc_rec);
 		list_transfer(assoc_list, object->assoc_list);
 	}
 	list_iterator_destroy(itr);
@@ -260,6 +278,11 @@ extern List as_mysql_modify_accts(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return NULL;
+
+	if (!is_user_min_admin_level(mysql_conn, uid, SLURMDB_ADMIN_OPERATOR)) {
+		errno = ESLURM_ACCESS_DENIED;
+		return NULL;
+	}
 
 	xstrcat(extra, "where deleted=0");
 	if (acct_cond->assoc_cond
@@ -363,7 +386,7 @@ extern List as_mysql_modify_accts(mysql_conn_t *mysql_conn, uint32_t uid,
 	xfree(user_name);
 	if (rc == SLURM_ERROR) {
 		error("Couldn't modify accounts");
-		list_destroy(ret_list);
+		FREE_NULL_LIST(ret_list);
 		errno = SLURM_ERROR;
 		ret_list = NULL;
 	}
@@ -398,6 +421,11 @@ extern List as_mysql_remove_accts(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return NULL;
+
+	if (!is_user_min_admin_level(mysql_conn, uid, SLURMDB_ADMIN_OPERATOR)) {
+		errno = ESLURM_ACCESS_DENIED;
+		return NULL;
+	}
 
 	xstrcat(extra, "where deleted=0");
 	if (acct_cond->assoc_cond
@@ -490,8 +518,7 @@ extern List as_mysql_remove_accts(mysql_conn_t *mysql_conn, uint32_t uid,
 	/* We need to remove these accounts from the coord's that have it */
 	coord_list = as_mysql_remove_coord(
 		mysql_conn, uid, ret_list, NULL);
-	if (coord_list)
-		list_destroy(coord_list);
+	FREE_NULL_LIST(coord_list);
 
 	user_name = uid_to_string((uid_t) uid);
 
@@ -512,7 +539,7 @@ extern List as_mysql_remove_accts(mysql_conn_t *mysql_conn, uint32_t uid,
 	xfree(name_char);
 	xfree(assoc_char);
 	if (rc == SLURM_ERROR) {
-		list_destroy(ret_list);
+		FREE_NULL_LIST(ret_list);
 		return NULL;
 	}
 
@@ -679,8 +706,7 @@ empty:
 		   this list in the acct->name so we don't
 		   free it here
 		*/
-		if (acct_cond->assoc_cond->acct_list)
-			list_destroy(acct_cond->assoc_cond->acct_list);
+		FREE_NULL_LIST(acct_cond->assoc_cond->acct_list);
 		acct_cond->assoc_cond->acct_list = list_create(NULL);
 		acct_cond->assoc_cond->with_deleted = acct_cond->with_deleted;
 	}
@@ -701,7 +727,7 @@ empty:
 		if (acct_cond && acct_cond->with_assocs) {
 			if (!acct_cond->assoc_cond) {
 				acct_cond->assoc_cond = xmalloc(
-					sizeof(slurmdb_association_cond_t));
+					sizeof(slurmdb_assoc_cond_t));
 			}
 
 			list_append(acct_cond->assoc_cond->acct_list,
@@ -714,7 +740,7 @@ empty:
 	    && list_count(acct_cond->assoc_cond->acct_list)) {
 		ListIterator assoc_itr = NULL;
 		slurmdb_account_rec_t *acct = NULL;
-		slurmdb_association_rec_t *assoc = NULL;
+		slurmdb_assoc_rec_t *assoc = NULL;
 		List assoc_list = as_mysql_get_assocs(
 			mysql_conn, uid, acct_cond->assoc_cond);
 
@@ -732,7 +758,7 @@ empty:
 
 				if (!acct->assoc_list)
 					acct->assoc_list = list_create(
-						slurmdb_destroy_association_rec);
+						slurmdb_destroy_assoc_rec);
 				list_append(acct->assoc_list, assoc);
 				list_remove(assoc_itr);
 			}
@@ -743,7 +769,7 @@ empty:
 		list_iterator_destroy(itr);
 		list_iterator_destroy(assoc_itr);
 
-		list_destroy(assoc_list);
+		FREE_NULL_LIST(assoc_list);
 	}
 
 	return acct_list;

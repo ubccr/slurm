@@ -114,11 +114,13 @@ extern int license_job_test(struct job_record *job_ptr, time_t when);
 /*
  * license_validate - Test if the required licenses are valid
  * IN licenses - required licenses
+ * OUT tres_req_cnt - appropriate counts for each requested gres
  * OUT valid - true if required licenses are valid and a sufficient number
  *             are configured (though not necessarily available now)
  * RET license_list, must be destroyed by caller
  */
-extern List license_validate(char *licenses, bool *valid);
+extern List license_validate(char *licenses,
+			     uint64_t *tres_req_cnt, bool *valid);
 
 /*
  * license_list_overlap - test if there is any overlap in licenses
@@ -136,5 +138,33 @@ get_all_license_info(char **buffer_ptr,
                      int *buffer_size,
                      uid_t uid,
                      uint16_t protocol_version);
+
+/*
+ * get_total_license_cnt - give me the total count of a given license name.
+ *
+ */
+extern uint32_t get_total_license_cnt(char *name);
+
+/*
+ * lic_get_value_by_type - Return count of named licenses used by job
+ * IN licenses - list containing licenses_t records
+ * IN name - name of the license
+ * RET number of licenses of the particular type used
+ */
+extern uint32_t license_get_total_cnt_from_list(List license_list, char *name);
+
+/* node_read should be locked before coming in here
+ * returns tres_str of the license_list.
+ */
+extern char *licenses_2_tres_str(List license_list);
+
+
+/* node_read should be locked before coming in here
+ * fills in tres_cnt of the license_list.
+ * locked if assoc_mgr tres read lock is locked or not.
+ */
+extern void license_set_job_tres_cnt(List license_list,
+				     uint64_t *tres_cnt,
+				     bool locked);
 
 #endif /* !_LICENSES_H */

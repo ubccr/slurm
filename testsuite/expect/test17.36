@@ -38,6 +38,7 @@ set test_part_3   "test$test_id\_part_3"
 set num_jobs      0
 set cr_core       0
 set cr_cpu        0
+set cr_socket     0
 set cpu_cnt       0
 set socket_cnt    0
 set thread_cnt    0
@@ -56,33 +57,37 @@ if {[is_super_user] == 0} {
 	send_user "\nWARNING: This test can't be run except as SlurmUser\n"
 	exit 0
 }
+if {[test_select_type_params "CR_SOCKET"]} {
+	send_user "\nWARNING: This test is incompatible with CR_SOCKET allocations\n"
+	exit 0
+}
+if {[test_select_type_params "CR_CORE"]} {
+	set cr_core 1
+}
+if {[test_select_type_params "CR_CPU"]} {
+	set cr_cpu 1
+}
+
+log_user 0
+set job_mem_opt  "--comment=no_mem"
+spawn -noecho $bin_bash -c "exec $scontrol show config | $bin_grep SelectTypeParameters"
+expect {
+	-re "MEMORY" {
+		set job_mem_opt  "--mem-per-cpu=4"
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+log_user 1
 
 proc cr_core_cpu { node } {
 
 	global cr_cpu cr_core core_cnt socket_cnt scontrol number exit_code
 	global cpu_cnt thread_cnt
 
-	# Determine if CR_CPU or CR_CORE is used
 	log_user 0
-	spawn $scontrol show config
-	expect {
-		-re "SelectTypeParameters *= .*CR_CPU" {
-			set cr_cpu 1
-			exp_continue
-		}
-		-re "SelectTypeParameters *= .*CR_CORE" {
-			set cr_core 1
-			exp_continue
-		}
-		timeout {
-			send_user "\nFAILURE: scontrol is not responding\n"
-			set exit_code 1
-		}
-		eof {
-			wait
-		}
-	}
-
 	spawn $scontrol show node $node
 	expect {
 		-re "CoresPerSocket=($number)" {
@@ -156,11 +161,11 @@ proc delete_part {part} {
 }
 
 proc sub_job { job shared part } {
-	global sbatch file_in number job_id exit_code
+	global sbatch file_in number job_id exit_code job_mem_opt
 
 	set job_id 0
 	if { $shared } {
-		spawn $sbatch -a$job -t1 -p$part --share -o/dev/null $file_in
+		spawn $sbatch -a$job -t1 $job_mem_opt -p$part --share -o/dev/null $file_in
 		expect {
 			-re "Submitted batch job ($number)" {
 				set job_id $expect_out(1,string)
@@ -175,7 +180,7 @@ proc sub_job { job shared part } {
 			}
 		}
 	} else {
-		spawn $sbatch -a$job -t1 -p$part -o/dev/null $file_in
+		spawn $sbatch -a$job -t1 $job_mem_opt -p$part -o/dev/null $file_in
 		expect {
 			-re "Submitted batch job ($number)" {
 				set job_id $expect_out(1,string)
@@ -224,7 +229,7 @@ proc check_job { exp_num_jobs } {
 	if { $job_cnt != $exp_num_jobs } {
 		send_user "\nFAILURE: the number of possible jobs that could "
 		send_user "run were not reached ($job_cnt != $exp_num_jobs).\n"
-		send_user "This could be due to memory or other limits.\n"
+		send_user "FAILURE: This could be due to memory or other limits.\n"
 		set exit_code 1
 	}
 }
@@ -346,22 +351,25 @@ delete_part $test_part_1
 # Test partition with shared=YES:2
 #
 ####################################
-send_user "\n\nTest partition with shared=YES:2\n"
+if { [test_gang] == 1 } {
+	send_user "\n\nTest partition with shared=YES:2 incompatible with gang scheduling\n"
+} else {
+	send_user "\n\nTest partition with shared=YES:2\n"
+#	Make a new partition with shared=yes:2
+	create_part $test_part_2 "YES:$shared_j_cnt" $node_name
 
-# Make a new partition with shared=yes:2
-create_part $test_part_2 "YES:$shared_j_cnt" $node_name
+#	Submit a job with shared (expect 2 jobs per core/CPU)
+	set new_job_limit [expr $num_jobs * 2]
+	sub_job "0-$new_job_limit" 1 $test_part_2
+	check_job $new_job_limit
+	cancel_job $job_id
 
-# Submit a job with shared (expect 2 jobs per core/CPU)
-set new_job_limit [expr $num_jobs * 2]
-sub_job "0-$new_job_limit" 1 $test_part_2
-check_job $new_job_limit
-cancel_job $job_id
-
-# Submit a job without shared (expect 1 job per core/CPU)
-sub_job "0-$num_jobs" 0 $test_part_2
-check_job $num_jobs
-cancel_job $job_id
-delete_part $test_part_2
+#	Submit a job without shared (expect 1 job per core/CPU)
+	sub_job "0-$num_jobs" 0 $test_part_2
+	check_job $num_jobs
+	cancel_job $job_id
+	delete_part $test_part_2
+}
 
 ########################################
 #

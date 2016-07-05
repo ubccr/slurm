@@ -685,13 +685,13 @@ extern int basil_geometry(struct node_record *node_ptr_array, int node_cnt)
 
 struct basil_accel_param* build_accel_param(struct job_record* job_ptr)
 {
-	int gpu_mem_req;
+	uint64_t gpu_mem_req;
 	struct basil_accel_param* head,* bap_ptr;
 
 	gpu_mem_req = gres_plugin_get_job_value_by_type(job_ptr->gres_list,
 							"gpu_mem");
 
-	if (gpu_mem_req == NO_VAL)
+	if (gpu_mem_req == NO_VAL64)
 		gpu_mem_req = 0;
 
 	if (!job_ptr) {
@@ -706,7 +706,7 @@ struct basil_accel_param* build_accel_param(struct job_record* job_ptr)
 	bap_ptr = head;
 	bap_ptr->type = BA_GPU;	/* Currently BASIL only permits
 				 * generic resources of type GPU. */
-	bap_ptr->memory_mb = gpu_mem_req;
+	bap_ptr->memory_mb = (uint32_t)gpu_mem_req;
 	bap_ptr->next = NULL;
 
 	return head;
@@ -754,13 +754,15 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 
 	if (cray_conf->sub_alloc) {
 		mppdepth = MAX(1, job_ptr->details->cpus_per_task);
-		if (!job_ptr->details->ntasks_per_node
-		    && job_ptr->details->num_tasks) {
+		if (job_ptr->details->ntasks_per_node) {
+			mppnppn  = job_ptr->details->ntasks_per_node;
+		} else if (job_ptr->details->num_tasks) {
 			mppnppn = (job_ptr->details->num_tasks +
 				   job_ptr->job_resrcs->nhosts - 1) /
 				job_ptr->job_resrcs->nhosts;
-		} else
-			mppnppn  = job_ptr->details->ntasks_per_node;
+		} else {
+			mppnppn = 1;
+		}
 	} else {
 		/* always be 1 */
 		mppdepth = 1;
@@ -1165,7 +1167,7 @@ extern int do_basil_release(struct job_record *job_ptr)
 	 *             stepdmgr, where job_state == NO_VAL is used to
 	 *             distinguish the context from that of slurmctld.
 	 */
-	if (job_ptr->job_state == (uint16_t)NO_VAL &&
+	if (job_ptr->job_state == NO_VAL &&
 	    (get_basil_version() >= BV_4_0)) {
 		int sleeptime = 1;
 

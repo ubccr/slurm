@@ -276,6 +276,7 @@ int xcgroup_ns_is_available(xcgroup_ns_t* cgns)
 
 	if (xcgroup_create(cgns, &cg, "/", 0, 0) == XCGROUP_ERROR)
 		return 0;
+
 	if (xcgroup_get_param(&cg, "release_agent",
 			      &value, &s) != XCGROUP_SUCCESS)
 		fstatus = 0;
@@ -465,7 +466,7 @@ int xcgroup_instanciate(xcgroup_t* cg)
 	file_path = cg->path;
 	uid = cg->uid;
 	gid = cg->gid;
-	create_only=0;
+	create_only = 0;
 	notify = cg->notify;
 
 	/* save current mask and apply working one */
@@ -538,10 +539,15 @@ int xcgroup_load(xcgroup_ns_t* cgns, xcgroup_t* cg, char* uri)
 
 int xcgroup_delete(xcgroup_t* cg)
 {
-	if (rmdir(cg->path))
+	/*
+	 *  Simply delete cgroup with rmdir(2). If cgroup doesn't
+	 *   exist, do not propagate error back to caller.
+	 */
+	if (cg && cg->path && (rmdir(cg->path) < 0) && (errno != ENOENT)) {
+		debug2("xcgroup: rmdir(%s): %m", cg->path);
 		return XCGROUP_ERROR;
-	else
-		return XCGROUP_SUCCESS;
+	}
+	return XCGROUP_SUCCESS;
 }
 
 static int cgroup_procs_readable (xcgroup_t *cg)

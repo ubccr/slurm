@@ -1,6 +1,6 @@
 <!--#include virtual="header.txt"-->
 
-<h1>Download</h1>
+<h1>Download Slurm</h1>
 <p>Slurm source can be downloaded from
 <a href="http://www.schedmd.com/#repos">
 http://www.schedmd.com/#repos</a>.<br>
@@ -20,9 +20,8 @@ Trinity Centre for High Performance Computing,
 Trinity College Dublin, Ireland.
 -->
 
-<p>Related software available from various sources include:
+<h2>Download Related Software</h2>
 <ul>
-
 <li><b>Authentication</b> plugins identifies the user originating
 a message.</li>
 <ul>
@@ -30,7 +29,7 @@ a message.</li>
 <li><b>MUNGE</b> (recommended)<br>
 In order to compile the "auth/munge" authentication plugin for Slurm,
 you will need to build and install MUNGE, available from
-<a href="https://code.google.com/p/munge/">https://code.google.com/p/munge/</a> and
+<a href="http://dun.github.io/munge/">http://dun.github.io/munge/</a> and
 <a href="http://packages.debian.org/src:munge">Debian</a> and
 <a href="http://fedoraproject.org/">Fedora</a> and
 <a href="http://packages.ubuntu.com/src:munge">Ubuntu</a>.</li>
@@ -50,8 +49,10 @@ for the application to manage Kerberos V credentials.</li>
 <ul>
 <li><a href="https://upc-bugs.lbl.gov/blcr/doc/html/">
 <b> BLCR (Berkeley Lab Checkpoint/Restart)</a></b>
-<li><a href="http://dmtcp.sourceforge.net//">
+<li><a href="http://dmtcp.sourceforge.net/">
 <b>DMTCP (Distributed MultiThreaded CheckPointing)</a></b>
+<li><a href="https://computation.llnl.gov/project/scr/">
+<b>Scalable Checkpoint/Restart (SCR) for MPI</a></b>
 </ul><br>
 
 <li><b>Databases</b> can be used to store accounting information.
@@ -175,17 +176,6 @@ Slurm's PAM module has also been packaged for
 <a href="http://packages.debian.org/src:libpam-slurm">Debian</a> and
 <a href="http://packages.ubuntu.com/src:libpam-slurm">Ubuntu</a>
 (both named <i>libpam-slurm</i>).</li><br>
-
-<li><b>Schedulers</b> offering control over the workload</li>
-<ul>
-<li><a href="http://www.sdsc.edu/catalina/">Catalina</a> a scheduler supporting the
-<a href="http://www.ogf.org/">Open Grid Forum</a> Advance Reservation API</li>
-<li><a href="http://www-03.ibm.com/systems/platformcomputing/products/lsf/">Load Sharing Facility (LSF)</a></li>
-<li><a href="http://www.adaptivecomputing.com/products/open-source/maui/">
-Maui Scheduler</a></li>
-<li><a href="http://www.adaptivecomputing.com/products/hpc-products/moab-hpc-suite-enterprise-edition/">
-Moab Cluster Suite</a></li>
-</ul><br>
 
 <li><b>Command wrappers</b><br>
 There is a wrapper for Maui/Moab's showq command
@@ -359,10 +349,56 @@ easy and elegantly manner.
 <li><a href="mslurm/mslurm_overview.pdf">Overview</a></li>
 <li><a href="mslurm/mslurm_install_instructions.pdf">Installation Instructions</a></li>
 <li><a href="mslurm/mslurm.tgz">Code</a></li>
+</ul></li><br>
+
+<li><a name="json"><b>JSON</b></a><br>
+Some Slurm plugins (burst_buffer/cray and power/cray) plugins
+parse JSON format data.
+These plugins are designed to make use of the JSON-C library for this purpose.
+Instructions for the build are as follows:
+<ol>
+<li>Download json-c version 0.12 (or higher) from<br>
+<a href="https://github.com/json-c/json-c/wiki">
+https://github.com/json-c/json-c/wiki</a></li>
+
+<li>Unpackage json-c<br>
+gunzip json-c-0.12.tar.gz<br>
+tar -xf json-c-0.12.tar</li>
+
+<li>Built and install json-c
 <ul>
+<li>If you have current build tools<br>
+cd json-c-0.12<br>
+export CFLAGS=-Wno-error=unused-but-set-variable<br>
+./configure --prefix=DESIRED_PATH<br>
+make<br>
+make install</li>
+
+<li>If you have old build tools<br>
+cd json-c-0.12<br>
+mv aclocal.m4 aclocal.m4.orig<br>
+mv ltmain.sh ltmain.sh.orig<br>
+./autogen.sh<br>
+export CFLAGS=-Wno-error=unused-but-set-variable<br>
+./configure --prefix=DESIRED_JSON_PATH<br>
+make<br>
+make install</li>
+</ul>
+
+<li>Build and install Slurm<br>
+./configure --with-json=DESIRED_JSON_PATH ...<br>
+make -j</li>
+</ol><br>
+
+<li><b>Slurm-web</b><br>
+Slurm-web is a free software, distributed under the GPL version 2 license,
+that provides both a HTTP REST API (based on JSON format) and a web GUI
+with dashboards and graphical views of the current state of your
+Slurm-based HPC supercomputers. The website of Slurm-web, with screenshots:<br>
+<a href="http://edf-hpc.github.io/slurm-web">http://edf-hpc.github.io/slurm-web</a></li>
 
 </ul>
 
-<p style="text-align:center;">Last modified 24 June 2015</p>
+<p style="text-align:center;">Last modified 16 February 2016</p>
 
 <!--#include virtual="footer.txt"-->

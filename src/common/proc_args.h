@@ -50,20 +50,8 @@
 #include "src/common/macros.h" /* true and false */
 #include "src/common/env.h"
 
-
-#define format_task_dist_states(t)			\
-(t == SLURM_DIST_BLOCK) ? "block" :			\
-(t == SLURM_DIST_CYCLIC) ? "cyclic" :			\
-(t == SLURM_DIST_PLANE) ? "plane" :			\
-(t == SLURM_DIST_CYCLIC_CYCLIC) ? "cyclic:cyclic" :	\
-(t == SLURM_DIST_CYCLIC_BLOCK) ? "cyclic:block" :	\
-(t == SLURM_DIST_BLOCK_CYCLIC) ? "block:cyclic" :	\
-(t == SLURM_DIST_BLOCK_BLOCK) ? "block:block" :		\
-(t == SLURM_DIST_BLOCK_CFULL) ? "block:fcyclic" :	\
-(t == SLURM_DIST_CYCLIC_CFULL) ? "cyclic:fcyclic" :	\
-(t == SLURM_DIST_ARBITRARY) ? "arbitrary" :		\
-"unknown"
-
+/* convert task state ID to equivalent string */
+extern char *format_task_dist_states(task_dist_states_t t);
 
 /* print this version of SLURM */
 void print_slurm_version(void);
@@ -133,9 +121,17 @@ uint16_t parse_mail_type(const char *arg);
 /* print the mail type */
 char *print_mail_type(const uint16_t type);
 
-/* search PATH to confirm the access of the given command */
-char *search_path(char *cwd, char *cmd, bool check_current_dir,
-		  int access_mode);
+/*
+ * search PATH to confirm the location and access mode of the given command
+ * IN cwd - current working directory
+ * IN cmd - command to execute
+ * IN check_current_dir - if true, search cwd for the command
+ * IN access_mode - required access rights of cmd
+ * IN test_exec - if false, do not confirm access mode of cmd if full path
+ * RET full path of cmd or NULL if not found
+ */
+char *search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode,
+		  bool test_exec);
 
 /* helper function for printing options */
 char *print_commandline(const int script_argc, char **script_argv);
@@ -168,6 +164,15 @@ extern int	parse_uint16(char *aval, uint16_t *ival);
  * RET     0 if no error, 1 otherwise.
  */
 extern int	parse_uint32(char *aval, uint32_t *ival);
+
+/* Get a decimal integer from arg
+ * IN      name - command line name
+ * IN      val - command line argument value
+ * IN      positive - true if number needs to be greater than 0
+ * RET     Returns the integer on success, exits program on failure.
+ */
+extern int parse_int(const char *name, const char *val, bool positive);
+
 
 /* print_db_notok() - Print an error message about slurmdbd
  *                    is unreachable or wrong cluster name.

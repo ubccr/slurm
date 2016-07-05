@@ -76,11 +76,12 @@ static void _list_delete_job(void *job_entry)
 int _setup_assoc_list(void)
 {
 	slurmdb_update_object_t update;
-	slurmdb_association_rec_t *assoc = NULL;
+	slurmdb_assoc_rec_t *assoc = NULL;
+	slurmdb_tres_rec_t *tres = NULL;
 
 	/* make the main list */
-	assoc_mgr_association_list =
-		list_create(slurmdb_destroy_association_rec);
+	assoc_mgr_assoc_list =
+		list_create(slurmdb_destroy_assoc_rec);
 	assoc_mgr_user_list =
 		list_create(slurmdb_destroy_user_rec);
 	assoc_mgr_qos_list =
@@ -91,37 +92,52 @@ int _setup_assoc_list(void)
 	running_cache = 1;
 	assoc_mgr_init(NULL, NULL, SLURM_SUCCESS);
 
+	/* Here we make the tres we want to add to the system.
+	 * We do this as an update to avoid having to do setup. */
+	memset(&update, 0, sizeof(slurmdb_update_object_t));
+	update.type = SLURMDB_ADD_TRES;
+	update.objects = list_create(slurmdb_destroy_tres_rec);
+
+	tres = xmalloc(sizeof(slurmdb_tres_rec_t));
+	tres->id = 1;
+	tres->type = xstrdup("cpu");
+	list_append(update.objects, tres);
+
+	if (assoc_mgr_update_tres(&update, false))
+		error("assoc_mgr_update_tres: %m");
+	FREE_NULL_LIST(update.objects);
+
 	/* Here we make the associations we want to add to the system.
 	 * We do this as an update to avoid having to do setup. */
 	memset(&update, 0, sizeof(slurmdb_update_object_t));
 	update.type = SLURMDB_ADD_ASSOC;
-	update.objects = list_create(slurmdb_destroy_association_rec);
+	update.objects = list_create(slurmdb_destroy_assoc_rec);
 
-	/* root association */
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	/* root assoc */
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 1;
 	assoc->acct = xstrdup("root");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 2;
 	assoc->parent_id = 1;
 	assoc->shares_raw = 40;
 	assoc->acct = xstrdup("aA");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 21;
 	assoc->parent_id = 2;
 	assoc->shares_raw = 30;
 	assoc->acct = xstrdup("aAA");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 211;
 	assoc->parent_id = 21;
 	assoc->shares_raw = 1;
@@ -130,16 +146,16 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uAA1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 22;
 	assoc->parent_id = 2;
 	assoc->shares_raw = 10;
 	assoc->acct = xstrdup("aAB");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 221;
 	assoc->parent_id = 22;
 	assoc->shares_raw = 1;
@@ -148,8 +164,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uAB1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 222;
 	assoc->parent_id = 22;
 	assoc->shares_raw = 1;
@@ -158,24 +174,24 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uAB2");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 3;
 	assoc->parent_id = 1;
 	assoc->shares_raw = 60;
 	assoc->acct = xstrdup("aB");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 31;
 	assoc->parent_id = 3;
 	assoc->shares_raw = 25;
 	assoc->acct = xstrdup("aBA");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 311;
 	assoc->parent_id = 31;
 	assoc->shares_raw = 1;
@@ -184,16 +200,16 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uBA1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 32;
 	assoc->parent_id = 3;
 	assoc->shares_raw = 35;
 	assoc->acct = xstrdup("aBB");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 321;
 	assoc->parent_id = 32;
 	assoc->shares_raw = 1;
@@ -202,8 +218,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uBB1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 4;
 	assoc->parent_id = 1;
 	assoc->shares_raw = 0;
@@ -211,8 +227,8 @@ int _setup_assoc_list(void)
 	assoc->acct = xstrdup("aC");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 41;
 	assoc->parent_id = 4;
 	assoc->shares_raw = 0;
@@ -223,16 +239,16 @@ int _setup_assoc_list(void)
 
 	/* Check for proper handling of Fairshare=parent */
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 5;
 	assoc->parent_id = 1;
 	assoc->shares_raw = 50;
 	assoc->acct = xstrdup("aD");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 51;
 	assoc->parent_id = 5;
 	assoc->shares_raw = SLURMDB_FS_USE_PARENT;
@@ -240,8 +256,8 @@ int _setup_assoc_list(void)
 	assoc->acct = xstrdup("aDA");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 511;
 	assoc->parent_id = 51;
 	assoc->shares_raw = SLURMDB_FS_USE_PARENT;
@@ -250,8 +266,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uDA1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 512;
 	assoc->parent_id = 51;
 	assoc->shares_raw = 30;
@@ -260,8 +276,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uDA2");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 513;
 	assoc->parent_id = 51;
 	assoc->shares_raw = 50;
@@ -270,8 +286,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uDA3");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 52;
 	assoc->parent_id = 5;
 	assoc->shares_raw = SLURMDB_FS_USE_PARENT;
@@ -280,8 +296,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uD1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 53;
 	assoc->parent_id = 5;
 	assoc->shares_raw = 40;
@@ -290,8 +306,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uD2");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 54;
 	assoc->parent_id = 5;
 	assoc->shares_raw = 50;
@@ -302,8 +318,8 @@ int _setup_assoc_list(void)
 
 	/* Check for proper tie handling */
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 6;
 	assoc->parent_id = 1;
 	assoc->shares_raw = 10;
@@ -311,8 +327,8 @@ int _setup_assoc_list(void)
 	assoc->acct = xstrdup("aE");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 61;
 	assoc->parent_id = 6;
 	assoc->shares_raw = 10;
@@ -321,8 +337,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("aE1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 62;
 	assoc->parent_id = 6;
 	assoc->shares_raw = 10;
@@ -331,8 +347,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("aE2");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 7;
 	assoc->parent_id = 1;
 	assoc->shares_raw = 10;
@@ -341,8 +357,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("u1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 8;
 	assoc->parent_id = 1;
 	assoc->shares_raw = 20;
@@ -350,8 +366,8 @@ int _setup_assoc_list(void)
 	assoc->acct = xstrdup("aF");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 81;
 	assoc->parent_id = 8;
 	assoc->shares_raw = 10;
@@ -360,8 +376,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uF1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 82;
 	assoc->parent_id = 8;
 	assoc->shares_raw = 20;
@@ -370,8 +386,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uF2");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 9;
 	assoc->parent_id = 1;
 	assoc->shares_raw = 8;
@@ -379,8 +395,8 @@ int _setup_assoc_list(void)
 	assoc->acct = xstrdup("aG");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 91;
 	assoc->parent_id = 9;
 	assoc->shares_raw = 10;
@@ -389,8 +405,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uG1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 92;
 	assoc->parent_id = 9;
 	assoc->shares_raw = 10;
@@ -398,8 +414,8 @@ int _setup_assoc_list(void)
 	assoc->acct = xstrdup("aGA");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 921;
 	assoc->parent_id = 92;
 	assoc->shares_raw = 20;
@@ -408,8 +424,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uGA1");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 921;
 	assoc->parent_id = 92;
 	assoc->shares_raw = 20;
@@ -418,8 +434,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("uGA2");
 	list_append(update.objects, assoc);
 
-	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	assoc->usage = create_assoc_mgr_association_usage();
+	assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+	assoc->usage = slurmdb_create_assoc_usage(g_tres_count);
 	assoc->id = 1001;
 	assoc->parent_id = 1;
 	assoc->shares_raw = 10;
@@ -428,7 +444,7 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("u2");
 	list_append(update.objects, assoc);
 
-	if (assoc_mgr_update_assocs(&update))
+	if (assoc_mgr_update_assocs(&update, false))
 		error("assoc_mgr_update_assocs: %m");
 	list_destroy(update.objects);
 
@@ -489,7 +505,7 @@ int main (int argc, char **argv)
 	 * sleep to make sure the thread gets started. */
 	sleep(1);
 	memset(&resp, 0, sizeof(shares_response_msg_t));
-	resp.assoc_shares_list = assoc_mgr_get_shares(NULL, 0, NULL, NULL);
+	assoc_mgr_get_shares(NULL, 0, NULL, &resp);
 	process(&resp, 0);
 
 	/* free memory */
@@ -499,9 +515,10 @@ int main (int argc, char **argv)
 		list_destroy(job_list);
 	if (resp.assoc_shares_list)
 		list_destroy(resp.assoc_shares_list);
-	if (assoc_mgr_association_list)
-		list_destroy(assoc_mgr_association_list);
+	if (assoc_mgr_assoc_list)
+		list_destroy(assoc_mgr_assoc_list);
 	if (assoc_mgr_qos_list)
 		list_destroy(assoc_mgr_qos_list);
+	xfree(assoc_mgr_tres_array);
 	return 0;
 }

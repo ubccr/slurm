@@ -43,7 +43,7 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <signal.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -246,7 +246,16 @@ static void * _service_connection(void *arg)
 			fini = true;
 		}
 
-		(void) _send_resp(conn->newsockfd, buffer);
+		if (_send_resp(conn->newsockfd, buffer) != SLURM_SUCCESS) {
+			/* This is only an issue on persistent connections, and
+			 * really isn't that big of a deal as the slurmctld
+			 * will just send the message again. */
+			if (conn->ctld_port)
+				debug("Problem sending response to "
+				      "connection %d(%s) uid(%d)",
+				      conn->newsockfd, conn->ip, uid);
+			fini = true;
+		}
 		xfree(msg);
 	}
 
@@ -259,7 +268,7 @@ static void * _service_connection(void *arg)
 			cluster_rec.name = conn->cluster_name;
 			cluster_rec.control_host = conn->ip;
 			cluster_rec.control_port = conn->ctld_port;
-			cluster_rec.cpu_count = conn->cluster_cpus;
+			cluster_rec.tres_str = conn->tres_str;
 			debug("cluster %s has disconnected",
 			      conn->cluster_name);
 
@@ -282,11 +291,12 @@ static void * _service_connection(void *arg)
 	}
 
 	acct_storage_g_close_connection(&conn->db_conn);
-	if (slurm_close_accepted_conn(conn->newsockfd) < 0)
+	if (slurm_close(conn->newsockfd) < 0)
 		error("close(%d): %m(%s)",  conn->newsockfd, conn->ip);
 	else
 		debug2("Closed connection %d uid(%d)", conn->newsockfd, uid);
 
+	xfree(conn->tres_str);
 	xfree(conn->cluster_name);
 	xfree(conn);
 	_free_server_thread(pthread_self());
@@ -538,7 +548,7 @@ static void _free_server_thread(pthread_t my_tid)
  * After one second, start sending SIGKILL to the threads. */
 static void _wait_for_thread_fini(void)
 {
-	int i, j;
+	int j;
 
 	if (thread_count == 0)
 		return;
@@ -552,8 +562,15 @@ static void _wait_for_thread_fini(void)
 		pthread_kill(slave_thread_id[j], SIGUSR1);
 	}
 	slurm_mutex_unlock(&thread_count_lock);
-	usleep(100000);	/* Give the threads 100 msec to clean up */
 
+	/* Can't send SIGKILL to threads as it goes to the process. Since this
+	 * is called only when the rpc_mgr is quitting, just let the threads die
+	 * by the dbd dying.  If it's the backup and it's giving up control, let
+	 * the threads finish. thread_count will be decremented when the thread
+	 * finishes -- even if the rpc_mgr is gone.
+	 */
+	/*usleep(100000); */	/* Give the threads 100 msec to clean up */
+	/*
 	for (i=0; ; i++) {
 		if (thread_count == 0)
 			return;
@@ -575,6 +592,7 @@ static void _wait_for_thread_fini(void)
 		slurm_mutex_unlock(&thread_count_lock);
 		sleep(1);
 	}
+	*/
 }
 
 static void _sig_handler(int signal)

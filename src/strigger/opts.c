@@ -210,8 +210,7 @@ extern void parse_command_line(int argc, char *argv[])
 			params.job_id = tmp_l;
 			break;
 		case (int) 'M':
-			if (params.clusters)
-				list_destroy(params.clusters);
+			FREE_NULL_LIST(params.clusters);
 			if (!(params.clusters =
 			      slurmdb_get_info_cluster(optarg))) {
 				print_db_notok(optarg, 0);
@@ -532,7 +531,7 @@ Usage: strigger [--set | --get | --clear] [OPTIONS]\n\
                       reset to default.\n\
   -n, --node[=host]   trigger related to specific node, all nodes by default\n\
   -N, --noheader      Do not print the message header\n\
-  -o, --offset=#      trigger's offset time from event, negative to preceed\n\
+  -o, --offset=#      trigger's offset time from event, negative to precede\n\
   -p, --program=path  pathname of program to execute when triggered\n\
   -Q, --quiet         quiet mode (suppress informational messages)\n\
   -r, --reconfig      trigger event on configuration changes\n\

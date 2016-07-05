@@ -40,9 +40,6 @@
 #  include "config.h"
 #endif
 
-#if !defined(__FreeBSD__)
-#include <net/if.h>
-#endif
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
@@ -55,6 +52,11 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+
+/* net/if.h must come after sys/types.h on NetBSD */
+#if !defined(__FreeBSD__)
+#include <net/if.h>
+#endif
 
 #include "slurm/slurm_errno.h"
 #include "src/common/slurm_xlator.h"
@@ -120,15 +122,12 @@ typedef struct sw_gen_libstate {
  * of how this plugin satisfies that application.  SLURM will only load
  * a switch plugin if the plugin_type string has a prefix of "switch/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as this API matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "switch generic plugin";
 const char plugin_type[]        = "switch/generic";
-const uint32_t plugin_version   = 110;
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 uint64_t debug_flags = 0;
 pthread_mutex_t	global_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -837,8 +836,6 @@ extern int switch_p_build_node_info(switch_node_info_t *switch_node)
 	gen_node_info->node_name = xstrdup(hostname);
 	if (getifaddrs(&if_array) == 0) {
 		for (if_rec = if_array; if_rec; if_rec = if_rec->ifa_next) {
-			if (!if_rec->ifa_addr->sa_data)
-				continue;
 #if !defined(__FreeBSD__)
 	   		if (if_rec->ifa_flags & IFF_LOOPBACK)
 				continue;

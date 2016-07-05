@@ -90,15 +90,12 @@ static uint64_t debug_flags = 0;
  * of how this plugin satisfies that application.  SLURM will only load
  * a task plugin if the plugin_type string has a prefix of "task/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as this API matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "task CRAY plugin";
 const char plugin_type[]        = "task/cray";
-const uint32_t plugin_version   = 100;
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 #ifdef HAVE_NATIVE_CRAY
 #ifdef HAVE_NUMA
@@ -437,6 +434,15 @@ extern int task_p_post_step (stepd_step_rec_t *job)
 		rc = snprintf(path, sizeof(path),
 			      "/dev/cpuset/slurm/uid_%d/job_%"
 			      PRIu32 "/step_batch", job->uid, job->jobid);
+		if (rc < 0) {
+			CRAY_ERR("snprintf failed. Return code: %d", rc);
+			return SLURM_ERROR;
+		}
+	} else if (job->stepid == SLURM_EXTERN_CONT) {
+		// Container for PAM to use for externally launched processes
+		rc = snprintf(path, sizeof(path),
+			      "/dev/cpuset/slurm/uid_%d/job_%"
+			      PRIu32 "/step_extern", job->uid, job->jobid);
 		if (rc < 0) {
 			CRAY_ERR("snprintf failed. Return code: %d", rc);
 			return SLURM_ERROR;
@@ -1003,6 +1009,14 @@ static int _step_epilogue(void)
 	} else if (debug_flags & DEBUG_FLAG_TASK) {
 		debug("Skipping epilogue, %d other steps running", num_steps);
 	}
+	return SLURM_SUCCESS;
+}
+
+/*
+ * Keep track a of a pid.
+ */
+extern int task_p_add_pid (pid_t pid)
+{
 	return SLURM_SUCCESS;
 }
 

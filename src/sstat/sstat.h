@@ -66,7 +66,7 @@
 
 #define ERROR 2
 
-#define STAT_FIELDS "jobid,maxvmsize,maxvmsizenode,maxvmsizetask,avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks,avecpufreq,reqcpufreq,consumedenergy,maxdiskread,maxdiskreadnode,maxdiskreadtask,avediskread,maxdiskwrite,maxdiskwritenode,maxdiskwritetask,avediskwrite"
+#define STAT_FIELDS "jobid,maxvmsize,maxvmsizenode,maxvmsizetask,avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks,avecpufreq,reqcpufreqmin,reqcpufreqmax,reqcpufreqgov,consumedenergy,maxdiskread,maxdiskreadnode,maxdiskreadtask,avediskread,maxdiskwrite,maxdiskwritenode,maxdiskwritetask,avediskwrite"
 
 #define STAT_FIELDS_PID "jobid,nodelist,pids"
 
@@ -77,6 +77,9 @@
 #define SECONDS_IN_MINUTE 60
 #define SECONDS_IN_HOUR (60*SECONDS_IN_MINUTE)
 #define SECONDS_IN_DAY (24*SECONDS_IN_HOUR)
+
+#define SSTAT_BATCH_STEP  0xfffffffd
+#define SSTAT_EXTERN_STEP 0xfffffffc
 
 /* On output, use fields 12-37 from JOB_STEP */
 
@@ -112,7 +115,9 @@ typedef enum {
 		PRINT_NODELIST,
 		PRINT_NTASKS,
 		PRINT_PIDS,
-		PRINT_REQ_CPUFREQ,
+		PRINT_REQ_CPUFREQ_MIN,
+		PRINT_REQ_CPUFREQ_MAX,
+		PRINT_REQ_CPUFREQ_GOV,
 } sstat_print_types_t;
 
 
@@ -124,6 +129,7 @@ typedef struct {
 	int opt_noheader;	/* can only be cleared */
 	int opt_verbose;	/* --verbose */
 	bool pid_format;
+	uint32_t convert_flags;
 } sstat_parameters_t;
 
 extern List print_fields_list;

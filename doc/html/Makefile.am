@@ -9,8 +9,10 @@ generated_html = \
 	add.html \
 	api.html \
 	authplugins.html \
+	bb_plugins.html \
 	big_sys.html \
 	bluegene.html \
+	burst_buffer.html \
 	cgroups.html \
 	checkpoint_blcr.html \
 	checkpoint_plugins.html \
@@ -27,7 +29,6 @@ generated_html = \
 	dist_plane.html \
 	documentation.html \
 	download.html \
-	dynalloc.html \
 	elastic_computing.html \
 	ext_sensorsplugins.html \
 	faq.html \
@@ -62,11 +63,12 @@ generated_html = \
 	overview.html \
 	platforms.html \
 	plugins.html \
+	power_mgmt.html \
 	power_save.html \
+	power_plugins.html \
 	preempt.html \
 	preemption_plugins.html \
 	priority_multifactor.html \
-	priority_multifactor2.html \
 	priority_multifactor3.html \
 	priority_plugins.html \
 	proctrack_plugins.html \
@@ -96,8 +98,10 @@ generated_html = \
 	testimonials.html \
 	topology.html \
 	topology_plugin.html \
+	tres.html \
 	troubleshoot.html \
 	tutorials.html \
+	user_permissions.html \
 	wckey.html
 
 html_DATA = \
@@ -116,7 +120,6 @@ html_DATA = \
 	ibm_pe_fig2.png \
 	k_function.gif \
 	linuxstyles.css \
-	lll.gif \
 	mc_support.gif \
 	plane_ex1.gif \
 	plane_ex2.gif \

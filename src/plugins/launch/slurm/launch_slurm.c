@@ -83,15 +83,12 @@
  * of how this plugin satisfies that application.  SLURM will only load
  * a task plugin if the plugin_type string has a prefix of "task/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as this API matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "launch SLURM plugin";
 const char plugin_type[]        = "launch/slurm";
-const uint32_t plugin_version   = 101;
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 static srun_job_t *local_srun_job = NULL;
 static uint32_t *local_global_rc = NULL;
@@ -558,6 +555,7 @@ extern int launch_p_step_launch(
 	launch_params.cpu_bind_type = opt.cpu_bind_type;
 	launch_params.mem_bind = opt.mem_bind;
 	launch_params.mem_bind_type = opt.mem_bind_type;
+	launch_params.accel_bind_type = opt.accel_bind_type;
 	launch_params.open_mode = opt.open_mode;
 	if (opt.acctg_freq >= 0)
 		launch_params.acctg_freq = opt.acctg_freq;
@@ -566,7 +564,9 @@ extern int launch_p_step_launch(
 		launch_params.cpus_per_task	= opt.cpus_per_task;
 	else
 		launch_params.cpus_per_task	= 1;
-	launch_params.cpu_freq          = opt.cpu_freq;
+	launch_params.cpu_freq_min      = opt.cpu_freq_min;
+	launch_params.cpu_freq_max      = opt.cpu_freq_max;
+	launch_params.cpu_freq_gov      = opt.cpu_freq_gov;
 	launch_params.task_dist         = opt.distribution;
 	launch_params.ckpt_dir		= opt.ckpt_dir;
 	launch_params.restart_dir       = opt.restart_dir;

@@ -7,7 +7,7 @@
  *  Written by Martin Perry <martin.perry@bull.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,14 +58,20 @@ extern int set_system_cgroup_cpus(char *phys_core_str);
 /* Set memory limit in system memory cgroup */
 extern int set_system_cgroup_mem_limit(uint32_t mem_spec_limit);
 
+/* Disable OOM killer in system memory cgroup */
+extern int disable_system_cgroup_mem_oom();
+
 /* Attach pid to system cpuset cgroup */
 extern int attach_system_cpuset_pid(pid_t pid);
 
 /* Attach a pid to system memory cgroup */
 extern int attach_system_memory_pid(pid_t pid);
 
-/* Check that cgroup job confinement is configured */
-extern bool check_cgroup_job_confinement(void);
+/* Check that corespec cgroup job confinement is configured */
+extern bool check_corespec_cgroup_job_confinement(void);
+
+/* Check that memspec cgroup job confinement is configured */
+extern bool check_memspec_cgroup_job_confinement(void);
 
 /* Attach a pid to the system cgroups */
 extern void attach_system_cgroup_pid(pid_t pid);

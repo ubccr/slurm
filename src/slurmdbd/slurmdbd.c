@@ -56,14 +56,15 @@
 #include "src/common/daemonize.h"
 #include "src/common/fd.h"
 #include "src/common/log.h"
+#include "src/common/proc_args.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_auth.h"
+#include "src/common/slurm_time.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
-#include "src/common/proc_args.h"
 
 #include "src/slurmdbd/read_config.h"
 #include "src/slurmdbd/rpc_mgr.h"
@@ -182,7 +183,8 @@ int main(int argc, char *argv[])
 
 	/* If we are tacking wckey we need to cache
 	   wckeys, if we aren't only cache the users, qos */
-	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_USER | ASSOC_MGR_CACHE_QOS;
+	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_USER |
+		ASSOC_MGR_CACHE_QOS | ASSOC_MGR_CACHE_TRES;
 	if (slurmdbd_conf->track_wckey)
 		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
 
@@ -207,7 +209,7 @@ int main(int argc, char *argv[])
 			acct_storage_g_commit(db_conn, 1);
 			run_dbd_backup();
 			if (!shutdown_time)
-				assoc_mgr_refresh_lists(db_conn);
+				assoc_mgr_refresh_lists(db_conn, 0);
 		} else if (slurmdbd_conf->dbd_host &&
 			   (!strcmp(slurmdbd_conf->dbd_host, node_name) ||
 			    !strcmp(slurmdbd_conf->dbd_host, "localhost"))) {
@@ -550,7 +552,7 @@ static void _request_registrations(void *db_conn)
 			clusteracct_storage_g_fini_ctld(db_conn, cluster_rec);
 	}
 	list_iterator_destroy(itr);
-	list_destroy(cluster_list);
+	FREE_NULL_LIST(cluster_list);
 }
 
 static void _rollup_handler_cancel()
@@ -574,7 +576,7 @@ static void *_rollup_handler(void *db_conn)
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
-	if (!localtime_r(&start_time, &tm)) {
+	if (!slurm_localtime_r(&start_time, &tm)) {
 		fatal("Couldn't get localtime for rollup handler %ld",
 		      (long)start_time);
 		return NULL;
@@ -586,30 +588,32 @@ static void *_rollup_handler(void *db_conn)
 		/* run the roll up */
 		slurm_mutex_lock(&rollup_lock);
 		running_rollup = 1;
-		debug2("running rollup at %s", slurm_ctime(&start_time));
+		debug2("running rollup at %s", slurm_ctime2(&start_time));
 		acct_storage_g_roll_usage(db_conn, 0, 0, 1);
 		acct_storage_g_commit(db_conn, 1);
 		running_rollup = 0;
 		slurm_mutex_unlock(&rollup_lock);
 
-		/* sleep for an hour */
-		tm.tm_sec = 0;
-		tm.tm_min = 0;
-		tm.tm_hour++;
-		tm.tm_isdst = -1;
-		next_time = mktime(&tm);
-
 		/* get the time now we have rolled usage */
 		start_time = time(NULL);
 
-		sleep((next_time-start_time));
-
-		start_time = time(NULL);
-		if (!localtime_r(&start_time, &tm)) {
+		if (!slurm_localtime_r(&start_time, &tm)) {
 			fatal("Couldn't get localtime for rollup handler %ld",
 			      (long)start_time);
 			return NULL;
 		}
+
+		/* sleep until the next hour */
+		tm.tm_sec = 0;
+		tm.tm_min = 0;
+		tm.tm_hour++;
+		tm.tm_isdst = -1;
+		next_time = slurm_mktime(&tm);
+
+		sleep((next_time - start_time));
+
+		start_time = next_time;
+
 		/* Just in case some new uids were added to the system
 		   pick them up here. */
 		assoc_mgr_set_missing_uids();
@@ -689,14 +693,13 @@ static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec)
 		slurm_msg_t_init(&out_msg);
 		out_msg.msg_type = ACCOUNTING_REGISTER_CTLD;
 		out_msg.flags = SLURM_GLOBAL_AUTH_KEY;
-		out_msg.protocol_version
-			= slurmdbd_translate_rpc(cluster_rec->rpc_version);
+		out_msg.protocol_version = cluster_rec->rpc_version;
 		slurm_send_node_msg(fd, &out_msg);
 		/* We probably need to add matching recv_msg function
 		 * for an arbitray fd or should these be fire
 		 * and forget?  For this, that we can probably
 		 * forget about it */
-		slurm_close_stream(fd);
+		slurm_close(fd);
 	}
 	return rc;
 }

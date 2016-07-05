@@ -208,10 +208,8 @@ static int dyn_spank_set_job_env (const char *var, const char *val, int ovwt);
 
 static void spank_stack_destroy (struct spank_stack *stack)
 {
-	if (stack->plugin_list)
-		list_destroy (stack->plugin_list);
-	if (stack->option_cache)
-		list_destroy (stack->option_cache);
+	FREE_NULL_LIST (stack->plugin_list);
+	FREE_NULL_LIST (stack->option_cache);
 	xfree (stack->plugin_path);
 	xfree (stack);
 }
@@ -611,6 +609,7 @@ static int _spank_conf_include (struct spank_stack *stack,
 		break;
 	  case GLOB_NOSPACE:
 		errno = ENOMEM;
+		break;
 	  case GLOB_ABORTED:
 		verbose ("%s:%d: cannot read dir %s: %m",
 			file, lineno, pattern);

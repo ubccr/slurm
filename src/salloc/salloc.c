@@ -58,14 +58,16 @@
 
 #include "slurm/slurm.h"
 
+#include "src/common/cpu_frequency.h"
 #include "src/common/env.h"
+#include "src/common/plugstack.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_rlimits_info.h"
+#include "src/common/slurm_time.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
-#include "src/common/plugstack.h"
 
 #include "src/salloc/salloc.h"
 #include "src/salloc/opt.h"
@@ -420,7 +422,20 @@ int main(int argc, char *argv[])
 				     cluster_name);
 		xfree(cluster_name);
 	}
-
+	if (alloc->env_size) {	/* Used to set Burst Buffer environment */
+		char *key, *value, *tmp;
+		for (i = 0; i < alloc->env_size; i++) {
+			tmp = xstrdup(alloc->environment[i]);
+			key = tmp;
+			value = strchr(tmp, '=');
+			if (value) {
+				value[0] = '\0';
+				value++;
+				env_array_append(&env, key, value);
+			}
+			xfree(tmp);
+		}
+	}
 
 	env_array_set_environment(env);
 	env_array_free(env);
@@ -493,10 +508,10 @@ relinquish:
 	if (allocation_state != REVOKED) {
 		pthread_mutex_unlock(&allocation_state_lock);
 
-		info("Relinquishing job allocation %d", alloc->job_id);
+		info("Relinquishing job allocation %u", alloc->job_id);
 		if ((slurm_complete_job(alloc->job_id, status) != 0) &&
 		    (slurm_get_errno() != ESLURM_ALREADY_DONE))
-			error("Unable to clean up job allocation %d: %m",
+			error("Unable to clean up job allocation %u: %m",
 			      alloc->job_id);
 		pthread_mutex_lock(&allocation_state_lock);
 		allocation_state = REVOKED;
@@ -626,6 +641,11 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->reservation = xstrdup(opt.reservation);
 	desc->profile  = opt.profile;
 	desc->wckey  = xstrdup(opt.wckey);
+
+	desc->cpu_freq_min = opt.cpu_freq_min;
+	desc->cpu_freq_max = opt.cpu_freq_max;
+	desc->cpu_freq_gov = opt.cpu_freq_gov;
+
 	if (opt.req_switch >= 0)
 		desc->req_switch = opt.req_switch;
 	if (opt.wait4switch >= 0)
@@ -655,7 +675,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.licenses)
 		desc->licenses = xstrdup(opt.licenses);
 	desc->network = opt.network;
-	if (opt.nice)
+	if (opt.nice != NO_VAL)
 		desc->nice = NICE_OFFSET + opt.nice;
 	if (opt.priority)
 		desc->priority = opt.priority;
@@ -664,6 +684,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->mail_user = xstrdup(opt.mail_user);
 	if (opt.begin)
 		desc->begin_time = opt.begin;
+	if (opt.burst_buffer)
+		desc->burst_buffer = opt.burst_buffer;
 	if (opt.account)
 		desc->account = xstrdup(opt.account);
 	if (opt.acctg_freq)
@@ -756,6 +778,11 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->spank_job_env      = opt.spank_job_env;
 		desc->spank_job_env_size = opt.spank_job_env_size;
 	}
+
+	if (opt.power_flags)
+		desc->power_flags = opt.power_flags;
+	if (opt.sicp_mode)
+		desc->sicp_mode = opt.sicp_mode;
 
 	return 0;
 }
@@ -923,7 +950,7 @@ static void _timeout_handler(srun_timeout_msg_t *msg)
 	if (msg->timeout != last_timeout) {
 		last_timeout = msg->timeout;
 		verbose("Job allocation time limit to be reached at %s",
-			slurm_ctime(&msg->timeout));
+			slurm_ctime2(&msg->timeout));
 	}
 }
 

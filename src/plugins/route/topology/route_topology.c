@@ -87,18 +87,16 @@ int switch_levels = 0;
  * of how this plugin satisfies that application.  SLURM will only load
  * a task plugin if the plugin_type string has a prefix of "task/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as this API matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "route topology plugin";
 const char plugin_type[]        = "route/topology";
-const uint32_t plugin_version   = 101;
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 /* Global data */
 static uint64_t debug_flags = 0;
+static pthread_mutex_t route_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*****************************************************************************\
  *  Functions required of all plugins
@@ -155,6 +153,7 @@ extern int route_p_split_hostlist(hostlist_t hl,
 	bitstr_t *fwd_bitmap = NULL;		/* nodes in forward list */
 
 	msg_count = hostlist_count(hl);
+	slurm_mutex_lock(&route_lock);
 	if (switch_record_cnt == 0) {
 		/* configs have not already been processed */
 		slurm_conf_init(NULL);
@@ -170,6 +169,7 @@ extern int route_p_split_hostlist(hostlist_t hl,
 			fatal("ROUTE: Failed to build topology config");
 		}
 	}
+	slurm_mutex_unlock(&route_lock);
 	*sp_hl = (hostlist_t*) xmalloc(switch_record_cnt * sizeof(hostlist_t));
 	/* create bitmap of nodes to send message too */
 	if (hostlist2bitmap (hl, false, &nodes_bitmap) != SLURM_SUCCESS) {
@@ -284,5 +284,10 @@ extern slurm_addr_t* route_p_next_collector ( bool *is_collector )
  */
 extern slurm_addr_t* route_p_next_collector_backup ( void )
 {
-	return route_next_collector_backup();
+	/* return NULL until we have a clearly defined backup.
+	 * Otherwise we could get into a sending loop if the primary
+	 * fails with us sending to a sibling that may have me as a
+	 * parent.
+	 */
+	return NULL;
 }

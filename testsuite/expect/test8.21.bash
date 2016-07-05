@@ -1,5 +1,28 @@
 #!/usr/bin/env bash
-
+############################################################################
+# Portion of Slurm test suite
+############################################################################
+# Copyright (C) 2015 SchedMD LLC
+# Written by Nathan Yee, SchedMD
+#
+# This file is part of SLURM, a resource management program.
+# For details, see <http://slurm.schedmd.com/>.
+# Please also read the included file: DISCLAIMER.
+#
+# SLURM is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation; either version 2 of the License, or (at your option)
+# any later version.
+#
+# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along
+# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
+############################################################################
 if [ $# -ne 5 ]; then
 	echo "test8.21.bash <srun_path> <squeue_path> <job_id> <job_size> <mode:1|2?"
 	exit 1
@@ -13,7 +36,7 @@ test_mode=$5
 delay_time=1
 while [ $delay_time -le 60 ]
 do
-	$srun -N1  --test-only --immediate /bin/true
+	$srun -N1  --test-only --immediate true
 	rc=$?
 	if [ $rc -eq 0 ]
 	then

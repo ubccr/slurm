@@ -59,6 +59,7 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
+#include "src/slurmctld/burst_buffer.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/preempt.h"
 #include "src/slurmctld/reservation.h"
@@ -241,7 +242,7 @@ static void _compute_start_times(void)
 			break;
 		}
 	}
-	list_destroy(job_queue);
+	FREE_NULL_LIST(job_queue);
 	FREE_NULL_BITMAP(alloc_bitmap);
 }
 
@@ -279,6 +280,7 @@ extern void *builtin_agent(void *args)
 		lock_slurmctld(all_locks);
 		_compute_start_times();
 		last_sched_time = time(NULL);
+		(void) bb_g_job_try_stage_in();
 		unlock_slurmctld(all_locks);
 	}
 	return NULL;

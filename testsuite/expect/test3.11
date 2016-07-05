@@ -48,6 +48,7 @@ set exit_code		0
 set res_name		""
 set res_name_save	""
 set res_nodes		""
+set res_nodecnt		0
 set res_thread_cnt	0
 set user_name		""
 set def_partition 	""
@@ -409,6 +410,11 @@ set cores_per_node [expr $cores_per_socket * $sockets_per_node]
 set node_count [available_nodes $def_partition ""]
 set cluster_cpus [expr $cores_per_node * $node_count]
 
+set cr_socket 0
+if {[test_select_type_params "CR_SOCKET"]} {
+	set cr_socket 1
+}
+
 #
 # Get the user name
 #
@@ -438,11 +444,11 @@ inc3_11_3
 inc3_11_4
 inc3_11_5
 inc3_11_6
-if {$cons_res_actived == 1 && $cores_per_node > 1 && $core_spec == 0 && $exclusive == 0} {
+if {$cons_res_actived == 1 && $cores_per_node > 1 && $core_spec == 0 && $exclusive == 0 && $cr_socket == 0} {
 	inc3_11_7
 	inc3_11_8
 }
-if {$cons_res_actived == 1 && $cores_per_node > 1 && $core_spec == 0 && $exclusive == 0 && $irregular_node_name == 0} {
+if {$cons_res_actived == 1 && $cores_per_node > 1 && $core_spec == 0 && $exclusive == 0 && $cr_socket == 0 && $irregular_node_name == 0} {
 	inc3_11_9
 }
 

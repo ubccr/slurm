@@ -41,7 +41,7 @@ set array_in      2
 print_header $test_id
 
 if {[get_array_config] < [expr $array_size + 1]} {
-	send_user "\nWARNING: MaxArraySize is to small\n"
+	send_user "\nWARNING: MaxArraySize is too small\n"
 	exit 0
 }
 
@@ -136,7 +136,9 @@ set new_job_id [check_update ${job_id}_2 4]
 # Make sure other tasks remain unchanged
 check_update ${job_id}_1 1
 
-cancel_job $job_id
+if {[cancel_job $job_id] != 0} {
+	set exit_code 1
+}
 
 if {$exit_code == 0} {
 	exec $bin_rm -f $file_script

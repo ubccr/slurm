@@ -120,19 +120,17 @@ union {
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as the job accounting API
- * matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[] = "AcctGatherEnergy RAPL plugin";
 const char plugin_type[] = "acct_gather_energy/rapl";
-const uint32_t plugin_version = 100;
+const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
 static acct_gather_energy_t *local_energy = NULL;
 static uint64_t debug_flags = 0;
+
+static int dataset_id = -1; /* id of the dataset for profile data */
 
 /* one cpu in the package */
 static int pkg2cpu[MAX_PKGS] = {[0 ... MAX_PKGS-1] = -1};
@@ -140,6 +138,8 @@ static int pkg_fd[MAX_PKGS] = {[0 ... MAX_PKGS-1] = -1};
 static char hostname[MAXHOSTNAMELEN];
 
 static int nb_pkg = 0;
+
+extern void acct_gather_energy_p_conf_set(s_p_hashtbl_t *tbl);
 
 static char *_msr_string(int which)
 {
@@ -355,24 +355,25 @@ static void _get_joules_task(acct_gather_energy_t *energy)
 	if (debug_flags & DEBUG_FLAG_ENERGY)
 		info("RAPL Result %"PRIu64" = %.6f Joules", result, ret);
 
-	if (energy->consumed_energy != 0) {
+	if (energy->consumed_energy) {
 		uint16_t node_freq;
-		energy->consumed_energy = (uint32_t)ret - energy->base_watts;
+		energy->consumed_energy =
+			(uint64_t)ret - energy->base_consumed_energy;
 		energy->current_watts =
 			(uint32_t)ret - energy->previous_consumed_energy;
 		node_freq = slurm_get_acct_gather_node_freq();
 		if (node_freq)	/* Prevent divide by zero */
-			local_energy->current_watts /= (float)node_freq;
-	}
-	if (energy->consumed_energy == 0) {
+			energy->current_watts /= (float)node_freq;
+	} else {
 		energy->consumed_energy = 1;
-		energy->base_watts = (uint32_t)ret;
+		energy->base_consumed_energy = (uint64_t)ret;
 	}
-	energy->previous_consumed_energy = (uint32_t)ret;
+	energy->previous_consumed_energy = (uint64_t)ret;
 	energy->poll_time = time(NULL);
 
 	if (debug_flags & DEBUG_FLAG_ENERGY)
-		info("_get_joules_task: current %.6f Joules, consumed %u",
+		info("_get_joules_task: current %.6f Joules, "
+		     "consumed %"PRIu64"",
 		     ret, energy->consumed_energy);
 }
 
@@ -393,25 +394,38 @@ static int _running_profile(void)
 
 static int _send_profile(void)
 {
-	acct_energy_data_t ener;
+	uint64_t curr_watts;
+	acct_gather_profile_dataset_t dataset[] = {
+		{ "Power", PROFILE_FIELD_UINT64 },
+		{ NULL, PROFILE_FIELD_NOT_SET }
+	};
 
 	if (!_running_profile())
 		return SLURM_SUCCESS;
 
 	if (debug_flags & DEBUG_FLAG_ENERGY)
-		info("_send_profile: consumed %d watts",
+		info("_send_profile: consumed %u watts",
 		     local_energy->current_watts);
 
-	memset(&ener, 0, sizeof(acct_energy_data_t));
-	/*TODO function to calculate Average CPUs Frequency*/
-	/*ener->cpu_freq = // read /proc/...*/
-	ener.cpu_freq = 1;
-	ener.time = time(NULL);
-	ener.power = local_energy->current_watts;
-	acct_gather_profile_g_add_sample_data(
-		ACCT_GATHER_PROFILE_ENERGY, &ener);
+	if (dataset_id < 0) {
+		dataset_id = acct_gather_profile_g_create_dataset(
+			"Energy", NO_PARENT, dataset);
+		if (debug_flags & DEBUG_FLAG_ENERGY)
+			debug("Energy: dataset created (id = %d)", dataset_id);
+		if (dataset_id == SLURM_ERROR) {
+			error("Energy: Failed to create the dataset for RAPL");
+			return SLURM_ERROR;
+		}
+	}
 
-	return SLURM_ERROR;
+	curr_watts = (uint64_t)local_energy->current_watts;
+	if (debug_flags & DEBUG_FLAG_PROFILE) {
+		info("PROFILE-Energy: power=%u", local_energy->current_watts);
+	}
+
+	return acct_gather_profile_g_add_sample_data(dataset_id,
+	                                             (void *)&curr_watts,
+						     local_energy->poll_time);
 }
 
 extern int acct_gather_energy_p_update_node_energy(void)
@@ -420,7 +434,7 @@ extern int acct_gather_energy_p_update_node_energy(void)
 
 	xassert(_run_in_daemon());
 
-	if (!local_energy || local_energy->current_watts == NO_VAL)
+	if (local_energy->current_watts == NO_VAL)
 		return rc;
 
 	_get_joules_task(local_energy);
@@ -470,21 +484,33 @@ extern int acct_gather_energy_p_get_data(enum acct_energy_type data_type,
 	int rc = SLURM_SUCCESS;
 	acct_gather_energy_t *energy = (acct_gather_energy_t *)data;
 	time_t *last_poll = (time_t *)data;
+	uint16_t *sensor_cnt = (uint16_t *)data;
 
 	xassert(_run_in_daemon());
 
+	if (!local_energy) {
+		debug("%s: trying to get data %d, but no local_energy yet.",
+		      __func__, data_type);
+		acct_gather_energy_p_conf_set(NULL);
+	}
+
 	switch (data_type) {
 	case ENERGY_DATA_JOULES_TASK:
+	case ENERGY_DATA_NODE_ENERGY_UP:
 		if (local_energy->current_watts == NO_VAL)
 			energy->consumed_energy = NO_VAL;
 		else
 			_get_joules_task(energy);
 		break;
 	case ENERGY_DATA_STRUCT:
+	case ENERGY_DATA_NODE_ENERGY:
 		memcpy(energy, local_energy, sizeof(acct_gather_energy_t));
 		break;
 	case ENERGY_DATA_LAST_POLL:
 		*last_poll = local_energy->poll_time;
+		break;
+	case ENERGY_DATA_SENSOR_CNT:
+		*sensor_cnt = 1;
 		break;
 	default:
 		error("acct_gather_energy_p_get_data: unknown enum %d",
@@ -533,11 +559,15 @@ extern void acct_gather_energy_p_conf_set(s_p_hashtbl_t *tbl)
 	if (!_run_in_daemon())
 		return;
 
+	/* Already been here, we shouldn't need to visit again */
+	if (local_energy)
+		return;
+
 	_hardware();
 	for (i = 0; i < nb_pkg; i++)
 		pkg_fd[i] = _open_msr(pkg2cpu[i]);
 
-	local_energy = acct_gather_energy_alloc();
+	local_energy = acct_gather_energy_alloc(1);
 
 	result = _read_msr(pkg_fd[0], MSR_RAPL_POWER_UNIT);
 	if (result == 0)

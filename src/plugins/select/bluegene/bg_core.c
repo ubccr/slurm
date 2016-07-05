@@ -120,6 +120,14 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 		return SLURM_SUCCESS;
 	}
 
+	/* The reason restore is used on the entire list is if this
+	 * was for a bunch of small blocks.  If we record is marked to
+	 * be destroyed and it is bigger than 1 midplane destroy it
+	 * even if restore is true.
+	 */
+	 if (restore && bg_record->destroy && (bg_record->mp_count > 1))
+		restore = false;
+
 	/* If we are here we are done with the destroy so just reset it. */
 	bg_record->destroy = 0;
 
@@ -259,7 +267,7 @@ static void *_track_freeing_blocks(void *args)
 	slurm_mutex_unlock(&block_state_mutex);
 	last_bg_update = time(NULL);
 	list_iterator_destroy(itr);
-	list_destroy(track_list);
+	FREE_NULL_LIST(track_list);
 	xfree(bg_free_list);
 	return NULL;
 }
@@ -322,7 +330,7 @@ extern bool block_mp_passthrough(bg_record_t *bg_record, int mp_bit)
 
 /* block_state_mutex must be unlocked before calling this. */
 extern void bg_requeue_job(uint32_t job_id, bool wait_for_start,
-			   bool slurmctld_locked, uint16_t job_state,
+			   bool slurmctld_locked, uint32_t job_state,
 			   bool preempted)
 {
 	int rc;
@@ -642,8 +650,7 @@ extern void free_block_list(uint32_t job_id, List track_list,
 
 	if (kill_job_list) {
 		bg_status_process_kill_job_list(kill_job_list, JOB_FAILED, 0);
-		list_destroy(kill_job_list);
-		kill_job_list = NULL;
+		FREE_NULL_LIST(kill_job_list);
 	}
 
 	if (wait) {

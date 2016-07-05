@@ -92,6 +92,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_job_array_task_id)
 #define job_format_add_batch_host(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_batch_host)
+#define job_format_add_burst_buffer(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_burst_buffer)
 #define job_format_add_core_spec(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_core_spec)
 #define job_format_add_job_id(list,wid,right,suffix) \
@@ -269,6 +271,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_job_min_time)
 #define job_format_add_wait4switch(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_wait4switch)
+#define job_format_add_tres(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_tres)
 
 
 /*****************************************************************************
@@ -280,6 +284,8 @@ int _print_job_array_task_id(job_info_t * job, int width, bool right_justify,
 			     char* suffix);
 int _print_job_batch_host(job_info_t * job, int width, bool right_justify,
 			char* suffix);
+int _print_job_burst_buffer(job_info_t * job, int width, bool right_justify,
+			    char* suffix);
 int _print_job_core_spec(job_info_t * job, int width, bool right_justify,
 			 char* suffix);
 int _print_job_job_id(job_info_t * job, int width, bool right_justify,
@@ -449,6 +455,8 @@ int _print_job_min_time(job_info_t * job, int width,
 			bool right_justify, char* suffix);
 int _print_job_wait4switch(job_info_t * job, int width,
 			   bool right_justify, char* suffix);
+int _print_job_tres(job_info_t * job, int width,
+		    bool right_justify, char *suffix);
 
 /*****************************************************************************
  * Step Print Format Functions

@@ -56,7 +56,6 @@ static char *	_job_name2id(char *job_name, uint32_t job_uid);
 static char *	_next_job_id(void);
 static int	_parse_checkpoint_args(int argc, char **argv,
 				       uint16_t *max_wait, char **image_dir);
-static int	_parse_requeue_flags(char *, uint32_t *state_flags);
 static int	_parse_restart_args(int argc, char **argv,
 				    uint16_t *stick, char **image_dir);
 static void	_update_job_size(uint32_t job_id);
@@ -102,7 +101,7 @@ static bool _is_job_id(char *job_str)
 	return true;
 
 fail:	xfree(local_job_str);
-	debug("Character %d in %s is not a valid job ID", i, job_str);
+	debug("Character %d in %s is invalid job ID", i, job_str);
 	return false;
 }
 
@@ -370,6 +369,7 @@ scontrol_hold(char *op, char *job_str)
 	static job_info_msg_t *jobs = NULL;
 	job_array_resp_msg_t *resp = NULL;
 	int i, rc = SLURM_SUCCESS, rc2;
+	int j;
 	job_desc_msg_t job_msg;
 	uint32_t job_id = 0;
 	char *job_name = NULL;
@@ -493,16 +493,16 @@ scontrol_hold(char *op, char *job_str)
 					job_msg.job_id_str);
 			}
 		} else if (resp) {
-			for (i = 0; i < resp->job_array_count; i++) {
-				if ((resp->error_code[i] == SLURM_SUCCESS) &&
+			for (j = 0; j < resp->job_array_count; j++) {
+				if ((resp->error_code[j] == SLURM_SUCCESS) &&
 				    (resp->job_array_count == 1))
 					continue;
 				exit_code = 1;
 				if (quiet_flag == 1)
 					continue;
 				fprintf(stderr, "%s: %s\n",
-					resp->job_array_id[i],
-					slurm_strerror(resp->error_code[i]));
+					resp->job_array_id[j],
+					slurm_strerror(resp->error_code[j]));
 			}
 			slurm_free_job_array_resp(resp);
 		}
@@ -579,21 +579,20 @@ scontrol_suspend(char *op, char *job_str)
  * IN job_id_str - a job id
  */
 extern void
-scontrol_requeue(int argc, char **argv)
+scontrol_requeue(char *job_str)
 {
-	char *job_id_str, *job_str;
+	char *job_id_str;
 	int rc, i;
 	job_array_resp_msg_t *resp = NULL;
 
-	if (!argv[0]) {
+	if (!job_str[0]) {
 		exit_code = 1;
 		return;
 	}
 
-	job_str = argv[0];
-	if (strncasecmp(argv[0], "jobid=", 6) == 0)
+	if (strncasecmp(job_str, "jobid=", 6) == 0)
 		job_str += 6;
-	if (strncasecmp(argv[0], "job=", 4) == 0)
+	if (strncasecmp(job_str, "job=", 4) == 0)
 		job_str += 4;
 
 	if (_is_job_id(job_str)) {
@@ -636,32 +635,12 @@ scontrol_requeue(int argc, char **argv)
 }
 
 extern void
-scontrol_requeue_hold(int argc, char **argv)
+scontrol_requeue_hold(uint32_t state_flag, char *job_str)
 {
 	int rc, i;
-	uint32_t state_flag;
-	char *job_id_str, *job_str;
+	char *job_id_str;
 	job_array_resp_msg_t *resp = NULL;
 
-	state_flag = 0;
-
-	if (argc == 1)
-		job_str = argv[0];
-	else
-		job_str = argv[1];
-
-	if (strncasecmp(job_str, "jobid=", 6) == 0)
-		job_str += 6;
-	if (strncasecmp(job_str, "job=", 4) == 0)
-		job_str += 4;
-
-	if (argc == 2) {
-		if (_parse_requeue_flags(argv[0], &state_flag) < 0) {
-			error("Invalid state specification %s", argv[0]);
-			exit_code = 1;
-			return;
-		}
-	}
 	state_flag |= JOB_REQUEUE_HOLD;
 
 	if (_is_job_id(job_str)) {
@@ -736,6 +715,11 @@ scontrol_update_job (int argc, char *argv[])
 			job_msg.nice = NICE_OFFSET + 100;
 			update_cnt++;
 			continue;
+		} else if (!val && argv[i + 1]) {
+			tag = argv[i];
+			taglen = strlen(tag);
+			val = argv[++i];
+			vallen = strlen(val);
 		} else {
 			exit_code = 1;
 			fprintf (stderr, "Invalid input: %s\n", argv[i]);
@@ -745,6 +729,18 @@ scontrol_update_job (int argc, char *argv[])
 
 		if (strncasecmp(tag, "JobId", MAX(taglen, 3)) == 0) {
 			job_msg.job_id_str = val;
+		}
+		else if (strncasecmp(tag, "ArrayTaskThrottle",
+				     MAX(taglen, 10)) == 0) {
+			int throttle;
+			throttle = strtoll(val, (char **) NULL, 10);
+			if (throttle < 0) {
+				error("Invalid ArrayTaskThrottle value");
+				exit_code = 1;
+				return 0;
+			}
+			job_msg.array_inx = val;
+			update_cnt++;
 		}
 		else if (strncasecmp(tag, "Comment", MAX(taglen, 3)) == 0) {
 			job_msg.comment = val;
@@ -766,7 +762,7 @@ scontrol_update_job (int argc, char *argv[])
 			}
 			if (incr || decr) {
 				if (!job_msg.job_id_str) {
-					error("JobId must preceed TimeLimit "
+					error("JobId must precede TimeLimit "
 					      "increment or decrement");
 					exit_code = 1;
 					return 0;
@@ -823,6 +819,14 @@ scontrol_update_job (int argc, char *argv[])
 				return 0;
 			}
 			job_msg.nice = NICE_OFFSET + nice;
+			update_cnt++;
+		}
+		else if (strncasecmp(tag, "CPUsPerTask", MAX(taglen, 6)) == 0) {
+			if (parse_uint16(val, &job_msg.cpus_per_task)) {
+				error("Invalid CPUsPerTask value: %s", val);
+				exit_code = 1;
+				return 0;
+			}
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "NumCPUs", MAX(taglen, 6)) == 0) {
@@ -1027,6 +1031,17 @@ scontrol_update_job (int argc, char *argv[])
 			}
 			update_cnt++;
 		}
+		else if (strncasecmp(tag, "ThreadSpec", MAX(taglen, 4)) == 0) {
+			if (!strcmp(val, "-1") || !strcmp(val, "*"))
+				job_msg.core_spec = (uint16_t) INFINITE;
+			else if (parse_uint16(val, &job_msg.core_spec)) {
+				error ("Invalid ThreadSpec value: %s", val);
+				exit_code = 1;
+				return 0;
+			} else
+				job_msg.core_spec |= CORE_SPEC_THREAD;
+			update_cnt++;
+		}
 		else if (strncasecmp(tag, "ExcNodeList", MAX(taglen, 3)) == 0){
 			job_msg.exc_nodes = val;
 			update_cnt++;
@@ -1052,6 +1067,10 @@ scontrol_update_job (int argc, char *argv[])
 		}
 		else if (strncasecmp(tag, "Account", MAX(taglen, 1)) == 0) {
 			job_msg.account = val;
+			update_cnt++;
+		}
+		else if (strncasecmp(tag, "BurstBuffer", MAX(taglen, 1)) == 0) {
+			job_msg.burst_buffer = val;
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "Dependency", MAX(taglen, 1)) == 0) {
@@ -1223,6 +1242,14 @@ scontrol_update_job (int argc, char *argv[])
 			}
 			job_msg.job_id_str = _next_job_id();
 		}
+	} else if (job_msg.job_id_str) {
+		exit_code = 1;
+		rc = ESLURM_INVALID_JOB_ID;
+		slurm_seterrno(rc);
+		if (quiet_flag != 1) {
+			fprintf(stderr, "%s for job %s\n",
+				slurm_strerror(rc), job_msg.job_id_str);
+		}
 	}
 
 	return rc;
@@ -1348,35 +1375,37 @@ fini:	slurm_free_resource_allocation_response_msg(alloc_info);
 		fclose(resize_sh);
 }
 
-/* _parse_requeue_args()
+/* parse_requeue_args()
+ * IN s - string to parse
+ * OUT flags - flags to set based upon argument
+ * RET 0 on successful parse, -1 otherwise
  */
-static int
-_parse_requeue_flags(char *s, uint32_t *state)
+extern int
+parse_requeue_flags(char *s, uint32_t *flags)
 {
-	char *p;
-	char *p0;
-	char *z;
+	char *p, *p0, *z;
 
 	p0 = p = xstrdup(s);
 	/* search for =
 	 */
 	z = strchr(p, '=');
 	if (!z) {
+		xfree(p0);
 		return -1;
 	}
 	*z = 0;
 
 	/* validate flags keyword
 	 */
-	if (strncasecmp(p, "state", 5) != 0) {
+	if (strncasecmp(p, "state", 5)) {
+		xfree(p0);
 		return -1;
 	}
 	++z;
 
 	p = z;
-	if (strncasecmp(p, "specialexit", 11) == 0
-	    || strncasecmp(p, "se", 2) == 0) {
-		*state = JOB_SPECIAL_EXIT;
+	if (!strncasecmp(p, "specialexit", 11) || !strncasecmp(p, "se", 2)) {
+		*flags = JOB_SPECIAL_EXIT;
 		xfree(p0);
 		return 0;
 	}
@@ -1437,7 +1466,8 @@ static uint32_t _get_job_time(const char *job_id_str)
 				       resp->job_array[i].array_bitmap;
 			if ((task_id == NO_VAL) ||
 			    (resp->job_array[i].array_task_id == task_id) ||
-			    ((task_id < bit_size(array_bitmap)) &&
+			    (array_bitmap &&
+			     (task_id < bit_size(array_bitmap)) &&
 			     bit_test(array_bitmap, task_id))) {
 				/* Array job with task_id match */
 				time_limit = resp->job_array[i].time_limit;

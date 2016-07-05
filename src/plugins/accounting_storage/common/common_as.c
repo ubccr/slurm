@@ -43,23 +43,24 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "src/common/env.h"
 #include "src/common/slurmdbd_defs.h"
 #include "src/common/slurm_auth.h"
+#include "src/common/slurm_time.h"
 #include "src/common/xstring.h"
-#include "src/common/env.h"
 #include "src/slurmdbd/read_config.h"
 #include "common_as.h"
 
-extern char *assoc_hour_table;
 extern char *assoc_day_table;
+extern char *assoc_hour_table;
 extern char *assoc_month_table;
 
-extern char *cluster_hour_table;
 extern char *cluster_day_table;
+extern char *cluster_hour_table;
 extern char *cluster_month_table;
 
-extern char *wckey_hour_table;
 extern char *wckey_day_table;
+extern char *wckey_hour_table;
 extern char *wckey_month_table;
 
 /*
@@ -81,7 +82,7 @@ static int _sort_update_object_dec(void *a, void *b)
 
 static void _dump_slurmdb_assoc_records(List assoc_list)
 {
-	slurmdb_association_rec_t *assoc = NULL;
+	slurmdb_assoc_rec_t *assoc = NULL;
 	ListIterator itr = NULL;
 
 	itr = list_iterator_create(assoc_list);
@@ -142,7 +143,7 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 			     void *object)
 {
 	slurmdb_update_object_t *update_object = NULL;
-	slurmdb_association_rec_t *assoc = object;
+	slurmdb_assoc_rec_t *assoc = object;
 	slurmdb_qos_rec_t *qos = object;
 	ListIterator itr = NULL;
 	if (!update_list) {
@@ -181,82 +182,46 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 	case SLURMDB_REMOVE_COORD:
 		update_object->objects = list_create(slurmdb_destroy_user_rec);
 		break;
+	case SLURMDB_ADD_TRES:
+		xassert(((slurmdb_tres_rec_t *)object)->id);
+		update_object->objects = list_create(slurmdb_destroy_tres_rec);
+		break;
 	case SLURMDB_ADD_ASSOC:
 		/* We are going to send these to the slurmctld's so
-		   lets set up the correct limits to INIFINITE instead
+		   lets set up the correct limits to INFINITE instead
 		   of NO_VAL */
-		if (assoc->grp_cpu_mins == (uint64_t)NO_VAL)
-			assoc->grp_cpu_mins = (uint64_t)INFINITE;
-		if (assoc->grp_cpu_run_mins == (uint64_t)NO_VAL)
-			assoc->grp_cpu_run_mins = (uint64_t)INFINITE;
-		if (assoc->grp_cpus == NO_VAL)
-			assoc->grp_cpus = INFINITE;
 		if (assoc->grp_jobs == NO_VAL)
 			assoc->grp_jobs = INFINITE;
-		if (assoc->grp_mem == NO_VAL)
-			assoc->grp_mem = INFINITE;
-		if (assoc->grp_nodes == NO_VAL)
-			assoc->grp_nodes = INFINITE;
 		if (assoc->grp_submit_jobs == NO_VAL)
 			assoc->grp_submit_jobs = INFINITE;
 		if (assoc->grp_wall == NO_VAL)
 			assoc->grp_wall = INFINITE;
 
-		if (assoc->max_cpu_mins_pj == (uint64_t)NO_VAL)
-			assoc->max_cpu_mins_pj = (uint64_t)INFINITE;
-		if (assoc->max_cpu_run_mins == (uint64_t)NO_VAL)
-			assoc->max_cpu_run_mins = (uint64_t)INFINITE;
-		if (assoc->max_cpus_pj == NO_VAL)
-			assoc->max_cpus_pj = INFINITE;
 		if (assoc->max_jobs == NO_VAL)
 			assoc->max_jobs = INFINITE;
-		if (assoc->max_nodes_pj == NO_VAL)
-			assoc->max_nodes_pj = INFINITE;
 		if (assoc->max_submit_jobs == NO_VAL)
 			assoc->max_submit_jobs = INFINITE;
 		if (assoc->max_wall_pj == NO_VAL)
 			assoc->max_wall_pj = INFINITE;
 	case SLURMDB_MODIFY_ASSOC:
 	case SLURMDB_REMOVE_ASSOC:
-		xassert(((slurmdb_association_rec_t *)object)->cluster);
+		xassert(((slurmdb_assoc_rec_t *)object)->cluster);
 		update_object->objects = list_create(
-			slurmdb_destroy_association_rec);
+			slurmdb_destroy_assoc_rec);
 		break;
 	case SLURMDB_ADD_QOS:
 		/* We are going to send these to the slurmctld's so
-		   lets set up the correct limits to INIFINITE instead
+		   lets set up the correct limits to INFINITE instead
 		   of NO_VAL */
-		if (qos->grp_cpu_mins == (uint64_t)NO_VAL)
-			qos->grp_cpu_mins = (uint64_t)INFINITE;
-		if (qos->grp_cpu_run_mins == (uint64_t)NO_VAL)
-			qos->grp_cpu_run_mins = (uint64_t)INFINITE;
-		if (qos->grp_cpus == NO_VAL)
-			qos->grp_cpus = INFINITE;
 		if (qos->grp_jobs == NO_VAL)
 			qos->grp_jobs = INFINITE;
-		if (qos->grp_mem == NO_VAL)
-			qos->grp_mem = INFINITE;
-		if (qos->grp_nodes == NO_VAL)
-			qos->grp_nodes = INFINITE;
 		if (qos->grp_submit_jobs == NO_VAL)
 			qos->grp_submit_jobs = INFINITE;
 		if (qos->grp_wall == NO_VAL)
 			qos->grp_wall = INFINITE;
 
-		if (qos->max_cpu_mins_pj == (uint64_t)NO_VAL)
-			qos->max_cpu_mins_pj = (uint64_t)INFINITE;
-		if (qos->max_cpu_run_mins_pu == (uint64_t)NO_VAL)
-			qos->max_cpu_run_mins_pu = (uint64_t)INFINITE;
-		if (qos->max_cpus_pj == NO_VAL)
-			qos->max_cpus_pj = INFINITE;
-		if (qos->max_cpus_pu == NO_VAL)
-			qos->max_cpus_pu = INFINITE;
 		if (qos->max_jobs_pu == NO_VAL)
 			qos->max_jobs_pu = INFINITE;
-		if (qos->max_nodes_pj == NO_VAL)
-			qos->max_nodes_pj = INFINITE;
-		if (qos->max_nodes_pu == NO_VAL)
-			qos->max_nodes_pu = INFINITE;
 		if (qos->max_submit_jobs_pu == NO_VAL)
 			qos->max_submit_jobs_pu = INFINITE;
 		if (qos->max_wall_pj == NO_VAL)
@@ -323,6 +288,9 @@ extern void dump_update_list(List update_list)
 		case SLURMDB_ADD_COORD:
 		case SLURMDB_REMOVE_COORD:
 			debug3("\tUSER RECORDS");
+			break;
+		case SLURMDB_ADD_TRES:
+			debug3("\tTRES RECORDS");
 			break;
 		case SLURMDB_ADD_ASSOC:
 		case SLURMDB_MODIFY_ASSOC:
@@ -400,7 +368,7 @@ extern int cluster_first_reg(char *host, uint16_t port, uint16_t rpc_version)
 		 * for an arbitray fd or should these be fire
 		 * and forget?  For this, that we can probably
 		 * forget about it */
-		slurm_close_stream(fd);
+		slurm_close(fd);
 	}
 	return rc;
 }
@@ -414,7 +382,8 @@ extern int cluster_first_reg(char *host, uint16_t port, uint16_t rpc_version)
  * IN/OUT usage_end: end time
  * RET: error code
  */
-extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
+extern int set_usage_information(char **usage_table,
+				 slurmdbd_msg_type_t type,
 				 time_t *usage_start, time_t *usage_end)
 {
 	time_t start = (*usage_start), end = (*usage_end);
@@ -425,14 +394,14 @@ extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
 
 	/* Default is going to be the last day */
 	if (!end) {
-		if (!localtime_r(&my_time, &end_tm)) {
+		if (!slurm_localtime_r(&my_time, &end_tm)) {
 			error("Couldn't get localtime from end %ld",
 			      my_time);
 			return SLURM_ERROR;
 		}
 		end_tm.tm_hour = 0;
 	} else {
-		if (!localtime_r(&end, &end_tm)) {
+		if (!slurm_localtime_r(&end, &end_tm)) {
 			error("Couldn't get localtime from user end %ld",
 			      end);
 			return SLURM_ERROR;
@@ -441,10 +410,10 @@ extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
 	end_tm.tm_sec = 0;
 	end_tm.tm_min = 0;
 	end_tm.tm_isdst = -1;
-	end = mktime(&end_tm);
+	end = slurm_mktime(&end_tm);
 
 	if (!start) {
-		if (!localtime_r(&my_time, &start_tm)) {
+		if (!slurm_localtime_r(&my_time, &start_tm)) {
 			error("Couldn't get localtime from start %ld",
 			      my_time);
 			return SLURM_ERROR;
@@ -452,7 +421,7 @@ extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
 		start_tm.tm_hour = 0;
 		start_tm.tm_mday--;
 	} else {
-		if (!localtime_r(&start, &start_tm)) {
+		if (!slurm_localtime_r(&start, &start_tm)) {
 			error("Couldn't get localtime from user start %ld",
 			      start);
 			return SLURM_ERROR;
@@ -461,11 +430,11 @@ extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
 	start_tm.tm_sec = 0;
 	start_tm.tm_min = 0;
 	start_tm.tm_isdst = -1;
-	start = mktime(&start_tm);
+	start = slurm_mktime(&start_tm);
 
 	if (end-start < 3600) {
 		end = start + 3600;
-		if (!localtime_r(&end, &end_tm)) {
+		if (!slurm_localtime_r(&end, &end_tm)) {
 			error("2 Couldn't get localtime from user end %ld",
 			      end);
 			return SLURM_ERROR;
@@ -514,6 +483,7 @@ extern int set_usage_information(char **usage_table, slurmdbd_msg_type_t type,
 	(*usage_start) = start;
 	(*usage_end) = end;
 	(*usage_table) = my_usage_table;
+
 	return SLURM_SUCCESS;
 }
 
@@ -655,8 +625,8 @@ extern time_t archive_setup_end_time(time_t last_submit, uint32_t purge)
 		return 0;
 	}
 
-	/* use localtime to avoid any daylight savings issues */
-	if (!localtime_r(&last_submit, &time_tm)) {
+	/* use slurm_localtime to avoid any daylight savings issues */
+	if (!slurm_localtime_r(&last_submit, &time_tm)) {
 		error("Couldn't get localtime from first "
 		      "suspend start %ld", (long)last_submit);
 		return 0;
@@ -682,7 +652,7 @@ extern time_t archive_setup_end_time(time_t last_submit, uint32_t purge)
 	}
 
 	time_tm.tm_isdst = -1;
-	return (mktime(&time_tm) - 1);
+	return (slurm_mktime(&time_tm) - 1);
 }
 
 
@@ -810,7 +780,7 @@ static char *_make_archive_name(time_t period_start, time_t period_end,
 	char start_char[32];
 	char end_char[32];
 
-	localtime_r((time_t *)&period_start, &time_tm);
+	slurm_localtime_r((time_t *)&period_start, &time_tm);
 	time_tm.tm_sec = 0;
 	time_tm.tm_min = 0;
 
@@ -833,7 +803,7 @@ static char *_make_archive_name(time_t period_start, time_t period_end,
 		 time_tm.tm_min,
 		 time_tm.tm_sec);
 
-	localtime_r((time_t *)&period_end, &time_tm);
+	slurm_localtime_r((time_t *)&period_end, &time_tm);
 	snprintf(end_char, sizeof(end_char),
 		 "%4.4u-%2.2u-%2.2u"
 		 "T%2.2u:%2.2u:%2.2u",

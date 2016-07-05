@@ -67,9 +67,9 @@ static pthread_mutex_t sinfo_cnt_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  sinfo_cnt_cond  = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t sinfo_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/************
- * Funtions *
- ************/
+/*************
+ * Functions *
+ *************/
 static int  _bg_report(block_info_msg_t *block_ptr);
 void *      _build_part_info(void *args);
 static int  _build_sinfo_data(List sinfo_list,
@@ -81,8 +81,7 @@ static sinfo_data_t *_create_sinfo(partition_info_t* part_ptr,
 static bool _filter_out(node_info_t *node_ptr);
 static int  _get_info(bool clear_old);
 static void _sinfo_list_delete(void *data);
-static bool _match_node_data(sinfo_data_t *sinfo_ptr,
-			     node_info_t *node_ptr);
+static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr);
 static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 			     partition_info_t* part_ptr);
 static int  _multi_cluster(List clusters);
@@ -93,7 +92,6 @@ static int  _query_server(partition_info_msg_t ** part_pptr,
 static int _reservation_report(reserve_info_msg_t *resv_ptr);
 static bool _serial_part_data(void);
 static void _sort_hostlist(List sinfo_list);
-static int  _strcmp(char *data1, char *data2);
 static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 			  uint32_t node_scaling);
 
@@ -346,6 +344,7 @@ _query_server(partition_info_msg_t ** part_pptr,
 					alloc_cpus *= single_node_cpus;
 			}
 			idle_cpus = node_ptr->cpus - alloc_cpus;
+
 			select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 						     SELECT_NODEDATA_SUBCNT,
 						     NODE_STATE_ERROR,
@@ -533,9 +532,8 @@ static int _build_sinfo_data(List sinfo_list,
 	}
 
 	/* make sinfo_list entries for every node in every partition */
-	for (j=0; j<partition_msg->record_count; j++, part_ptr++) {
-		part_ptr = &(partition_msg->partition_array[j]);
-
+	for (j = 0, part_ptr = partition_msg->partition_array;
+	     j < partition_msg->record_count; j++, part_ptr++) {
 		if (params.filtering && params.part_list &&
 		    !list_find_first(params.part_list,
 				     _find_part_list,
@@ -733,25 +731,37 @@ static void _sort_hostlist(List sinfo_list)
 	list_iterator_destroy(i);
 }
 
+/* Return false if this node's data needs to be added to sinfo's table of
+ * data to print. Return true if it is duplicate/redundant data. */
 static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 {
-	if (params.match_flags.hostnames_flag ||
-	    params.match_flags.node_addr_flag)
+	uint32_t tmp = 0;
+
+	if (params.node_flag)
+		return false;
+
+	if (params.match_flags.hostnames_flag &&
+	    (hostlist_find(sinfo_ptr->hostnames,
+			   node_ptr->node_hostname) == -1))
+		return false;
+
+	if (params.match_flags.node_addr_flag &&
+	    (hostlist_find(sinfo_ptr->node_addr, node_ptr->node_addr) == -1))
 		return false;
 
 	if (sinfo_ptr->nodes &&
 	    params.match_flags.features_flag &&
-	    (_strcmp(node_ptr->features, sinfo_ptr->features)))
+	    (xstrcmp(node_ptr->features, sinfo_ptr->features)))
 		return false;
 
 	if (sinfo_ptr->nodes &&
 	    params.match_flags.gres_flag &&
-	    (_strcmp(node_ptr->gres, sinfo_ptr->gres)))
+	    (xstrcmp(node_ptr->gres, sinfo_ptr->gres)))
 		return false;
 
 	if (sinfo_ptr->nodes &&
 	    params.match_flags.reason_flag &&
-	    (_strcmp(node_ptr->reason, sinfo_ptr->reason)))
+	    (xstrcmp(node_ptr->reason, sinfo_ptr->reason)))
 		return false;
 
 	if (sinfo_ptr->nodes &&
@@ -769,9 +779,17 @@ static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 		char *state1, *state2;
 		state1 = node_state_string(node_ptr->node_state);
 		state2 = node_state_string(sinfo_ptr->node_state);
-		if (strcmp(state1, state2))
+		if (xstrcmp(state1, state2))
 			return false;
 	}
+
+	select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
+				     SELECT_NODEDATA_MEM_ALLOC,
+				     NODE_STATE_ALLOCATED,
+				     &tmp);
+	if (params.match_flags.alloc_mem_flag &&
+	    (tmp != sinfo_ptr->alloc_memory))
+		return false;
 
 	/* If no need to exactly match sizes, just return here
 	 * otherwise check cpus, disk, memory and weigth individually */
@@ -808,10 +826,12 @@ static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 	if (params.match_flags.cpu_load_flag &&
 	    (node_ptr->cpu_load        != sinfo_ptr->min_cpu_load))
 		return false;
+	if (params.match_flags.free_mem_flag &&
+	    (node_ptr->free_mem        != sinfo_ptr->min_free_mem))
+		return false;
 	if (params.match_flags.version_flag &&
 	    (node_ptr->version     != sinfo_ptr->version))
 		return false;
-
 
 	return true;
 }
@@ -839,7 +859,7 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 		return false;
 
 	if (params.match_flags.partition_flag
-	    && (_strcmp(part_ptr->name, sinfo_ptr->part_info->name)))
+	    && (xstrcmp(part_ptr->name, sinfo_ptr->part_info->name)))
 		return false;
 
 	if (params.match_flags.avail_flag &&
@@ -847,7 +867,7 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 		return false;
 
 	if (params.match_flags.groups_flag &&
-	    (_strcmp(part_ptr->allow_groups,
+	    (xstrcmp(part_ptr->allow_groups,
 		     sinfo_ptr->part_info->allow_groups)))
 		return false;
 
@@ -895,14 +915,14 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 			  uint32_t node_scaling)
 {
-	uint32_t base_state;
+	uint32_t base_state, alloc_mem = 0;
 	uint16_t used_cpus = 0, error_cpus = 0;
 	int total_cpus = 0, total_nodes = 0;
 	/* since node_scaling could be less here, we need to use the
 	 * global node scaling which should never change. */
 	int single_node_cpus = (node_ptr->cpus / g_node_scaling);
 
- 	base_state = node_ptr->node_state & NODE_STATE_BASE;
+	base_state = node_ptr->node_state & NODE_STATE_BASE;
 
 	if (sinfo_ptr->nodes_total == 0) {	/* first node added */
 		sinfo_ptr->node_state = node_ptr->node_state;
@@ -927,6 +947,8 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 		sinfo_ptr->max_weight = node_ptr->weight;
 		sinfo_ptr->min_cpu_load = node_ptr->cpu_load;
 		sinfo_ptr->max_cpu_load = node_ptr->cpu_load;
+		sinfo_ptr->min_free_mem = node_ptr->free_mem;
+		sinfo_ptr->max_free_mem = node_ptr->free_mem;
 		sinfo_ptr->max_cpus_per_node = sinfo_ptr->part_info->
 					       max_cpus_per_node;
 		sinfo_ptr->version    = node_ptr->version;
@@ -974,12 +996,20 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 			sinfo_ptr->min_cpu_load = node_ptr->cpu_load;
 		if (sinfo_ptr->max_cpu_load < node_ptr->cpu_load)
 			sinfo_ptr->max_cpu_load = node_ptr->cpu_load;
+
+		if (sinfo_ptr->min_free_mem > node_ptr->free_mem)
+			sinfo_ptr->min_free_mem = node_ptr->free_mem;
+		if (sinfo_ptr->max_free_mem < node_ptr->free_mem)
+			sinfo_ptr->max_free_mem = node_ptr->free_mem;
 	}
 
-	hostlist_push_host(sinfo_ptr->nodes, node_ptr->name);
-	if (params.match_flags.node_addr_flag)
+	if (hostlist_find(sinfo_ptr->nodes, node_ptr->name) == -1)
+		hostlist_push_host(sinfo_ptr->nodes, node_ptr->name);
+	if (params.match_flags.node_addr_flag &&
+	    (hostlist_find(sinfo_ptr->node_addr, node_ptr->node_addr) == -1))
 		hostlist_push_host(sinfo_ptr->node_addr, node_ptr->node_addr);
-	if (params.match_flags.hostnames_flag)
+	if (params.match_flags.hostnames_flag &&
+	    (hostlist_find(sinfo_ptr->hostnames, node_ptr->node_hostname) == -1))
 		hostlist_push_host(sinfo_ptr->hostnames, node_ptr->node_hostname);
 
 	total_cpus = node_ptr->cpus;
@@ -993,6 +1023,10 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 				     SELECT_NODEDATA_SUBCNT,
 				     NODE_STATE_ERROR,
 				     &error_cpus);
+	select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
+				     SELECT_NODEDATA_MEM_ALLOC,
+				     NODE_STATE_ALLOCATED,
+				     &alloc_mem);
 
 	if (params.cluster_flags & CLUSTER_FLAG_BG) {
 		if (!params.match_flags.state_flag &&
@@ -1046,10 +1080,10 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 
 	sinfo_ptr->nodes_total += total_nodes;
 
-
 	sinfo_ptr->cpus_alloc += used_cpus;
 	sinfo_ptr->cpus_total += total_cpus;
 	total_cpus -= used_cpus + error_cpus;
+	sinfo_ptr->alloc_memory = alloc_mem;
 
 	if (error_cpus) {
 		sinfo_ptr->cpus_idle += total_cpus;
@@ -1212,19 +1246,6 @@ static void _sinfo_list_delete(void *data)
 	hostlist_destroy(sinfo_ptr->hostnames);
 	xfree(sinfo_ptr);
 }
-
-/* like strcmp, but works with NULL pointers */
-static int _strcmp(char *data1, char *data2)
-{
-	static char null_str[] = "(null)";
-
-	if (data1 == NULL)
-		data1 = null_str;
-	if (data2 == NULL)
-		data2 = null_str;
-	return strcmp(data1, data2);
-}
-
 
 /* Find the given partition name in the list */
 static int _find_part_list(void *x, void *key)

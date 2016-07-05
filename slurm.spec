@@ -19,7 +19,8 @@
 # --without debug    %_without_debug    1    don't compile with debugging symbols
 # --with lua         %_with_lua         1    build Slurm lua bindings (proctrack only for now)
 # --without munge    %_without_munge    1    don't build auth-munge RPM
-# --with mysql       %_with_mysql       1    require mysql support
+# --with mysql       %_with_mysql       1    require mysql/mariadb support
+# --without netloc   %_without_netloc  path  require netloc support
 # --with openssl     %_with_openssl     1    require openssl RPM to be installed
 # --without pam      %_without_pam      1    don't require pam-devel RPM to be installed
 # --with percs       %_with_percs       1    build percs RPM
@@ -130,19 +131,28 @@ BuildRequires: readline-devel
 BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
 %endif
 
+%define use_mysql_devel %(perl -e '`rpm -q mariadb-devel`; print $?;')
+
 %if %{slurm_with mysql}
+%if %{use_mysql_devel}
 BuildRequires: mysql-devel >= 5.0.0
+%else
+BuildRequires: mariadb-devel >= 5.0.0
+%endif
 %endif
 
 %if %{slurm_with cray_alps}
+%if %{use_mysql_devel}
 BuildRequires: mysql-devel
+%else
+BuildRequires: mariadb-devel
+%endif
 %endif
 
 %if %{slurm_with cray}
 BuildRequires: cray-libalpscomm_cn-devel
 BuildRequires: cray-libalpscomm_sn-devel
 BuildRequires: libnuma-devel
-BuildConflicts: cray-libnuma1
 BuildRequires: libhwloc-devel
 BuildRequires: cray-libjob-devel
 BuildRequires: gtk2-devel
@@ -151,7 +161,11 @@ BuildRequires: pkg-config
 %endif
 
 %if %{slurm_with cray_network}
+%if %{use_mysql_devel}
 BuildRequires: mysql-devel
+%else
+BuildRequires: mariadb-devel
+%endif
 BuildRequires: cray-libalpscomm_cn-devel
 BuildRequires: cray-libalpscomm_sn-devel
 BuildRequires: hwloc-devel
@@ -384,13 +398,13 @@ Perl tool to print Slurm job state information. The output is designed to give
 information on the resource usage and availablilty, as well as information
 about jobs that are currently active on the machine. This output is built
 using the Slurm utilities, sinfo, squeue and scontrol, the man pages for these
-utilites will provide more information and greater depth of understanding
+utilities will provide more information and greater depth of understanding
 
 %if %{slurm_with pam}
 %package pam_slurm
 Summary: PAM module for restricting access to compute nodes via Slurm
 Group: System Environment/Base
-Requires: slurm slurm-devel
+Requires: slurm
 BuildRequires: pam-devel
 Obsoletes: pam_slurm
 %description pam_slurm
@@ -424,25 +438,26 @@ Gives the ability for Slurm to use Berkeley Lab Checkpoint/Restart
 	%{?with_proctrack:--with-proctrack=%{?with_proctrack}}\
 	%{?with_cpusetdir:--with-cpusetdir=%{?with_cpusetdir}} \
 	%{?with_apbasildir:--with-apbasildir=%{?with_apbasildir}} \
-	%{?with_xcpu:--with-xcpu=%{?with_xcpu}} \
 	%{?with_mysql_config:--with-mysql_config=%{?with_mysql_config}} \
 	%{?with_pg_config:--with-pg_config=%{?with_pg_config}} \
 	%{?with_ssl:--with-ssl=%{?with_ssl}} \
 	%{?with_munge:--with-munge=%{?with_munge}}\
+	%{?with_netloc:--with-netloc=%{?with_netloc}}\
 	%{?with_blcr:--with-blcr=%{?with_blcr}}\
 	%{?slurm_with_cray:--enable-native-cray}\
 	%{?slurm_with_cray_network:--enable-cray-network}\
 	%{?slurm_with_salloc_background:--enable-salloc-background} \
 	%{!?slurm_with_readline:--without-readline} \
 	%{?slurm_with_multiple_slurmd:--enable-multiple-slurmd} \
+	%{?with_freeipmi:--with-freeipmi=%{?with_freeipmi}}\
 	%{?with_cflags}
 
-make %{?_smp_mflags}
+%__make %{?_smp_mflags}
 
 %install
 rm -rf "$RPM_BUILD_ROOT"
-DESTDIR="$RPM_BUILD_ROOT" make install
-DESTDIR="$RPM_BUILD_ROOT" make install-contrib
+DESTDIR="$RPM_BUILD_ROOT" %__make install
+DESTDIR="$RPM_BUILD_ROOT" %__make install-contrib
 
 %ifos aix5.3
    mv ${RPM_BUILD_ROOT}%{_bindir}/srun ${RPM_BUILD_ROOT}%{_sbindir}
@@ -455,9 +470,9 @@ DESTDIR="$RPM_BUILD_ROOT" make install-contrib
       ln -s ../../etc/init.d/slurmdbd $RPM_BUILD_ROOT/usr/sbin/rcslurmdbd
    fi
    if [ -d /usr/lib/systemd/system ]; then
-      install -D -m755 etc/slurmctld.service $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmctld.service
-      install -D -m755 etc/slurmd.service    $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmd.service
-      install -D -m755 etc/slurmdbd.service  $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmdbd.service
+      install -D -m644 etc/slurmctld.service $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmctld.service
+      install -D -m644 etc/slurmd.service    $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmd.service
+      install -D -m644 etc/slurmdbd.service  $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmdbd.service
    fi
 %endif
 
@@ -478,15 +493,17 @@ DESTDIR="$RPM_BUILD_ROOT" make install-contrib
    rm -f $RPM_BUILD_ROOT/%{_sbindir}/slurmconfgen.py
 %endif
 
-install -D -m644 etc/slurm.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf.example
 install -D -m644 etc/cgroup.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup.conf.example
 install -D -m644 etc/cgroup_allowed_devices_file.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup_allowed_devices_file.conf.example
 install -D -m755 etc/cgroup.release_common.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup.release_common.example
 install -D -m755 etc/cgroup.release_common.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup/release_freezer
 install -D -m755 etc/cgroup.release_common.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup/release_cpuset
 install -D -m755 etc/cgroup.release_common.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup/release_memory
-install -D -m644 etc/slurmdbd.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurmdbd.conf.example
+install -D -m644 etc/layouts.d.power.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/layouts.d.power.conf.example
+install -D -m644 etc/layouts.d.power_cpufreq.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/layouts.d.power_cpufreq.conf.example
+install -D -m644 etc/slurm.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf.example
 install -D -m755 etc/slurm.epilog.clean ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.epilog.clean
+install -D -m644 etc/slurmdbd.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurmdbd.conf.example
 install -D -m755 contribs/sgather/sgather ${RPM_BUILD_ROOT}%{_bindir}/sgather
 install -D -m755 contribs/sjstat ${RPM_BUILD_ROOT}%{_bindir}/sjstat
 
@@ -519,6 +536,8 @@ rm -f $RPM_BUILD_ROOT/%{_libdir}/security/*.la
 %if %{?with_pam_dir}0
 rm -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm.a
 rm -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm.la
+rm -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm_adopt.a
+rm -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm_adopt.la
 %endif
 rm -f $RPM_BUILD_ROOT/lib/security/pam_slurm.a
 rm -f $RPM_BUILD_ROOT/lib/security/pam_slurm.la
@@ -526,6 +545,12 @@ rm -f $RPM_BUILD_ROOT/lib32/security/pam_slurm.a
 rm -f $RPM_BUILD_ROOT/lib32/security/pam_slurm.la
 rm -f $RPM_BUILD_ROOT/lib64/security/pam_slurm.a
 rm -f $RPM_BUILD_ROOT/lib64/security/pam_slurm.la
+rm -f $RPM_BUILD_ROOT/lib/security/pam_slurm_adopt.a
+rm -f $RPM_BUILD_ROOT/lib/security/pam_slurm_adopt.la
+rm -f $RPM_BUILD_ROOT/lib32/security/pam_slurm_adopt.a
+rm -f $RPM_BUILD_ROOT/lib32/security/pam_slurm_adopt.la
+rm -f $RPM_BUILD_ROOT/lib64/security/pam_slurm_adopt.a
+rm -f $RPM_BUILD_ROOT/lib64/security/pam_slurm_adopt.la
 %if ! %{slurm_with auth_none}
 rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/auth_none.so
 %endif
@@ -588,6 +613,8 @@ test -f $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmctld.service	&&
   echo /usr/lib/systemd/system/slurmctld.service		>> $LIST
 test -f $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmd.service	&&
   echo /usr/lib/systemd/system/slurmd.service		>> $LIST
+test -f $RPM_BUILD_ROOT/%{_bindir}/netloc_to_topology		&&
+  echo %{_bindir}/netloc_to_topology			>> $LIST
 
 test -f $RPM_BUILD_ROOT/opt/modulefiles/slurm/%{version}-%{release} &&
   echo /opt/modulefiles/slurm/%{version}-%{release} >> $LIST
@@ -669,15 +696,12 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/accounting_storage_mysql.so &&
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/jobcomp_mysql.so            &&
    echo %{_libdir}/slurm/jobcomp_mysql.so            >> $LIST
 
-LIST=./perlapi.files
-touch $LIST
-test -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/Slurm.bs        &&
-   echo $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/Slurm.bs        >> $LIST
-test -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurmdb/Slurmdb.bs    &&
-   echo $RPM_BUILD_ROOT/%{_perldir}/auto/Slurmdb/Slurmdb.bs    >> $LIST
-
 LIST=./plugins.files
 touch $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_cray.so  &&
+   echo %{_libdir}/slurm/acct_gather_energy_cray.so  >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_ibmaem.so &&
+   echo %{_libdir}/slurm/acct_gather_energy_ibmaem.so  >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_ipmi.so  &&
    echo %{_libdir}/slurm/acct_gather_energy_ipmi.so  >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_rapl.so  &&
@@ -686,18 +710,24 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_infiniband_ofed.so &&
    echo %{_libdir}/slurm/acct_gather_infiniband_ofed.so >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_profile_hdf5.so &&
    echo %{_libdir}/slurm/acct_gather_profile_hdf5.so >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/burst_buffer_cray.so        &&
+   echo %{_libdir}/slurm/burst_buffer_cray.so        >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_openssl.so           &&
    echo %{_libdir}/slurm/crypto_openssl.so           >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/ext_sensors_rrd.so          &&
    echo %{_libdir}/slurm/ext_sensors_rrd.so          >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/jobcomp_elasticsearch.so    &&
+   echo %{_libdir}/slurm/jobcomp_elasticsearch.so    >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/launch_slurm.so             &&
    echo %{_libdir}/slurm/launch_slurm.so             >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/launch_aprun.so             &&
    echo %{_libdir}/slurm/launch_aprun.so             >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/mpi_mvapich.so              &&
+   echo %{_libdir}/slurm/mpi_mvapich.so              >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/power_cray.so               &&
+   echo %{_libdir}/slurm/power_cray.so               >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/select_bluegene.so          &&
    echo %{_libdir}/slurm/select_bluegene.so          >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/slurmctld_dynalloc.so       &&
-   echo %{_libdir}/slurm/slurmctld_dynalloc.so       >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_affinity.so            &&
    echo %{_libdir}/slurm/task_affinity.so            >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_cgroup.so              &&
@@ -708,6 +738,8 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/job_container_none.so       &&
    echo %{_libdir}/slurm/job_container_none.so       >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_cray.so                &&
    echo %{_libdir}/slurm/task_cray.so                >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/slurmctld_nonstop.so        &&
+   echo %{_libdir}/slurm/slurmctld_nonstop.so        >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/switch_cray.so              &&
    echo %{_libdir}/slurm/switch_cray.so              >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/proctrack_cray.so           &&
@@ -718,13 +750,21 @@ touch $LIST
 %if %{?with_pam_dir}0
     test -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm.so	&&
 	echo %{with_pam_dir}/pam_slurm.so	>>$LIST
+    test -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm_adopt.so	&&
+	echo %{with_pam_dir}/pam_slurm_adopt.so	>>$LIST
 %else
-    test -f $RPM_BUILD_ROOT/lib/security/pam_slurm.so		&&
+    test -f $RPM_BUILD_ROOT/lib/security/pam_slurm.so	&&
 	echo /lib/security/pam_slurm.so		>>$LIST
-    test -f $RPM_BUILD_ROOT/lib32/security/pam_slurm.so		&&
+    test -f $RPM_BUILD_ROOT/lib32/security/pam_slurm.so	&&
 	echo /lib32/security/pam_slurm.so	>>$LIST
-    test -f $RPM_BUILD_ROOT/lib64/security/pam_slurm.so		&&
+    test -f $RPM_BUILD_ROOT/lib64/security/pam_slurm.so	&&
 	echo /lib64/security/pam_slurm.so	>>$LIST
+    test -f $RPM_BUILD_ROOT/lib/security/pam_slurm_adopt.so		&&
+	echo /lib/security/pam_slurm_adopt.so		>>$LIST
+    test -f $RPM_BUILD_ROOT/lib32/security/pam_slurm_adopt.so		&&
+	echo /lib32/security/pam_slurm_adopt.so		>>$LIST
+    test -f $RPM_BUILD_ROOT/lib64/security/pam_slurm_adopt.so		&&
+	echo /lib64/security/pam_slurm_adopt.so		>>$LIST
 %endif
 #############################################################################
 
@@ -748,6 +788,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/src/*
 %{_mandir}/man1/*
 %{_mandir}/man5/acct_gather.*
+%{_mandir}/man5/burst_buffer.*
 %{_mandir}/man5/ext_sensors.*
 %{_mandir}/man5/cgroup.*
 %{_mandir}/man5/cray.*
@@ -772,13 +813,15 @@ rm -rf $RPM_BUILD_ROOT
 %config %{_sysconfdir}/slurm.conf.template
 %{_sbindir}/slurmconfgen.py
 %endif
-%config %{_sysconfdir}/slurm.conf.example
 %config %{_sysconfdir}/cgroup.conf.example
 %config %{_sysconfdir}/cgroup_allowed_devices_file.conf.example
 %config %{_sysconfdir}/cgroup.release_common.example
 %config %{_sysconfdir}/cgroup/release_freezer
 %config %{_sysconfdir}/cgroup/release_cpuset
 %config %{_sysconfdir}/cgroup/release_memory
+%config %{_sysconfdir}/layouts.d.power.conf.example
+%config %{_sysconfdir}/layouts.d.power_cpufreq.conf.example
+%config %{_sysconfdir}/slurm.conf.example
 %config %{_sysconfdir}/slurm.epilog.clean
 %exclude %{_mandir}/man1/sjobexit*
 %exclude %{_mandir}/man1/sjstat*
@@ -835,7 +878,7 @@ rm -rf $RPM_BUILD_ROOT
 %endif
 #############################################################################
 
-%files -f perlapi.files perlapi
+%files perlapi
 %defattr(-,root,root)
 %{_perldir}/Slurm.pm
 %{_perldir}/Slurm/Bitstr.pm
@@ -874,6 +917,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/acct_gather_infiniband_none.so
 %{_libdir}/slurm/acct_gather_energy_none.so
 %{_libdir}/slurm/acct_gather_profile_none.so
+%{_libdir}/slurm/burst_buffer_generic.so
 %{_libdir}/slurm/checkpoint_none.so
 %{_libdir}/slurm/checkpoint_ompi.so
 %{_libdir}/slurm/core_spec_cray.so
@@ -894,17 +938,20 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/jobcomp_filetxt.so
 %{_libdir}/slurm/jobcomp_none.so
 %{_libdir}/slurm/jobcomp_script.so
+%{_libdir}/slurm/layouts_power_cpufreq.so
+%{_libdir}/slurm/layouts_power_default.so
+%{_libdir}/slurm/layouts_unit_default.so
 %if ! %{slurm_with bluegene}
 %{_libdir}/slurm/mpi_lam.so
 %{_libdir}/slurm/mpi_mpich1_p4.so
 %{_libdir}/slurm/mpi_mpich1_shmem.so
 %{_libdir}/slurm/mpi_mpichgm.so
 %{_libdir}/slurm/mpi_mpichmx.so
-%{_libdir}/slurm/mpi_mvapich.so
 %{_libdir}/slurm/mpi_openmpi.so
 %{_libdir}/slurm/mpi_pmi2.so
 %endif
 %{_libdir}/slurm/mpi_none.so
+%{_libdir}/slurm/power_none.so
 %{_libdir}/slurm/preempt_job_prio.so
 %{_libdir}/slurm/preempt_none.so
 %{_libdir}/slurm/preempt_partition_prio.so
@@ -926,11 +973,11 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/select_cons_res.so
 %{_libdir}/slurm/select_linear.so
 %{_libdir}/slurm/select_serial.so
-%{_libdir}/slurm/slurmctld_nonstop.so
 %{_libdir}/slurm/switch_generic.so
 %{_libdir}/slurm/switch_none.so
 %{_libdir}/slurm/task_none.so
 %{_libdir}/slurm/topology_3d_torus.so
+%{_libdir}/slurm/topology_hypercube.so
 %{_libdir}/slurm/topology_node_rank.so
 %{_libdir}/slurm/topology_none.so
 %{_libdir}/slurm/topology_tree.so
@@ -1043,7 +1090,7 @@ fi
 %endif
 
 %preun
-if [ "$1" = 0 ]; then
+if [ "$1" -eq 0 ]; then
     if [ -x /etc/init.d/slurm ]; then
 	[ -x /sbin/chkconfig ] && /sbin/chkconfig --del slurm
 	if /etc/init.d/slurm status | grep -q running; then
@@ -1053,7 +1100,7 @@ if [ "$1" = 0 ]; then
 fi
 
 %preun slurmdbd
-if [ "$1" = 0 ]; then
+if [ "$1" -eq 0 ]; then
     if [ -x /etc/init.d/slurmdbd ]; then
 	[ -x /sbin/chkconfig ] && /sbin/chkconfig --del slurmdbd
 	if /etc/init.d/slurmdbd status | grep -q running; then
@@ -1063,7 +1110,9 @@ if [ "$1" = 0 ]; then
 fi
 
 %postun
-if [ "$1" = 0 ]; then
+if [ "$1" -gt 1 ]; then
+    /etc/init.d/slurm condrestart
+elif [ "$1" -eq 0 ]; then
     if [ -x /sbin/ldconfig ]; then
 	/sbin/ldconfig %{_libdir}
     fi
@@ -1071,6 +1120,11 @@ fi
 %if %{?insserv_cleanup:1}0
 %insserv_cleanup
 %endif
+
+%postun slurmdbd
+if [ "$1" -gt 1 ]; then
+    /etc/init.d/slurmdbd condrestart
+fi
 
 #############################################################################
 

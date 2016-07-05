@@ -112,7 +112,8 @@ static void _print_small_double(
 		return;
 
 	if (dub > 1)
-		convert_num_unit((double)dub, outbuf, buf_size, units);
+		convert_num_unit((double)dub, outbuf, buf_size, units,
+				 params.convert_flags);
 	else if (dub > 0)
 		snprintf(outbuf, buf_size, "%.2fM", dub);
 	else
@@ -212,6 +213,8 @@ void print_fields(type_t type, void *object)
 	struct	group *gr = NULL;
 	char outbuf[FORMAT_STRING_SIZE];
 	bool got_stats = false;
+	int cpu_tres_rec_count = 0;
+	int step_cpu_tres_rec_count = 0;
 
 	switch(type) {
 	case JOB:
@@ -224,14 +227,36 @@ void print_fields(type_t type, void *object)
 		*/
 		if (!step)
 			job->track_steps = 1;
+		else
+			step_cpu_tres_rec_count =
+				slurmdb_find_tres_count_in_string(
+					step->tres_alloc_str, TRES_CPU);
+
 		if (job->stats.cpu_min != NO_VAL)
 			got_stats = true;
+
 		job_comp = NULL;
+		cpu_tres_rec_count = slurmdb_find_tres_count_in_string(
+			(job->tres_alloc_str && job->tres_alloc_str[0]) ?
+			job->tres_alloc_str : job->tres_req_str,
+			TRES_CPU);
 		break;
 	case JOBSTEP:
 		job = step->job_ptr;
+
 		if (step->stats.cpu_min != NO_VAL)
 			got_stats = true;
+
+		if ((step_cpu_tres_rec_count =
+		     slurmdb_find_tres_count_in_string(
+			     step->tres_alloc_str, TRES_CPU)) == INFINITE64)
+			step_cpu_tres_rec_count =
+				slurmdb_find_tres_count_in_string(
+					(job->tres_alloc_str &&
+					 job->tres_alloc_str[0]) ?
+					job->tres_alloc_str : job->tres_req_str,
+					TRES_CPU);
+
 		job_comp = NULL;
 		break;
 	case JOBCOMP:
@@ -242,25 +267,36 @@ void print_fields(type_t type, void *object)
 		break;
 	}
 
+	if ((uint64_t)cpu_tres_rec_count == INFINITE64)
+		cpu_tres_rec_count = 0;
+
+	if ((uint64_t)step_cpu_tres_rec_count == INFINITE64)
+		step_cpu_tres_rec_count = 0;
+
 	list_iterator_reset(print_fields_itr);
 	while((field = list_next(print_fields_itr))) {
 		char *tmp_char = NULL, id[FORMAT_STRING_SIZE];
 		int tmp_int = NO_VAL, tmp_int2 = NO_VAL;
-		double tmp_dub = (double)NO_VAL;
-		uint32_t tmp_uint32 = (uint32_t)NO_VAL;
-		uint64_t tmp_uint64 = (uint64_t)NO_VAL;
+		double tmp_dub = (double)NO_VAL; /* don't use NO_VAL64
+						    unless we can
+						    confirm the values
+						    coming in are
+						    NO_VAL64 */
+		uint32_t tmp_uint32 = NO_VAL;
+		uint64_t tmp_uint64 = NO_VAL64;
 
 		memset(&outbuf, 0, sizeof(outbuf));
 		switch(field->type) {
 		case PRINT_ALLOC_CPUS:
 			switch(type) {
 			case JOB:
-				tmp_int = job->alloc_cpus;
+				tmp_int = cpu_tres_rec_count;
+
 				// we want to use the step info
 				if (!step)
 					break;
 			case JOBSTEP:
-				tmp_int = step->ncpus;
+				tmp_int = step_cpu_tres_rec_count;
 				break;
 			case JOBCOMP:
 			default:
@@ -286,6 +322,37 @@ void print_fields(type_t type, void *object)
 			}
 			field->print_routine(field,
 					     tmp_char,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_ALLOC_NODES:
+			switch(type) {
+			case JOB:
+				tmp_int = job->alloc_nodes;
+				tmp_char = job->tres_alloc_str;
+				break;
+			case JOBSTEP:
+				tmp_int = step->nnodes;
+				tmp_char = step->tres_alloc_str;
+				break;
+			case JOBCOMP:
+				tmp_int = job_comp->node_cnt;
+				break;
+			default:
+				break;
+			}
+
+			if (!tmp_int && tmp_char) {
+				if ((tmp_uint64 =
+				     slurmdb_find_tres_count_in_string(
+					     tmp_char, TRES_NODE))
+				    != INFINITE64)
+					tmp_int = tmp_uint64;
+			}
+			convert_num_unit((double)tmp_int, outbuf,
+					 sizeof(outbuf), UNIT_NONE,
+					 params.convert_flags);
+			field->print_routine(field,
+					     outbuf,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_ACCOUNT:
@@ -323,7 +390,9 @@ void print_fields(type_t type, void *object)
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
 				convert_num_unit2((double)tmp_dub,
 						  outbuf, sizeof(outbuf),
-						  UNIT_KILO, 1000, false);
+						  UNIT_KILO, 1000,
+						  params.convert_flags &
+						  (~CONVERT_NUM_UNIT_EXACT));
 
 			field->print_routine(field,
 					     outbuf,
@@ -432,9 +501,10 @@ void print_fields(type_t type, void *object)
 				}
 			}
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit((double)tmp_dub,
-						 outbuf, sizeof(outbuf),
-						 UNIT_KILO);
+				convert_num_unit((double)tmp_dub, outbuf,
+						 sizeof(outbuf),
+						 UNIT_KILO,
+						 params.convert_flags);
 
 			field->print_routine(field,
 					     outbuf,
@@ -456,9 +526,10 @@ void print_fields(type_t type, void *object)
 				}
 			}
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit((double)tmp_dub,
-						 outbuf, sizeof(outbuf),
-						 UNIT_KILO);
+				convert_num_unit((double)tmp_dub, outbuf,
+						 sizeof(outbuf),
+						 UNIT_KILO,
+						 params.convert_flags);
 
 			field->print_routine(field,
 					     outbuf,
@@ -481,9 +552,10 @@ void print_fields(type_t type, void *object)
 			}
 
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit((double)tmp_dub,
-						 outbuf, sizeof(outbuf),
-						 UNIT_KILO);
+				convert_num_unit((double)tmp_dub, outbuf,
+						 sizeof(outbuf),
+						 UNIT_KILO,
+						 params.convert_flags);
 
 			field->print_routine(field,
 					     outbuf,
@@ -555,7 +627,9 @@ void print_fields(type_t type, void *object)
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
 				convert_num_unit2((double)tmp_dub,
 						  outbuf, sizeof(outbuf),
-						  UNIT_NONE, 1000, false);
+						  UNIT_NONE, 1000,
+						  params.convert_flags &
+						  (~CONVERT_NUM_UNIT_EXACT));
 
 			field->print_routine(field,
 					     outbuf,
@@ -585,11 +659,11 @@ void print_fields(type_t type, void *object)
 			switch(type) {
 			case JOB:
 				tmp_uint64 = (uint64_t)job->elapsed
-					* (uint64_t)job->alloc_cpus;
+					* (uint64_t)cpu_tres_rec_count;
 				break;
 			case JOBSTEP:
 				tmp_uint64 = (uint64_t)step->elapsed
-					* (uint64_t)step->ncpus;
+					* (uint64_t)step_cpu_tres_rec_count;
 				break;
 			case JOBCOMP:
 				break;
@@ -604,11 +678,11 @@ void print_fields(type_t type, void *object)
 			switch(type) {
 			case JOB:
 				tmp_uint64 = (uint64_t)job->elapsed
-					* (uint64_t)job->alloc_cpus;
+					* (uint64_t)cpu_tres_rec_count;
 				break;
 			case JOBSTEP:
 				tmp_uint64 = (uint64_t)step->elapsed
-					* (uint64_t)step->ncpus;
+					* (uint64_t)step_cpu_tres_rec_count;
 				break;
 			case JOBCOMP:
 				break;
@@ -790,18 +864,22 @@ void print_fields(type_t type, void *object)
 						 job->jobid);
 			}
 
-			switch(type) {
+			switch (type) {
 			case JOB:
 				tmp_char = xstrdup(id);
 				break;
 			case JOBSTEP:
-				if (step->stepid == NO_VAL)
+				if (step->stepid == SLURM_BATCH_SCRIPT) {
 					tmp_char = xstrdup_printf(
 						"%s.batch", id);
-				else
+				} else if (step->stepid == SLURM_EXTERN_CONT) {
+					tmp_char = xstrdup_printf(
+						"%s.extern", id);
+				} else {
 					tmp_char = xstrdup_printf(
 						"%s.%u",
 						id, step->stepid);
+				}
 				break;
 			case JOBCOMP:
 				tmp_char = xstrdup_printf("%u",
@@ -816,20 +894,25 @@ void print_fields(type_t type, void *object)
 			xfree(tmp_char);
 			break;
 		case PRINT_JOBIDRAW:
-			switch(type) {
+			switch (type) {
 			case JOB:
 				tmp_char = xstrdup_printf("%u", job->jobid);
 				break;
 			case JOBSTEP:
-				if (step->stepid == NO_VAL)
+				if (step->stepid == SLURM_BATCH_SCRIPT) {
 					tmp_char = xstrdup_printf(
 						"%u.batch",
 						step->job_ptr->jobid);
-				else
+				} else if (step->stepid == SLURM_EXTERN_CONT) {
+					tmp_char = xstrdup_printf(
+						"%u.extern",
+						step->job_ptr->jobid);
+				} else {
 					tmp_char = xstrdup_printf(
 						"%u.%u",
 						step->job_ptr->jobid,
 						step->stepid);
+				}
 				break;
 			case JOBCOMP:
 				tmp_char = xstrdup_printf("%u",
@@ -1050,10 +1133,12 @@ void print_fields(type_t type, void *object)
 				default:
 					break;
 				}
-				if (tmp_uint64 != (uint64_t)NO_VAL)
-					convert_num_unit((double)tmp_uint64,
-							 outbuf, sizeof(outbuf),
-							 UNIT_KILO);
+				if (tmp_uint64 != (uint64_t)NO_VAL64)
+					convert_num_unit(
+						(double)tmp_uint64,
+						outbuf, sizeof(outbuf),
+						UNIT_KILO,
+						params.convert_flags);
 			}
 
 			field->print_routine(field,
@@ -1126,10 +1211,12 @@ void print_fields(type_t type, void *object)
 				default:
 					break;
 				}
-				if (tmp_uint64 != (uint64_t)NO_VAL)
-					convert_num_unit((double)tmp_uint64,
-							 outbuf, sizeof(outbuf),
-							 UNIT_KILO);
+				if (tmp_uint64 != (uint64_t)NO_VAL64)
+					convert_num_unit(
+						(double)tmp_uint64,
+						outbuf, sizeof(outbuf),
+						UNIT_KILO,
+						params.convert_flags);
 			}
 
 			field->print_routine(field,
@@ -1200,14 +1287,16 @@ void print_fields(type_t type, void *object)
 					break;
 				case JOBCOMP:
 				default:
-					tmp_uint64 = (uint64_t)NO_VAL;
+					tmp_uint64 = (uint64_t)NO_VAL64;
 					break;
 				}
 
-				if (tmp_uint64 != (uint64_t)NO_VAL)
-					convert_num_unit((double)tmp_uint64,
-							 outbuf, sizeof(outbuf),
-							 UNIT_KILO);
+				if (tmp_uint64 != (uint64_t)NO_VAL64)
+					convert_num_unit(
+						(double)tmp_uint64,
+						outbuf, sizeof(outbuf),
+						UNIT_KILO,
+						params.convert_flags);
 			}
 
 			field->print_routine(field,
@@ -1364,27 +1453,32 @@ void print_fields(type_t type, void *object)
 			switch(type) {
 			case JOB:
 				tmp_int = job->alloc_nodes;
-				tmp_char = job->nodes;
+				tmp_char = (job->tres_alloc_str &&
+					    job->tres_alloc_str[0])
+					? job->tres_alloc_str :
+					job->tres_req_str;
 				break;
 			case JOBSTEP:
 				tmp_int = step->nnodes;
-				tmp_char = step->nodes;
+				tmp_char = step->tres_alloc_str;
 				break;
 			case JOBCOMP:
 				tmp_int = job_comp->node_cnt;
-				tmp_char = job_comp->nodelist;
 				break;
 			default:
 				break;
 			}
 
-			if (!tmp_int) {
-				hostlist_t hl = hostlist_create(tmp_char);
-				tmp_int = hostlist_count(hl);
-				hostlist_destroy(hl);
+			if (!tmp_int && tmp_char) {
+				if ((tmp_uint64 =
+				     slurmdb_find_tres_count_in_string(
+					     tmp_char, TRES_NODE))
+				    != INFINITE64)
+					tmp_int = tmp_uint64;
 			}
-			convert_num_unit((double)tmp_int,
-					 outbuf, sizeof(outbuf), UNIT_NONE);
+			convert_num_unit((double)tmp_int, outbuf,
+					 sizeof(outbuf), UNIT_NONE,
+					 params.convert_flags);
 			field->print_routine(field,
 					     outbuf,
 					     (curr_inx == field_count));
@@ -1393,7 +1487,7 @@ void print_fields(type_t type, void *object)
 			switch(type) {
 			case JOB:
 				if (!job->track_steps && !step)
-					tmp_int = job->alloc_cpus;
+					tmp_int = cpu_tres_rec_count;
 				// we want to use the step info
 				if (!step)
 					break;
@@ -1496,7 +1590,7 @@ void print_fields(type_t type, void *object)
 					     tmp_int,
 					     (curr_inx == field_count));
 			break;
-		case PRINT_REQ_CPUFREQ:
+		case PRINT_REQ_CPUFREQ_MIN:
 			switch (type) {
 			case JOB:
 				if (!job->track_steps && !step)
@@ -1505,7 +1599,45 @@ void print_fields(type_t type, void *object)
 				if (!step)
 					break;
 			case JOBSTEP:
-				tmp_dub = step->req_cpufreq;
+				tmp_dub = step->req_cpufreq_min;
+				break;
+			default:
+				break;
+			}
+			cpu_freq_to_string(outbuf, sizeof(outbuf), tmp_dub);
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_REQ_CPUFREQ_MAX:
+			switch (type) {
+			case JOB:
+				if (!job->track_steps && !step)
+					tmp_dub = NO_VAL;
+				// we want to use the step info
+				if (!step)
+					break;
+			case JOBSTEP:
+				tmp_dub = step->req_cpufreq_max;
+				break;
+			default:
+				break;
+			}
+			cpu_freq_to_string(outbuf, sizeof(outbuf), tmp_dub);
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_REQ_CPUFREQ_GOV:
+			switch (type) {
+			case JOB:
+				if (!job->track_steps && !step)
+					tmp_dub = NO_VAL;
+				// we want to use the step info
+				if (!step)
+					break;
+			case JOBSTEP:
+				tmp_dub = step->req_cpufreq_gov;
 				break;
 			default:
 				break;
@@ -1521,7 +1653,7 @@ void print_fields(type_t type, void *object)
 				tmp_int = job->req_cpus;
 				break;
 			case JOBSTEP:
-				tmp_int = step->ncpus;
+				tmp_int = step_cpu_tres_rec_count;
 				break;
 			case JOBCOMP:
 
@@ -1573,12 +1705,45 @@ void print_fields(type_t type, void *object)
 				}
 				convert_num_unit((double)tmp_uint32,
 						 outbuf, sizeof(outbuf),
-						 UNIT_MEGA);
+						 UNIT_MEGA,
+						 params.convert_flags);
 				if (per_cpu)
 					sprintf(outbuf+strlen(outbuf), "c");
 				else
 					sprintf(outbuf+strlen(outbuf), "n");
 			}
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_REQ_NODES:
+			switch(type) {
+			case JOB:
+				tmp_int = 0;
+				tmp_char = job->tres_req_str;
+				break;
+			case JOBSTEP:
+				tmp_int = step->nnodes;
+				tmp_char = step->tres_alloc_str;
+				break;
+			case JOBCOMP:
+				tmp_int = job_comp->node_cnt;
+				break;
+			default:
+				break;
+			}
+
+			if (!tmp_int && tmp_char) {
+				if ((tmp_uint64 =
+				     slurmdb_find_tres_count_in_string(
+					     tmp_char, TRES_NODE))
+				    != INFINITE64)
+					tmp_int = tmp_uint64;
+			}
+			convert_num_unit((double)tmp_int, outbuf,
+					 sizeof(outbuf), UNIT_NONE,
+					 params.convert_flags);
+
 			field->print_routine(field,
 					     outbuf,
 					     (curr_inx == field_count));
@@ -1603,8 +1768,8 @@ void print_fields(type_t type, void *object)
 				break;
 			}
 			field->print_routine(field,
-						tmp_char,
-						(curr_inx == field_count));
+					     tmp_char,
+					     (curr_inx == field_count));
 			break;
 		case PRINT_RESERVATION_ID:
 			switch(type) {
@@ -1627,8 +1792,8 @@ void print_fields(type_t type, void *object)
 			if (tmp_uint32 == (uint32_t)NO_VAL)
 				tmp_uint32 = NO_VAL;
 			field->print_routine(field,
-						tmp_uint32,
-						(curr_inx == field_count));
+					     tmp_uint32,
+					     (curr_inx == field_count));
 			break;
 		case PRINT_RESV:
 			switch(type) {
@@ -1859,6 +2024,66 @@ void print_fields(type_t type, void *object)
 				break;
 			}
 			tmp_char = _elapsed_time(tmp_int, tmp_int2);
+
+			field->print_routine(field,
+					     tmp_char,
+					     (curr_inx == field_count));
+			xfree(tmp_char);
+			break;
+		case PRINT_TRESA:
+			switch(type) {
+			case JOB:
+				tmp_char = job->tres_alloc_str;
+				break;
+			case JOBSTEP:
+				tmp_char = step->tres_alloc_str;
+				break;
+			case JOBCOMP:
+			default:
+				tmp_char = NULL;
+				break;
+			}
+
+			if (!g_tres_list) {
+				slurmdb_tres_cond_t tres_cond;
+				memset(&tres_cond, 0,
+				       sizeof(slurmdb_tres_cond_t));
+				tres_cond.with_deleted = 1;
+				g_tres_list = slurmdb_tres_get(
+					acct_db_conn, &tres_cond);
+			}
+
+			tmp_char = slurmdb_make_tres_string_from_simple(
+				tmp_char, g_tres_list);
+
+			field->print_routine(field,
+					     tmp_char,
+					     (curr_inx == field_count));
+			xfree(tmp_char);
+			break;
+		case PRINT_TRESR:
+			switch(type) {
+			case JOB:
+				tmp_char = job->tres_req_str;
+				break;
+			case JOBSTEP:
+			case JOBCOMP:
+			default:
+				tmp_char = NULL;
+				break;
+			}
+
+			if (!g_tres_list) {
+				slurmdb_tres_cond_t tres_cond;
+				memset(&tres_cond, 0,
+				       sizeof(slurmdb_tres_cond_t));
+				tres_cond.with_deleted = 1;
+				g_tres_list = slurmdb_tres_get(
+					acct_db_conn, &tres_cond);
+			}
+
+			tmp_char = slurmdb_make_tres_string_from_simple(
+				tmp_char, g_tres_list);
 
 			field->print_routine(field,
 					     tmp_char,

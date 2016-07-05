@@ -3,6 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2015 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -62,6 +63,7 @@
 #include "src/common/plugrack.h"
 #include "src/common/slurm_cred.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_time.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -73,10 +75,15 @@ typedef struct sbcast_cred sbcast_cred_t;		/* opaque data type */
 
 /*
  * Default credential information expiration window.
- * Long enough for loading user environment, running prolog,
- * and dealing with the slurmd getting paged out of memory.
+ * Long enough for loading user environment, running prolog, paging slurmd
+ * into memory, plus sending a launch request to all compute nodes of a job
+ * (i.e. MessageTimeout * message_depth, where
+ * (TreeWidth ^^ message_depth) >= count_of_compute_nodes).
+ *
+ * The default value may be altered with the configuration option of this sort:
+ * "AuthInfo=cred_expire=600"
  */
-#define DEFAULT_EXPIRATION_WINDOW 1200
+#define DEFAULT_EXPIRATION_WINDOW 120
 
 #define EXTREME_DEBUG   0
 #define MAX_TIME 0x7fffffff
@@ -177,6 +184,7 @@ struct slurm_job_credential {
 	List job_gres_list;		/* Generic resources allocated to JOB */
 	List step_gres_list;		/* Generic resources allocated to STEP */
 
+	char     *job_constraints;	/* constraints in job allocation */
 	bitstr_t *job_core_bitmap;
 	uint16_t  job_core_spec;	/* Count of specialized cores */
 	uint32_t  job_nhosts;	/* count of nodes allocated to JOB */
@@ -233,6 +241,7 @@ static pthread_mutex_t g_context_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool init_run = false;
 static time_t crypto_restart_time = (time_t) 0;
 static List sbcast_cache_list = NULL;
+static int cred_expire = DEFAULT_EXPIRATION_WINDOW;
 
 /*
  * Static prototypes:
@@ -291,12 +300,25 @@ static char * timestr (const time_t *tp, char *buf, size_t n);
 
 static int _slurm_crypto_init(void)
 {
+	char	*auth_info, *tok;
 	char    *plugin_type = "crypto";
 	char	*type = NULL;
 	int	retval = SLURM_SUCCESS;
 
 	if ( init_run && g_context )  /* mostly avoid locks for better speed */
 		return retval;
+
+	if ((auth_info = slurm_get_auth_info())) {
+		if ((tok = strstr(auth_info, "cred_expire="))) {
+			cred_expire = atoi(tok + 12);
+			if (cred_expire < 5) {
+				error("AuthInfo=cred_expire=%d invalid",
+				      cred_expire);
+				cred_expire = DEFAULT_EXPIRATION_WINDOW;
+			}
+		xfree(auth_info);
+		}
+	}
 
 	slurm_mutex_lock( &g_context_lock );
 	if (crypto_restart_time == (time_t) 0)
@@ -331,7 +353,7 @@ static int _slurm_crypto_fini(void)
 		return SLURM_SUCCESS;
 
 	init_run = false;
-	list_destroy(sbcast_cache_list);
+	FREE_NULL_LIST(sbcast_cache_list);
 	sbcast_cache_list = NULL;
 	rc = plugin_context_destroy(g_context);
 	g_context = NULL;
@@ -420,10 +442,8 @@ slurm_cred_ctx_destroy(slurm_cred_ctx_t ctx)
 		(*(ops.crypto_destroy_key))(ctx->exkey);
 	if (ctx->key)
 		(*(ops.crypto_destroy_key))(ctx->key);
-	if (ctx->job_list)
-		list_destroy(ctx->job_list);
-	if (ctx->state_list)
-		list_destroy(ctx->state_list);
+	FREE_NULL_LIST(ctx->job_list);
+	FREE_NULL_LIST(ctx->state_list);
 
 	xassert(ctx->magic = ~CRED_CTX_MAGIC);
 
@@ -536,32 +556,39 @@ slurm_cred_create(slurm_cred_ctx_t ctx, slurm_cred_arg_t *arg,
 	cred->step_hostlist   = xstrdup(arg->step_hostlist);
 #ifndef HAVE_BG
 	{
-		int i, sock_recs = 0;
-#ifndef HAVE_ALPS_CRAY
-		/* Zero compute node allocations allowed on a Cray for use
-		 * of front-end nodes */
-		xassert(arg->job_nhosts);
-#endif
-		for (i = 0; i < arg->job_nhosts; i++) {
-			sock_recs += arg->sock_core_rep_count[i];
-			if (sock_recs >= arg->job_nhosts)
-				break;
+		int i = 0, sock_recs = 0;
+		if (arg->sock_core_rep_count) {
+			for (i = 0; i < arg->job_nhosts; i++) {
+				sock_recs += arg->sock_core_rep_count[i];
+				if (sock_recs >= arg->job_nhosts)
+					break;
+			}
 		}
 		i++;
-		cred->job_core_bitmap = bit_copy(arg->job_core_bitmap);
-		cred->step_core_bitmap = bit_copy(arg->step_core_bitmap);
-		cred->core_array_size = i;
-		cred->cores_per_socket = xmalloc(sizeof(uint16_t) * i);
-		memcpy(cred->cores_per_socket, arg->cores_per_socket,
-		       (sizeof(uint16_t) * i));
-		cred->sockets_per_node = xmalloc(sizeof(uint16_t) * i);
-		memcpy(cred->sockets_per_node, arg->sockets_per_node,
-		       (sizeof(uint16_t) * i));
+		if (arg->job_core_bitmap)
+			cred->job_core_bitmap = bit_copy(arg->job_core_bitmap);
+		if (arg->step_core_bitmap)
+			cred->step_core_bitmap =bit_copy(arg->step_core_bitmap);
+		cred->core_array_size     = i;
+		cred->cores_per_socket    = xmalloc(sizeof(uint16_t) * i);
+		cred->sockets_per_node    = xmalloc(sizeof(uint16_t) * i);
 		cred->sock_core_rep_count = xmalloc(sizeof(uint32_t) * i);
-		memcpy(cred->sock_core_rep_count, arg->sock_core_rep_count,
-		       (sizeof(uint32_t) * i));
-		cred->job_nhosts = arg->job_nhosts;
-		cred->job_hostlist = xstrdup(arg->job_hostlist);
+		if (arg->cores_per_socket) {
+			memcpy(cred->cores_per_socket, arg->cores_per_socket,
+			       (sizeof(uint16_t) * i));
+		}
+		if (arg->sockets_per_node) {
+			memcpy(cred->sockets_per_node, arg->sockets_per_node,
+			       (sizeof(uint16_t) * i));
+		}
+		if (arg->sock_core_rep_count) {
+			memcpy(cred->sock_core_rep_count,
+			       arg->sock_core_rep_count,
+			       (sizeof(uint32_t) * i));
+		}
+		cred->job_constraints = xstrdup(arg->job_constraints);
+		cred->job_nhosts      = arg->job_nhosts;
+		cred->job_hostlist    = xstrdup(arg->job_hostlist);
 	}
 #endif
 	cred->ctime  = time(NULL);
@@ -618,12 +645,13 @@ slurm_cred_copy(slurm_cred_t *cred)
 					  rcred->core_array_size);
 	memcpy(rcred->sockets_per_node, cred->sockets_per_node,
 	       (sizeof(uint16_t) * rcred->core_array_size));
-	cred->sock_core_rep_count = xmalloc(sizeof(uint32_t) *
-					    rcred->core_array_size);
+	rcred->sock_core_rep_count = xmalloc(sizeof(uint32_t) *
+					     rcred->core_array_size);
 	memcpy(rcred->sock_core_rep_count, cred->sock_core_rep_count,
 	       (sizeof(uint32_t) * rcred->core_array_size));
-	rcred->job_nhosts = cred->job_nhosts;
-	rcred->job_hostlist = xstrdup(cred->job_hostlist);
+	rcred->job_constraints = xstrdup(cred->job_constraints);
+	rcred->job_nhosts      = cred->job_nhosts;
+	rcred->job_hostlist    = xstrdup(cred->job_hostlist);
 #endif
 	rcred->ctime  = cred->ctime;
 	rcred->siglen = cred->siglen;
@@ -658,7 +686,7 @@ slurm_cred_faker(slurm_cred_arg_t *arg)
 #ifndef HAVE_BG
 	{
 		int sock_recs = 0;
-		for (i=0; i<arg->job_nhosts; i++) {
+		for (i = 0; i < arg->job_nhosts; i++) {
 			sock_recs += arg->sock_core_rep_count[i];
 			if (sock_recs >= arg->job_nhosts)
 				break;
@@ -676,8 +704,9 @@ slurm_cred_faker(slurm_cred_arg_t *arg)
 		cred->sock_core_rep_count = xmalloc(sizeof(uint32_t) * i);
 		memcpy(cred->sock_core_rep_count, arg->sock_core_rep_count,
 		       (sizeof(uint32_t) * i));
-		cred->job_nhosts = arg->job_nhosts;
-		cred->job_hostlist = xstrdup(arg->job_hostlist);
+		cred->job_constraints = xstrdup(arg->job_constraints);
+		cred->job_nhosts      = arg->job_nhosts;
+		cred->job_hostlist    = xstrdup(arg->job_hostlist);
 	}
 #endif
 	cred->ctime  = time(NULL);
@@ -714,6 +743,7 @@ void slurm_cred_free_args(slurm_cred_arg_t *arg)
 	FREE_NULL_LIST(arg->job_gres_list);
 	FREE_NULL_LIST(arg->step_gres_list);
 	xfree(arg->step_hostlist);
+	xfree(arg->job_constraints);
 	xfree(arg->job_hostlist);
 	xfree(arg->sock_core_rep_count);
 	xfree(arg->sockets_per_node);
@@ -743,6 +773,7 @@ int slurm_cred_get_args(slurm_cred_t *cred, slurm_cred_arg_t *arg)
 	arg->cores_per_socket = NULL;
 	arg->sockets_per_node = NULL;
 	arg->sock_core_rep_count = NULL;
+	arg->job_constraints = NULL;
 	arg->job_nhosts = 0;
 	arg->job_hostlist = NULL;
 #else
@@ -760,8 +791,9 @@ int slurm_cred_get_args(slurm_cred_t *cred, slurm_cred_arg_t *arg)
 					   cred->core_array_size);
 	memcpy(arg->sock_core_rep_count, cred->sock_core_rep_count,
 	       (sizeof(uint32_t) * cred->core_array_size));
-	arg->job_nhosts = cred->job_nhosts;
-	arg->job_hostlist = xstrdup(cred->job_hostlist);
+	arg->job_constraints = xstrdup(cred->job_constraints);
+	arg->job_nhosts      = cred->job_nhosts;
+	arg->job_hostlist    = xstrdup(cred->job_hostlist);
 #endif
 	slurm_mutex_unlock(&cred->mutex);
 
@@ -833,6 +865,7 @@ slurm_cred_verify(slurm_cred_ctx_t ctx, slurm_cred_t *cred,
 	arg->cores_per_socket = NULL;
 	arg->sockets_per_node = NULL;
 	arg->sock_core_rep_count = NULL;
+	arg->job_constraints = NULL;
 	arg->job_nhosts = 0;
 	arg->job_hostlist = NULL;
 #else
@@ -850,8 +883,9 @@ slurm_cred_verify(slurm_cred_ctx_t ctx, slurm_cred_t *cred,
 					   cred->core_array_size);
 	memcpy(arg->sock_core_rep_count, cred->sock_core_rep_count,
 	       (sizeof(uint32_t) * cred->core_array_size));
-	arg->job_nhosts = cred->job_nhosts;
-	arg->job_hostlist = xstrdup(cred->job_hostlist);
+	arg->job_constraints = xstrdup(cred->job_constraints);
+	arg->job_nhosts      = cred->job_nhosts;
+	arg->job_hostlist    = xstrdup(cred->job_hostlist);
 #endif
 	slurm_mutex_unlock(&cred->mutex);
 
@@ -879,6 +913,7 @@ slurm_cred_destroy(slurm_cred_t *cred)
 	FREE_NULL_BITMAP(cred->job_core_bitmap);
 	FREE_NULL_BITMAP(cred->step_core_bitmap);
 	xfree(cred->cores_per_socket);
+	xfree(cred->job_constraints);
 	xfree(cred->job_hostlist);
 	xfree(cred->sock_core_rep_count);
 	xfree(cred->sockets_per_node);
@@ -1269,7 +1304,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 
 	cred = _slurm_cred_alloc();
 	slurm_mutex_lock(&cred->mutex);
-	if (protocol_version >= SLURM_14_03_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
 		safe_unpack32(&cred->jobid, buffer);
 		safe_unpack32(&cred->stepid, buffer);
 		safe_unpack32(&cred_uid, buffer);
@@ -1288,6 +1323,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 		safe_unpack16(&cred->job_core_spec, buffer);
 		safe_unpack32(&cred->job_mem_limit, buffer);
 		safe_unpack32(&cred->step_mem_limit, buffer);
+		safe_unpackstr_xmalloc(&cred->job_constraints, &len, buffer);
 		safe_unpackstr_xmalloc(&cred->step_hostlist, &len, buffer);
 		safe_unpack_time(&cred->ctime, buffer);
 
@@ -1333,7 +1369,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 		safe_unpackmem_xmalloc(sigp, &len, buffer);
 		cred->siglen = len;
 		xassert(len > 0);
-	} else if (protocol_version >= SLURM_2_6_PROTOCOL_VERSION) {
+	} else if (protocol_version >= SLURM_14_03_PROTOCOL_VERSION) {
 		safe_unpack32(&cred->jobid, buffer);
 		safe_unpack32(&cred->stepid, buffer);
 		safe_unpack32(&cred_uid, buffer);
@@ -1349,6 +1385,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 		    != SLURM_SUCCESS) {
 			goto unpack_error;
 		}
+		safe_unpack16(&cred->job_core_spec, buffer);
 		safe_unpack32(&cred->job_mem_limit, buffer);
 		safe_unpack32(&cred->step_mem_limit, buffer);
 		safe_unpackstr_xmalloc(&cred->step_hostlist, &len, buffer);
@@ -1446,6 +1483,9 @@ slurm_cred_ctx_unpack(slurm_cred_ctx_t ctx, Buf buffer)
 void
 slurm_cred_print(slurm_cred_t *cred)
 {
+	char *spec_type;
+	int spec_count;
+
 	if (cred == NULL)
 		return;
 
@@ -1453,14 +1493,25 @@ slurm_cred_print(slurm_cred_t *cred)
 
 	xassert(cred->magic == CRED_MAGIC);
 
+	if (cred->job_core_spec == (uint16_t) NO_VAL) {
+		spec_type  = "Cores";
+		spec_count = 0;
+	} else if (cred->job_core_spec & CORE_SPEC_THREAD) {
+		spec_type  = "Threads";
+		spec_count = cred->job_core_spec & (~CORE_SPEC_THREAD);
+	} else {
+		spec_type  = "Cores";
+		spec_count = cred->job_core_spec;
+	}
 	info("Cred: Jobid             %u",  cred->jobid         );
 	info("Cred: Stepid            %u",  cred->stepid        );
 	info("Cred: UID               %u",  (uint32_t) cred->uid);
-	info("Cred: Job_core_spec     %u",  cred->job_core_spec );
+	info("Cred: Job_constraints   %s",  cred->job_constraints );
+	info("Cred: Job_core_spec     %d %s", spec_count, spec_type );
 	info("Cred: Job_mem_limit     %u",  cred->job_mem_limit );
 	info("Cred: Step_mem_limit    %u",  cred->step_mem_limit );
 	info("Cred: Step hostlist     %s",  cred->step_hostlist );
-	info("Cred: ctime             %s",  slurm_ctime(&cred->ctime) );
+	info("Cred: ctime             %s",  slurm_ctime2(&cred->ctime) );
 	info("Cred: siglen            %u",  cred->siglen        );
 #ifndef HAVE_BG
 	{
@@ -1585,7 +1636,7 @@ _slurm_cred_ctx_alloc(void)
 	slurm_mutex_init(&ctx->mutex);
 	slurm_mutex_lock(&ctx->mutex);
 
-	ctx->expiry_window = DEFAULT_EXPIRATION_WINDOW;
+	ctx->expiry_window = cred_expire;
 	ctx->exkey_exp     = (time_t) -1;
 
 	xassert(ctx->magic = CRED_CTX_MAGIC);
@@ -1685,26 +1736,28 @@ _pack_cred(slurm_cred_t *cred, Buf buffer, uint16_t protocol_version)
 {
 	uint32_t cred_uid = (uint32_t) cred->uid;
 
-	if (protocol_version >= SLURM_14_03_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
 		pack32(cred->jobid,          buffer);
 		pack32(cred->stepid,         buffer);
 		pack32(cred_uid,             buffer);
 
 		(void) gres_plugin_job_state_pack(cred->job_gres_list, buffer,
 						  cred->jobid, false,
-						  SLURM_PROTOCOL_VERSION);
+						  protocol_version);
 		gres_plugin_step_state_pack(cred->step_gres_list, buffer,
 					    cred->jobid, cred->stepid,
-					    SLURM_PROTOCOL_VERSION);
+					    protocol_version);
 		pack16(cred->job_core_spec,  buffer);
 		pack32(cred->job_mem_limit,  buffer);
 		pack32(cred->step_mem_limit, buffer);
+		packstr(cred->job_constraints, buffer);
 		packstr(cred->step_hostlist, buffer);
 		pack_time(cred->ctime,       buffer);
 #ifndef HAVE_BG
 		{
-			uint32_t tot_core_cnt;
-			tot_core_cnt = bit_size(cred->job_core_bitmap);
+			uint32_t tot_core_cnt = 0;
+			if (cred->job_core_bitmap)
+				tot_core_cnt = bit_size(cred->job_core_bitmap);
 			pack32(tot_core_cnt, buffer);
 			pack_bit_fmt(cred->job_core_bitmap, buffer);
 			pack_bit_fmt(cred->step_core_bitmap, buffer);
@@ -1731,10 +1784,11 @@ _pack_cred(slurm_cred_t *cred, Buf buffer, uint16_t protocol_version)
 
 		(void) gres_plugin_job_state_pack(cred->job_gres_list, buffer,
 						  cred->jobid, false,
-						  SLURM_PROTOCOL_VERSION);
+						  protocol_version);
 		gres_plugin_step_state_pack(cred->step_gres_list, buffer,
 					    cred->jobid, cred->stepid,
-					    SLURM_PROTOCOL_VERSION);
+					    protocol_version);
+		pack16(cred->job_core_spec,  buffer);
 		pack32(cred->job_mem_limit,  buffer);
 		pack32(cred->step_mem_limit, buffer);
 		packstr(cred->step_hostlist, buffer);
@@ -1813,7 +1867,7 @@ extern char * timestr (const time_t *tp, char *buf, size_t n)
 	if (disabled)
 		return NULL;
 #endif
-	if (!localtime_r (tp, &tmval))
+	if (!slurm_localtime_r (tp, &tmval))
 		error ("localtime_r: %m");
 	slurm_strftime (buf, n, fmt, &tmval);
 	return (buf);
@@ -2427,6 +2481,6 @@ void  print_sbcast_cred(sbcast_cred_t *sbcast_cred)
 {
 	info("Sbcast_cred: Jobid   %u", sbcast_cred->jobid         );
 	info("Sbcast_cred: Nodes   %s", sbcast_cred->nodes         );
-	info("Sbcast_cred: ctime   %s", slurm_ctime(&sbcast_cred->ctime) );
-	info("Sbcast_cred: Expire  %s", slurm_ctime(&sbcast_cred->expiration) );
+	info("Sbcast_cred: ctime   %s", slurm_ctime2(&sbcast_cred->ctime) );
+	info("Sbcast_cred: Expire  %s", slurm_ctime2(&sbcast_cred->expiration));
 }

@@ -5,7 +5,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -470,10 +470,7 @@ extern void init_job_db(void)
 extern void term_job_db(void)
 {
 	pthread_mutex_lock(&job_fail_mutex);
-	if (job_fail_list) {
-		list_destroy(job_fail_list);
-		job_fail_list = NULL;
-	}
+	FREE_NULL_LIST(job_fail_list);
 	pthread_mutex_unlock(&job_fail_mutex);
 }
 
@@ -1348,6 +1345,16 @@ extern char *replace_node(char *cmd_ptr, uid_t cmd_uid,
 		if (i == SLURM_SUCCESS)
 			will_run_time = will_run_idle;
 	}
+	xfree(job_alloc_req.account);
+	xfree(job_alloc_req.dependency);
+	xfree(job_alloc_req.exc_nodes);
+	xfree(job_alloc_req.features);
+	xfree(job_alloc_req.gres);
+	xfree(job_alloc_req.name);
+	xfree(job_alloc_req.network);
+	xfree(job_alloc_req.partition);
+	xfree(job_alloc_req.qos);
+	xfree(job_alloc_req.wckey);
 
 	pthread_mutex_lock(&job_fail_mutex);	/* Resume lock */
 
@@ -1377,18 +1384,6 @@ extern char *replace_node(char *cmd_ptr, uid_t cmd_uid,
 		}
 		goto fini;
 	}
-
-	xfree(job_alloc_req.account);
-	xfree(job_alloc_req.dependency);
-	xfree(job_alloc_req.exc_nodes);
-	xfree(job_alloc_req.features);
-	xfree(job_alloc_req.gres);
-	xfree(job_alloc_req.name);
-	xfree(job_alloc_req.network);
-	xfree(job_alloc_req.partition);
-	xfree(job_alloc_req.qos);
-	xfree(job_alloc_req.reservation);
-	xfree(job_alloc_req.wckey);
 
 merge:
 	if (!new_job_ptr) {	/* Fix for CLANG false positive */
@@ -1466,6 +1461,7 @@ merge:
 			     "from job %u: %s",
 			     node_name, job_id, slurm_strerror(rc));
 		}
+		xfree(job_alloc_req.req_nodes);
 	}
 
 	/* Work complete */
@@ -1753,7 +1749,7 @@ static void _send_event_callbacks(void)
 				      callback_jobid);
 				goto io_fini;
 			}
-			sent = _slurm_msg_sendto_timeout(fd,
+			sent = slurm_msg_sendto_timeout(fd,
 					(char *) &callback_flags,
 					sizeof(uint32_t), 0, 100000);
 			while ((slurm_shutdown_msg_conn(fd) < 0) &&
@@ -1787,7 +1783,7 @@ static void *_state_thread(void *no_data)
 
 	last_save_time = last_callback_time = time(NULL);
 	while (!thread_shutdown) {
-		sleep(1);
+		usleep(200000);
 
 		now = time(NULL);
 		if (difftime(now, last_callback_time) >= NONSTOP_EVENT_PERIOD) {

@@ -3,6 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010-2015 SchedMD LLC <http://www.schedmd.com>
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>,
  *    Christopher J. Morrone <morrone2@llnl.gov>, et. al.
@@ -59,20 +60,18 @@
 
 
 typedef struct sbatch_options {
-	List clusters; /* cluster to run this on. */
+	char *clusters;		/* cluster to run this on. */
 	char *progname;		/* argv[0] of this program or   */
 
 	/* batch script argv and argc, if provided on the command line */
 	int script_argc;
 	char **script_argv;
-
 	char *user;		/* local username		*/
 	uid_t uid;		/* local uid			*/
 	gid_t gid;		/* local gid			*/
 	uid_t euid;		/* effective user --uid=user	*/
 	gid_t egid;		/* effective group --gid=group	*/
-	char *cwd;		/* current working directory	*/
-
+ 	char *cwd;		/* current working directory	*/
 	int  ntasks;		/* --ntasks=n,      -n n	*/
 	bool ntasks_set;	/* true if ntasks explicitly set */
 	int  cpus_per_task;	/* --cpus-per-task=n, -c n	*/
@@ -82,6 +81,7 @@ typedef struct sbatch_options {
 	bool nodes_set;		/* true if nodes explicitly set */
 	int sockets_per_node;	/* --sockets-per-node=n		*/
 	int cores_per_socket;	/* --cores-per-socket=n		*/
+	uint32_t kill_invalid_dep;  /* --kill_invalid_dep           */
 	int threads_per_core;	/* --threads-per-core=n		*/
 	int ntasks_per_node;	/* --ntasks-per-node=n		*/
 	int ntasks_per_socket;	/* --ntasks-per-socket=n	*/
@@ -180,7 +180,13 @@ typedef struct sbatch_options {
 	int spank_job_env_size;	/* size of spank_job_env	*/
 	int umask;		/* job umask for PBS		*/
 	int core_spec;		/* --core-spec=n,      -S n	*/
+	uint32_t cpu_freq_min;  /* Minimum cpu frequency  */
+	uint32_t cpu_freq_max;  /* Maximum cpu frequency  */
+	uint32_t cpu_freq_gov;  /* cpu frequency governor */
 	bool test_only;		/* --test-only			*/
+	char *burst_buffer;	/* -bb				*/
+	uint8_t power_flags;	/* Power management options	*/
+	uint8_t sicp_mode;	/* Inter-cluster job ID		*/
 } opt_t;
 
 extern opt_t opt;

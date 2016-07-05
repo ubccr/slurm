@@ -64,20 +64,22 @@
 
 #include "slurm/slurm.h"
 
+#include "src/common/cpu_frequency.h"
+#include "src/common/eio.h"
+#include "src/common/fd.h"
+#include "src/common/forward.h"
 #include "src/common/hostlist.h"
+#include "src/common/net.h"
+#include "src/common/plugstack.h"
+#include "src/common/slurm_auth.h"
+#include "src/common/slurm_cred.h"
+#include "src/common/slurm_mpi.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/slurm_time.h"
+#include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/eio.h"
-#include "src/common/net.h"
-#include "src/common/fd.h"
-#include "src/common/slurm_auth.h"
-#include "src/common/forward.h"
-#include "src/common/plugstack.h"
-#include "src/common/slurm_cred.h"
-#include "src/common/mpi.h"
-#include "src/common/uid.h"
 
 #include "src/api/step_launch.h"
 #include "src/api/step_ctx.h"
@@ -104,13 +106,30 @@ static pid_t  srun_ppid = (pid_t) 0;
 static uid_t  slurm_uid;
 static bool   force_terminated_job = false;
 static int    task_exit_signal = 0;
+#ifdef HAVE_NATIVE_CRAY
+/* On a Cray we need to validate the gid
+ * before the launch of the tasks.  Since a native
+ * Cray really isn't a cluster but a distributed system this should
+ * be ok.
+ * This could be hacked by a user, but the only damage they
+ * could really do is set SLURM_USER_NAME to be something
+ * other than the actual name.  Running any getpwXXX commands
+ * on a cray compute node is not scalable and could
+ * potentially cause all sorts of issues and timeouts when
+ * talking with LDAP or NIS when done on the compute node.  We
+ * have not seen this issue on a regular cluster, so we do
+ * the validating there instead when not on a Cray.
+ */
+static bool   validate_gid = true;
+#else
+static bool   validate_gid = false;
+#endif
 static void _exec_prog(slurm_msg_t *msg);
 static int  _msg_thr_create(struct step_launch_state *sls, int num_nodes);
 static void _handle_msg(void *arg, slurm_msg_t *msg);
 static int  _cr_notify_step_launch(slurm_step_ctx_t *ctx);
 static int  _start_io_timeout_thread(step_launch_state_t *sls);
 static void *_check_io_timeout(void *_sls);
-static int _valid_uid_gid(uid_t uid, gid_t *gid, char **user_name);
 
 static struct io_operations message_socket_ops = {
 	.readable = &eio_message_socket_readable,
@@ -140,7 +159,9 @@ void slurm_step_launch_params_t_init (slurm_step_launch_params_t *ptr)
 	ptr->buffered_stdio = true;
 	memcpy(&ptr->local_fds, &fds, sizeof(fds));
 	ptr->gid = getgid();
-	ptr->cpu_freq = NO_VAL;
+	ptr->cpu_freq_min = NO_VAL;
+	ptr->cpu_freq_max = NO_VAL;
+	ptr->cpu_freq_gov = NO_VAL;
 }
 
 /*
@@ -174,7 +195,7 @@ int slurm_step_launch (slurm_step_ctx_t *ctx,
 	memset(&launch, 0, sizeof(launch));
 
 	if (ctx == NULL || ctx->magic != STEP_CTX_MAGIC) {
-		error("Not a valid slurm_step_ctx_t!");
+		error("%s: Not a valid slurm_step_ctx_t", __func__);
 		slurm_seterrno(EINVAL);
 		return SLURM_ERROR;
 	}
@@ -218,7 +239,8 @@ int slurm_step_launch (slurm_step_ctx_t *ctx,
 	launch.job_id = ctx->step_req->job_id;
 	launch.uid = ctx->step_req->user_id;
 	launch.gid = params->gid;
-	if (!_valid_uid_gid((uid_t)launch.uid, &launch.gid, &launch.user_name))
+	if (!slurm_valid_uid_gid((uid_t)launch.uid, &launch.gid,
+				 &launch.user_name, 0, validate_gid))
 		return SLURM_ERROR;
 	launch.argc = params->argc;
 	launch.argv = params->argv;
@@ -256,9 +278,12 @@ int slurm_step_launch (slurm_step_ctx_t *ctx,
 	launch.task_epilog	= params->task_epilog;
 	launch.cpu_bind_type	= params->cpu_bind_type;
 	launch.cpu_bind		= params->cpu_bind;
-	launch.cpu_freq		= params->cpu_freq;
+	launch.cpu_freq_min	= params->cpu_freq_min;
+	launch.cpu_freq_max	= params->cpu_freq_max;
+	launch.cpu_freq_gov	= params->cpu_freq_gov;
 	launch.mem_bind_type	= params->mem_bind_type;
 	launch.mem_bind		= params->mem_bind;
+	launch.accel_bind_type	= params->accel_bind_type;
 	launch.multi_prog	= params->multi_prog ? 1 : 0;
 	launch.cpus_per_task	= params->cpus_per_task;
 	launch.task_dist	= params->task_dist;
@@ -371,17 +396,18 @@ int slurm_step_launch_add (slurm_step_ctx_t *ctx,
 	int rc = SLURM_SUCCESS;
 
 	debug("Entering slurm_step_launch_add");
+
+	if (ctx == NULL || ctx->magic != STEP_CTX_MAGIC) {
+		error("%s: Not a valid slurm_step_ctx_t", __func__);
+		slurm_seterrno(EINVAL);
+		return SLURM_ERROR;
+	}
+
 	if (!ctx->launch_state->user_managed_io)
 		fatal("slurm_step_launch_add has only been tested "
 		      "with user managed io");
 
 	memset(&launch, 0, sizeof(launch));
-
-	if (ctx == NULL || ctx->magic != STEP_CTX_MAGIC) {
-		error("Not a valid slurm_step_ctx_t!");
-		slurm_seterrno(EINVAL);
-		return SLURM_ERROR;
-	}
 
 	/* Now, hack the step_layout struct if the following it true.
 	   This looks like an ugly hack to support LAM/MPI's lamboot.
@@ -395,7 +421,8 @@ int slurm_step_launch_add (slurm_step_ctx_t *ctx,
 	launch.job_id = ctx->step_req->job_id;
 	launch.uid = ctx->step_req->user_id;
 	launch.gid = params->gid;
-	if (!_valid_uid_gid((uid_t)launch.uid, &launch.gid, &launch.user_name))
+	if (!slurm_valid_uid_gid((uid_t)launch.uid, &launch.gid,
+				 &launch.user_name, 0, validate_gid))
 		return SLURM_ERROR;
 	launch.argc = params->argc;
 	launch.argv = params->argv;
@@ -433,9 +460,12 @@ int slurm_step_launch_add (slurm_step_ctx_t *ctx,
 	launch.task_epilog	= params->task_epilog;
 	launch.cpu_bind_type	= params->cpu_bind_type;
 	launch.cpu_bind		= params->cpu_bind;
-	launch.cpu_freq		= params->cpu_freq;
+	launch.cpu_freq_min	= params->cpu_freq_min;
+	launch.cpu_freq_max	= params->cpu_freq_max;
+	launch.cpu_freq_gov	= params->cpu_freq_gov;
 	launch.mem_bind_type	= params->mem_bind_type;
 	launch.mem_bind		= params->mem_bind;
+	launch.accel_bind_type	= params->accel_bind_type;
 	launch.multi_prog	= params->multi_prog ? 1 : 0;
 	launch.cpus_per_task	= params->cpus_per_task;
 	launch.task_dist	= params->task_dist;
@@ -571,10 +601,15 @@ int slurm_step_launch_wait_start(slurm_step_ctx_t *ctx)
  */
 void slurm_step_launch_wait_finish(slurm_step_ctx_t *ctx)
 {
-	struct step_launch_state *sls = ctx->launch_state;
+	struct step_launch_state *sls;
 	struct timespec ts = {0, 0};
 	bool time_set = false;
 	int errnum;
+
+	if (! ctx || ctx->magic != STEP_CTX_MAGIC)
+		return;
+
+	sls = ctx->launch_state;
 
 	/* Wait for all tasks to complete */
 	pthread_mutex_lock(&sls->lock);
@@ -699,7 +734,12 @@ void slurm_step_launch_wait_finish(slurm_step_ctx_t *ctx)
  */
 void slurm_step_launch_abort(slurm_step_ctx_t *ctx)
 {
-	struct step_launch_state *sls = ctx->launch_state;
+	struct step_launch_state *sls;
+
+	if (!ctx || ctx->magic != STEP_CTX_MAGIC)
+		return;
+
+	sls = ctx->launch_state;
 
 	pthread_mutex_lock(&sls->lock);
 	sls->abort = true;
@@ -777,6 +817,9 @@ void slurm_step_launch_fwd_signal(slurm_step_ctx_t *ctx, int signo)
 	req.msg_type = REQUEST_SIGNAL_TASKS;
 	req.data     = &msg;
 
+	if (ctx->step_resp->use_protocol_ver)
+		req.protocol_version = ctx->step_resp->use_protocol_ver;
+
 	debug3("sending signal %d to job %u on host %s",
 	       signo, ctx->job_id, name);
 
@@ -802,7 +845,7 @@ void slurm_step_launch_fwd_signal(slurm_step_ctx_t *ctx, int signo)
 		}
 	}
 	list_iterator_destroy(itr);
-	list_destroy(ret_list);
+	FREE_NULL_LIST(ret_list);
 nothing_left:
 	debug2("All tasks have been signalled");
 
@@ -930,7 +973,7 @@ static int _connect_srun_cr(char *addr)
 	strcpy(sa.sun_path, addr);
 	sa_len = strlen(sa.sun_path) + sizeof(sa.sun_family);
 
-	while ((rc = connect(fd, (struct sockaddr *)&sa, sa_len) < 0) &&
+	while (((rc = connect(fd, (struct sockaddr *)&sa, sa_len)) < 0) &&
 	       (errno == EINTR));
 
 	if (rc < 0) {
@@ -1012,11 +1055,13 @@ static int _msg_thr_create(struct step_launch_state *sls, int num_nodes)
 	int i, rc = SLURM_SUCCESS;
 	pthread_attr_t attr;
 	uint16_t *ports;
+	uint16_t eio_timeout;
 
 	debug("Entering _msg_thr_create()");
 	slurm_uid = (uid_t) slurm_get_slurm_user_id();
 
-	sls->msg_handle = eio_handle_create();
+	eio_timeout = slurm_get_srun_eio_timeout();
+	sls->msg_handle = eio_handle_create(eio_timeout);
 	sls->num_resp_port = _estimate_nports(num_nodes, 48);
 	sls->resp_port = xmalloc(sizeof(uint16_t) * sls->num_resp_port);
 
@@ -1445,7 +1490,8 @@ static void
 _handle_msg(void *arg, slurm_msg_t *msg)
 {
 	struct step_launch_state *sls = (struct step_launch_state *)arg;
-	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
+	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred,
+					     slurm_get_auth_info());
 	uid_t uid = getuid();
 	srun_user_msg_t *um;
 	int rc;
@@ -1522,8 +1568,8 @@ _handle_msg(void *arg, slurm_msg_t *msg)
 		_task_user_managed_io_handler(sls, msg);
 		break;
 	default:
-		error("received spurious message type: %u",
-		      msg->msg_type);
+		error("%s: received spurious message type: %u",
+		      __func__, msg->msg_type);
 		break;
 	}
 	return;
@@ -1566,6 +1612,9 @@ static int _fail_step_tasks(slurm_step_ctx_t *ctx, char *node, int ret_code)
 	slurm_msg_t_init(&req);
 	req.msg_type = REQUEST_STEP_COMPLETE;
 	req.data = &msg;
+
+	if (ctx->step_resp->use_protocol_ver)
+		req.protocol_version = ctx->step_resp->use_protocol_ver;
 
 	if (slurm_send_recv_controller_rc_msg(&req, &rc) < 0)
 	       return SLURM_ERROR;
@@ -1610,6 +1659,9 @@ static int _launch_tasks(slurm_step_ctx_t *ctx,
 	msg.msg_type = REQUEST_LAUNCH_TASKS;
 	msg.data = launch_msg;
 
+	if (ctx->step_resp->use_protocol_ver)
+		msg.protocol_version = ctx->step_resp->use_protocol_ver;
+
 #ifdef HAVE_FRONT_END
 	slurm_cred_get_args(ctx->step_resp->cred, &cred_args);
 	//info("hostlist=%s", cred_args.step_hostlist);
@@ -1653,7 +1705,7 @@ static int _launch_tasks(slurm_step_ctx_t *ctx,
 		}
 	}
 	list_iterator_destroy(ret_itr);
-	list_destroy(ret_list);
+	FREE_NULL_LIST(ret_list);
 
 	if (tot_rc != SLURM_SUCCESS)
 		return tot_rc;
@@ -1734,7 +1786,7 @@ _exec_prog(slurm_msg_t *msg)
 	}
 	if (checkpoint) {
 		/* OpenMPI specific checkpoint support */
-		info("Checkpoint started at %s", slurm_ctime(&now));
+		info("Checkpoint started at %s", slurm_ctime2(&now));
 		for (i=0; (exec_msg->argv[i] && (i<2)); i++) {
 			argv[i] = exec_msg->argv[i];
 		}
@@ -1781,10 +1833,10 @@ fini:	if (checkpoint) {
 		now = time(NULL);
 		if (exit_code) {
 			info("Checkpoint completion code %d at %s",
-			     exit_code, slurm_ctime(&now));
+			     exit_code, slurm_ctime2(&now));
 		} else {
 			info("Checkpoint completed successfully at %s",
-			     slurm_ctime(&now));
+			     slurm_ctime2(&now));
 		}
 		if (buf[0])
 			info("Checkpoint location: %s", buf);
@@ -1924,84 +1976,4 @@ _check_io_timeout(void *_sls)
 	}
 	pthread_mutex_unlock(&sls->lock);
 	return NULL;
-}
-
-/* returns 0 if invalid gid, otherwise returns 1.  Set gid with
- * correct gid if root launched job.  Also set user_name
- * if not already set. */
-static int
-_valid_uid_gid(uid_t uid, gid_t *gid, char **user_name)
-{
-	struct passwd pwd, *result;
-	char buffer[PW_BUF_SIZE];
-	int rc;
-
-#ifdef HAVE_NATIVE_CRAY
-	struct group *grp;
-	int i;
-#endif
-	rc = slurm_getpwuid_r(uid, &pwd, buffer, PW_BUF_SIZE, &result);
-
-	if (!result || rc) {
-		error("uid %ld not found on system", (long)uid);
-		slurm_seterrno(ESLURMD_UID_NOT_FOUND);
-		return 0;
-	}
-
-	if (!*user_name)
-		*user_name = xstrdup(result->pw_name);
-
-#ifdef HAVE_NATIVE_CRAY
-	/* On a Cray this
-	 * needs to happen before the launch of the tasks.  Since a native
-	 * Cray really isn't a cluster but a distributed system this should
-	 * be ok.
-	 * This could be hacked by a user, but the only damage they
-	 * could really do is set SLURM_USER_NAME to be something
-	 * other than the actual name.  Running any getpwXXX commands
-	 * on a cray compute node is not scalable and could
-	 * potentially cause all sorts of issues and timeouts when
-	 * talking with LDAP or NIS when done on the compute node.  We
-	 * have not seen this issue on a regular cluster, so we do
-	 * the validating there instead when not on a Cray.
-	 */
-
-	if (result->pw_gid == *gid)
-		return 1;
-
-	grp = getgrgid(*gid);
-	if (!grp) {
-		error("gid %ld not found on system", (long)(*gid));
-		slurm_seterrno(ESLURMD_GID_NOT_FOUND);
-		return 0;
-	}
-
-	/* Allow user root to use any valid gid */
-	if (result->pw_uid == 0) {
-		result->pw_gid = *gid;
-		return 1;
-	}
-	for (i = 0; grp->gr_mem[i]; i++) {
-		if (!strcmp(result->pw_name, grp->gr_mem[i])) {
-			result->pw_gid = *gid;
-			return 1;
-		}
-	}
-
-	/* root user may have launched this job for this user, but
-	 * root did not explicitly set the gid. This would set the
-	 * gid to 0. In this case we should set the appropriate
-	 * default gid for the user (from the passwd struct).
-	 */
-	if (*gid == 0) {
-		*gid = result->pw_gid;
-		return 1;
-	}
-	error("uid %ld is not a member of gid %ld",
-		(long)result->pw_uid, (long)(*gid));
-	slurm_seterrno(ESLURMD_GID_NOT_FOUND);
-	return 0;
-#else
-	return 1;
-#endif
 }

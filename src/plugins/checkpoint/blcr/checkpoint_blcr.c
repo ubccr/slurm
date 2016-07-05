@@ -148,15 +148,12 @@ static pthread_cond_t ckpt_agent_cond = PTHREAD_COND_INITIALIZER;
  * only load checkpoint plugins if the plugin_type string has a
  * prefix of "checkpoint/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as the checkpoint API matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]       	= "BLCR checkpoint plugin";
 const char plugin_type[]       	= "checkpoint/blcr";
-const uint32_t plugin_version	= 100;
+const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -367,11 +364,6 @@ extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer,
 		set_buf_offset(buffer, x);
 		pack32(z - y, buffer);
 		set_buf_offset(buffer, z);
-	} else if (protocol_version >= SLURM_2_6_PROTOCOL_VERSION) {
-		pack16(check_ptr->disabled, buffer);
-		pack_time(check_ptr->time_stamp, buffer);
-		pack32(check_ptr->error_code, buffer);
-		packstr(check_ptr->error_msg, buffer);
 	}
 
 	return SLURM_SUCCESS;
@@ -402,13 +394,8 @@ extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer,
 					       &uint32_tmp, buffer);
 		}
 
-	} else if (protocol_version >= SLURM_2_6_PROTOCOL_VERSION) {
-		safe_unpack16(&check_ptr->disabled, buffer);
-		safe_unpack_time(&check_ptr->time_stamp, buffer);
-		safe_unpack32(&check_ptr->error_code, buffer);
-		safe_unpackstr_xmalloc(&check_ptr->error_msg,
-				       &uint32_tmp, buffer);
 	}
+
 	return SLURM_SUCCESS;
 
     unpack_error:

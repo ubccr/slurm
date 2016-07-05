@@ -87,7 +87,7 @@ typedef struct {
 	int32_t priority;
 	uint32_t ncpus;
 	uint32_t ntasks;
-	enum job_states	status;
+	uint32_t status; 		/* job state */
 	int32_t	exitcode;
 	uint32_t elapsed;
 	time_t end;
@@ -105,7 +105,7 @@ typedef struct {
 	uint32_t	stepnum;	/* job's step number */
 	char	        *nodes;
 	char	        *stepname;
-	enum job_states	status;
+	uint32_t 	status; 	/* job state */
 	int32_t	        exitcode;
 	uint32_t	ntasks;
 	uint32_t        ncpus;
@@ -224,8 +224,7 @@ static void _destroy_filetxt_job_rec(void *object)
 {
 	filetxt_job_rec_t *job = (filetxt_job_rec_t *)object;
 	if (job) {
-		if (job->steps)
-			list_destroy(job->steps);
+		FREE_NULL_LIST(job->steps);
 		_free_filetxt_header(&job->header);
 		xfree(job->jobname);
 		xfree(job->account);
@@ -254,7 +253,9 @@ static slurmdb_step_rec_t *_slurmdb_create_step_rec(
 	slurmdb_step->elapsed = filetxt_step->elapsed;
 	slurmdb_step->end = filetxt_step->end;
 	slurmdb_step->exitcode = filetxt_step->exitcode;
-	slurmdb_step->ncpus = filetxt_step->ncpus;
+	slurmdb_step->tres_alloc_str = xstrdup_printf(
+		"cpu=%u", filetxt_step->ncpus);
+
 	if (filetxt_step->nodes) {
 		hostlist_t hl = hostlist_create(filetxt_step->nodes);
 		slurmdb_step->nnodes = hostlist_count(hl);
@@ -319,7 +320,9 @@ no_cond:
 	slurmdb_job->jobname = xstrdup(filetxt_job->jobname);
 	slurmdb_job->partition = xstrdup(filetxt_job->header.partition);
 	slurmdb_job->req_cpus = filetxt_job->ncpus;
-	slurmdb_job->alloc_cpus = filetxt_job->ncpus;
+	slurmdb_job->tres_alloc_str = xstrdup_printf(
+		"cpu=%u", filetxt_job->ncpus);
+
 	if (filetxt_job->nodes) {
 		hostlist_t hl = hostlist_create(filetxt_job->nodes);
 		slurmdb_job->alloc_nodes = hostlist_count(hl);
@@ -1124,7 +1127,7 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 		list_iterator_destroy(itr2);
 
 	list_iterator_destroy(itr);
-	list_destroy(job_list);
+	FREE_NULL_LIST(job_list);
 
 	xfree(filein);
 
@@ -1447,9 +1450,9 @@ finished:
 	xfree(filein);
 
 	fclose(fd);
-	list_destroy(exp_list);
-	list_destroy(keep_list);
-	list_destroy(other_list);
+	FREE_NULL_LIST(exp_list);
+	FREE_NULL_LIST(keep_list);
+	FREE_NULL_LIST(other_list);
 	xfree(old_logfile_name);
 	xfree(logfile_name);
 

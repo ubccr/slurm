@@ -4,7 +4,7 @@
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2015 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
@@ -89,6 +89,7 @@ enum {
 	SORTID_DEFAULT,
 	SORTID_DENY_ACCOUNTS,
 	SORTID_DENY_QOS,
+	SORTID_EXCLUSIVE_USER,
 	SORTID_FEATURES,
 	SORTID_GRACE_TIME,
 	SORTID_HIDDEN,
@@ -114,6 +115,7 @@ enum {
 	SORTID_PART_STATE,
 	SORTID_PREEMPT_MODE,
 	SORTID_PRIORITY,
+	SORTID_QOS_CHAR,
 	SORTID_REASON,
 	SORTID_ROOT,
 	SORTID_SHARE,
@@ -137,6 +139,8 @@ static display_data_t display_data_part[] = {
 	{G_TYPE_STRING, SORTID_ALTERNATE, "Alternate", FALSE,
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_DEFAULT, "Default", FALSE,
+	 EDIT_MODEL, refresh_part, create_model_part, admin_edit_part},
+	{G_TYPE_STRING, SORTID_EXCLUSIVE_USER, "ExclusiveUser", FALSE,
 	 EDIT_MODEL, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_GRACE_TIME, "GraceTime", FALSE,
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
@@ -169,6 +173,8 @@ static display_data_t display_data_part[] = {
 	 create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_SHARE, "Share", FALSE, EDIT_MODEL, refresh_part,
 	 create_model_part, admin_edit_part},
+	{G_TYPE_STRING, SORTID_QOS_CHAR, "Qos", FALSE,
+	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_ALLOW_ACCOUNTS, "Allowed Accounts", FALSE,
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_ALLOW_GROUPS, "Allowed Groups", FALSE,
@@ -216,6 +222,8 @@ static display_data_t create_data_part[] = {
 	{G_TYPE_STRING, SORTID_ALTERNATE, "Alternate", FALSE,
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
 	{G_TYPE_STRING, SORTID_DEFAULT, "Default", FALSE,
+	 EDIT_MODEL, refresh_part, _create_model_part2, admin_edit_part},
+	{G_TYPE_STRING, SORTID_EXCLUSIVE_USER, "ExclusiveUser", FALSE,
 	 EDIT_MODEL, refresh_part, _create_model_part2, admin_edit_part},
 	{G_TYPE_STRING, SORTID_GRACE_TIME, "GraceTime", FALSE,
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
@@ -325,8 +333,10 @@ static int _build_min_max_32_string(char *buffer, int buf_size,
 {
 	char tmp_min[8];
 	char tmp_max[8];
-	convert_num_unit((float)min, tmp_min, sizeof(tmp_min), UNIT_NONE);
-	convert_num_unit((float)max, tmp_max, sizeof(tmp_max), UNIT_NONE);
+	convert_num_unit((float)min, tmp_min, sizeof(tmp_min), UNIT_NONE,
+			 working_sview_config.convert_flags);
+	convert_num_unit((float)max, tmp_max, sizeof(tmp_max), UNIT_NONE,
+			 working_sview_config.convert_flags);
 
 	if (max == min)
 		return snprintf(buffer, buf_size, "%s", tmp_max);
@@ -356,6 +366,7 @@ static void _set_active_combo_part(GtkComboBox *combo,
 		goto end_it;
 	switch(type) {
 	case SORTID_DEFAULT:
+	case SORTID_EXCLUSIVE_USER:
 	case SORTID_HIDDEN:
 	case SORTID_ROOT:
 		if (!strcmp(temp_char, "yes"))
@@ -505,6 +516,16 @@ static const char *_set_part_msg(update_part_msg_t *part_msg,
 			part_msg->flags |= PART_FLAG_DEFAULT_CLR;
 		}
 		type = "default";
+		break;
+	case SORTID_EXCLUSIVE_USER:
+		if (!strcasecmp(new_text, "yes")) {
+			part_msg->flags |= PART_FLAG_EXCLUSIVE_USER;
+			part_msg->flags &= (~PART_FLAG_EXC_USER_CLR);
+		} else if (!strcasecmp(new_text, "no")) {
+			part_msg->flags &= (~PART_FLAG_EXCLUSIVE_USER);
+			part_msg->flags |= PART_FLAG_EXC_USER_CLR;
+		}
+		type = "hidden";
 		break;
 	case SORTID_GRACE_TIME:
 		temp_int = time_str2mins((char *)new_text);
@@ -663,6 +684,10 @@ static const char *_set_part_msg(update_part_msg_t *part_msg,
 	case SORTID_FEATURES:
 		type = "Update Features";
 		got_features_edit_signal = xstrdup(new_text);
+		break;
+	case SORTID_QOS_CHAR:
+		type = "QOS Char";
+		part_msg->qos_char = xstrdup(new_text);
 		break;
 	default:
 		type = "unknown";
@@ -905,11 +930,14 @@ static void _layout_part_record(GtkTreeView *treeview,
 		GTK_TREE_STORE(gtk_tree_view_get_model(treeview));
 
 	convert_num_unit((float)sview_part_info->sub_part_total.node_alloc_cnt,
-			 tmp_cnt, sizeof(tmp_cnt), UNIT_NONE);
+			 tmp_cnt, sizeof(tmp_cnt), UNIT_NONE,
+			 working_sview_config.convert_flags);
 	convert_num_unit((float)sview_part_info->sub_part_total.node_idle_cnt,
-			 tmp_cnt1, sizeof(tmp_cnt1), UNIT_NONE);
+			 tmp_cnt1, sizeof(tmp_cnt1), UNIT_NONE,
+			 working_sview_config.convert_flags);
 	convert_num_unit((float)sview_part_info->sub_part_total.node_error_cnt,
-			 tmp_cnt2, sizeof(tmp_cnt2), UNIT_NONE);
+			 tmp_cnt2, sizeof(tmp_cnt2), UNIT_NONE,
+			 working_sview_config.convert_flags);
 	snprintf(ind_cnt, sizeof(ind_cnt), "%s/%s/%s",
 		 tmp_cnt, tmp_cnt1, tmp_cnt2);
 
@@ -943,7 +971,8 @@ static void _layout_part_record(GtkTreeView *treeview,
 		case SORTID_CPUS:
 			convert_num_unit((float)part_ptr->total_cpus,
 					 tmp_cnt, sizeof(tmp_cnt),
-					 UNIT_NONE);
+					 UNIT_NONE,
+					 working_sview_config.convert_flags);
 			temp_char = tmp_cnt;
 			break;
 		case SORTID_DEFAULT:
@@ -991,6 +1020,12 @@ static void _layout_part_record(GtkTreeView *treeview,
 			else
 				temp_char = "none";
 			break;
+		case SORTID_EXCLUSIVE_USER:
+			if (part_ptr->flags & PART_FLAG_EXCLUSIVE_USER)
+				yes_no = 1;
+			else
+				yes_no = 0;
+			break;
 		case SORTID_HIDDEN:
 			if (part_ptr->flags & PART_FLAG_HIDDEN)
 				yes_no = 1;
@@ -1007,7 +1042,8 @@ static void _layout_part_record(GtkTreeView *treeview,
 			convert_num_unit((float)sview_part_info->
 					 sub_part_total.mem_total,
 					 tmp_cnt, sizeof(tmp_cnt),
-					 UNIT_MEGA);
+					 UNIT_MEGA,
+					 working_sview_config.convert_flags);
 			temp_char = tmp_cnt;
 			break;
 		case SORTID_NODELIST:
@@ -1020,7 +1056,9 @@ static void _layout_part_record(GtkTreeView *treeview,
 			if (cluster_flags & CLUSTER_FLAG_BG)
 				convert_num_unit((float)part_ptr->total_nodes,
 						 tmp_cnt,
-						 sizeof(tmp_cnt), UNIT_NONE);
+						 sizeof(tmp_cnt), UNIT_NONE,
+						 working_sview_config.
+						 convert_flags);
 			else
 				sprintf(tmp_cnt, "%u", part_ptr->total_nodes);
 			temp_char = tmp_cnt;
@@ -1046,7 +1084,8 @@ static void _layout_part_record(GtkTreeView *treeview,
 			break;
 		case SORTID_PRIORITY:
 			convert_num_unit((float)part_ptr->priority,
-					 time_buf, sizeof(time_buf), UNIT_NONE);
+					 time_buf, sizeof(time_buf), UNIT_NONE,
+					 working_sview_config.convert_flags);
 			temp_char = time_buf;
 			break;
 		case SORTID_REASON:
@@ -1081,11 +1120,18 @@ static void _layout_part_record(GtkTreeView *treeview,
 			convert_num_unit(
 				(float)sview_part_info->sub_part_total.
 				disk_total,
-				time_buf, sizeof(time_buf), UNIT_NONE);
+				time_buf, sizeof(time_buf), UNIT_NONE,
+				working_sview_config.convert_flags);
 			temp_char = time_buf;
 			break;
 		case SORTID_TIMELIMIT:
 			limit_set = part_ptr->max_time;
+			break;
+		case SORTID_QOS_CHAR:
+			if (part_ptr->qos_char)
+				temp_char = part_ptr->qos_char;
+			else
+				temp_char = "N/A";
 			break;
 		default:
 			break;
@@ -1109,7 +1155,8 @@ static void _layout_part_record(GtkTreeView *treeview,
 			else {
 				convert_num_unit(
 					(float)limit_set,
-					time_buf, sizeof(time_buf), UNIT_NONE);
+					time_buf, sizeof(time_buf), UNIT_NONE,
+					working_sview_config.convert_flags);
 				temp_char = time_buf;
 			}
 			limit_set = NO_VAL;
@@ -1139,7 +1186,7 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 	char tmp_max_nodes[40], tmp_min_nodes[40], tmp_grace[40];
 	char tmp_cpu_cnt[40], tmp_node_cnt[40], tmp_max_cpus_per_node[40];
 	char *tmp_alt, *tmp_default, *tmp_accounts, *tmp_groups, *tmp_hidden;
-	char *tmp_deny_accounts;
+	char *tmp_deny_accounts, *tmp_qos_char, *tmp_exc_user;
 	char *tmp_qos, *tmp_deny_qos;
 	char *tmp_root, *tmp_share, *tmp_state;
 	uint16_t tmp_preempt;
@@ -1153,7 +1200,8 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 
 	if (cluster_flags & CLUSTER_FLAG_BG)
 		convert_num_unit((float)part_ptr->total_cpus, tmp_cpu_cnt,
-				 sizeof(tmp_cpu_cnt), UNIT_NONE);
+				 sizeof(tmp_cpu_cnt), UNIT_NONE,
+				 working_sview_config.convert_flags);
 	else
 		sprintf(tmp_cpu_cnt, "%u", part_ptr->total_cpus);
 
@@ -1187,6 +1235,11 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 	else
 		tmp_deny_qos = "none";
 
+	if (part_ptr->flags & PART_FLAG_EXCLUSIVE_USER)
+		tmp_exc_user = "yes";
+	else
+		tmp_exc_user = "no";
+
 	if (part_ptr->flags & PART_FLAG_HIDDEN)
 		tmp_hidden = "yes";
 	else
@@ -1204,14 +1257,15 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 	else {
 		convert_num_unit((float)part_ptr->max_nodes,
 				 tmp_max_nodes, sizeof(tmp_max_nodes),
-				 UNIT_NONE);
+				 UNIT_NONE, working_sview_config.convert_flags);
 	}
 
 	if (part_ptr->min_nodes == (uint32_t) INFINITE)
 		snprintf(tmp_min_nodes, sizeof(tmp_min_nodes), "infinite");
 	else {
 		convert_num_unit((float)part_ptr->min_nodes,
-				 tmp_min_nodes, sizeof(tmp_min_nodes), UNIT_NONE);
+				 tmp_min_nodes, sizeof(tmp_min_nodes),
+				 UNIT_NONE, working_sview_config.convert_flags);
 	}
 
 	if (part_ptr->max_cpus_per_node == INFINITE) {
@@ -1223,7 +1277,8 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 
 	if (cluster_flags & CLUSTER_FLAG_BG)
 		convert_num_unit((float)part_ptr->total_nodes, tmp_node_cnt,
-				 sizeof(tmp_node_cnt), UNIT_NONE);
+				 sizeof(tmp_node_cnt), UNIT_NONE,
+				 working_sview_config.convert_flags);
 	else
 		sprintf(tmp_node_cnt, "%u", part_ptr->total_nodes);
 
@@ -1252,7 +1307,8 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 		tmp_preempt = slurm_get_preempt_mode();	/* use cluster param */
 
 	convert_num_unit((float)part_ptr->priority,
-			 tmp_prio, sizeof(tmp_prio), UNIT_NONE);
+			 tmp_prio, sizeof(tmp_prio), UNIT_NONE,
+			 working_sview_config.convert_flags);
 
 	if (part_ptr->max_share & SHARED_FORCE) {
 		snprintf(tmp_share_buf, sizeof(tmp_share_buf), "force:%u",
@@ -1274,6 +1330,11 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 			      tmp_time, sizeof(tmp_time));
 	}
 
+	if (part_ptr->qos_char)
+		tmp_qos_char = part_ptr->qos_char;
+	else
+		tmp_qos_char = "N/A";
+
 	/* Combining these records provides a slight performance improvement
 	 * NOTE: Some of these fields are cleared here and filled in based upon
 	 * the configuration of nodes within this partition. */
@@ -1286,11 +1347,13 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 			   SORTID_DEFAULT,    tmp_default,
 			   SORTID_FEATURES,   "",
 			   SORTID_GRACE_TIME, tmp_grace,
+			   SORTID_QOS_CHAR,   tmp_qos_char,
 			   SORTID_ALLOW_ACCOUNTS, tmp_accounts,
 			   SORTID_ALLOW_GROUPS, tmp_groups,
 			   SORTID_ALLOW_QOS,  tmp_qos,
 			   SORTID_DENY_ACCOUNTS, tmp_deny_accounts,
 			   SORTID_DENY_QOS,   tmp_deny_qos,
+			   SORTID_EXCLUSIVE_USER, tmp_exc_user,
 			   SORTID_HIDDEN,     tmp_hidden,
 			   SORTID_JOB_SIZE,   tmp_size,
 			   SORTID_MAX_CPUS_PER_NODE, tmp_max_cpus_per_node,
@@ -1346,21 +1409,24 @@ static void _update_part_sub_record(sview_part_sub_t *sview_part_sub,
 		if (sview_part_sub->cpu_alloc_cnt) {
 			convert_num_unit((float)sview_part_sub->cpu_alloc_cnt,
 					 tmp_cnt,
-					 sizeof(tmp_cnt), UNIT_NONE);
+					 sizeof(tmp_cnt), UNIT_NONE,
+					 working_sview_config.convert_flags);
 			xstrfmtcat(tmp_cpus, "Alloc:%s", tmp_cnt);
 			if (cluster_flags & CLUSTER_FLAG_BG) {
 				convert_num_unit(
 					(float)(sview_part_sub->cpu_alloc_cnt
 						/ cpus_per_node),
 					tmp_cnt,
-					sizeof(tmp_cnt), UNIT_NONE);
+					sizeof(tmp_cnt), UNIT_NONE,
+					working_sview_config.convert_flags);
 				xstrfmtcat(tmp_nodes, "Alloc:%s", tmp_cnt);
 			}
 		}
 		if (sview_part_sub->cpu_error_cnt) {
 			convert_num_unit((float)sview_part_sub->cpu_error_cnt,
 					 tmp_cnt,
-					 sizeof(tmp_cnt), UNIT_NONE);
+					 sizeof(tmp_cnt), UNIT_NONE,
+					 working_sview_config.convert_flags);
 			if (tmp_cpus)
 				xstrcat(tmp_cpus, " ");
 			xstrfmtcat(tmp_cpus, "Err:%s", tmp_cnt);
@@ -1369,7 +1435,8 @@ static void _update_part_sub_record(sview_part_sub_t *sview_part_sub,
 					(float)(sview_part_sub->cpu_error_cnt
 						/ cpus_per_node),
 					tmp_cnt,
-					sizeof(tmp_cnt), UNIT_NONE);
+					sizeof(tmp_cnt), UNIT_NONE,
+					working_sview_config.convert_flags);
 				if (tmp_nodes)
 					xstrcat(tmp_nodes, " ");
 				xstrfmtcat(tmp_nodes, "Err:%s", tmp_cnt);
@@ -1378,7 +1445,8 @@ static void _update_part_sub_record(sview_part_sub_t *sview_part_sub,
 		if (sview_part_sub->cpu_idle_cnt) {
 			convert_num_unit((float)sview_part_sub->cpu_idle_cnt,
 					 tmp_cnt,
-					 sizeof(tmp_cnt), UNIT_NONE);
+					 sizeof(tmp_cnt), UNIT_NONE,
+					 working_sview_config.convert_flags);
 			if (tmp_cpus)
 				xstrcat(tmp_cpus, " ");
 			xstrfmtcat(tmp_cpus, "Idle:%s", tmp_cnt);
@@ -1387,7 +1455,8 @@ static void _update_part_sub_record(sview_part_sub_t *sview_part_sub,
 					(float)(sview_part_sub->cpu_idle_cnt
 						/ cpus_per_node),
 					tmp_cnt,
-					sizeof(tmp_cnt), UNIT_NONE);
+					sizeof(tmp_cnt), UNIT_NONE,
+					working_sview_config.convert_flags);
 				if (tmp_nodes)
 					xstrcat(tmp_nodes, " ");
 				xstrfmtcat(tmp_nodes, "Idle:%s", tmp_cnt);
@@ -1396,20 +1465,24 @@ static void _update_part_sub_record(sview_part_sub_t *sview_part_sub,
 	} else {
 		tmp_cpus = xmalloc(20);
 		convert_num_unit((float)sview_part_sub->cpu_cnt,
-				 tmp_cpus, 20, UNIT_NONE);
+				 tmp_cpus, 20, UNIT_NONE,
+				 working_sview_config.convert_flags);
 	}
 
 	if (!tmp_nodes) {
 		convert_num_unit((float)sview_part_sub->node_cnt, tmp_cnt,
-				 sizeof(tmp_cnt), UNIT_NONE);
+				 sizeof(tmp_cnt), UNIT_NONE,
+				 working_sview_config.convert_flags);
 		tmp_nodes = xstrdup(tmp_cnt);
 	}
 
 	convert_num_unit((float)sview_part_sub->disk_total, tmp_disk,
-			 sizeof(tmp_disk), UNIT_NONE);
+			 sizeof(tmp_disk), UNIT_NONE,
+			 working_sview_config.convert_flags);
 
 	convert_num_unit((float)sview_part_sub->mem_total, tmp_mem,
-			 sizeof(tmp_mem), UNIT_MEGA);
+			 sizeof(tmp_mem), UNIT_MEGA,
+			 working_sview_config.convert_flags);
 
 	tmp_nodelist = hostlist_ranged_string_xmalloc(sview_part_sub->hl);
 
@@ -1502,8 +1575,7 @@ static void _part_info_free(sview_part_info_t *sview_part_info)
 		xfree(sview_part_info->part_name);
 		memset(&sview_part_info->sub_part_total, 0,
 		       sizeof(sview_part_sub_t));
-		if (sview_part_info->sub_list)
-			list_destroy(sview_part_info->sub_list);
+		FREE_NULL_LIST(sview_part_info->sub_list);
 	}
 }
 
@@ -1526,8 +1598,7 @@ static void _destroy_part_sub(void *object)
 		xfree(sview_part_sub->reason);
 		if (sview_part_sub->hl)
 			hostlist_destroy(sview_part_sub->hl);
-		if (sview_part_sub->node_ptr_list)
-			list_destroy(sview_part_sub->node_ptr_list);
+		FREE_NULL_LIST(sview_part_sub->node_ptr_list);
 		xfree(sview_part_sub);
 	}
 }
@@ -1852,7 +1923,7 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 
 	if (last_list) {
 		list_iterator_destroy(last_list_itr);
-		list_destroy(last_list);
+		FREE_NULL_LIST(last_list);
 	}
 
 	return info_list;
@@ -2139,6 +2210,7 @@ static GtkListStore *_create_model_part2(int type)
 	last_model = NULL;	/* Reformat display */
 	switch (type) {
 	case SORTID_DEFAULT:
+	case SORTID_EXCLUSIVE_USER:
 	case SORTID_HIDDEN:
 		model = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_INT);
 		gtk_list_store_append(model, &iter);
@@ -2224,6 +2296,7 @@ extern GtkListStore *create_model_part(int type)
 	last_model = NULL;	/* Reformat display */
 	switch (type) {
 	case SORTID_DEFAULT:
+	case SORTID_EXCLUSIVE_USER:
 	case SORTID_HIDDEN:
 	case SORTID_ROOT:
 		model = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_INT);
@@ -2755,7 +2828,7 @@ display_it:
 
 	_update_info_part(send_info_list,
 			  GTK_TREE_VIEW(spec_info->display_widget));
-	list_destroy(send_info_list);
+	FREE_NULL_LIST(send_info_list);
 end_it:
 	popup_win->toggled = 0;
 	popup_win->force_refresh = 0;

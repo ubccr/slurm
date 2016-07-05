@@ -240,6 +240,8 @@
 #define	unpack_time		slurm_unpack_time
 #define	packdouble		slurm_packdouble
 #define	unpackdouble		slurm_unpackdouble
+#define	packlongdouble		slurm_packlongdouble
+#define	unpacklongdouble	slurm_unpacklongdouble
 #define	pack64			slurm_pack64
 #define	unpack64		slurm_unpack64
 #define	pack32			slurm_pack32
@@ -406,11 +408,22 @@
 #define eio_signal_shutdown		slurm_eio_signal_shutdown
 #define eio_signal_wakeup		slurm_eio_signal_wakeup
 
+/* callerid.[ch] functions */
+#define callerid_get_own_netinfo	slurm_callerid_get_own_netinfo
+
+/* some stepd_api.[ch] functions */
+#define stepd_available			slurm_stepd_available
+#define stepd_connect			slurm_stepd_connect
+#define stepd_get_uid			slurm_stepd_get_uid
+#define stepd_add_extern_pid		slurm_stepd_add_extern_pid
+
+
 #endif /* USE_ALIAS */
 
 /* Include the function definitions after redefining their names. */
 #include "src/common/arg_desc.h"
 #include "src/common/bitstring.h"
+#include "src/common/callerid.h"
 #include "src/common/eio.h"
 #include "src/common/env.h"
 #include "src/common/hostlist.h"
@@ -426,6 +439,7 @@
 #include "src/common/slurm_route.h"
 #include "src/common/slurm_step_layout.h"
 #include "src/common/strlcpy.h"
+#include "src/common/stepd_api.h"
 #include "src/common/switch.h"
 #include "src/common/working_cluster.h"
 #include "src/common/xassert.h"

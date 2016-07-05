@@ -71,82 +71,18 @@
 #include "src/slurmd/slurmstepd/multi_prog.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
+#ifdef HAVE_NATIVE_CRAY
+static bool already_validated_uid = true;
+#else
+static bool already_validated_uid = false;
+#endif
+
 static char ** _array_copy(int n, char **src);
 static void _array_free(char ***array);
 static void _srun_info_destructor(void *arg);
 static void _job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
 				char *ifname, char *ofname, char *efname);
 static void _task_info_destroy(stepd_step_task_info_t *t, uint16_t multi_prog);
-
-/* returns 0 if invalid gid, otherwise returns 1.  Set gid with
- * correct gid if root launched job.  Also set user_name
- * if not already set. */
-static int
-_valid_uid_gid(uid_t uid, gid_t *gid, char **user_name)
-{
-	struct passwd *pwd;
-	struct group *grp;
-	int i;
-
-#ifdef HAVE_NATIVE_CRAY
-	/* already verified */
-	if (*user_name)
-		return 1;
-#endif
-znovu:
-	errno = 0;
-	pwd = getpwuid(uid);
-	if (!pwd) {
-		if (errno == EINTR)
-			goto znovu;
-		error("uid %ld not found on system", (long) uid);
-		slurm_seterrno(ESLURMD_UID_NOT_FOUND);
-		return 0;
-	}
-
-	if (!*user_name)
-		*user_name = xstrdup(pwd->pw_name);
-
-	if (pwd->pw_gid == *gid)
-		return 1;
-
-	grp = getgrgid(*gid);
-	if (!grp) {
-		error("gid %ld not found on system", (long)(*gid));
-		slurm_seterrno(ESLURMD_GID_NOT_FOUND);
-		return 0;
-	}
-
-	/* Allow user root to use any valid gid */
-	if (pwd->pw_uid == 0) {
-		pwd->pw_gid = *gid;
-		return 1;
-	}
-	for (i = 0; grp->gr_mem[i]; i++) {
-		if (!strcmp(pwd->pw_name, grp->gr_mem[i])) {
-			pwd->pw_gid = *gid;
-		       	return 1;
-	       	}
-	}
-	if (*gid != 0) {
-		if (slurm_find_group_user(pwd, *gid))
-			return 1;
-	}
-	/* root user may have launched this job for this user, but
-	 * root did not explicitly set the gid. This would set the
-	 * gid to 0. In this case we should set the appropriate
-	 * default gid for the user (from the passwd struct).
-	 */
-	if (*gid == 0) {
-		*gid = pwd->pw_gid;
-		return 1;
-	}
-	error("uid %ld is not a member of gid %ld",
-		(long)pwd->pw_uid, (long)(*gid));
-	slurm_seterrno(ESLURMD_GID_NOT_FOUND);
-
-	return 0;
-}
 
 /*
  * return the default output filename for a batch job
@@ -298,7 +234,7 @@ _task_info_destroy(stepd_step_task_info_t *t, uint16_t multi_prog)
 
 /* create a slurmd job structure from a launch tasks message */
 extern stepd_step_rec_t *
-stepd_step_rec_create(launch_tasks_request_msg_t *msg)
+stepd_step_rec_create(launch_tasks_request_msg_t *msg, uint16_t protocol_version)
 {
 	stepd_step_rec_t  *job = NULL;
 	srun_info_t   *srun = NULL;
@@ -310,7 +246,8 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg)
 	xassert(msg->complete_nodelist != NULL);
 	debug3("entering stepd_step_rec_create");
 
-	if (!_valid_uid_gid((uid_t)msg->uid, &(msg->gid), &(msg->user_name)))
+	if (!slurm_valid_uid_gid((uid_t)msg->uid, &(msg->gid),
+				 &(msg->user_name), already_validated_uid, 1))
 		return NULL;
 
 	if (acct_gather_check_acct_freq_task(msg->job_mem_lim, msg->acctg_freq))
@@ -332,7 +269,9 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg)
 		return NULL;
 	}
 
-	job->state	= SLURMSTEPD_STEP_STARTING;
+	job->state = SLURMSTEPD_STEP_STARTING;
+	pthread_cond_init(&job->state_cond, NULL);
+	pthread_mutex_init(&job->state_mutex, NULL);
 	job->node_tasks	= msg->tasks_to_launch[nodeid];
 	i = sizeof(uint16_t) * msg->nnodes;
 	job->task_cnts  = xmalloc(i);
@@ -351,7 +290,9 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg)
 	job->cpu_bind = xstrdup(msg->cpu_bind);
 	job->mem_bind_type = msg->mem_bind_type;
 	job->mem_bind = xstrdup(msg->mem_bind);
-	job->cpu_freq = msg->cpu_freq;
+	job->cpu_freq_min = msg->cpu_freq_min;
+	job->cpu_freq_max = msg->cpu_freq_max;
+	job->cpu_freq_gov = msg->cpu_freq_gov;
 	job->ckpt_dir = xstrdup(msg->ckpt_dir);
 	job->restart_dir = xstrdup(msg->restart_dir);
 	job->cpus_per_task = msg->cpus_per_task;
@@ -368,7 +309,7 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg)
 			job->array_task_id = atoi(msg->env[i] + 20);
 	}
 
-	job->eio     = eio_handle_create();
+	job->eio     = eio_handle_create(0);
 	job->sruns   = list_create((ListDelF) _srun_info_destructor);
 	job->clients = list_create(NULL); /* FIXME! Needs destructor */
 	job->stdout_eio_objs = list_create(NULL); /* FIXME! Needs destructor */
@@ -392,13 +333,19 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg)
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
 	job->envtp->ckpt_dir = NULL;
-	job->envtp->comm_port = msg->resp_port[nodeid % msg->num_resp_port];
-
-	memcpy(&resp_addr, &msg->orig_addr, sizeof(slurm_addr_t));
-	slurm_set_addr(&resp_addr,
-		       msg->resp_port[nodeid % msg->num_resp_port],
-		       NULL);
+	if (!msg->resp_port)
+		msg->num_resp_port = 0;
+	if (msg->num_resp_port) {
+		job->envtp->comm_port =
+			msg->resp_port[nodeid % msg->num_resp_port];
+		memcpy(&resp_addr, &msg->orig_addr, sizeof(slurm_addr_t));
+		slurm_set_addr(&resp_addr,
+			       msg->resp_port[nodeid % msg->num_resp_port],
+			       NULL);
+	}
 	job->user_managed_io = msg->user_managed_io;
+	if (!msg->io_port)
+		msg->user_managed_io = 1;
 	if (!msg->user_managed_io) {
 		memcpy(&io_addr,   &msg->orig_addr, sizeof(slurm_addr_t));
 		slurm_set_addr(&io_addr,
@@ -406,7 +353,8 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg)
 			       NULL);
 	}
 
-	srun = srun_info_create(msg->cred, &resp_addr, &io_addr);
+	srun = srun_info_create(msg->cred, &resp_addr, &io_addr,
+				protocol_version);
 
 	job->buffered_stdio = msg->buffered_stdio;
 	job->labelio = msg->labelio;
@@ -489,7 +437,8 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 
 	debug3("entering batch_stepd_step_rec_create");
 
-	if (!_valid_uid_gid((uid_t)msg->uid, &(msg->gid), &(msg->user_name)))
+	if (!slurm_valid_uid_gid((uid_t)msg->uid, &(msg->gid),
+				 &(msg->user_name), already_validated_uid, 1))
 		return NULL;
 
 	if (acct_gather_check_acct_freq_task(msg->job_mem, msg->acctg_freq))
@@ -497,7 +446,9 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 
 	job = xmalloc(sizeof(stepd_step_rec_t));
 
-	job->state   = SLURMSTEPD_STEP_STARTING;
+	job->state = SLURMSTEPD_STEP_STARTING;
+	pthread_cond_init(&job->state_cond, NULL);
+	pthread_mutex_init(&job->state_mutex, NULL);
 	if (msg->cpus_per_node)
 		job->cpus    = msg->cpus_per_node[0];
 	job->node_tasks  = 1;
@@ -531,7 +482,7 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	job->restart_dir = xstrdup(msg->restart_dir);
 
 	job->env     = _array_copy(msg->envc, msg->environment);
-	job->eio     = eio_handle_create();
+	job->eio     = eio_handle_create(0);
 	job->sruns   = list_create((ListDelF) _srun_info_destructor);
 	job->envtp   = xmalloc(sizeof(env_t));
 	job->envtp->jobid = -1;
@@ -564,7 +515,7 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	get_cred_gres(msg->cred, conf->node_name,
 		      &job->job_gres_list, &job->step_gres_list);
 
-	srun = srun_info_create(NULL, NULL, NULL);
+	srun = srun_info_create(NULL, NULL, NULL, (uint16_t)NO_VAL);
 
 	list_append(job->sruns, (void *) srun);
 
@@ -613,7 +564,7 @@ stepd_step_rec_destroy(stepd_step_rec_t *job)
 
 	for (i = 0; i < job->node_tasks; i++)
 		_task_info_destroy(job->task[i], job->multi_prog);
-	list_destroy(job->sruns);
+	FREE_NULL_LIST(job->sruns);
 	xfree(job->envtp);
 	xfree(job->node_name);
 	mpmd_free(job);
@@ -627,7 +578,8 @@ stepd_step_rec_destroy(stepd_step_rec_t *job)
 }
 
 extern srun_info_t *
-srun_info_create(slurm_cred_t *cred, slurm_addr_t *resp_addr, slurm_addr_t *ioaddr)
+srun_info_create(slurm_cred_t *cred, slurm_addr_t *resp_addr,
+		 slurm_addr_t *ioaddr, uint16_t protocol_version)
 {
 	char             *data = NULL;
 	uint32_t          len  = 0;
@@ -635,7 +587,9 @@ srun_info_create(slurm_cred_t *cred, slurm_addr_t *resp_addr, slurm_addr_t *ioad
 	srun_key_t       *key  = xmalloc(sizeof(srun_key_t));
 
 	srun->key    = key;
-
+	if (!protocol_version || (protocol_version == (uint16_t)NO_VAL))
+		protocol_version = SLURM_PROTOCOL_VERSION;
+	srun->protocol_version = protocol_version;
 	/*
 	 * If no credential was provided, return the empty
 	 * srun info object. (This is used, for example, when

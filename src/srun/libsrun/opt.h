@@ -99,6 +99,7 @@ typedef struct srun_options {
 	char *cpu_bind;		/* binding map for map/mask_cpu */
 	mem_bind_type_t mem_bind_type; /* --mem_bind=		*/
 	char *mem_bind;		/* binding map for map/mask_mem	*/
+	uint16_t accel_bind_type; /* --accel-bind= */
 	bool nodes_set;		/* true if nodes explicitly set */
 	bool nodes_set_env;	/* true if nodes set via SLURM_NNODES */
 	bool nodes_set_opt;	/* true if nodes explicitly set using
@@ -112,6 +113,8 @@ typedef struct srun_options {
 	char *ckpt_interval_str;/* --checkpoint (string)	*/
 	char *ckpt_dir;  	/* --checkpoint-dir (string)   */
 	bool exclusive;		/* --exclusive			*/
+	char *bcast_file;	/* --bcast, copy executable to compute nodes */
+	bool bcast_flag;	/* --bcast, copy executable to compute nodes */
 	int  resv_port_cnt;	/* --resv_ports			*/
 	char *partition;	/* --partition=n,   -p n   	*/
 	enum task_dist_states
@@ -216,7 +219,6 @@ typedef struct srun_options {
 	uint8_t open_mode;	/* --open-mode=append|truncate	*/
 	char *acctg_freq;	/* --acctg-freq=<type1>=<freq1>,*/
 				/* 	<type2>=<freq2>,...	*/
-	uint32_t cpu_freq;     	/* --cpu_freq=kilohertz		*/
 	bool pty;		/* --pty			*/
 	char *restart_dir;	/* --restart                    */
 	int argc;		/* length of argv array		*/
@@ -231,6 +233,12 @@ typedef struct srun_options {
 	bool user_managed_io;   /* 0 for "normal" IO, 1 for "user manged" IO */
 	int core_spec;		/* --core-spec=n,      -S n	*/
 	bool core_spec_set;	/* true if core_spec explicitly set */
+	char *burst_buffer;	/* -bb				*/
+	uint32_t cpu_freq_min;  /* Minimum cpu frequency  */
+	uint32_t cpu_freq_max;  /* Maximum cpu frequency  */
+	uint32_t cpu_freq_gov;  /* cpu frequency governor */
+	uint8_t power_flags;	/* Power management options	*/
+	uint8_t sicp_mode;	/* Inter-cluster job ID		*/
 } opt_t;
 
 extern opt_t opt;
@@ -239,6 +247,7 @@ extern int error_exit;		/* exit code for slurm errors */
 extern int immediate_exit;	/* exit code for --imediate option & busy */
 extern bool srun_max_timer;
 extern bool srun_shutdown;
+extern time_t srun_begin_time;	/* begin time of srun process */
 extern int sig_array[];
 extern resource_allocation_response_msg_t *global_resp;
 

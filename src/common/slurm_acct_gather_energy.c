@@ -82,15 +82,22 @@ static pthread_mutex_t g_context_lock =	PTHREAD_MUTEX_INITIALIZER;
 static bool init_run = false;
 static bool acct_shutdown = true;
 static int freq = 0;
-
+static pthread_t watch_node_thread_id = 0;
 
 static void *_watch_node(void *arg)
 {
 	int type = PROFILE_ENERGY;
 	int delta = acct_gather_profile_timer[type].freq - 1;
+
+	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+
 	while (init_run && acct_gather_profile_running) {
 		/* Do this until shutdown is requested */
+		slurm_mutex_lock(&g_context_lock);
 		(*(ops.set_data))(ENERGY_DATA_PROFILE, &delta);
+		slurm_mutex_unlock(&g_context_lock);
+
 		slurm_mutex_lock(&acct_gather_profile_timer[type].notify_mutex);
 		pthread_cond_wait(
 			&acct_gather_profile_timer[type].notify,
@@ -131,31 +138,40 @@ extern int slurm_acct_gather_energy_init(void)
 
 done:
 	slurm_mutex_unlock(&g_context_lock);
-	xfree(type);
 	if (retval == SLURM_SUCCESS)
 		retval = acct_gather_conf_init();
+	if (retval != SLURM_SUCCESS)
+		fatal("can not open the %s plugin", type);
+	xfree(type);
 
 	return retval;
 }
 
 extern int acct_gather_energy_fini(void)
 {
-	int rc;
+	int rc = SLURM_SUCCESS;
 
-	if (!g_context)
-		return SLURM_SUCCESS;
+	slurm_mutex_lock(&g_context_lock);
+	if (g_context) {
+		init_run = false;
 
-	init_run = false;
-	rc = plugin_context_destroy(g_context);
-	g_context = NULL;
+		if (watch_node_thread_id) {
+			pthread_cancel(watch_node_thread_id);
+			pthread_join(watch_node_thread_id, NULL);
+		}
+
+		rc = plugin_context_destroy(g_context);
+		g_context = NULL;
+	}
+	slurm_mutex_unlock(&g_context_lock);
 
 	return rc;
 }
 
-extern acct_gather_energy_t *acct_gather_energy_alloc(void)
+extern acct_gather_energy_t *acct_gather_energy_alloc(uint16_t cnt)
 {
 	acct_gather_energy_t *energy =
-		xmalloc(sizeof(struct acct_gather_energy));
+		xmalloc(sizeof(struct acct_gather_energy) * cnt);
 
 	return energy;
 }
@@ -168,7 +184,24 @@ extern void acct_gather_energy_destroy(acct_gather_energy_t *energy)
 extern void acct_gather_energy_pack(acct_gather_energy_t *energy, Buf buffer,
 				    uint16_t protocol_version)
 {
-	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		if (!energy) {
+			pack64(0, buffer);
+			pack32(0, buffer);
+			pack64(0, buffer);
+			pack32(0, buffer);
+			pack64(0, buffer);
+			pack_time(0, buffer);
+			return;
+		}
+
+		pack64(energy->base_consumed_energy, buffer);
+		pack32(energy->base_watts, buffer);
+		pack64(energy->consumed_energy, buffer);
+		pack32(energy->current_watts, buffer);
+		pack64(energy->previous_consumed_energy, buffer);
+		pack_time(energy->poll_time, buffer);
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		if (!energy) {
 			int i;
 			for (i=0; i<5; i++)
@@ -177,35 +210,56 @@ extern void acct_gather_energy_pack(acct_gather_energy_t *energy, Buf buffer,
 			return;
 		}
 
-		pack32(energy->base_consumed_energy, buffer);
+		pack32((uint32_t) energy->base_consumed_energy, buffer);
 		pack32(energy->base_watts, buffer);
-		pack32(energy->consumed_energy, buffer);
+		pack32((uint32_t) energy->consumed_energy, buffer);
 		pack32(energy->current_watts, buffer);
-		pack32(energy->previous_consumed_energy, buffer);
+		pack32((uint32_t) energy->previous_consumed_energy, buffer);
 		pack_time(energy->poll_time, buffer);
 	}
 }
 
 extern int acct_gather_energy_unpack(acct_gather_energy_t **energy, Buf buffer,
-				     uint16_t protocol_version)
+				     uint16_t protocol_version, bool need_alloc)
 {
-	acct_gather_energy_t *energy_ptr = acct_gather_energy_alloc();
-	*energy = energy_ptr;
+	uint32_t uint32_tmp;
+	acct_gather_energy_t *energy_ptr;
 
-	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		safe_unpack32(&energy_ptr->base_consumed_energy, buffer);
+	if (need_alloc) {
+		energy_ptr = acct_gather_energy_alloc(1);
+		*energy = energy_ptr;
+	} else {
+		energy_ptr = *energy;
+	}
+
+	if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		safe_unpack64(&energy_ptr->base_consumed_energy, buffer);
 		safe_unpack32(&energy_ptr->base_watts, buffer);
-		safe_unpack32(&energy_ptr->consumed_energy, buffer);
+		safe_unpack64(&energy_ptr->consumed_energy, buffer);
 		safe_unpack32(&energy_ptr->current_watts, buffer);
-		safe_unpack32(&energy_ptr->previous_consumed_energy, buffer);
+		safe_unpack64(&energy_ptr->previous_consumed_energy, buffer);
+		safe_unpack_time(&energy_ptr->poll_time, buffer);
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
+		safe_unpack32(&uint32_tmp, buffer);
+		energy_ptr->base_consumed_energy = (uint64_t) uint32_tmp;
+		safe_unpack32(&energy_ptr->base_watts, buffer);
+		safe_unpack32(&uint32_tmp, buffer);
+		energy_ptr->consumed_energy = (uint64_t) uint32_tmp;
+		safe_unpack32(&energy_ptr->current_watts, buffer);
+		safe_unpack32(&uint32_tmp, buffer);
+		energy_ptr->previous_consumed_energy = (uint64_t) uint32_tmp;
 		safe_unpack_time(&energy_ptr->poll_time, buffer);
 	}
 
 	return SLURM_SUCCESS;
 
 unpack_error:
-	acct_gather_energy_destroy(energy_ptr);
-	*energy = NULL;
+	if (need_alloc) {
+		acct_gather_energy_destroy(energy_ptr);
+		*energy = NULL;
+	} else
+		memset(energy_ptr, 0, sizeof(acct_gather_energy_t));
+
 	return SLURM_ERROR;
 }
 
@@ -251,7 +305,6 @@ extern int acct_gather_energy_startpoll(uint32_t frequency)
 {
 	int retval = SLURM_SUCCESS;
 	pthread_attr_t attr;
-	pthread_t _watch_node_thread_id;
 
 	if (slurm_acct_gather_energy_init() < 0)
 		return SLURM_ERROR;
@@ -273,10 +326,8 @@ extern int acct_gather_energy_startpoll(uint32_t frequency)
 
 	/* create polling thread */
 	slurm_attr_init(&attr);
-	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
-		error("pthread_attr_setdetachstate error %m");
 
-	if (pthread_create(&_watch_node_thread_id, &attr, &_watch_node, NULL)) {
+	if (pthread_create(&watch_node_thread_id, &attr, &_watch_node, NULL)) {
 		debug("acct_gather_energy failed to create _watch_node "
 		      "thread: %m");
 	} else

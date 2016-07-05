@@ -52,7 +52,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/param.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -125,5 +125,6 @@ uint16_t slurm_get_numa_node(uint16_t cpuid);
 /*** from schedutils.c ***/
 int	char_to_val(int c);
 int	str_to_cpuset(cpu_set_t *mask, const char* str);
+int	str_to_cnt(const char* str);
 char *	cpuset_to_str(const cpu_set_t *mask, char *str);
 int	val_to_char(int v);

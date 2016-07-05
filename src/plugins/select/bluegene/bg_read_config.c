@@ -126,10 +126,7 @@ extern void destroy_image(void *ptr)
 	image_t *n = (image_t *)ptr;
 	if (n) {
 		xfree(n->name);
-		if (n->groups) {
-			list_destroy(n->groups);
-			n->groups = NULL;
-		}
+		FREE_NULL_LIST(n->groups);
 		xfree(n);
 	}
 }
@@ -874,12 +871,12 @@ no_calc:
 		      "STATIC LayoutMode.  Please update your bluegene.conf.");
 
 #ifdef HAVE_BGQ
-	if ((bg_recover != NOT_FROM_CONTROLLER)
+	if ((bg_recover != NOT_FROM_CONTROLLER) && assoc_mgr_qos_list
 	    && s_p_get_string(&tmp_char, "RebootQOSList", tbl)) {
 		bool valid;
 		char *token, *last = NULL;
 		slurmdb_qos_rec_t *qos = NULL;
-		assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK,
+		assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK,
 					   READ_LOCK, NO_LOCK,
 					   NO_LOCK, NO_LOCK };
 

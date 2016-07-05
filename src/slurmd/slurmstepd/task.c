@@ -71,21 +71,27 @@
 
 #include <sys/resource.h>
 
+/* FIXME: Come up with a real solution for EUID instead of substituting RUID */
+#if defined(__NetBSD__)
+#define eaccess(p,m) (access((p),(m)))
+#define HAVE_EACCESS 1
+#endif
+
 #include "slurm/slurm_errno.h"
 
 #include "src/common/checkpoint.h"
 #include "src/common/env.h"
+#include "src/common/gres.h"
 #include "src/common/fd.h"
 #include "src/common/log.h"
-#include "src/common/mpi.h"
 #include "src/common/plugstack.h"
-#include "src/slurmd/common/proctrack.h"
+#include "src/common/slurm_mpi.h"
 #include "src/common/switch.h"
-#include "src/slurmd/common/task_plugin.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
-
+#include "src/slurmd/common/proctrack.h"
+#include "src/slurmd/common/task_plugin.h"
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/pdebug.h"
 #include "src/slurmd/slurmstepd/task.h"
@@ -325,7 +331,8 @@ _build_path(char* fname, char **prog_env)
 	dir = strtok(path_env, ":");
 	while (dir) {
 		snprintf(file_path, len, "%s/%s", dir, file_name);
-		if (stat(file_path, &stat_buf) == 0)
+		if ((stat(file_path, &stat_buf) == 0)
+		    && (! S_ISDIR(stat_buf.st_mode)))
 			break;
 		dir = strtok(NULL, ":");
 	}
@@ -355,7 +362,7 @@ _setup_mpi(stepd_step_rec_t *job, int ltaskid)
 
 	return mpi_hook_slurmstepd_task(info, &job->env);
 }
-
+extern void block_daemon(void);
 
 /*
  *  Current process is running as the user when this is called.
@@ -388,7 +395,9 @@ exec_task(stepd_step_rec_t *job, int i)
 	job->envtp->distribution = job->task_dist;
 	job->envtp->cpu_bind = xstrdup(job->cpu_bind);
 	job->envtp->cpu_bind_type = job->cpu_bind_type;
-	job->envtp->cpu_freq = job->cpu_freq;
+	job->envtp->cpu_freq_min = job->cpu_freq_min;
+	job->envtp->cpu_freq_max = job->cpu_freq_max;
+	job->envtp->cpu_freq_gov = job->cpu_freq_gov;
 	job->envtp->mem_bind = xstrdup(job->mem_bind);
 	job->envtp->mem_bind_type = job->mem_bind_type;
 	job->envtp->distribution = -1;
@@ -440,12 +449,23 @@ exec_task(stepd_step_rec_t *job, int i)
 
 	/* task plugin hook */
 	if (task_g_pre_launch(job)) {
-		error ("Failed task affinity setup");
-		exit (1);
+		error("Failed to invoke task plugins: one of task_p_pre_launch functions returned error");
+		exit(1);
+	}
+	if (!job->batch && job->accel_bind_type) {
+		/* Modify copy of job's environment. Do not alter in place or
+		 * concurrent searches of the environment can generate invalid
+		 * memory references. */
+		job->envtp->env = env_array_copy((const char **) job->env);
+		gres_plugin_step_set_env(&job->envtp->env, job->step_gres_list,
+					 job->accel_bind_type);
+		tmp_env = job->env;
+		job->env = job->envtp->env;
+		env_array_free(tmp_env);
 	}
 
 	if (spank_user_task (job, i) < 0) {
-		error ("Failed to invoke task plugin stack");
+		error ("Failed to invoke spank plugin stack");
 		exit (1);
 	}
 

@@ -55,6 +55,16 @@
 #include "src/common/slurm_priority.h"
 #include "src/common/assoc_mgr.h"
 
+/* These are defined here so when we link with something other than
+ * the slurmctld we will have these symbols defined.  They will get
+ * overwritten when linking with the slurmctld.
+ */
+#if defined (__APPLE__)
+int slurmctld_tres_cnt __attribute__((weak_import)) = 0;
+#else
+int slurmctld_tres_cnt = 0;
+#endif
+
 /*
  * These variables are required by the generic plugin interface.  If they
  * are not found in the plugin, the plugin loader will ignore it.
@@ -77,16 +87,12 @@
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobcomp/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as the job completion logging API
- * matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]       	= "Priority BASIC plugin";
 const char plugin_type[]       	= "priority/basic";
-const uint32_t plugin_version	= 100;
+const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -136,7 +142,7 @@ extern void priority_p_reconfig(bool assoc_clear)
 	return;
 }
 
-extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc)
+extern void priority_p_set_assoc_usage(slurmdb_assoc_rec_t *assoc)
 {
 	return;
 }
@@ -168,58 +174,75 @@ extern List priority_p_get_priority_factors_list(
 
 extern void priority_p_job_end(struct job_record *job_ptr)
 {
-	uint64_t unused_cpu_run_secs = 0;
 	uint64_t time_limit_secs = (uint64_t)job_ptr->time_limit * 60;
-	slurmdb_association_rec_t *assoc_ptr;
-	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK,
+	slurmdb_assoc_rec_t *assoc_ptr;
+	int i;
+	uint64_t *unused_tres_run_secs;
+	assoc_mgr_lock_t locks = { NO_LOCK, WRITE_LOCK, NO_LOCK,
 				   WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 	/* No unused cpu_run_secs if job ran past its time limit */
 	if (job_ptr->end_time >= job_ptr->start_time + time_limit_secs)
 		return;
 
-	unused_cpu_run_secs = job_ptr->total_cpus *
-		(job_ptr->start_time + time_limit_secs - job_ptr->end_time);
+	unused_tres_run_secs = xmalloc(sizeof(uint64_t) * slurmctld_tres_cnt);
+	for (i=0; i<slurmctld_tres_cnt; i++) {
+		unused_tres_run_secs[i] =
+			(uint64_t)(job_ptr->start_time +
+				   time_limit_secs - job_ptr->end_time) *
+			job_ptr->tres_req_cnt[i];
+	}
 
 	assoc_mgr_lock(&locks);
 	if (job_ptr->qos_ptr) {
 		slurmdb_qos_rec_t *qos_ptr =
 			(slurmdb_qos_rec_t *)job_ptr->qos_ptr;
-		if (unused_cpu_run_secs >
-		    qos_ptr->usage->grp_used_cpu_run_secs) {
-			qos_ptr->usage->grp_used_cpu_run_secs = 0;
+		for (i=0; i<slurmctld_tres_cnt; i++) {
+			if (unused_tres_run_secs[i] >
+			    qos_ptr->usage->grp_used_tres_run_secs[i]) {
+			qos_ptr->usage->grp_used_tres_run_secs[i] = 0;
 			debug2("acct_policy_job_fini: "
-			       "grp_used_cpu_run_secs "
-			       "underflow for qos %s", qos_ptr->name);
-		} else
-			qos_ptr->usage->grp_used_cpu_run_secs -=
-				unused_cpu_run_secs;
+			       "grp_used_tres_run_secs "
+			       "underflow for qos %s tres %s",
+			       qos_ptr->name,
+			       assoc_mgr_tres_name_array[i]);
+			} else
+				qos_ptr->usage->grp_used_tres_run_secs[i] -=
+					unused_tres_run_secs[i];
+		}
 	}
-	assoc_ptr = (slurmdb_association_rec_t *)job_ptr->assoc_ptr;
+	assoc_ptr = (slurmdb_assoc_rec_t *)job_ptr->assoc_ptr;
 	while (assoc_ptr) {
 		/* If the job finished early remove the extra time now. */
-		if (unused_cpu_run_secs >
-		    assoc_ptr->usage->grp_used_cpu_run_secs) {
-			assoc_ptr->usage->grp_used_cpu_run_secs = 0;
-			debug2("acct_policy_job_fini: "
-			       "grp_used_cpu_run_secs "
-			       "underflow for account %s",
-			       assoc_ptr->acct);
-		} else {
-			assoc_ptr->usage->grp_used_cpu_run_secs -=
-				unused_cpu_run_secs;
-			debug4("acct_policy_job_fini: job %u. "
-			       "Removed %"PRIu64" unused seconds "
-			       "from assoc %s "
-			       "grp_used_cpu_run_secs = %"PRIu64"",
-			       job_ptr->job_id, unused_cpu_run_secs,
-			       assoc_ptr->acct,
-			       assoc_ptr->usage->grp_used_cpu_run_secs);
+		for (i=0; i<slurmctld_tres_cnt; i++) {
+			if (unused_tres_run_secs[i] >
+			    assoc_ptr->usage->grp_used_tres_run_secs[i]) {
+				assoc_ptr->usage->grp_used_tres_run_secs[i] = 0;
+				debug2("acct_policy_job_fini: "
+				       "grp_used_tres_run_secs "
+				       "underflow for account %s tres %s",
+				       assoc_ptr->acct,
+				       assoc_mgr_tres_name_array[i]);
+
+			} else {
+				assoc_ptr->usage->grp_used_tres_run_secs[i] -=
+					unused_tres_run_secs[i];
+				debug4("acct_policy_job_fini: job %u. "
+				       "Removed %"PRIu64" unused seconds "
+				       "from acct %s tres %s "
+				       "grp_used_tres_run_secs = %"PRIu64"",
+				       job_ptr->job_id, unused_tres_run_secs[i],
+				       assoc_ptr->acct,
+				       assoc_mgr_tres_name_array[i],
+				       assoc_ptr->usage->
+				       grp_used_tres_run_secs[i]);
+			}
 		}
 		/* now handle all the group limits of the parents */
 		assoc_ptr = assoc_ptr->usage->parent_assoc_ptr;
 	}
 	assoc_mgr_unlock(&locks);
+	xfree(unused_tres_run_secs);
 
 	return;
 }

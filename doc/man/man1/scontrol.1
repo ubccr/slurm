@@ -1,4 +1,4 @@
-.TH scontrol "1" "Slurm Commands" "April 2015" "Slurm Commands"
+.TH scontrol "1" "Slurm Commands" "September 2015" "Slurm Commands"
 
 .SH "NAME"
 scontrol \- Used view and modify Slurm configuration and state.
@@ -191,7 +191,9 @@ This is the default behavior.
 \fBhold\fP \fIjob_list\fP
 Prevent a pending job from beginning started (sets it's priority to 0).
 Use the \fIrelease\fP command to permit the job to be scheduled.
-The job_list argument is a comma separated list of job IDs.
+The job_list argument is a comma separated list of job IDs OR
+"jobname=" with the job's name, which will attempt to hold all jobs having
+that name.
 Note that when a job is held by a system administrator using the \fBhold\fP
 command, only a system administrator may release the job for execution (also
 see the \fBuhold\fP command). When the job is held by its owner, it may also
@@ -275,8 +277,9 @@ or removed from the cluster.
 .TP
 \fBrelease\fP \fIjob_list\fP
 Release a previously held job to begin execution.
-The job_list argument is a comma separated list of job IDs. It is possible to
-use the job name, specifying "name=job_name".
+The job_list argument is a comma separated list of job IDs OR
+"jobname=" with the job's name, which will attempt to hold all jobs having
+that name.
 Also see \fBhold\fR.
 
 .TP
@@ -292,7 +295,7 @@ The job_list argument is a comma separated list of job IDs.
 A held job can be released using scontrol to reset its priority (e.g.
 "scontrol release <job_id>"). The command accepts the following option:
 .RS
-.TP 12
+.TP
 \fIState=SpecialExit\fP
 The "SpecialExit" keyword specifies that the job
 has to be put in a special state \fBJOB_SPECIAL_EXIT\fP.
@@ -300,10 +303,20 @@ The "scontrol show job" command will display the JobState as
 \fBSPECIAL_EXIT\fP, while the "squeue" command as \fBSE\fP.
 .RE
 
+.TP
 \fBresume\fP \fIjob_list\fP
 Resume a previously suspended job.
 The job_list argument is a comma separated list of job IDs.
 Also see \fBsuspend\fR.
+
+\fBNOTE:\fR A suspended job releases its CPUs for allocation to other jobs.
+Resuming a previously suspended job may result in multiple jobs being
+allocated the same CPUs, which could trigger gang scheduling with some
+configurations or severe degradation in performance with other configurations.
+Use of the scancel command to send SIGSTOP and SIGCONT signals would stop a
+job without releasing its CPUs for allocaiton to other jobs and would be a
+preferable mechanism in many cases.
+Use with caution.
 
 .TP
 \fBschedloglevel\fP \fILEVEL\fP
@@ -344,10 +357,10 @@ contents of the slurm.conf configuration file.
 .TP
 \fBshow\fP \fIENTITY\fP \fIID\fP
 Display the state of the specified entity with the specified identification.
-\fIENTITY\fP may be \fIaliases\fP, \fIconfig\fP, \fIdaemons\fP, \fIfrontend\fP,
-\fIjob\fP, \fInode\fP, \fIpartition\fP, \fIreservation\fP, \fIslurmd\fP,
-\fIstep\fP, \fItopology\fP, \fIhostlist\fP, \fIhostlistsorted\fP or
-\fIhostnames\fP
+\fIENTITY\fP may be \fIaliases\fP, \fIassoc_mgr\fP, \fIburstbuffer\fP,
+\fIconfig\fP, \fIdaemons\fP, \fIfrontend\fP, \fIjob\fP, \fInode\fP,
+\fIpartition\fP, \fIpowercap\fP, \fIreservation\fP, \fIslurmd\fP, \fIstep\fP,
+\fItopology\fP, \fIhostlist\fP, \fIhostlistsorted\fP or \fIhostnames\fP
 (also \fIblock\fP or \fIsubmp\fP on BlueGene systems).
 \fIID\fP can be used to identify a specific element of the identified
 entity: job ID, node name, partition name, reservation name, or job step ID for
@@ -361,6 +374,12 @@ named nodes will be shown.
 \fINodeHostname\fP (useful to get the list of virtual nodes associated with a
 real node in a configuration where multiple slurmd daemons execute on a single
 compute node).
+\fIassoc_mgr\fP displays the current contents of the slurmctld's internal cache
+for users, associations and/or qos. The \fIID\fP may be users=<user1>,[...,<userN>],
+accounts=<acct1>,[...,<acctN>], qos=<qos1>,[...,<qosN>] and/or
+flags=<users,assoc,qos>, used to filter the desired section to be displayed. If
+no flags are specified, all sections are displayed.
+\fIburstbuffer\fP displays the current status of the BurstBuffer plugin.
 \fIconfig\fP displays parameter names from the configuration files in mixed
 case (e.g. SlurmdPort=7003) while derived parameters names are in upper case
 only (e.g. SLURM_VERSION).
@@ -429,12 +448,12 @@ system administrator (also see the \fBhold\fP command).
 
 .TP
 \fBupdate\fP \fISPECIFICATION\fP
-Update job, step, node, partition, or reservation configuration per the
-supplied specification. \fISPECIFICATION\fP is in the same format as the Slurm
-configuration file and the output of the \fIshow\fP command described above. It
-may be desirable to execute the \fIshow\fP command (described above) on the
-specific entity you which to update, then use cut\-and\-paste tools to enter
-updated configuration values to the \fIupdate\fP. Note that while most
+Update job, step, node, partition, powercapping or reservation configuration per
+the supplied specification. \fISPECIFICATION\fP is in the same format as the
+Slurm configuration file and the output of the \fIshow\fP command described 
+above. It may be desirable to execute the \fIshow\fP command (described above)
+on the specific entity you want to update, then use cut\-and\-paste tools to
+enter updated configuration values to the \fIupdate\fP. Note that while most
 configuration values can be changed using this command, not all can be changed
 using this mechanism. In particular, the hardware configuration of a node or
 the physical addition or removal of nodes from the cluster may only be
@@ -452,7 +471,7 @@ Display the version number of scontrol being executed.
 
 .TP
 \fBwait_job\fP \fIjob_id\fP
-Wait until a job andall of its nodes are ready for use or the job has entered
+Wait until a job and all of its nodes are ready for use or the job has entered
 some termination state. This option is particularly useful in the Slurm Prolog
 or in the batch script itself if nodes are powered down and restarted
 automatically as needed.
@@ -473,6 +492,20 @@ Repeat the last command executed.
 \fIAccount\fP=<account>
 Account name to be changed for this job's resource use.
 Value may be cleared with blank data value, "Account=".
+.TP
+\fIArrayTaskThrottle\fP=<count>
+Speciify the maximum number of tasks in a job array that can execute at
+the same time.
+Set the count to zero in order to eliminate any limit.
+The task throttle count for a job array is reported as part of its ArrayTaskId
+field, preceded with a percent sign.
+For example "ArrayTaskId=1\-10%2" indicates the maximum number of running tasks
+is limited to 2.
+.TP
+\fIBurstBuffer\fP=<spec>
+Burst buffer specification to be changed for this job's resource use.
+Value may be cleared with blank data value, "BurstBuffer=".
+Format is burst buffer plugin specific.
 .TP
 \fIConn\-Type\fP=<type>
 Reset the node connection type. Supported only on IBM BlueGene systems.
@@ -1066,7 +1099,7 @@ Format is the same as for MaxTime.
 Set the default memory to be allocated per CPU for jobs in this partition.
 The memory size is specified in megabytes.
 .TP
-\fIDefMemPerCNode\fP=<MB>
+\fIDefMemPerNode\fP=<MB>
 Set the default memory to be allocated per node for jobs in this partition.
 The memory size is specified in megabytes.
 
@@ -1156,6 +1189,11 @@ priority.
 The value may not exceed 65533.
 
 .TP
+\fIQOS\fP=<QOSname|blank to remove>
+Set the partition QOS with a QOS name or to remove the Partition QOS
+leave the option blank.
+
+.TP
 \fIRootOnly\fP=<yes|no>
 Specify if only allocation requests initiated by user root will be satisfied.
 This can be used to restrict control of the partition to some meta\-scheduler.
@@ -1204,6 +1242,17 @@ See also the "Alternate" partition specification.
 .RE
 
 .TP
+\fBSPECIFICATIONS FOR UPDATE COMMAND, POWERCAP\fR
+
+.TP
+\fIPowerCap\fP=<count>
+Set the amount of watts the cluster is limited to.
+Specify a number, "INFINITE" to enable the power capping logic without
+power restriction or "0" to disable the power capping logic.
+Update slurm.conf with any changes meant to be persistent across normal
+restarts of slurmctld or the execution of \fBscontrol reconfig\fR.
+
+.TP
 \fBSPECIFICATIONS FOR CREATE, UPDATE, AND DELETE COMMANDS, RESERVATIONS\fR
 .TP
 
@@ -1233,6 +1282,26 @@ then all other accounts are implicitly allowed to use the reservation and it is
 not possible to also explicitly specify allowed accounts.
 
 .TP
+\fIBurstBuffer\fP=<buffer_spec>[,<buffer_spec>,...]
+Specification of burst buffer resources which are to be reserved.
+"buffer_spec" consists of four elements:
+[plugin:][type:]#[units]
+"plugin" is the burst buffer plugin name, currently either "cray" or "generic".
+If no plugin is specified, the reservation applies to all configured burst
+buffer plugins.
+"type" specifies a Cray generic burst buffer resource, for example "nodes".
+if "type" is not specified, the number is a measure of storage space.
+The "units" may be "N" (nodes), "GB" (gigabytes), "TB" (terabytes),
+"PB" (petabytes), etc. with the default units being gigabyes for reservations
+of storage space.
+For example "BurstBuffer=cray:2TB" (reserve 2TB of storage plus
+3 nodes from the Cray plugin) or
+"BurstBuffer=100GB" (reserve 100 GB of storage from all configured burst buffer
+plugins).
+Jobs using this reservation are not restricted to these burst buffer resources,
+but may use these reserved resources plus any which are generally available.
+
+.TP
 \fICoreCnt\fP=<num>
 This option is only supported when SelectType=select/cons_res. Identify number of
 cores to be reserved. If NodeCnt is used, this is the total number of cores to
@@ -1250,6 +1319,8 @@ A new reservation must specify one or more resource to be included: NodeCnt,
 Nodes and/or Licenses.
 If a reservation includes Licenses, but no NodeCnt or Nodes, then the option
 \fIFlags=LICENSE_ONLY\fP must also be specified.
+Jobs using this reservation are not restricted to these licenses, but may
+use these reserved licenses plus any which are generally available.
 
 .TP
 \fINodeCnt\fP=<num>[,num,...]
@@ -1322,6 +1393,14 @@ Flags\-=DAILY (NOTE: this shortcut is not supported for all flags).
 Currently supported flags include:
 .RS
 .TP 14
+\fIANY_NODES\fR
+This is a reservation for burst buffers and/or licenses only and not compute
+nodes.
+If this flag is set, a job using this reservation may use the associated
+burst buffers and/or licenses plus any compute nodes.
+If this flag is not set, a job using this reservation may use only the nodes
+and licenses associated with the reservation.
+.TP
 \fIDAILY\fR
 Repeat the reservation at the same time every day
 .TP
@@ -1334,11 +1413,7 @@ This can be especially useful when reserving all nodes in the system
 for maintenance.
 .TP
 \fILICENSE_ONLY\fR
-This is a reservation for licenses only and not compute nodes.
-If this flag is set, a job using this reservation may use the associated
-licenses and any compute nodes.
-If this flag is not set, a job using this reservation may use only the nodes
-and licenses associated with the reservation.
+See \fIANY_NODES\fR.
 .TP
 \fIMAINT\fR
 Maintenance mode, receives special accounting treatment.
@@ -1353,6 +1428,14 @@ reservation.
 This flag can be used to reserve all nodes within the specified
 partition.  PartitionName and Nodes=ALL must be specified or
 this option is ignored.
+.TP
+\fRREPLACE\fR
+Resources allocated to jobs as automaticallly replenished using idle resources.
+This option can be used to maintain a constant number of idle resources
+available for pending jobs (subject to availability of idle resources).
+This should be used with the \fINodeCnt\fP reservation option; do not identify
+specific nodes to be included in the reservation.
+This option is not supported on IBM Bluegene systems.
 .TP
 \fISPEC_NODES\fR
 Reservation is for specific nodes (output only)
@@ -1396,6 +1479,35 @@ then all other users are implicitly allowed to use the reservation and it is
 not possible to also explicitly specify allowed users.
 
 .TP
+\fITRES\fP=<tres_spec>
+Comma\-separated list of TRES required for the reservation. Current supported
+TRES types with reservations are: CPU, Node, License and BB. CPU and Node
+follow the same format as CoreCnt and NodeCnt parameters respectively.
+License names can be followed by an equal '=' and a count:
+
+License/<name1>=<count1>[,License/<name2>=<count2>,...]
+
+BurstBuffer can be specified in a similar way as BurstBuffer parameter. The
+only difference is that colon symbol ':' should be replaced by an equal '='
+in order to follow the TRES format.
+
+Some examples of TRES valid specifications:
+
+TRES=cpu=5,bb/cray=4,license/iop1=1,license/iop2=3
+
+TRES=node=5k,license/iop1=2
+
+As specified in CoreCnt, if a nodelist is specified, cpu can be an array
+of core numbers by node:
+nodes=compute[1\-3] TRES=cpu=2,2,1,bb/cray=4,license/iop1=2
+
+Please note that CPU, Node, License and BB can override CoreCnt, NodeCnt,
+Licenses and BurstBuffer parameters respectively.  Also CPU represents
+CoreCnt, in a reservation and will be adjusted if you have threads per
+core on your nodes.
+
+
+.TP
 \fBSPECIFICATIONS FOR UPDATE BLOCK/SUBMP \fR
 .TP
 Bluegene systems only!
@@ -1435,6 +1547,42 @@ Identify the bluegene ionodes to be updated (i.e. bg000[0\-3]). This
 specification is required.
 NOTE: Even on BGQ where node names are given in bg0000[00000] format
 this option takes an ionode name bg0000[0].
+
+.TP
+\fBSPECIFICATIONS FOR UPDATE COMMAND, LAYOUTS \fR
+.TP
+\fILayout\fP=<name>
+Identify the layout to be updated. This specification is required.
+.TP
+\fIEntity\fP=<entity list>
+Identify the entities to be updated. This specification is required.
+.TP
+\fIKey\fP=<value>
+Keys/Values to update for the entities. The format must respect the layout.d
+configuration files. Key=Type cannot be updated. At least one Key/Value is
+required, several can be set.
+
+.TP
+\fBSPECIFICATIONS FOR SHOW COMMAND, LAYOUTS\fR
+.PP
+Without options, lists all configured layouts. With a layout specified,
+shows entities with following options:
+
+.TP
+\fIKey\fP=<value>
+Keys/Values to update for the entities. The format must respect the layout.d
+configuration files. Key=Type cannot be updated. One Key/Value is required,
+several can be set.
+.TP
+\fIEntity\fP=<value>
+Entities to show, default is not used. Can be set to "*".
+.TP
+\fIType\fP=<value>
+Type of entities to show, default is not used.
+.TP
+\fInolayout\fP
+If not used, only entities with defining the tree are shown.
+With the option, only leaves are shown.
 
 .TP
 \fBDESCRIPTION FOR SHOW COMMAND, NODES\fR
@@ -1497,6 +1645,20 @@ exclusive use by the Slurm compute node daemons (slurmd, slurmstepd).
 The combined memory limit, in megabytes, on this node for the Slurm compute
 node daemons (slurmd, slurmstepd).
 
+.TP
+The meaning of the memory information is as follows:
+
+.TP
+\fIRealMemory\fP
+The total memory, in MB, on the node.
+
+.TP
+\fIAllocMem\fP
+The total memory, in MB, currently allocated by jobs on the node.
+
+.TP
+\fIFreeMem\fP
+The total memory, in MB, currently free on the node as reported by the OS.
 
 .SH "ENVIRONMENT VARIABLES"
 .PP
@@ -1533,6 +1695,11 @@ For other years it returns a date month and year without a time (e.g.
 
 A valid strftime() format can also be specified. For example, a value of
 "%a %T" will report the day of the week and a time stamp (e.g. "Mon 12:34:56").
+
+.TP
+\fBSLURM_TOPO_LEN\fR
+Specify the maximum size of the line when printing Topology. If not set, the
+default value "512" will be used.
 
 .SH "AUTHORIZATION"
 
@@ -1671,7 +1838,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010-2014 SchedMD LLC.
+Copyright (C) 2010-2015 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <http://slurm.schedmd.com/>.

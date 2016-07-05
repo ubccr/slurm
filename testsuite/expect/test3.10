@@ -85,6 +85,7 @@ expect {
 if {$authorized == 0} {
 	send_user "\nWARNING: You are not authorized to run this test\n"
 	cancel_job $job_id
+	exec rm -f $file_in $file_out $file_err
 	exit 0
 }
 cancel_job $job_id
@@ -183,7 +184,9 @@ if {$matches == 0} {
 	set exit_code 1
 }
 
-cancel_job $job_id
+if {[cancel_job $job_id] != 0} {
+	set exit_code 1
+}
 if {$exit_code == 0} {
 	send_user "\nSUCCESS\n"
 }

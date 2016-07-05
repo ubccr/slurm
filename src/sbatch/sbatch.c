@@ -53,15 +53,16 @@
 
 #include "slurm/slurm.h"
 
+#include "src/common/cpu_frequency.h"
 #include "src/common/env.h"
 #include "src/common/plugstack.h"
+#include "src/common/proc_args.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
 
 #include "src/sbatch/opt.h"
-#include "src/sbatch/mult_cluster.h"
 
 #define MAX_RETRIES 15
 
@@ -159,8 +160,13 @@ int main(int argc, char *argv[])
 
 	/* If can run on multiple clusters find the earliest run time
 	 * and run it there */
-	if (sbatch_set_first_avail_cluster(&desc) != SLURM_SUCCESS)
+	if (opt.clusters &&
+	    slurmdb_get_first_avail_cluster(&desc, opt.clusters,
+			&working_cluster_rec) != SLURM_SUCCESS) {
+		print_db_notok(opt.clusters, 0);
 		exit(error_exit);
+	}
+
 
 	if (_check_cluster_specific_settings(&desc) != SLURM_SUCCESS)
 		exit(error_exit);
@@ -322,17 +328,20 @@ static int _check_cluster_specific_settings(job_desc_msg_t *req)
 		/*
 		 * Fix options and inform user, but do not abort submission.
 		 */
-		if (req->shared && req->shared != (uint16_t)NO_VAL) {
-			info("--share is not (yet) supported on Cray.");
-			req->shared = false;
+		if (req->shared && (req->shared != (uint16_t)NO_VAL)) {
+			info("--share is not supported on Cray/ALPS systems.");
+			req->shared = (uint16_t)NO_VAL;
 		}
-		if (req->overcommit && req->overcommit != (uint8_t)NO_VAL) {
-			info("--overcommit is not supported on Cray.");
+		if (req->overcommit && (req->overcommit != (uint8_t)NO_VAL)) {
+			info("--overcommit is not supported on Cray/ALPS "
+			     "systems.");
 			req->overcommit = false;
 		}
-		if (req->wait_all_nodes && req->wait_all_nodes != (uint16_t)NO_VAL) {
-			info("--wait-all-nodes is handled automatically on Cray.");
-			req->wait_all_nodes = false;
+		if (req->wait_all_nodes &&
+		    (req->wait_all_nodes != (uint16_t)NO_VAL)) {
+			info("--wait-all-nodes is handled automatically on "
+			     "Cray/ALPS systems.");
+			req->wait_all_nodes = (uint16_t)NO_VAL;
 		}
 	}
 	return rc;
@@ -389,7 +398,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->task_dist  = opt.distribution;
 
 	desc->network = opt.network;
-	if (opt.nice)
+	if (opt.nice != NO_VAL)
 		desc->nice = NICE_OFFSET + opt.nice;
 	if (opt.priority)
 		desc->priority = opt.priority;
@@ -397,6 +406,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->mail_type = opt.mail_type;
 	if (opt.mail_user)
 		desc->mail_user = xstrdup(opt.mail_user);
+	if (opt.burst_buffer)
+		desc->burst_buffer = opt.burst_buffer;
 	if (opt.begin)
 		desc->begin_time = opt.begin;
 	if (opt.account)
@@ -508,7 +519,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 				    "SLURM_GET_USER_ENV", "1");
 	}
 
-	if (opt.distribution == SLURM_DIST_ARBITRARY) {
+	if ((opt.distribution & SLURM_DIST_STATE_BASE) == SLURM_DIST_ARBITRARY) {
 		env_array_overwrite_fmt(&desc->environment,
 					"SLURM_ARBITRARY_NODELIST",
 					"%s", desc->req_nodes);
@@ -535,11 +546,22 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->spank_job_env      = opt.spank_job_env;
 		desc->spank_job_env_size = opt.spank_job_env_size;
 	}
+
+	desc->cpu_freq_min = opt.cpu_freq_min;
+	desc->cpu_freq_max = opt.cpu_freq_max;
+	desc->cpu_freq_gov = opt.cpu_freq_gov;
+
 	if (opt.req_switch >= 0)
 		desc->req_switch = opt.req_switch;
 	if (opt.wait4switch >= 0)
 		desc->wait4switch = opt.wait4switch;
 
+	if (opt.power_flags)
+		desc->power_flags = opt.power_flags;
+	if (opt.sicp_mode)
+		desc->sicp_mode = opt.sicp_mode;
+	if (opt.kill_invalid_dep)
+		desc->bitflags = opt.kill_invalid_dep;
 
 	return 0;
 }

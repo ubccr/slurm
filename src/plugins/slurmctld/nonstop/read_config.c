@@ -5,7 +5,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -365,7 +365,7 @@ extern void create_hot_spare_resv(void)
 						  RESERVE_FLAG_IGN_JOBS;
 			resv_msg.name		= resv_name;
 			resv_msg.node_cnt	= node_cnt;
-			resv_msg.partition	= part_ptr->name;
+			resv_msg.partition	= xstrdup(part_ptr->name);
 			resv_msg.start_time	= now;
 			resv_msg.users		= xstrdup("root");
 			if (find_resv_name(resv_name)) {
@@ -377,6 +377,7 @@ extern void create_hot_spare_resv(void)
 				     resv_name);
 				(void) create_resv(&resv_msg);
 			}
+			xfree(resv_msg.partition);
 			xfree(resv_msg.users);
 			break;
 		}

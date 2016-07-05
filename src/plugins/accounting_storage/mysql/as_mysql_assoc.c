@@ -49,19 +49,17 @@ char *assoc_req_inx[] = {
 	"acct",
 	"`partition`",
 	"shares",
-	"grp_cpu_mins",
-	"grp_cpu_run_mins",
-	"grp_cpus",
+	"grp_tres_mins",
+	"grp_tres_run_mins",
+	"grp_tres",
 	"grp_jobs",
-	"grp_mem",
-	"grp_nodes",
 	"grp_submit_jobs",
 	"grp_wall",
-	"max_cpu_mins_pj",
-	"max_cpu_run_mins",
-	"max_cpus_pj",
+	"max_tres_mins_pj",
+	"max_tres_run_mins",
+	"max_tres_pj",
+	"max_tres_pn",
 	"max_jobs",
-	"max_nodes_pj",
 	"max_submit_jobs",
 	"max_wall_pj",
 	"parent_acct",
@@ -78,19 +76,17 @@ enum {
 	ASSOC_REQ_ACCT,
 	ASSOC_REQ_PART,
 	ASSOC_REQ_FS,
-	ASSOC_REQ_GCM,
-	ASSOC_REQ_GCRM,
-	ASSOC_REQ_GC,
+	ASSOC_REQ_GTM,
+	ASSOC_REQ_GTRM,
+	ASSOC_REQ_GT,
 	ASSOC_REQ_GJ,
-	ASSOC_REQ_GMEM,
-	ASSOC_REQ_GN,
 	ASSOC_REQ_GSJ,
 	ASSOC_REQ_GW,
-	ASSOC_REQ_MCMPJ,
-	ASSOC_REQ_MCRM,
-	ASSOC_REQ_MCPJ,
+	ASSOC_REQ_MTMPJ,
+	ASSOC_REQ_MTRM,
+	ASSOC_REQ_MTPJ,
+	ASSOC_REQ_MTPN,
 	ASSOC_REQ_MJ,
-	ASSOC_REQ_MNPJ,
 	ASSOC_REQ_MSJ,
 	ASSOC_REQ_MWPJ,
 	ASSOC_REQ_PARENT,
@@ -102,19 +98,19 @@ enum {
 };
 
 static char *get_parent_limits_select =
-	"select @par_id, @mj, @msj, @mcpj, "
-	"@mnpj, @mwpj, @mcmpj, @mcrm, "
+	"select @par_id, @mj, @msj, "
+	"@mwpj, @mtpj, @mtpn, @mtmpj, @mtrm, "
 	"@def_qos_id, @qos, @delta_qos;";
 
 enum {
 	ASSOC2_REQ_PARENT_ID,
 	ASSOC2_REQ_MJ,
 	ASSOC2_REQ_MSJ,
-	ASSOC2_REQ_MCPJ,
-	ASSOC2_REQ_MNPJ,
 	ASSOC2_REQ_MWPJ,
-	ASSOC2_REQ_MCMPJ,
-	ASSOC2_REQ_MCRM,
+	ASSOC2_REQ_MTPJ,
+	ASSOC2_REQ_MTPN,
+	ASSOC2_REQ_MTMPJ,
+	ASSOC2_REQ_MTRM,
 	ASSOC2_REQ_DEF_QOS,
 	ASSOC2_REQ_QOS,
 	ASSOC2_REQ_DELTA_QOS,
@@ -146,6 +142,13 @@ static char *massoc_req_inx[] = {
 	"lft",
 	"rgt",
 	"qos",
+	"grp_tres_mins",
+	"grp_tres_run_mins",
+	"grp_tres",
+	"max_tres_mins_pj",
+	"max_tres_run_mins",
+	"max_tres_pj",
+	"max_tres_pn",
 };
 
 enum {
@@ -157,6 +160,13 @@ enum {
 	MASSOC_LFT,
 	MASSOC_RGT,
 	MASSOC_QOS,
+	MASSOC_GTM,
+	MASSOC_GTRM,
+	MASSOC_GT,
+	MASSOC_MTMPJ,
+	MASSOC_MTRM,
+	MASSOC_MTPJ,
+	MASSOC_MTPN,
 	MASSOC_COUNT
 };
 
@@ -183,8 +193,8 @@ enum {
 
 static int _assoc_sort_cluster(void *r1, void *r2)
 {
-	slurmdb_association_rec_t *rec_a = *(slurmdb_association_rec_t **)r1;
-	slurmdb_association_rec_t *rec_b = *(slurmdb_association_rec_t **)r2;
+	slurmdb_assoc_rec_t *rec_a = *(slurmdb_assoc_rec_t **)r1;
+	slurmdb_assoc_rec_t *rec_b = *(slurmdb_assoc_rec_t **)r2;
 	int diff;
 
 	diff = strcmp(rec_a->cluster, rec_b->cluster);
@@ -200,7 +210,7 @@ static int _assoc_sort_cluster(void *r1, void *r2)
  * changed while running the function.
  */
 static int _reset_default_assoc(mysql_conn_t *mysql_conn,
-				slurmdb_association_rec_t *assoc,
+				slurmdb_assoc_rec_t *assoc,
 				char **query,
 				bool add_to_update)
 {
@@ -241,9 +251,9 @@ static int _reset_default_assoc(mysql_conn_t *mysql_conn,
 		xfree(sel_query);
 
 		while ((row = mysql_fetch_row(result))) {
-			slurmdb_association_rec_t *mod_assoc = xmalloc(
-				sizeof(slurmdb_association_rec_t));
-			slurmdb_init_association_rec(mod_assoc, 0);
+			slurmdb_assoc_rec_t *mod_assoc = xmalloc(
+				sizeof(slurmdb_assoc_rec_t));
+			slurmdb_init_assoc_rec(mod_assoc, 0);
 
 			mod_assoc->cluster = xstrdup(assoc->cluster);
 			mod_assoc->id = slurm_atoul(row[0]);
@@ -252,7 +262,7 @@ static int _reset_default_assoc(mysql_conn_t *mysql_conn,
 					      SLURMDB_MODIFY_ASSOC,
 					      mod_assoc)
 			    != SLURM_SUCCESS) {
-				slurmdb_destroy_association_rec(mod_assoc);
+				slurmdb_destroy_assoc_rec(mod_assoc);
 				error("couldn't add to the update list");
 				rc = SLURM_ERROR;
 				break;
@@ -261,6 +271,66 @@ static int _reset_default_assoc(mysql_conn_t *mysql_conn,
 		mysql_free_result(result);
 	}
 end_it:
+	return rc;
+}
+
+/* assoc_mgr_lock_t should be clear before coming in here. */
+static int _check_coord_qos(mysql_conn_t *mysql_conn, char *cluster_name,
+			    char *account, char *coord_name, List qos_list)
+{
+	char *query;
+	bitstr_t *request_qos, *valid_qos;
+	MYSQL_RES *result;
+	MYSQL_ROW row;
+	int rc = SLURM_SUCCESS;
+	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK };
+
+	if (!qos_list || !list_count(qos_list))
+		return SLURM_SUCCESS;
+
+	/* If there is a variable cleared here we need to make
+	   sure we get the parent's information, if any. */
+	query = xstrdup_printf(
+		"call get_coord_qos('%s', '%s', '%s', '%s');",
+		assoc_table, account,
+		cluster_name, coord_name);
+	debug4("%d(%s:%d) query\n%s",
+	       mysql_conn->conn, THIS_FILE, __LINE__, query);
+	if (!(result = mysql_db_query_ret(mysql_conn, query, 1))) {
+		xfree(query);
+		return SLURM_ERROR;
+	}
+	xfree(query);
+
+	if (!(row = mysql_fetch_row(result)) || !row[0]) {
+		mysql_free_result(result);
+		return SLURM_ERROR;
+	}
+
+	/* First set the values of the valid ones this coordinator has
+	   access to.
+	*/
+
+	assoc_mgr_lock(&locks);
+	valid_qos = bit_alloc(g_qos_count);
+	request_qos = bit_alloc(g_qos_count);
+	assoc_mgr_unlock(&locks);
+
+	set_qos_bitstr_from_string(valid_qos, row[0]);
+
+	mysql_free_result(result);
+
+	/* Now set the ones they are requesting */
+	set_qos_bitstr_from_list(request_qos, qos_list);
+
+	/* If they are authorized their list should be in the super set */
+	if (!bit_super_set(request_qos, valid_qos))
+		rc = SLURM_ERROR;
+
+	FREE_NULL_BITMAP(valid_qos);
+	FREE_NULL_BITMAP(request_qos);
+
 	return rc;
 }
 
@@ -372,7 +442,7 @@ static int _move_account(mysql_conn_t *mysql_conn, uint32_t *lft, uint32_t *rgt,
 	}
 	xfree(query);
 	if (!(row = mysql_fetch_row(result))) {
-		debug4("Can't move a none existant association");
+		debug4("Can't move a none existent association");
 		mysql_free_result(result);
 		return ESLURM_INVALID_PARENT_ACCOUNT;
 	}
@@ -568,7 +638,7 @@ static uint32_t _get_parent_id(
 }
 
 static int _set_assoc_lft_rgt(
-	mysql_conn_t *mysql_conn, slurmdb_association_rec_t *assoc)
+	mysql_conn_t *mysql_conn, slurmdb_assoc_rec_t *assoc)
 {
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
@@ -604,26 +674,14 @@ static int _set_assoc_lft_rgt(
 }
 
 static int _set_assoc_limits_for_add(
-	mysql_conn_t *mysql_conn, slurmdb_association_rec_t *assoc)
+	mysql_conn_t *mysql_conn, slurmdb_assoc_rec_t *assoc)
 {
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
 	char *query = NULL;
 	char *parent = NULL;
 	char *qos_delta = NULL;
-
-	enum {
-		ASSOC_REQ_PARENT_ID,
-		ASSOC_REQ_MJ,
-		ASSOC_REQ_MSJ,
-		ASSOC_REQ_MCPJ,
-		ASSOC_REQ_MNPJ,
-		ASSOC_REQ_MWPJ,
-		ASSOC_REQ_MCMPJ,
-		ASSOC_REQ_MCRM,
-		ASSOC_REQ_QOS,
-		ASSOC_REQ_DELTA_QOS,
-	};
+	uint32_t tres_str_flags = TRES_STR_FLAG_REMOVE;
 
 	xassert(assoc);
 
@@ -654,22 +712,30 @@ static int _set_assoc_limits_for_add(
 	else if (assoc->def_qos_id == INFINITE)
 		assoc->def_qos_id = 0;
 
-	if (row[ASSOC2_REQ_MCMPJ]
-	    && assoc->max_cpu_mins_pj == (uint64_t)INFINITE)
-		assoc->max_cpu_mins_pj = slurm_atoull(row[ASSOC2_REQ_MCMPJ]);
-	if (row[ASSOC2_REQ_MCRM]
-	    && assoc->max_cpu_run_mins == (uint64_t)INFINITE)
-		assoc->max_cpu_run_mins = slurm_atoull(row[ASSOC2_REQ_MCRM]);
-	if (row[ASSOC2_REQ_MCPJ] && assoc->max_cpus_pj == INFINITE)
-		assoc->max_cpus_pj = slurm_atoul(row[ASSOC2_REQ_MCPJ]);
 	if (row[ASSOC2_REQ_MJ] && assoc->max_jobs == INFINITE)
 		assoc->max_jobs = slurm_atoul(row[ASSOC2_REQ_MJ]);
-	if (row[ASSOC2_REQ_MNPJ] && assoc->max_nodes_pj == INFINITE)
-		assoc->max_nodes_pj = slurm_atoul(row[ASSOC2_REQ_MNPJ]);
 	if (row[ASSOC2_REQ_MSJ] && assoc->max_submit_jobs == INFINITE)
 		assoc->max_submit_jobs = slurm_atoul(row[ASSOC2_REQ_MSJ]);
 	if (row[ASSOC2_REQ_MWPJ] && assoc->max_wall_pj == INFINITE)
 		assoc->max_wall_pj = slurm_atoul(row[ASSOC2_REQ_MWPJ]);
+
+	/* For the tres limits we just concatted the limits going up
+	 * the heirarchy slurmdb_tres_list_from_string will just skip
+	 * over any reoccuring limit to give us the first one per
+	 * TRES.
+	 */
+	slurmdb_combine_tres_strings(
+		&assoc->max_tres_pj, row[ASSOC2_REQ_MTPJ],
+		tres_str_flags);
+	slurmdb_combine_tres_strings(
+		&assoc->max_tres_pn, row[ASSOC2_REQ_MTPN],
+		tres_str_flags);
+	slurmdb_combine_tres_strings(
+		&assoc->max_tres_mins_pj, row[ASSOC2_REQ_MTMPJ],
+		tres_str_flags);
+	slurmdb_combine_tres_strings(
+		&assoc->max_tres_run_mins, row[ASSOC2_REQ_MTRM],
+		tres_str_flags);
 
 	if (assoc->qos_list) {
 		int set = 0;
@@ -720,7 +786,7 @@ end_it:
  * a previous change to it's parent.
  */
 static int _modify_unset_users(mysql_conn_t *mysql_conn,
-			       slurmdb_association_rec_t *assoc,
+			       slurmdb_assoc_rec_t *assoc,
 			       char *acct,
 			       uint32_t lft, uint32_t rgt,
 			       List ret_list, int moved_parent)
@@ -729,6 +795,7 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 	MYSQL_ROW row;
 	char *query = NULL, *object = NULL;
 	int i;
+	uint32_t tres_str_flags = TRES_STR_FLAG_REMOVE | TRES_STR_FLAG_NO_NULL;
 
 	char *assoc_inx[] = {
 		"id_assoc",
@@ -737,11 +804,11 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 		"`partition`",
 		"max_jobs",
 		"max_submit_jobs",
-		"max_nodes_pj",
-		"max_cpus_pj",
+		"max_tres_pj",
+		"max_tres_pn",
 		"max_wall_pj",
-		"max_cpu_mins_pj",
-		"max_cpu_run_mins",
+		"max_tres_mins_pj",
+		"max_tres_run_mins",
 		"def_qos_id",
 		"qos",
 		"delta_qos",
@@ -756,11 +823,11 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 		ASSOC_PART,
 		ASSOC_MJ,
 		ASSOC_MSJ,
-		ASSOC_MNPJ,
-		ASSOC_MCPJ,
+		ASSOC_MTPJ,
+		ASSOC_MTPN,
 		ASSOC_MWPJ,
-		ASSOC_MCMPJ,
-		ASSOC_MCRM,
+		ASSOC_MTMPJ,
+		ASSOC_MTRM,
 		ASSOC_DEF_QOS,
 		ASSOC_QOS,
 		ASSOC_DELTA_QOS,
@@ -799,11 +866,12 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 	xfree(query);
 
 	while ((row = mysql_fetch_row(result))) {
-		slurmdb_association_rec_t *mod_assoc = NULL;
+		slurmdb_assoc_rec_t *mod_assoc = NULL;
 		int modified = 0;
+		char *tmp_char = NULL;
 
-		mod_assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-		slurmdb_init_association_rec(mod_assoc, 0);
+		mod_assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+		slurmdb_init_assoc_rec(mod_assoc, 0);
 		mod_assoc->id = slurm_atoul(row[ASSOC_ID]);
 		mod_assoc->cluster = xstrdup(assoc->cluster);
 
@@ -822,33 +890,50 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 			modified = 1;
 		}
 
-		if (!row[ASSOC_MNPJ] && assoc->max_nodes_pj != NO_VAL) {
-			mod_assoc->max_nodes_pj = assoc->max_nodes_pj;
-			modified = 1;
-		}
-
-		if (!row[ASSOC_MCPJ] && assoc->max_cpus_pj != NO_VAL) {
-			mod_assoc->max_cpus_pj = assoc->max_cpus_pj;
-			modified = 1;
-		}
-
 		if (!row[ASSOC_MWPJ] && assoc->max_wall_pj != NO_VAL) {
 			mod_assoc->max_wall_pj = assoc->max_wall_pj;
 			modified = 1;
 		}
 
-		if (!row[ASSOC_MCMPJ]
-		    && assoc->max_cpu_mins_pj != (uint64_t)NO_VAL) {
-			mod_assoc->max_cpu_mins_pj = assoc->max_cpu_mins_pj;
+		if (assoc->max_tres_pj) {
+			tmp_char = xstrdup(row[ASSOC_MTPJ]);
+			slurmdb_combine_tres_strings(
+				&tmp_char, assoc->max_tres_pj,
+				tres_str_flags);
+			mod_assoc->max_tres_pj = tmp_char;
+			tmp_char = NULL;
 			modified = 1;
 		}
 
-		if (!row[ASSOC_MCRM]
-		    && assoc->max_cpu_run_mins != (uint64_t)NO_VAL) {
-			mod_assoc->max_cpu_run_mins = assoc->max_cpu_run_mins;
+		if (assoc->max_tres_pn) {
+			tmp_char = xstrdup(row[ASSOC_MTPN]);
+			slurmdb_combine_tres_strings(
+				&tmp_char, assoc->max_tres_pn,
+				tres_str_flags);
+			mod_assoc->max_tres_pn = tmp_char;
+			tmp_char = NULL;
 			modified = 1;
 		}
 
+		if (assoc->max_tres_mins_pj) {
+			tmp_char = xstrdup(row[ASSOC_MTMPJ]);
+			slurmdb_combine_tres_strings(
+				&tmp_char, assoc->max_tres_mins_pj,
+				tres_str_flags);
+			mod_assoc->max_tres_mins_pj = tmp_char;
+			tmp_char = NULL;
+			modified = 1;
+		}
+
+		if (assoc->max_tres_run_mins) {
+			tmp_char = xstrdup(row[ASSOC_MTRM]);
+			slurmdb_combine_tres_strings(
+				&tmp_char, assoc->max_tres_run_mins,
+				tres_str_flags);
+			mod_assoc->max_tres_run_mins = tmp_char;
+			tmp_char = NULL;
+			modified = 1;
+		}
 		if (!row[ASSOC_QOS][0] && assoc->qos_list) {
 			List delta_qos_list = NULL;
 			char *qos_char = NULL, *delta_char = NULL;
@@ -895,7 +980,7 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 			    || !list_count(assoc->qos_list))
 				modified = 1;
 			else {
-				list_destroy(mod_assoc->qos_list);
+				FREE_NULL_LIST(mod_assoc->qos_list);
 				mod_assoc->qos_list = NULL;
 			}
 		}
@@ -915,7 +1000,7 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 						    slurm_atoul(row[ASSOC_LFT]),
 						    slurm_atoul(row[ASSOC_RGT]),
 						    ret_list, moved_parent);
-				slurmdb_destroy_association_rec(mod_assoc);
+				slurmdb_destroy_assoc_rec(mod_assoc);
 				continue;
 			}
 			/* We do want to send all user accounts though */
@@ -937,19 +1022,19 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 			list_append(ret_list, object);
 
 			if (moved_parent)
-				slurmdb_destroy_association_rec(mod_assoc);
+				slurmdb_destroy_assoc_rec(mod_assoc);
 			else
 				if (addto_update_list(mysql_conn->update_list,
 						      SLURMDB_MODIFY_ASSOC,
 						      mod_assoc)
 				    != SLURM_SUCCESS) {
-					slurmdb_destroy_association_rec(
+					slurmdb_destroy_assoc_rec(
 						mod_assoc);
 					error("couldn't add to "
 					      "the update list");
 				}
 		} else
-			slurmdb_destroy_association_rec(mod_assoc);
+			slurmdb_destroy_assoc_rec(mod_assoc);
 
 	}
 	mysql_free_result(result);
@@ -959,8 +1044,8 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 
 /* when doing a select on this all the select should have a prefix of
  * t1. Returns "where" clause which needs to be xfreed. */
-static char *_setup_association_cond_qos(slurmdb_association_cond_t *assoc_cond,
-					 char *cluster_name)
+static char *_setup_assoc_cond_qos(slurmdb_assoc_cond_t *assoc_cond,
+				   char *cluster_name)
 {
 	int set = 0;
 	ListIterator itr = NULL;
@@ -968,8 +1053,11 @@ static char *_setup_association_cond_qos(slurmdb_association_cond_t *assoc_cond,
 	char *prefix = "t1";
 	char *extra = NULL;
 
+	/* Since this gets put in an SQL query we don't want it to be
+	 * NULL since it would print (null) instead of nothing.
+	 */
 	if (!assoc_cond)
-		return NULL;
+		return xstrdup("");
 
 	/* we need to check this first so we can update the
 	   with_sub_accts if needed since this the qos_list is a
@@ -1010,8 +1098,8 @@ static char *_setup_association_cond_qos(slurmdb_association_cond_t *assoc_cond,
 }
 
 /* When doing a select on this all the select should have a prefix of t1. */
-static int _setup_association_cond_limits(
-	slurmdb_association_cond_t *assoc_cond,
+static int _setup_assoc_cond_limits(
+	slurmdb_assoc_cond_t *assoc_cond,
 	const char *prefix, char **extra)
 {
 	int set = 0;
@@ -1055,267 +1143,6 @@ static int _setup_association_cond_limits(
 			if (set)
 				xstrcat(*extra, " || ");
 			xstrfmtcat(*extra, "%s.def_qos_id='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->fairshare_list
-	    && list_count(assoc_cond->fairshare_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->fairshare_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			if (!strncasecmp(object, "parent", 6))
-				xstrfmtcat(*extra, "%s.shares='%u'",
-					   prefix, SLURMDB_FS_USE_PARENT);
-			else
-				xstrfmtcat(*extra, "%s.shares='%s'",
-					   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->grp_cpu_mins_list
-	    && list_count(assoc_cond->grp_cpu_mins_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->grp_cpu_mins_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.grp_cpu_mins='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->grp_cpu_run_mins_list
-	    && list_count(assoc_cond->grp_cpu_run_mins_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->grp_cpu_run_mins_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.grp_cpu_run_mins='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->grp_cpus_list
-	    && list_count(assoc_cond->grp_cpus_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->grp_cpus_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.grp_cpus='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->grp_jobs_list
-	    && list_count(assoc_cond->grp_jobs_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->grp_jobs_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.grp_jobs='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->grp_mem_list
-	    && list_count(assoc_cond->grp_mem_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->grp_mem_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.grp_mem='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->grp_nodes_list
-	    && list_count(assoc_cond->grp_nodes_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->grp_nodes_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.grp_nodes='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->grp_submit_jobs_list
-	    && list_count(assoc_cond->grp_submit_jobs_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->grp_submit_jobs_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.grp_submit_jobs='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->grp_wall_list
-	    && list_count(assoc_cond->grp_wall_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->grp_wall_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.grp_wall='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->max_cpu_mins_pj_list
-	    && list_count(assoc_cond->max_cpu_mins_pj_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->max_cpu_mins_pj_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.max_cpu_mins_pj='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->max_cpu_run_mins_list
-	    && list_count(assoc_cond->max_cpu_run_mins_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->max_cpu_run_mins_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.max_cpu_run_mins='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->max_cpus_pj_list
-	    && list_count(assoc_cond->max_cpus_pj_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->max_cpus_pj_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.max_cpus_pj='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->max_jobs_list
-	    && list_count(assoc_cond->max_jobs_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->max_jobs_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.max_jobs='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->max_nodes_pj_list
-	    && list_count(assoc_cond->max_nodes_pj_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->max_nodes_pj_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.max_nodes_pj='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->max_submit_jobs_list
-	    && list_count(assoc_cond->max_submit_jobs_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->max_submit_jobs_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "%s.max_submit_jobs='%s'",
-				   prefix, object);
-			set = 1;
-		}
-		list_iterator_destroy(itr);
-		xstrcat(*extra, ")");
-	}
-
-	if (assoc_cond->max_wall_pj_list
-	    && list_count(assoc_cond->max_wall_pj_list)) {
-		set = 0;
-		xstrcat(*extra, " && (");
-		itr = list_iterator_create(assoc_cond->max_wall_pj_list);
-		while ((object = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra,
-				   "%s.max_wall_pj='%s'",
 				   prefix, object);
 			set = 1;
 		}
@@ -1391,7 +1218,7 @@ static int _setup_association_cond_limits(
 
 static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 					 MYSQL_RES *result,
-					 slurmdb_association_rec_t *assoc,
+					 slurmdb_assoc_rec_t *assoc,
 					 slurmdb_user_rec_t *user,
 					 char *cluster_name, char *sent_vals,
 					 bool is_admin, bool same_user,
@@ -1415,7 +1242,8 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 	vals = xstrdup(sent_vals);
 
 	while ((row = mysql_fetch_row(result))) {
-		slurmdb_association_rec_t *mod_assoc = NULL;
+		MYSQL_RES *result2 = NULL;
+		slurmdb_assoc_rec_t *mod_assoc = NULL, alt_assoc;
 		int account_type=0;
 		/* If parent changes these also could change
 		   so we need to keep track of the latest
@@ -1423,7 +1251,11 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 		*/
 		uint32_t lft = slurm_atoul(row[MASSOC_LFT]);
 		uint32_t rgt = slurm_atoul(row[MASSOC_RGT]);
-		char *account = row[MASSOC_ACCT];
+		char *orig_acct, *account;
+
+		orig_acct = account = row[MASSOC_ACCT];
+
+		slurmdb_init_assoc_rec(&alt_assoc, 0);
 
 		/* Here we want to see if the person
 		 * is a coord of the parent account
@@ -1475,6 +1307,28 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 					      user->name, user->uid,
 					      row[MASSOC_ACCT]);
 
+				rc = ESLURM_ACCESS_DENIED;
+				goto end_it;
+			} else if (_check_coord_qos(mysql_conn, cluster_name,
+						    account, user->name,
+						    assoc->qos_list)
+				   == SLURM_ERROR) {
+				assoc_mgr_lock_t locks = {
+					NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
+					NO_LOCK, NO_LOCK, NO_LOCK };
+				char *requested_qos;
+
+				assoc_mgr_lock(&locks);
+				requested_qos = get_qos_complete_str(
+					assoc_mgr_qos_list, assoc->qos_list);
+				assoc_mgr_unlock(&locks);
+				error("Coordinator %s(%d) does not have the "
+				      "access to all the qos requested (%s), "
+				      "so they can't modify account "
+				      "%s with it.",
+				      user->name, user->uid, requested_qos,
+				      account);
+				xfree(requested_qos);
 				rc = ESLURM_ACCESS_DENIED;
 				goto end_it;
 			}
@@ -1538,8 +1392,7 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 			xstrfmtcat(name_char, "(id_assoc=%s", row[MASSOC_ID]);
 
 		/* Only do this when not dealing with the root association. */
-		if (strcmp(account, "root") || row[MASSOC_USER][0]) {
-			MYSQL_RES *result2;
+		if (strcmp(orig_acct, "root") || row[MASSOC_USER][0]) {
 			MYSQL_ROW row2;
 			/* If there is a variable cleared here we need to make
 			   sure we get the parent's information, if any. */
@@ -1561,69 +1414,102 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 			if ((row2 = mysql_fetch_row(result2))) {
 				if (assoc->def_qos_id == INFINITE
 				    && row2[ASSOC2_REQ_DEF_QOS])
-					assoc->def_qos_id = slurm_atoul(
+					alt_assoc.def_qos_id = slurm_atoul(
 						row2[ASSOC2_REQ_DEF_QOS]);
 
 				if ((assoc->max_jobs == INFINITE)
 				    && row2[ASSOC2_REQ_MJ])
-					assoc->max_jobs = slurm_atoul(
+					alt_assoc.max_jobs = slurm_atoul(
 						row2[ASSOC2_REQ_MJ]);
 				if ((assoc->max_submit_jobs == INFINITE)
 				    && row2[ASSOC2_REQ_MSJ])
-					assoc->max_submit_jobs = slurm_atoul(
+					alt_assoc.max_submit_jobs = slurm_atoul(
 						row2[ASSOC2_REQ_MSJ]);
-				if ((assoc->max_cpus_pj == INFINITE)
-				    && row2[ASSOC2_REQ_MCPJ])
-					assoc->max_cpus_pj = slurm_atoul(
-						row2[ASSOC2_REQ_MCPJ]);
-				if ((assoc->max_nodes_pj == INFINITE)
-				    && row2[ASSOC2_REQ_MNPJ])
-					assoc->max_nodes_pj = slurm_atoul(
-						row2[ASSOC2_REQ_MNPJ]);
 				if ((assoc->max_wall_pj == INFINITE)
 				    && row2[ASSOC2_REQ_MWPJ])
-					assoc->max_wall_pj = slurm_atoul(
+					alt_assoc.max_wall_pj = slurm_atoul(
 						row2[ASSOC2_REQ_MWPJ]);
-				if ((assoc->max_cpu_mins_pj ==
-				     (uint64_t)INFINITE)
-				    && row2[ASSOC2_REQ_MCMPJ])
-					assoc->max_cpu_mins_pj = slurm_atoull(
-						row2[ASSOC2_REQ_MCMPJ]);
-				if ((assoc->max_cpu_run_mins ==
-				     (uint64_t)INFINITE)
-				    && row2[ASSOC2_REQ_MCRM])
-					assoc->max_cpu_run_mins = slurm_atoull(
-						row2[ASSOC2_REQ_MCRM]);
+
+				/* We don't have to copy these strings
+				 * or check for there existance,
+				 * slurmdb_combine_tres_strings will
+				 * do this for us below.
+				 */
+				if (row2[ASSOC2_REQ_MTPJ][0])
+					alt_assoc.max_tres_pj =
+						row2[ASSOC2_REQ_MTPJ];
+				if (row2[ASSOC2_REQ_MTPN][0])
+					alt_assoc.max_tres_pn =
+						row2[ASSOC2_REQ_MTPN];
+				if (row2[ASSOC2_REQ_MTMPJ][0])
+					alt_assoc.max_tres_mins_pj =
+						row2[ASSOC2_REQ_MTMPJ];
+				if (row2[ASSOC2_REQ_MTRM][0])
+					alt_assoc.max_tres_run_mins =
+						row2[ASSOC2_REQ_MTRM];
 			}
-			mysql_free_result(result2);
 		}
-		mod_assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-		slurmdb_init_association_rec(mod_assoc, 0);
+		mod_assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+		slurmdb_init_assoc_rec(mod_assoc, 0);
 		mod_assoc->id = slurm_atoul(row[MASSOC_ID]);
 		mod_assoc->cluster = xstrdup(cluster_name);
 
-		mod_assoc->def_qos_id = assoc->def_qos_id;
+		if (alt_assoc.def_qos_id != NO_VAL)
+			mod_assoc->def_qos_id = alt_assoc.def_qos_id;
+		else
+			mod_assoc->def_qos_id = assoc->def_qos_id;
 
 		mod_assoc->is_def = assoc->is_def;
 
 		mod_assoc->shares_raw = assoc->shares_raw;
 
-		mod_assoc->grp_cpus = assoc->grp_cpus;
-		mod_assoc->grp_cpu_mins = assoc->grp_cpu_mins;
-		mod_assoc->grp_cpu_run_mins = assoc->grp_cpu_run_mins;
+		mod_tres_str(&mod_assoc->grp_tres,
+			     assoc->grp_tres, row[MASSOC_GT],
+			     NULL, "grp_tres", &vals, mod_assoc->id, 1);
+		mod_tres_str(&mod_assoc->grp_tres_mins,
+			     assoc->grp_tres_mins, row[MASSOC_GTM],
+			     NULL, "grp_tres_mins", &vals, mod_assoc->id, 1);
+		mod_tres_str(&mod_assoc->grp_tres_run_mins,
+			     assoc->grp_tres_run_mins, row[MASSOC_GTRM],
+			     NULL, "grp_tres_run_mins", &vals,
+			     mod_assoc->id, 1);
+
 		mod_assoc->grp_jobs = assoc->grp_jobs;
-		mod_assoc->grp_mem = assoc->grp_mem;
-		mod_assoc->grp_nodes = assoc->grp_nodes;
 		mod_assoc->grp_submit_jobs = assoc->grp_submit_jobs;
 		mod_assoc->grp_wall = assoc->grp_wall;
 
-		mod_assoc->max_cpus_pj = assoc->max_cpus_pj;
-		mod_assoc->max_cpu_mins_pj = assoc->max_cpu_mins_pj;
-		mod_assoc->max_cpu_run_mins = assoc->max_cpu_run_mins;
-		mod_assoc->max_jobs = assoc->max_jobs;
-		mod_assoc->max_nodes_pj = assoc->max_nodes_pj;
-		mod_assoc->max_submit_jobs = assoc->max_submit_jobs;
-		mod_assoc->max_wall_pj = assoc->max_wall_pj;
+		mod_tres_str(&mod_assoc->max_tres_pj,
+			     assoc->max_tres_pj, row[MASSOC_MTPJ],
+			     alt_assoc.max_tres_pj, "max_tres_pj",
+			     &vals, mod_assoc->id, 1);
+		mod_tres_str(&mod_assoc->max_tres_pn,
+			     assoc->max_tres_pn, row[MASSOC_MTPN],
+			     alt_assoc.max_tres_pn, "max_tres_pn",
+			     &vals, mod_assoc->id, 1);
+		mod_tres_str(&mod_assoc->max_tres_mins_pj,
+			     assoc->max_tres_mins_pj, row[MASSOC_MTMPJ],
+			     alt_assoc.max_tres_mins_pj, "max_tres_mins_pj",
+			     &vals, mod_assoc->id, 1);
+		mod_tres_str(&mod_assoc->max_tres_run_mins,
+			     assoc->max_tres_run_mins, row[MASSOC_MTRM],
+			     alt_assoc.max_tres_run_mins, "max_tres_run_mins",
+			     &vals, mod_assoc->id, 1);
+
+		if (result2)
+			mysql_free_result(result2);
+
+		if (alt_assoc.max_jobs != NO_VAL)
+			mod_assoc->max_jobs = alt_assoc.max_jobs;
+		else
+			mod_assoc->max_jobs = assoc->max_jobs;
+		if (alt_assoc.max_submit_jobs != NO_VAL)
+			mod_assoc->max_submit_jobs = alt_assoc.max_submit_jobs;
+		else
+			mod_assoc->max_submit_jobs = assoc->max_submit_jobs;
+		if (alt_assoc.max_wall_pj != NO_VAL)
+			mod_assoc->max_wall_pj = alt_assoc.max_wall_pj;
+		else
+			mod_assoc->max_wall_pj = assoc->max_wall_pj;
 
 		/* no need to get the parent id since if we moved
 		 * parent id's we will get it when we send the total list */
@@ -1714,8 +1600,8 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 			/* Use fresh one here so we don't have to
 			   worry about dealing with bad values.
 			*/
-			slurmdb_association_rec_t tmp_assoc;
-			slurmdb_init_association_rec(&tmp_assoc, 0);
+			slurmdb_assoc_rec_t tmp_assoc;
+			slurmdb_init_assoc_rec(&tmp_assoc, 0);
 			tmp_assoc.is_def = 1;
 			tmp_assoc.cluster = cluster_name;
 			tmp_assoc.acct = row[MASSOC_ACCT];
@@ -1729,13 +1615,13 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 			}
 		}
 
-		if (moved_parent)
-			slurmdb_destroy_association_rec(mod_assoc);
+		if (!vals || !vals[0] || moved_parent)
+			slurmdb_destroy_assoc_rec(mod_assoc);
 		else if (addto_update_list(mysql_conn->update_list,
 					   SLURMDB_MODIFY_ASSOC,
 					   mod_assoc) != SLURM_SUCCESS) {
 			error("couldn't add to the update list");
-			slurmdb_destroy_association_rec(mod_assoc);
+			slurmdb_destroy_assoc_rec(mod_assoc);
 		}
 	}
 
@@ -1751,7 +1637,7 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 	if (rc != SLURM_SUCCESS)
 		goto end_it;
 
-	if (vals) {
+	if (vals && vals[0]) {
 		char *user_name = uid_to_string((uid_t) user->uid);
 		rc = modify_common(mysql_conn, DBD_MODIFY_ASSOCS, now,
 				   user_name, assoc_table, name_char, vals,
@@ -1766,8 +1652,8 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 	if (moved_parent) {
 		List local_assoc_list = NULL;
 		ListIterator local_itr = NULL;
-		slurmdb_association_rec_t *local_assoc = NULL;
-		slurmdb_association_cond_t local_assoc_cond;
+		slurmdb_assoc_rec_t *local_assoc = NULL;
+		slurmdb_assoc_cond_t local_assoc_cond;
 		/* now we need to send the update of the new parents and
 		 * limits, so just to be safe, send the whole
 		 * tree because we could have some limits that
@@ -1780,12 +1666,12 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 		 */
 
 		memset(&local_assoc_cond, 0,
-		       sizeof(slurmdb_association_cond_t));
+		       sizeof(slurmdb_assoc_cond_t));
 		local_assoc_cond.cluster_list = list_create(NULL);
 		list_append(local_assoc_cond.cluster_list, cluster_name);
 		local_assoc_list = as_mysql_get_assocs(
 			mysql_conn, user->uid, &local_assoc_cond);
-		list_destroy(local_assoc_cond.cluster_list);
+		FREE_NULL_LIST(local_assoc_cond.cluster_list);
 		if (!local_assoc_list)
 			goto end_it;
 		/* NOTE: you can not use list_pop, or list_push
@@ -1804,7 +1690,7 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 				list_remove(local_itr);
 		}
 		list_iterator_destroy(local_itr);
-		list_destroy(local_assoc_list);
+		FREE_NULL_LIST(local_assoc_list);
 	}
 
 	if (reset_query) {
@@ -1843,7 +1729,7 @@ static int _process_remove_assoc_results(mysql_conn_t *mysql_conn,
 		goto skip_process;
 
 	while ((row = mysql_fetch_row(result))) {
-		slurmdb_association_rec_t *rem_assoc = NULL;
+		slurmdb_assoc_rec_t *rem_assoc = NULL;
 		uint32_t lft;
 
 		if (!is_admin) {
@@ -1907,14 +1793,14 @@ static int _process_remove_assoc_results(mysql_conn_t *mysql_conn,
 		if (lft < smallest_lft)
 			smallest_lft = lft;
 
-		rem_assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-		slurmdb_init_association_rec(rem_assoc, 0);
+		rem_assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
+		slurmdb_init_assoc_rec(rem_assoc, 0);
 		rem_assoc->id = slurm_atoul(row[RASSOC_ID]);
 		rem_assoc->cluster = xstrdup(cluster_name);
 		if (addto_update_list(mysql_conn->update_list,
 				      SLURMDB_REMOVE_ASSOC,
 				      rem_assoc) != SLURM_SUCCESS) {
-			slurmdb_destroy_association_rec(rem_assoc);
+			slurmdb_destroy_assoc_rec(rem_assoc);
 			error("couldn't add to the update list");
 		}
 
@@ -1940,7 +1826,7 @@ end_it:
 
 static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 			       slurmdb_user_rec_t *user,
-			       slurmdb_association_cond_t *assoc_cond,
+			       slurmdb_assoc_cond_t *assoc_cond,
 			       char *cluster_name,
 			       char *fields, char *sent_extra,
 			       bool is_admin, List sent_list)
@@ -1953,11 +1839,11 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 	uint32_t parent_def_qos_id = 0;
 	uint32_t parent_mj = INFINITE;
 	uint32_t parent_msj = INFINITE;
-	uint32_t parent_mcpj = INFINITE;
-	uint32_t parent_mnpj = INFINITE;
 	uint32_t parent_mwpj = INFINITE;
-	uint64_t parent_mcmpj = (uint64_t)INFINITE;
-	uint64_t parent_mcrm = (uint64_t)INFINITE;
+	char *parent_mtpj = NULL;
+	char *parent_mtpn = NULL;
+	char *parent_mtmpj = NULL;
+	char *parent_mtrm = NULL;
 	char *parent_acct = NULL;
 	char *parent_qos = NULL;
 	char *parent_delta_qos = NULL;
@@ -1988,7 +1874,7 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 	 */
 	if (!is_admin && (private_data & PRIVATE_DATA_USERS)) {
 		int set = 0;
-		query = xstrdup_printf("select lft from %s_%s where user='%s'",
+		query = xstrdup_printf("select lft from \"%s_%s\" where user='%s'",
 				       cluster_name, assoc_table, user->name);
 		if (user->coord_accts) {
 			slurmdb_coord_rec_t *coord = NULL;
@@ -2028,7 +1914,7 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 			xstrcat(extra, ")");
 		else {
 			xfree(extra);
-			debug("User %s has no assocations, and is not admin, "
+			debug("User %s has no associations, and is not admin, "
 			      "so not returning any.", user->name);
 			/* This user has no valid associations, so
 			 * end. */
@@ -2036,7 +1922,7 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 		}
 	}
 
-	qos_extra = _setup_association_cond_qos(assoc_cond, cluster_name);
+	qos_extra = _setup_assoc_cond_qos(assoc_cond, cluster_name);
 
 
 	//START_TIMER;
@@ -2063,11 +1949,11 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 		return SLURM_SUCCESS;
 	}
 
-	assoc_list = list_create(slurmdb_destroy_association_rec);
+	assoc_list = list_create(slurmdb_destroy_assoc_rec);
 	delta_qos_list = list_create(slurm_destroy_char);
 	while ((row = mysql_fetch_row(result))) {
-		slurmdb_association_rec_t *assoc =
-			xmalloc(sizeof(slurmdb_association_rec_t));
+		slurmdb_assoc_rec_t *assoc =
+			xmalloc(sizeof(slurmdb_assoc_rec_t));
 		MYSQL_RES *result2 = NULL;
 		MYSQL_ROW row2;
 
@@ -2093,35 +1979,17 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 		else
 			assoc->grp_submit_jobs = INFINITE;
 
-		if (row[ASSOC_REQ_GC])
-			assoc->grp_cpus = slurm_atoul(row[ASSOC_REQ_GC]);
-		else
-			assoc->grp_cpus = INFINITE;
-
-		if (row[ASSOC_REQ_GMEM])
-			assoc->grp_mem = slurm_atoul(row[ASSOC_REQ_GMEM]);
-		else
-			assoc->grp_mem = INFINITE;
-
-		if (row[ASSOC_REQ_GN])
-			assoc->grp_nodes = slurm_atoul(row[ASSOC_REQ_GN]);
-		else
-			assoc->grp_nodes = INFINITE;
 		if (row[ASSOC_REQ_GW])
 			assoc->grp_wall = slurm_atoul(row[ASSOC_REQ_GW]);
 		else
 			assoc->grp_wall = INFINITE;
 
-		if (row[ASSOC_REQ_GCM])
-			assoc->grp_cpu_mins = slurm_atoull(row[ASSOC_REQ_GCM]);
-		else
-			assoc->grp_cpu_mins = INFINITE;
-
-		if (row[ASSOC_REQ_GCRM])
-			assoc->grp_cpu_run_mins =
-				slurm_atoull(row[ASSOC_REQ_GCRM]);
-		else
-			assoc->grp_cpu_run_mins = INFINITE;
+		if (row[ASSOC_REQ_GT][0])
+			assoc->grp_tres = xstrdup(row[ASSOC_REQ_GT]);
+		if (row[ASSOC_REQ_GTM][0])
+			assoc->grp_tres_mins = xstrdup(row[ASSOC_REQ_GTM]);
+		if (row[ASSOC_REQ_GTRM][0])
+			assoc->grp_tres_run_mins = xstrdup(row[ASSOC_REQ_GTRM]);
 
 		parent_acct = row[ASSOC_REQ_ACCT];
 		if (!without_parent_info
@@ -2187,49 +2055,41 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 				else
 					parent_msj = INFINITE;
 
-				if (row2[ASSOC2_REQ_MCPJ])
-					parent_mcpj = slurm_atoul(
-						row2[ASSOC2_REQ_MCPJ]);
-				else
-					parent_mcpj = INFINITE;
-
-				if (row2[ASSOC2_REQ_MNPJ])
-					parent_mnpj = slurm_atoul(
-						row2[ASSOC2_REQ_MNPJ]);
-				else
-					parent_mnpj = INFINITE;
-
 				if (row2[ASSOC2_REQ_MWPJ])
 					parent_mwpj = slurm_atoul(
 						row2[ASSOC2_REQ_MWPJ]);
 				else
 					parent_mwpj = INFINITE;
 
-				if (row2[ASSOC2_REQ_MCMPJ])
-					parent_mcmpj = slurm_atoull(
-						row2[ASSOC2_REQ_MCMPJ]);
-				else
-					parent_mcmpj = INFINITE;
+				xfree(parent_mtpj);
+				if (row2[ASSOC2_REQ_MTPJ][0])
+					parent_mtpj = xstrdup(
+						row2[ASSOC2_REQ_MTPJ]);
 
-				if (row2[ASSOC2_REQ_MCRM])
-					parent_mcrm = slurm_atoull(
-						row2[ASSOC2_REQ_MCRM]);
-				else
-					parent_mcrm = (uint64_t)INFINITE;
+				xfree(parent_mtpn);
+				if (row2[ASSOC2_REQ_MTPN][0])
+					parent_mtpn = xstrdup(
+						row2[ASSOC2_REQ_MTPN]);
+
+				xfree(parent_mtmpj);
+				if (row2[ASSOC2_REQ_MTMPJ][0])
+					parent_mtmpj = xstrdup(
+						row2[ASSOC2_REQ_MTMPJ]);
+
+				xfree(parent_mtrm);
+				if (row2[ASSOC2_REQ_MTRM][0])
+					parent_mtrm = xstrdup(
+						row2[ASSOC2_REQ_MTRM]);
 
 				xfree(parent_qos);
 				if (row2[ASSOC2_REQ_QOS][0])
 					parent_qos =
 						xstrdup(row2[ASSOC2_REQ_QOS]);
-				else
-					parent_qos = NULL;
 
 				xfree(parent_delta_qos);
 				if (row2[ASSOC2_REQ_DELTA_QOS][0])
 					parent_delta_qos = xstrdup(
 						row2[ASSOC2_REQ_DELTA_QOS]);
-				else
-					parent_delta_qos = NULL;
 			}
 			last_acct = parent_acct;
 			last_cluster = cluster_name;
@@ -2253,32 +2113,44 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 		else
 			assoc->max_submit_jobs = parent_msj;
 
-		if (row[ASSOC_REQ_MCPJ])
-			assoc->max_cpus_pj = slurm_atoul(row[ASSOC_REQ_MCPJ]);
-		else
-			assoc->max_cpus_pj = parent_mcpj;
-
-		if (row[ASSOC_REQ_MNPJ])
-			assoc->max_nodes_pj = slurm_atoul(row[ASSOC_REQ_MNPJ]);
-		else
-			assoc->max_nodes_pj = parent_mnpj;
-
 		if (row[ASSOC_REQ_MWPJ])
 			assoc->max_wall_pj = slurm_atoul(row[ASSOC_REQ_MWPJ]);
 		else
 			assoc->max_wall_pj = parent_mwpj;
 
-		if (row[ASSOC_REQ_MCMPJ])
-			assoc->max_cpu_mins_pj = slurm_atoull(
-				row[ASSOC_REQ_MCMPJ]);
-		else
-			assoc->max_cpu_mins_pj = parent_mcmpj;
+		if (row[ASSOC_REQ_MTPJ][0])
+			assoc->max_tres_pj = xstrdup(row[ASSOC_REQ_MTPJ]);
 
-		if (row[ASSOC_REQ_MCRM])
-			assoc->max_cpu_run_mins = slurm_atoull(
-				row[ASSOC_REQ_MCRM]);
-		else
-			assoc->max_cpu_run_mins = parent_mcrm;
+		if (row[ASSOC_REQ_MTPN][0])
+			assoc->max_tres_pn = xstrdup(row[ASSOC_REQ_MTPN]);
+
+		if (row[ASSOC_REQ_MTMPJ][0])
+			assoc->max_tres_mins_pj = xstrdup(row[ASSOC_REQ_MTMPJ]);
+
+		if (row[ASSOC_REQ_MTRM][0])
+			assoc->max_tres_run_mins = xstrdup(row[ASSOC_REQ_MTRM]);
+
+		/* For the tres limits we just concatted the limits going up
+		 * the heirarchy slurmdb_tres_list_from_string will just skip
+		 * over any reoccuring limit to give us the first one per
+		 * TRES.
+		 */
+		slurmdb_combine_tres_strings(
+			&assoc->max_tres_pj, parent_mtpj,
+			TRES_STR_FLAG_NONE);
+		xfree(parent_mtpj);
+		slurmdb_combine_tres_strings(
+			&assoc->max_tres_pn, parent_mtpn,
+			TRES_STR_FLAG_NONE);
+		xfree(parent_mtpn);
+		slurmdb_combine_tres_strings(
+			&assoc->max_tres_mins_pj, parent_mtmpj,
+			TRES_STR_FLAG_NONE);
+		xfree(parent_mtmpj);
+		slurmdb_combine_tres_strings(
+			&assoc->max_tres_run_mins, parent_mtrm,
+			TRES_STR_FLAG_NONE);
+		xfree(parent_mtrm);
 
 		assoc->qos_list = list_create(slurm_destroy_char);
 
@@ -2367,7 +2239,7 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 	}
 	mysql_free_result(result);
 
-	list_destroy(delta_qos_list);
+	FREE_NULL_LIST(delta_qos_list);
 
 	xfree(parent_delta_qos);
 	xfree(parent_qos);
@@ -2379,7 +2251,7 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 				   assoc_cond->usage_end);
 
 	list_transfer(sent_list, assoc_list);
-	list_destroy(assoc_list);
+	FREE_NULL_LIST(assoc_list);
 	return SLURM_SUCCESS;
 }
 
@@ -2403,16 +2275,16 @@ extern int as_mysql_get_modified_lfts(mysql_conn_t *mysql_conn,
 	xfree(query);
 
 	while ((row = mysql_fetch_row(result))) {
-		slurmdb_association_rec_t *assoc =
-			xmalloc(sizeof(slurmdb_association_rec_t));
-		slurmdb_init_association_rec(assoc, 0);
+		slurmdb_assoc_rec_t *assoc =
+			xmalloc(sizeof(slurmdb_assoc_rec_t));
+		slurmdb_init_assoc_rec(assoc, 0);
 		assoc->id = slurm_atoul(row[0]);
 		assoc->lft = slurm_atoul(row[1]);
 		assoc->cluster = xstrdup(cluster_name);
 		if (addto_update_list(mysql_conn->update_list,
 				      SLURMDB_MODIFY_ASSOC,
 				      assoc) != SLURM_SUCCESS)
-			slurmdb_destroy_association_rec(assoc);
+			slurmdb_destroy_assoc_rec(assoc);
 	}
 	mysql_free_result(result);
 
@@ -2420,12 +2292,12 @@ extern int as_mysql_get_modified_lfts(mysql_conn_t *mysql_conn,
 }
 
 extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
-			       List association_list)
+			       List assoc_list)
 {
 	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
 	int i=0;
-	slurmdb_association_rec_t *object = NULL;
+	slurmdb_assoc_rec_t *object = NULL;
 	char *cols = NULL, *vals = NULL, *txn_query = NULL;
 	char *extra = NULL, *query = NULL, *update = NULL, *tmp_extra = NULL;
 	char *parent = NULL;
@@ -2441,8 +2313,11 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 	char *last_parent = NULL, *last_cluster = NULL;
 	List local_cluster_list = NULL;
 	List added_user_list = NULL;
+	bool is_coord = false;
+	slurmdb_update_object_t *update_object = NULL;
+	List assoc_list_tmp = NULL;
 
-	if (!association_list) {
+	if (!assoc_list) {
 		error("No association list given");
 		return SLURM_ERROR;
 	}
@@ -2450,11 +2325,12 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return ESLURM_DB_CONNECTION;
 
-	if (!is_user_min_admin_level(mysql_conn, uid, SLURMDB_ADMIN_OPERATOR)) {
+	if (!is_user_min_admin_level(mysql_conn, uid,
+				     SLURMDB_ADMIN_OPERATOR)) {
 		ListIterator itr2 = NULL;
 		slurmdb_user_rec_t user;
 		slurmdb_coord_rec_t *coord = NULL;
-		slurmdb_association_rec_t *object = NULL;
+		slurmdb_assoc_rec_t *object = NULL;
 
 		memset(&user, 0, sizeof(slurmdb_user_rec_t));
 		user.uid = uid;
@@ -2465,7 +2341,7 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			return ESLURM_ACCESS_DENIED;
 		}
 
-		itr = list_iterator_create(association_list);
+		itr = list_iterator_create(assoc_list);
 		itr2 = list_iterator_create(user.coord_accts);
 		while ((object = list_next(itr))) {
 			char *account = "root";
@@ -2489,14 +2365,15 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			      user.name, user.uid);
 			return ESLURM_ACCESS_DENIED;
 		}
+		is_coord = true;
 	}
 
 	local_cluster_list = list_create(NULL);
 	user_name = uid_to_string((uid_t) uid);
 	/* these need to be in a specific order */
-	list_sort(association_list, (ListCmpF)_assoc_sort_cluster);
+	list_sort(assoc_list, (ListCmpF)_assoc_sort_cluster);
 
-	itr = list_iterator_create(association_list);
+	itr = list_iterator_create(assoc_list);
 	while ((object = list_next(itr))) {
 		if (!object->cluster || !object->cluster[0]
 		    || !object->acct || !object->acct[0]) {
@@ -2504,6 +2381,30 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			      "acct to add one.");
 			rc = SLURM_ERROR;
 			continue;
+		}
+
+		if (is_coord && _check_coord_qos(mysql_conn, object->cluster,
+						 object->acct, user_name,
+						 object->qos_list)
+		    == SLURM_ERROR) {
+			assoc_mgr_lock_t locks = {
+				NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
+				NO_LOCK, NO_LOCK, NO_LOCK };
+			char *requested_qos;
+
+			assoc_mgr_lock(&locks);
+			requested_qos = get_qos_complete_str(
+				assoc_mgr_qos_list, object->qos_list);
+			assoc_mgr_unlock(&locks);
+			error("Coordinator %s(%d) does not have the "
+			      "access to all the qos requested (%s), "
+			      "so they can't add to account "
+			      "%s with it.",
+			      user_name, uid, requested_qos,
+			      object->acct);
+			xfree(requested_qos);
+			rc = ESLURM_ACCESS_DENIED;
+			break;
 		}
 
 		/* When adding if this isn't a default might as well
@@ -2557,8 +2458,8 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			list_append(added_user_list, object->user);
 		}
 
-		setup_association_limits(object, &cols, &vals, &extra,
-					 QOS_LEVEL_NONE, 1);
+		setup_assoc_limits(object, &cols, &vals, &extra,
+				   QOS_LEVEL_NONE, 1);
 
 		xstrcat(tmp_char, aassoc_req_inx[0]);
 		for(i=1; i<AASSOC_COUNT; i++)
@@ -2858,25 +2759,28 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	}
 
-	if (!moved_parent) {
-		slurmdb_update_object_t *update_object = NULL;
+	/* Since we are already removed all the items from assoc_list
+	 * we need to work off the update_list from here on out.
+	 */
+	itr = list_iterator_create(mysql_conn->update_list);;
+	while ((update_object = list_next(itr))) {
+		if (!update_object->objects ||
+		    !list_count(update_object->objects))
+			continue;
+		if (update_object->type == SLURMDB_ADD_ASSOC)
+			break;
+	}
+	list_iterator_destroy(itr);
 
-		itr = list_iterator_create(
-			mysql_conn->update_list);;
-		while ((update_object = list_next(itr))) {
-			if (!update_object->objects
-			    || !list_count(update_object->objects))
-				continue;
-			if (update_object->type == SLURMDB_ADD_ASSOC)
-				break;
-		}
-		list_iterator_destroy(itr);
+	if (update_object && update_object->objects
+	    && list_count(update_object->objects))
+		assoc_list_tmp = update_object->objects;
 
-		if (update_object && update_object->objects
-		    && list_count(update_object->objects)) {
+	if (assoc_list_tmp) {
+		ListIterator itr2 = list_iterator_create(assoc_list_tmp);
+
+		if (!moved_parent) {
 			char *cluster_name;
-			ListIterator itr2 =
-				list_iterator_create(update_object->objects);
 
 			slurm_mutex_lock(&as_mysql_cluster_list_lock);
 			itr = list_iterator_create(as_mysql_cluster_list);
@@ -2898,78 +2802,28 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			}
 			list_iterator_destroy(itr);
 			slurm_mutex_unlock(&as_mysql_cluster_list_lock);
-			list_iterator_destroy(itr2);
-		}
-	}
-
-	/* now reset all the other defaults accordingly. (if needed) */
-	itr = list_iterator_create(association_list);
-	while ((object = list_next(itr))) {
-		if ((object->is_def != 1) || !object->cluster
-		    || !object->acct || !object->user)
-			continue;
-
-		if ((rc = _reset_default_assoc(
-			     mysql_conn, object, &query, moved_parent ? 0 : 1))
-		    != SLURM_SUCCESS) {
-			xfree(query);
-			goto end_it;
 		}
 
-		/* xstrfmtcat(query, "update \"%s_%s\" set is_def=0, " */
-		/* 	   "mod_time=%ld " */
-		/* 	   "where (user='%s' && acct!='%s' && is_def=1);", */
-		/* 	   object->cluster, assoc_table, (long)now, */
-		/* 	   object->user, object->acct); */
+		/* make sure we don't have any other default accounts */
+		list_iterator_reset(itr2);
+		while ((object = list_next(itr2))) {
+			if ((object->is_def != 1) || !object->cluster
+			    || !object->acct || !object->user)
+				continue;
 
-		/* if (!moved_parent) { */
-		/* 	MYSQL_RES *result = NULL; */
-		/* 	MYSQL_ROW row; */
-		/* 	/\* If moved parent all the associations will be sent */
-		/* 	   so no need to do this extra step.  Else, this has */
-		/* 	   to be done one at a time so we can send */
-		/* 	   the updated assocs back to the slurmctlds */
-		/* 	*\/ */
-		/* 	xstrfmtcat(query, "select id_assoc from \"%s_%s\" " */
-		/* 		   "where (user='%s' && acct!='%s' " */
-		/* 		   "&& is_def=1);", */
-		/* 		   object->cluster, assoc_table, */
-		/* 		   object->user, object->acct); */
-		/* 	debug("%d(%s:%d) query\n%s", */
-		/* 	       mysql_conn->conn, THIS_FILE, */
-		/* 	       __LINE__, query); */
-		/* 	if (!(result = mysql_db_query_ret( */
-		/* 		     mysql_conn, query, 1))) { */
-		/* 		xfree(query); */
-		/* 		rc = SLURM_ERROR; */
-		/* 		goto end_it; */
-		/* 	} */
-		/* 	xfree(query); */
-
-		/* 	while ((row = mysql_fetch_row(result))) { */
-		/* 	      slurmdb_association_rec_t *mod_assoc = xmalloc( */
-		/* 			sizeof(slurmdb_association_rec_t)); */
-		/* 		slurmdb_init_association_rec(mod_assoc, 0); */
-
-		/* 		mod_assoc->id = slurm_atoul(row[0]); */
-		/* 		mod_assoc->is_def = 0; */
-
-		/* 		if (addto_update_list(mysql_conn->update_list,*/
-		/* 				      SLURMDB_MODIFY_ASSOC, */
-		/* 				      mod_assoc) */
-		/* 		    != SLURM_SUCCESS) { */
-		/* 			slurmdb_destroy_association_rec( */
-		/* 				mod_assoc); */
-		/* 			error("couldn't add to " */
-		/* 			      "the update list"); */
-		/* 			rc = SLURM_ERROR; */
-		/* 			break; */
-		/* 		} */
-		/* 	} */
-		/* 	mysql_free_result(result); */
-		/* } */
+			if ((rc = _reset_default_assoc(
+				     mysql_conn, object,
+				     &query, moved_parent ? 0 : 1))
+			    != SLURM_SUCCESS) {
+				xfree(query);
+				goto end_it;
+			}
+		}
+		list_iterator_destroy(itr2);
+		/* This temp list is no longer needed */
+		assoc_list_tmp = NULL;
 	}
-	list_iterator_destroy(itr);
+
 	if (query) {
 		if (debug_flags & DEBUG_FLAG_DB_ASSOC)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
@@ -2998,10 +2852,9 @@ end_it:
 			}
 		}
 		if (moved_parent) {
-			List assoc_list = NULL;
 			ListIterator itr = NULL;
-			slurmdb_association_rec_t *assoc = NULL;
-			slurmdb_association_cond_t assoc_cond;
+			slurmdb_assoc_rec_t *assoc = NULL;
+			slurmdb_assoc_cond_t assoc_cond;
 			/* now we need to send the update of the new parents and
 			 * limits, so just to be safe, send the whole
 			 * tree because we could have some limits that
@@ -3013,11 +2866,11 @@ end_it:
 			 * want to rewrite code to make it happen
 			 */
 			memset(&assoc_cond, 0,
-			       sizeof(slurmdb_association_cond_t));
+			       sizeof(slurmdb_assoc_cond_t));
 			assoc_cond.cluster_list = local_cluster_list;
-			if (!(assoc_list =
+			if (!(assoc_list_tmp =
 			      as_mysql_get_assocs(mysql_conn, uid, NULL))) {
-				list_destroy(local_cluster_list);
+				FREE_NULL_LIST(local_cluster_list);
 				return rc;
 			}
 			/* NOTE: you can not use list_pop, or list_push
@@ -3028,7 +2881,7 @@ end_it:
 			   So we are just going to delete each item as it
 			   comes out since we are moving it to the update_list.
 			*/
-			itr = list_iterator_create(assoc_list);
+			itr = list_iterator_create(assoc_list_tmp);
 			while ((assoc = list_next(itr))) {
 				if (addto_update_list(mysql_conn->update_list,
 						      SLURMDB_MODIFY_ASSOC,
@@ -3036,20 +2889,20 @@ end_it:
 					list_remove(itr);
 			}
 			list_iterator_destroy(itr);
-			list_destroy(assoc_list);
+			FREE_NULL_LIST(assoc_list_tmp);
 		}
 	} else {
 		FREE_NULL_LIST(added_user_list);
 		xfree(txn_query);
 		reset_mysql_conn(mysql_conn);
 	}
-	list_destroy(local_cluster_list);
+	FREE_NULL_LIST(local_cluster_list);
 	return rc;
 }
 
 extern List as_mysql_modify_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
-				   slurmdb_association_cond_t *assoc_cond,
-				   slurmdb_association_rec_t *assoc)
+				   slurmdb_assoc_cond_t *assoc_cond,
+				   slurmdb_assoc_rec_t *assoc)
 {
 	ListIterator itr = NULL;
 	List ret_list = NULL;
@@ -3095,7 +2948,7 @@ extern List as_mysql_modify_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 				   only allowed to change the default
 				   account, and default QOS.
 				*/
-				slurmdb_init_association_rec(assoc, 1);
+				slurmdb_init_assoc_rec(assoc, 1);
 
 				assoc->is_def = is_def;
 				assoc->def_qos_id = def_qos_id;
@@ -3115,10 +2968,10 @@ is_same_user:
 	    || assoc_cond->with_sub_accts)
 		prefix = "t2";
 
-	(void) _setup_association_cond_limits(assoc_cond, prefix, &extra);
+	(void) _setup_assoc_cond_limits(assoc_cond, prefix, &extra);
 
 	/* This needs to be here to make sure we only modify the
-	   correct set of associations The first clause was already
+	   correct set of assocs The first clause was already
 	   taken care of above. */
 	if (assoc_cond->user_list && !list_count(assoc_cond->user_list)) {
 		debug4("no user specified looking at users");
@@ -3128,14 +2981,14 @@ is_same_user:
 		xstrcat(extra, " && user = '' ");
 	}
 
-	setup_association_limits(assoc, &tmp_char1, &tmp_char2,
-				 &vals, QOS_LEVEL_MODIFY, 0);
+	setup_assoc_limits(assoc, &tmp_char1, &tmp_char2,
+			   &vals, QOS_LEVEL_MODIFY, 0);
 	xfree(tmp_char1);
 	xfree(tmp_char2);
 
-	if (!extra || (!vals && !assoc->parent_acct
-		       && (!assoc->qos_list || !list_count(assoc->qos_list)))) {
+	if (!extra || (!vals && !assoc->parent_acct)) {
 		xfree(vals);
+		xfree(extra);
 		errno = SLURM_NO_CHANGE_IN_DATA;
 		error("Nothing to change");
 		return NULL;
@@ -3154,7 +3007,7 @@ is_same_user:
 
 	itr = list_iterator_create(use_cluster_list);
 	while ((cluster_name = list_next(itr))) {
-		char *qos_extra = _setup_association_cond_qos(
+		char *qos_extra = _setup_assoc_cond_qos(
 			assoc_cond, cluster_name);
 
 		xstrfmtcat(query, "select distinct %s "
@@ -3170,7 +3023,7 @@ is_same_user:
 			xfree(query);
 			if (mysql_errno(mysql_conn->db_conn)
 			    != ER_NO_SUCH_TABLE) {
-				list_destroy(ret_list);
+				FREE_NULL_LIST(ret_list);
 				ret_list = NULL;
 			}
 			break;
@@ -3186,7 +3039,7 @@ is_same_user:
 		    || (rc == ESLURM_SAME_PARENT_ACCOUNT)) {
 			continue;
 		} else if (rc != SLURM_SUCCESS) {
-			list_destroy(ret_list);
+			FREE_NULL_LIST(ret_list);
 			ret_list = NULL;
 			break;
 		}
@@ -3214,7 +3067,7 @@ is_same_user:
 }
 
 extern List as_mysql_remove_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
-				   slurmdb_association_cond_t *assoc_cond)
+				   slurmdb_assoc_cond_t *assoc_cond)
 {
 	ListIterator itr = NULL;
 	List ret_list = NULL;
@@ -3254,7 +3107,7 @@ extern List as_mysql_remove_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 	    || assoc_cond->with_sub_accts)
 		prefix = "t2";
 
-	(void)_setup_association_cond_limits(assoc_cond, prefix, &extra);
+	(void)_setup_assoc_cond_limits(assoc_cond, prefix, &extra);
 
 	xstrcat(object, rassoc_req_inx[0]);
 	for(i=1; i<RASSOC_COUNT; i++)
@@ -3269,7 +3122,7 @@ extern List as_mysql_remove_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	itr = list_iterator_create(use_cluster_list);
 	while ((cluster_name = list_next(itr))) {
-		char *qos_extra = _setup_association_cond_qos(
+		char *qos_extra = _setup_assoc_cond_qos(
 			assoc_cond, cluster_name);
 
 		query = xstrdup_printf("select distinct t1.lft, t1.rgt from "
@@ -3285,7 +3138,7 @@ extern List as_mysql_remove_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			xfree(query);
 			if (mysql_errno(mysql_conn->db_conn)
 			    != ER_NO_SUCH_TABLE) {
-				list_destroy(ret_list);
+				FREE_NULL_LIST(ret_list);
 				ret_list = NULL;
 			}
 			break;
@@ -3319,7 +3172,7 @@ extern List as_mysql_remove_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			      mysql_conn, query, 0))) {
 			xfree(query);
 			xfree(name_char);
-			list_destroy(ret_list);
+			FREE_NULL_LIST(ret_list);
 			ret_list = NULL;
 			break;
 		}
@@ -3333,7 +3186,7 @@ extern List as_mysql_remove_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 		mysql_free_result(result);
 
 		if (rc != SLURM_SUCCESS) {
-			list_destroy(ret_list);
+			FREE_NULL_LIST(ret_list);
 			ret_list = NULL;
 			break;
 		}
@@ -3362,7 +3215,7 @@ extern List as_mysql_remove_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 }
 
 extern List as_mysql_get_assocs(mysql_conn_t *mysql_conn, uid_t uid,
-				slurmdb_association_cond_t *assoc_cond)
+				slurmdb_assoc_cond_t *assoc_cond)
 {
 	//DEF_TIMERS;
 	char *extra = NULL;
@@ -3399,7 +3252,7 @@ extern List as_mysql_get_assocs(mysql_conn_t *mysql_conn, uid_t uid,
 				mysql_conn, &user, 1, NULL);
 		}
 		if (!is_admin && !user.name) {
-			debug("User %u has no assocations, and is not admin, "
+			debug("User %u has no associations, and is not admin, "
 			      "so not returning any.", user.uid);
 			return NULL;
 		}
@@ -3409,7 +3262,7 @@ extern List as_mysql_get_assocs(mysql_conn_t *mysql_conn, uid_t uid,
 	    || assoc_cond->with_sub_accts)
 		prefix = "t2";
 
-	(void) _setup_association_cond_limits(assoc_cond, prefix, &extra);
+	(void) _setup_assoc_cond_limits(assoc_cond, prefix, &extra);
 
 	if (assoc_cond->cluster_list && list_count(assoc_cond->cluster_list))
 		use_cluster_list = assoc_cond->cluster_list;
@@ -3419,7 +3272,7 @@ empty:
 	for(i=1; i<ASSOC_REQ_COUNT; i++) {
 		xstrfmtcat(tmp, ", t1.%s", assoc_req_inx[i]);
 	}
-	assoc_list = list_create(slurmdb_destroy_association_rec);
+	assoc_list = list_create(slurmdb_destroy_assoc_rec);
 
 	if (use_cluster_list == as_mysql_cluster_list)
 		slurm_mutex_lock(&as_mysql_cluster_list_lock);
@@ -3430,7 +3283,7 @@ empty:
 					      cluster_name, tmp, extra,
 					      is_admin, assoc_list))
 		    != SLURM_SUCCESS) {
-			list_destroy(assoc_list);
+			FREE_NULL_LIST(assoc_list);
 			assoc_list = NULL;
 			break;
 		}

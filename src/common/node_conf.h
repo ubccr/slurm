@@ -160,16 +160,24 @@ struct node_record {
 					 * no need to save/restore */
 	time_t down_time;		/* When first set to DOWN state */
 #endif	/* HAVE_ALPS_CRAY */
-	acct_gather_energy_t *energy;
+	acct_gather_energy_t *energy;	/* power consumption data */
 	ext_sensors_data_t *ext_sensors; /* external sensor data */
+	power_mgmt_data_t *power;	/* power management data */
 	dynamic_plugin_data_t *select_nodeinfo; /* opaque data structure,
 						 * use select_g_get_nodeinfo()
 						 * to access contents */
 	uint32_t cpu_load;		/* CPU load * 100 */
 	time_t cpu_load_time;		/* Time when cpu_load last set */
+	uint32_t free_mem;		/* Free memory in MiB */
+	time_t free_mem_time;		/* Time when free_mem last set */
 	uint16_t protocol_version;	/* Slurm version number */
 	char *version;			/* Slurm version */
 	bitstr_t *node_spec_bitmap;	/* node cpu specialization bitmap */
+	uint32_t owner;			/* User allowed to use node or NO_VAL */
+	uint16_t owner_job_cnt;		/* Count of exclusive jobs by "owner" */
+	char *tres_str;                 /* tres this node has */
+	char *tres_fmt_str;		/* tres this node has */
+	uint64_t *tres_cnt;		/* tres this node has. NO_PACK*/
 };
 extern struct node_record *node_record_table_ptr;  /* ptr to node records */
 extern int node_record_count;		/* count in node_record_table_ptr */
@@ -253,11 +261,28 @@ extern struct node_record *create_node_record (
 
 /*
  * find_node_record - find a record for node with specified name
- * input: name - name of the desired node
- * output: return pointer to node record or NULL if not found
- *         node_hash_table - table of hash indexes
+ * IN: name - name of the desired node
+ * RET: pointer to node record or NULL if not found
+ * NOTE: Logs an error if the node name is NOT found
  */
 extern struct node_record *find_node_record (char *name);
+
+/*
+ * find_node_record2 - find a record for node with specified name
+ * IN: name - name of the desired node
+ * RET: pointer to node record or NULL if not found
+ * NOTE: Does not log an error if the node name is NOT found
+ */
+extern struct node_record *find_node_record2 (char *name);
+
+/*
+ * find_node_record_no_alias - find a record for node with specified name
+ * without looking at the node's alias (NodeHostName).
+ * IN: name - name of the desired node
+ * RET: pointer to node record or NULL if not found
+ * NOTE: Does not log an error if the node name is NOT found
+ */
+extern struct node_record *find_node_record_no_alias (char *name);
 
 /*
  * hostlist2bitmap - given a hostlist, build a bitmap representation

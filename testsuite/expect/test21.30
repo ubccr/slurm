@@ -46,6 +46,7 @@ source ./inc21.30.13
 source ./inc21.30.14
 source ./inc21.30.15
 source ./inc21.30.16
+source ./inc21.30.17
 
 set test_id	"21.30"
 set exit_code	0
@@ -93,6 +94,9 @@ set maxjobs_num 2
 set maxjobsub   MaxSubmitJobs
 set maxjobsub_num 2
 set time_spacing 1
+
+# cr_core = 1 / cr_cpu = 0
+set selectparam  0
 
 # mod qos
 array set mod_qos_vals {
@@ -168,6 +172,11 @@ proc check_state { job } {
 		set exit_code 1
 	}
 
+}
+
+# Determine what the selecttype param is
+if {[test_select_type_params "CR_CORE"]} {
+	set selectparam 1
 }
 
 set got_node 0
@@ -319,11 +328,15 @@ if {[test_super_user] == 0} {
 }
 
 #
-# Some tests will not work properly when allocating whole nodes to jobs
+# Some tests will not work properly when allocating sockets or whole nodes to jobs
 #
 set select_type [test_select_type]
 if {![string compare $select_type "linear"] || [default_part_exclusive]} {
 	send_user "\nWARNING: This test is incompatible with exclusive node allocations\n"
+	exit 0
+}
+if {[test_select_type_params "CR_SOCKET"]} {
+	send_user "\nWARNING: This test is incompatible with CR_SOCKET allocations\n"
 	exit 0
 }
 
@@ -442,7 +455,6 @@ set mod_qos_vals(GrpNodes) "-1"
 # Test GrpCpus
 #
 set mod_qos_vals(GrpCpus) $grcpu_num
-send_user "\nmoding qos\n"
 mod_qos $qostest [array get mod_qos_vals]
 sleep $time_spacing
 inc21_30_2
@@ -598,6 +610,12 @@ set mod_qos_vals(MaxWall) "-1"
 #
 # Test Max CPUs Per User
 #
+
+# If CR_CORE set maxcpuspu a multiple number of threads
+if {$selectparam} {
+	set maxcpuspu_num [expr $maxcpuspu_num * $nthreads]
+}
+
 set mod_qos_vals(MaxCpusPerUser) $maxcpuspu_num
 mod_qos $qostest [array get mod_qos_vals]
 sleep $time_spacing
@@ -618,5 +636,18 @@ if {$exit_code != 0 } {
 	endit
 }
 set mod_qos_vals(MaxNodesPerUser) "-1"
+
+#
+# Test MaxWall is used as job's timelimit if job was requested
+# without --time option
+#
+set mod_qos_vals(MaxWall) $maxwall_num
+mod_qos $qostest [array get mod_qos_vals]
+sleep $time_spacing
+inc21_30_17
+if {$exit_code != 0 } {
+	endit
+}
+set mod_qos_vals(MaxWall) "-1"
 
 endit

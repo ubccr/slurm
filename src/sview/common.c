@@ -603,6 +603,9 @@ static void _selected_page(GtkMenuItem *menuitem, display_data_t *display_data)
 	case RESV_PAGE:
 		each.pfunc = &popup_all_resv;
 		break;
+	case BB_PAGE:
+		each.pfunc = &popup_all_bb;
+		break;
 	case FRONT_END_PAGE:
 		each.pfunc = &popup_all_front_end;
 		break;
@@ -636,6 +639,10 @@ static void _selected_page(GtkMenuItem *menuitem, display_data_t *display_data)
 			select_admin_nodes(treedata->model, &treedata->iter,
 					   display_data, NO_VAL,
 					   treedata->treeview);
+			break;
+		case BB_PAGE:
+			select_admin_bb(treedata->model, &treedata->iter,
+					   display_data, treedata->treeview);
 			break;
 		default:
 			g_print("common admin got %d %d\n",
@@ -1196,7 +1203,7 @@ extern GtkTreeView *create_treeview_2cols_attach_to_table(GtkTable *table)
 					   "text", DISPLAY_FONT);
 	gtk_tree_view_append_column(tree_view, col);
 
-       	g_object_unref(treestore);
+	g_object_unref(treestore);
 	return tree_view;
 }
 
@@ -1751,10 +1758,7 @@ extern void destroy_popup_info(void *arg)
 		g_mutex_lock(sview_mutex);
 		/* these are all children of each other so must
 		   be freed in this order */
-		if (popup_win->grid_button_list) {
-			list_destroy(popup_win->grid_button_list);
-			popup_win->grid_button_list = NULL;
-		}
+		FREE_NULL_LIST(popup_win->grid_button_list);
 		if (popup_win->table) {
 			gtk_widget_destroy(GTK_WIDGET(popup_win->table));
 			popup_win->table = NULL;
@@ -1849,6 +1853,9 @@ extern void *popup_thr(popup_info_t *popup_win)
 		break;
 	case FRONT_END_PAGE:
 		specifc_info = specific_info_front_end;
+		break;
+	case BB_PAGE:
+		specifc_info = specific_info_bb;
 		break;
 	case SUBMIT_PAGE:
 	default:
@@ -2054,8 +2061,8 @@ extern void display_admin_edit(GtkTable *table, void *type_msg, int *row,
 		entry = gtk_combo_box_new_with_model(model2);
 		g_object_unref(model2);
 
-/* 		(callback)_set_active_combo_part(GTK_COMBO_BOX(entry), model, */
-/* 				       iter, display_data->id); */
+/*		(callback)_set_active_combo_part(GTK_COMBO_BOX(entry), model, */
+/*				       iter, display_data->id); */
 		(set_active)(GTK_COMBO_BOX(entry), model,
 			     iter, display_data->id);
 
@@ -2134,8 +2141,8 @@ extern void add_display_treestore_line(int update,
 				       const char *name, char *value)
 {
 	if (!name) {
-/* 		g_print("error, name = %s and value = %s\n", */
-/* 			name, value); */
+/*		g_print("error, name = %s and value = %s\n", */
+/*			name, value); */
 		return;
 	}
 	if (update) {
@@ -2182,8 +2189,8 @@ extern void add_display_treestore_line_with_font(
 	char *font)
 {
 	if (!name) {
-/* 		g_print("error, name = %s and value = %s\n", */
-/* 			name, value); */
+/*		g_print("error, name = %s and value = %s\n", */
+/*			name, value); */
 		return;
 	}
 	if (update) {
@@ -2276,12 +2283,14 @@ extern char *page_to_str(int page)
 		return "Job";
 	case PART_PAGE:
 		return "Partition";
-	case NODE_PAGE:
-		return "Node";
-	case BLOCK_PAGE:
-		return "Block";
 	case RESV_PAGE:
 		return "Reservation";
+	case BB_PAGE:
+		return "BurstBuffer";
+	case BLOCK_PAGE:
+		return "Block";
+	case NODE_PAGE:
+		return "Node";
 	case FRONT_END_PAGE:
 		return "Frontend";
 	default:

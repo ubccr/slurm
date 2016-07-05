@@ -67,7 +67,7 @@
 /* If we unpack a buffer that contains bad data, we want to avoid a memory
  * allocation error due to array or buffer sizes that are unreasonably large */
 #define MAX_PACK_ARRAY_LEN	(128 * 1024)
-#define MAX_PACK_MEM_LEN	(64 * 1024 * 1024)
+#define MAX_PACK_MEM_LEN	(1024 * 1024 * 1024)
 
 struct slurm_buf {
 	uint32_t magic;
@@ -96,6 +96,9 @@ int	unpack_time(time_t *valp, Buf buffer);
 void 	packdouble(double val, Buf buffer);
 int	unpackdouble(double *valp, Buf buffer);
 
+void 	packlongdouble(long double val, Buf buffer);
+int	unpacklongdouble(long double *valp, Buf buffer);
+
 void 	pack64(uint64_t val, Buf buffer);
 int	unpack64(uint64_t *valp, Buf buffer);
 
@@ -116,6 +119,13 @@ int	unpack32_array(uint32_t **valp, uint32_t* size_val, Buf buffer);
 
 void	pack64_array(uint64_t *valp, uint32_t size_val, Buf buffer);
 int	unpack64_array(uint64_t **valp, uint32_t* size_val, Buf buffer);
+
+void	packdouble_array(double *valp, uint32_t size_val, Buf buffer);
+int	unpackdouble_array(double **valp, uint32_t* size_val, Buf buffer);
+
+void	packlongdouble_array(long double *valp, uint32_t size_val, Buf buffer);
+int	unpacklongdouble_array(long double **valp, uint32_t* size_val,
+			       Buf buffer);
 
 void	packmem(char *valp, uint32_t size_val, Buf buffer);
 int	unpackmem(char *valp, uint32_t *size_valp, Buf buffer);
@@ -152,6 +162,19 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 	assert(sizeof(*valp) == sizeof(double));        \
 	assert(buf->magic == BUF_MAGIC);		\
         if (unpackdouble(valp,buf))			\
+		goto unpack_error;			\
+} while (0)
+
+#define safe_packlongdouble(val,buf) do {		\
+	assert(sizeof(val) == sizeof(long double));   	\
+	assert(buf->magic == BUF_MAGIC);		\
+	packlongdouble(val,buf);			\
+} while (0)
+
+#define safe_unpacklongdouble(valp,buf) do {		\
+	assert(sizeof(*valp) == sizeof(long double));	\
+	assert(buf->magic == BUF_MAGIC);		\
+        if (unpacklongdouble(valp,buf))			\
 		goto unpack_error;			\
 } while (0)
 
@@ -231,6 +254,20 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
 	assert(buf->magic == BUF_MAGIC);		\
 	if (unpack64_array(valp,size_valp,buf))		\
+		goto unpack_error;			\
+} while (0)
+
+#define safe_unpackdouble_array(valp,size_valp,buf) do {	\
+	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
+	assert(buf->magic == BUF_MAGIC);		\
+	if (unpackdouble_array(valp,size_valp,buf))		\
+		goto unpack_error;			\
+} while (0)
+
+#define safe_unpacklongdouble_array(valp,size_valp,buf) do {	\
+	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
+	assert(buf->magic == BUF_MAGIC);		\
+	if (unpacklongdouble_array(valp,size_valp,buf))		\
 		goto unpack_error;			\
 } while (0)
 

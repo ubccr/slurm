@@ -88,6 +88,11 @@ Request jobs or job steps having one of the specified names.  The
 list consists of a comma separated list of job names.
 
 .TP
+\fB\-\-noconvert\fR
+Don't convert units from their original type (e.g. 2048M won't be converted to
+2G).
+
+.TP
 \fB\-o <output_format>\fR, \fB\-\-format=<output_format>\fR
 Specify the information to be displayed, its size and position
 (right or left justified).
@@ -152,7 +157,7 @@ Generic resources (gres) required by the job or step.
 .TP
 \fB%B\fR
 Executing (batch) host. For an allocated session, this is the host on which
-the session is executing (i.e. the node from which the the \fBsrun\fR or the
+the session is executing (i.e. the node from which the \fBsrun\fR or the
 \fBsalloc\fR command was executed). For a batch job, this is the node executing
 the batch script. In the case of a typical Linux cluster, this would be the
 compute node zero of the allocation. In the case of a BlueGene or a Cray
@@ -179,7 +184,7 @@ Minimum size of temporary disk space (in MB) requested by the job.
 Number of nodes allocated to the job or the minimum number of nodes
 required by a pending job. The actual number of nodes allocated to a pending
 job may exceed this number if the job specified a node range count (e.g.
-minimum and maximum node counts) or the the job specifies a processor
+minimum and maximum node counts) or the job specifies a processor
 count instead of a node count and the cluster contains nodes with varying
 processor counts. As a job is completing this number will reflect the
 current number of nodes allocated.
@@ -190,8 +195,11 @@ Time at which the job ended or is expected to end (based upon its time limit).
 (Valid for jobs only)
 .TP
 \fB%E\fR
-Job dependency. This job will not begin execution until the dependent job
-completes.  A value of zero implies this job has no dependencies.
+Job dependencies remaining. This job will not begin execution until these
+dependent jobs complete. In the case of a job that can not run due to job
+dependencies never being satisfied, the full original job dependency
+specification will be reported. A value of NULL implies this job has no
+dependencies.
 (Valid for jobs only)
 .TP
 \fB%f\fR
@@ -398,7 +406,7 @@ Count of cores reserved on each node for system use (core specialization).
 Nice value (adjustment to a job's scheduling priority).
 (Valid for jobs only)
 .TP
-%Y
+\fB%Y\fR
 For pending jobs, a list of the nodes expected to be used when the job is
 started.
 .TP
@@ -482,6 +490,10 @@ script.
 Prints the number of boards per node allocated to the job.
 (Valid for jobs only)
 .TP
+\fBburstbuffer\fR
+Burst Buffer specification
+(Valid for jobs only)
+.TP
 \fBchptdir\fR
 Prints the directory where the job checkpoint will be written to.
 (Valid for job steps only)
@@ -521,8 +533,11 @@ Prints the number of CPUs per tasks allocated to the job.
 (Valid for jobs only)
 .TP
 \fBdependency\fR
-Job dependency. This job will not begin execution until the dependent job
-completes.  A value of zero implies this job has no dependencies.
+Job dependencies remaining. This job will not begin execution until these
+dependent jobs complete. In the case of a job that can not run due to job
+dependencies never being satisfied, the full original job dependency
+specification will be reported. A value of NULL implies this job has no
+dependencies.
 (Valid for jobs only)
 .TP
 \fBderivedec\fR
@@ -775,8 +790,8 @@ Actual or expected start time of the job or job step.
 .TP
 \fBstate\fR
 Job state, extended form:
-PENDING, RUNNING, SUSPENDED, CANCELLED, COMPLETING, COMPLETED, CONFIGURING,
-FAILED, TIMEOUT, PREEMPTED, NODE_FAIL and SPECIAL_EXIT.
+PENDING, RUNNING, STOPPED, SUSPENDED, CANCELLED, COMPLETING, COMPLETED,
+CONFIGURING, FAILED, TIMEOUT, PREEMPTED, NODE_FAIL and SPECIAL_EXIT.
 See the \fBJOB STATE CODES\fR section below for more information.
 (Valid for jobs only)
 .TP
@@ -843,6 +858,9 @@ and thus will be inaccurate for job steps which have been suspended.
 Clock skew between nodes in the cluster will cause the time to be inaccurate.
 If the time is obviously wrong (e.g. negative), it displays as "INVALID".
 (Valid for jobs and job steps)
+.TP
+\fBtres\fR
+Print the trackable resources allocated to the job.
 .TP
 \fBuserid\fR
 User ID for a job or job step.
@@ -932,7 +950,7 @@ Specify the states of jobs to view.  Accepts a comma separated list of
 state names or "all". If "all" is specified then jobs of all states will be
 reported. If no state is specified then pending, running, and completing
 jobs are reported. Valid states (in both extended and compact form) include:
-PENDING (PD), RUNNING (R), SUSPENDED (S),
+PENDING (PD), RUNNING (R), SUSPENDED (S), STOPPED (ST),
 COMPLETING (CG), COMPLETED (CD), CONFIGURING (CF), CANCELLED (CA),
 FAILED (F), TIMEOUT (TO), PREEMPTED (PR), BOOT_FAIL (BF) , NODE_FAIL (NF)
 and SPECIAL_EXIT (SE).
@@ -1101,7 +1119,7 @@ Job was explicitly cancelled by the user or system administrator.
 The job may or may not have been initiated.
 .TP
 \fBCD  COMPLETED\fR
-Job has terminated all processes on all nodes.
+Job has terminated all processes on all nodes with an exit code of zero.
 .TP
 \fBCF  CONFIGURING\fR
 Job has been allocated resources, but are waiting for them to become ready for use
@@ -1125,16 +1143,21 @@ Job terminated due to preemption.
 \fBR   RUNNING\fR
 Job currently has an allocation.
 .TP
-\fBS   SUSPENDED\fR
-Job has an allocation, but execution has been suspended.
-.TP
-\fBTO  TIMEOUT\fR
-Job terminated upon reaching its time limit.
-.TP
-\fBSE SPECIAL_EXIT\fR
+\fBSE  SPECIAL_EXIT\fR
 The job was requeued in a special state. This state can be set by
 users, typically in EpilogSlurmctld, if the job has terminated with
 a particular exit value.
+.TP
+\fBST  STOPPED\fR
+Job has an allocation, but execution has been stopped with SIGSTOP signal.
+CPUS have been retained by this job.
+.TP
+\fBS   SUSPENDED\fR
+Job has an allocation, but execution has been suspended and CPUs have been
+released for other jobs.
+.TP
+\fBTO  TIMEOUT\fR
+Job terminated upon reaching its time limit.
 
 
 .SH "ENVIRONMENT VARIABLES"

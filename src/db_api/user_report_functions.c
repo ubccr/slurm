@@ -64,8 +64,7 @@ extern List slurmdb_report_user_top_usage(void *db_conn,
 	int exit_code = 0;
 	slurmdb_user_rec_t *user = NULL;
 	slurmdb_cluster_rec_t *cluster = NULL;
-	slurmdb_association_rec_t *assoc = NULL;
-	slurmdb_accounting_rec_t *assoc_acct = NULL;
+	slurmdb_assoc_rec_t *assoc = NULL;
 	slurmdb_report_user_rec_t *slurmdb_report_user = NULL;
 	slurmdb_report_cluster_rec_t *slurmdb_report_cluster = NULL;
 	uid_t my_uid = getuid();
@@ -81,7 +80,7 @@ extern List slurmdb_report_user_top_usage(void *db_conn,
 	if (!user_cond->assoc_cond) {
 		delete_assoc_cond = 1;
 		user_cond->assoc_cond =
-			xmalloc(sizeof(slurmdb_association_cond_t));
+			xmalloc(sizeof(slurmdb_assoc_cond_t));
 	}
 
 	if (!user_cond->assoc_cond->cluster_list) {
@@ -149,7 +148,7 @@ extern List slurmdb_report_user_top_usage(void *db_conn,
 			list_create(slurmdb_destroy_report_user_rec);
 	}
 	list_iterator_destroy(itr);
-	list_destroy(usage_cluster_list);
+	FREE_NULL_LIST(usage_cluster_list);
 
 	itr = list_iterator_create(user_list);
 	cluster_itr = list_iterator_create(cluster_list);
@@ -252,16 +251,9 @@ extern List slurmdb_report_user_top_usage(void *db_conn,
 			if (!object)
 				list_append(slurmdb_report_user->acct_list,
 					    xstrdup(assoc->acct));
-			itr3 = list_iterator_create(assoc->accounting_list);
-			while((assoc_acct = list_next(itr3))) {
-				slurmdb_report_user->cpu_secs +=
-					(uint64_t)assoc_acct->alloc_secs;
-				slurmdb_report_user->consumed_energy +=
-					(uint64_t)assoc_acct->consumed_energy;
-/* 				slurmdb_report_cluster->cpu_secs +=  */
-/* 					(uint64_t)assoc_acct->alloc_secs; */
-			}
-			list_iterator_destroy(itr3);
+			slurmdb_transfer_acct_list_2_tres(
+				assoc->accounting_list,
+				&slurmdb_report_user->tres_list);
 		}
 		list_iterator_destroy(itr2);
 	}
@@ -270,12 +262,12 @@ extern List slurmdb_report_user_top_usage(void *db_conn,
 
 end_it:
 	if (delete_cluster_list) {
-		list_destroy(user_cond->assoc_cond->cluster_list);
+		FREE_NULL_LIST(user_cond->assoc_cond->cluster_list);
 		user_cond->assoc_cond->cluster_list = NULL;
 	}
 
 	if (delete_assoc_cond) {
-		slurmdb_destroy_association_cond(user_cond->assoc_cond);
+		slurmdb_destroy_assoc_cond(user_cond->assoc_cond);
 		user_cond->assoc_cond = NULL;
 	}
 
@@ -284,16 +276,10 @@ end_it:
 		user_cond = NULL;
 	}
 
-	if (user_list) {
-		list_destroy(user_list);
-		user_list = NULL;
-	}
+	FREE_NULL_LIST(user_list);
 
 	if (exit_code) {
-		if (cluster_list) {
-			list_destroy(cluster_list);
-			cluster_list = NULL;
-		}
+		FREE_NULL_LIST(cluster_list);
 	}
 
 	return cluster_list;

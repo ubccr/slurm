@@ -70,22 +70,23 @@
 #  include <stdlib.h>	/* for abort() */
 #endif
 
-#include <sys/poll.h>
+#include <poll.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/unistd.h>
 
 #include "slurm/slurm_errno.h"
-#include "src/common/log.h"
 #include "src/common/fd.h"
+#include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/safeopen.h"
+#include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_time.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/slurm_protocol_api.h"
 
 #ifndef LINEBUFSIZE
 #  define LINEBUFSIZE 256
@@ -188,7 +189,7 @@ static size_t _make_timestamp(char *timestamp_buf, size_t max,
 {
 	time_t timestamp_t = time(NULL);
 	struct tm timestamp_tm;
-	if (!localtime_r(&timestamp_t, &timestamp_tm)) {
+	if (!slurm_localtime_r(&timestamp_t, &timestamp_tm)) {
 		fprintf(stderr, "localtime_r() failed\n");
 		return 0;
 	}
@@ -265,7 +266,9 @@ static int _fd_writeable(int fd)
 	 * gone, but getting 0 back from a nonblocking read means just that.
 	 */
 	if ((ufds.revents & POLLHUP) || fstat(fd, &stat_buf) ||
-	    (S_ISSOCK(stat_buf.st_mode) && (recv(fd, &temp, 1, 0) == 0)))
+	    ((S_ISSOCK(stat_buf.st_mode) &&
+	     (rc = recv(fd, &temp, 1, MSG_DONTWAIT) <= 0) &&
+	     ((rc == 0) || ((errno != EAGAIN) && (errno != EWOULDBLOCK))))))
 		return -1;
 	else if ((ufds.revents & POLLNVAL)
 		 || (ufds.revents & POLLERR)
@@ -312,7 +315,7 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
 	}
 
 	/* Only take the first one here.  In some situations it can change. */
-	if (!slurm_prog_name && log->argv0 && (strlen(log->argv0) > 1))
+	if (!slurm_prog_name && log->argv0 && (strlen(log->argv0) > 0))
 		slurm_prog_name = xstrdup(log->argv0);
 
 	if (!log->fpfx)
@@ -678,7 +681,7 @@ set_idbuf(char *idbuf)
 
 	gettimeofday(&now, NULL);
 
-	sprintf(idbuf, "%.15s.%-6d %5d %p", ctime(&now.tv_sec) + 4,
+	sprintf(idbuf, "%.15s.%-6d %5d %p", slurm_ctime(&now.tv_sec) + 4,
 	        (int)now.tv_usec, (int)getpid(), (void *)pthread_self());
 
 }

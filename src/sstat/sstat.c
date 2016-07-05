@@ -45,7 +45,8 @@ int _sstat_query(slurm_step_layout_t *step_layout, uint32_t job_id,
 		 uint32_t step_id);
 int _process_results();
 int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist,
-	     uint32_t req_cpufreq);
+	     uint32_t req_cpufreq_min, uint32_t req_cpufreq_max,
+	     uint32_t req_cpufreq_gov);
 
 /*
  * Globals
@@ -84,7 +85,10 @@ print_field_t fields[] = {
 	{20, "Nodelist", print_fields_str, PRINT_NODELIST},
 	{8, "NTasks", print_fields_uint, PRINT_NTASKS},
 	{20, "Pids", print_fields_str, PRINT_PIDS},
-	{10, "ReqCPUFreq", print_fields_str, PRINT_REQ_CPUFREQ},
+	{10, "ReqCPUFreq", print_fields_str, PRINT_REQ_CPUFREQ_MIN}, /*vestigial*/
+	{13, "ReqCPUFreqMin", print_fields_str, PRINT_REQ_CPUFREQ_MIN},
+	{13, "ReqCPUFreqMax", print_fields_str, PRINT_REQ_CPUFREQ_MAX},
+	{13, "ReqCPUFreqGov", print_fields_str, PRINT_REQ_CPUFREQ_GOV},
 	{0, NULL, NULL, 0}};
 
 List jobs = NULL;
@@ -95,7 +99,8 @@ ListIterator print_fields_itr = NULL;
 int field_count = 0;
 
 int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist,
-	     uint32_t req_cpufreq)
+	     uint32_t req_cpufreq_min, uint32_t req_cpufreq_max,
+	     uint32_t req_cpufreq_gov)
 {
 	job_step_stat_response_msg_t *step_stat_response = NULL;
 	int rc = SLURM_SUCCESS;
@@ -132,7 +137,9 @@ int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist,
 	step.job_ptr = &job;
 	step.stepid = stepid;
 	step.nodes = xmalloc(BUF_SIZE);
-	step.req_cpufreq = req_cpufreq;
+	step.req_cpufreq_min = req_cpufreq_min;
+	step.req_cpufreq_max = req_cpufreq_max;
+	step.req_cpufreq_gov = req_cpufreq_gov;
 	step.stepname = NULL;
 	step.state = JOB_RUNNING;
 
@@ -195,7 +202,9 @@ int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist,
 int main(int argc, char **argv)
 {
 	ListIterator itr = NULL;
-	uint32_t req_cpufreq = NO_VAL;
+	uint32_t req_cpufreq_min = NO_VAL;
+	uint32_t req_cpufreq_max = NO_VAL;
+	uint32_t req_cpufreq_gov = NO_VAL;
 	uint32_t stepid = NO_VAL;
 	slurmdb_selected_step_t *selected_step = NULL;
 
@@ -223,7 +232,7 @@ int main(int argc, char **argv)
 	while ((selected_step = list_next(itr))) {
 		char *nodelist = NULL;
 		bool free_nodelist = false;
-		if (selected_step->stepid == INFINITE) {
+		if (selected_step->stepid == SSTAT_BATCH_STEP) {
 			/* get the batch step info */
 			job_info_msg_t *job_ptr = NULL;
 			hostlist_t hl;
@@ -240,6 +249,20 @@ int main(int argc, char **argv)
 			nodelist = hostlist_pop(hl);
 			free_nodelist = true;
 			hostlist_destroy(hl);
+			slurm_free_job_info_msg(job_ptr);
+		} else if (selected_step->stepid == SSTAT_EXTERN_STEP) {
+			/* get the extern step info */
+			job_info_msg_t *job_ptr = NULL;
+
+			if (slurm_load_job(
+				    &job_ptr, selected_step->jobid, SHOW_ALL)) {
+				error("couldn't get info for job %u",
+				      selected_step->jobid);
+				continue;
+			}
+
+			stepid = INFINITE;
+			nodelist = job_ptr->job_array[0].nodes;
 			slurm_free_job_info_msg(job_ptr);
 		} else if (selected_step->stepid != NO_VAL) {
 			stepid = selected_step->stepid;
@@ -258,7 +281,9 @@ int main(int argc, char **argv)
 				_do_stat(selected_step->jobid,
 					 step_ptr->job_steps[i].step_id,
 					 step_ptr->job_steps[i].nodes,
-					 step_ptr->job_steps[i].cpu_freq);
+					 step_ptr->job_steps[i].cpu_freq_min,
+					 step_ptr->job_steps[i].cpu_freq_max,
+					 step_ptr->job_steps[i].cpu_freq_gov);
 			}
 			slurm_free_job_step_info_response_msg(step_ptr);
 			continue;
@@ -279,22 +304,22 @@ int main(int argc, char **argv)
 			}
 			stepid = step_ptr->job_steps[0].step_id;
 			nodelist = step_ptr->job_steps[0].nodes;
-			req_cpufreq = step_ptr->job_steps[0].cpu_freq;
+			req_cpufreq_min = step_ptr->job_steps[0].cpu_freq_min;
+			req_cpufreq_max = step_ptr->job_steps[0].cpu_freq_max;
+			req_cpufreq_gov = step_ptr->job_steps[0].cpu_freq_gov;
 		}
-		_do_stat(selected_step->jobid, stepid, nodelist, req_cpufreq);
+		_do_stat(selected_step->jobid, stepid, nodelist,
+			 req_cpufreq_min, req_cpufreq_max, req_cpufreq_gov);
 		if (free_nodelist && nodelist)
 			free(nodelist);
 	}
 	list_iterator_destroy(itr);
 
 	xfree(params.opt_field_list);
-	if (params.opt_job_list)
-		list_destroy(params.opt_job_list);
-
+	FREE_NULL_LIST(params.opt_job_list);
 	if (print_fields_itr)
 		list_iterator_destroy(print_fields_itr);
-	if (print_fields_list)
-		list_destroy(print_fields_list);
+	FREE_NULL_LIST(print_fields_list);
 
 	return 0;
 }

@@ -54,6 +54,7 @@
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_jobcomp.h"
 #include "src/common/parse_time.h"
+#include "src/common/slurm_time.h"
 #include "src/common/uid.h"
 #include "filetxt_jobcomp_process.h"
 
@@ -81,16 +82,12 @@
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobcomp/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as the job completion logging API
- * matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]       	= "Job completion text file logging plugin";
 const char plugin_type[]       	= "jobcomp/filetxt";
-const uint32_t plugin_version	= 100;
+const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 
 #define JOB_FORMAT "JobId=%lu UserId=%s(%lu) GroupId=%s(%lu) Name=%s JobState=%s Partition=%s "\
 		"TimeLimit=%s StartTime=%s EndTime=%s NodeList=%s NodeCnt=%u ProcCnt=%u "\
@@ -218,7 +215,7 @@ static void _make_time_str (time_t *time, char *string, int size)
 {
 	struct tm time_tm;
 
-	localtime_r(time, &time_tm);
+	slurm_localtime_r(time, &time_tm);
 	if ( *time == (time_t) 0 ) {
 		snprintf(string, size, "Unknown");
 	} else {
@@ -249,7 +246,7 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 	char usr_str[32], grp_str[32], start_str[32], end_str[32], lim_str[32];
 	char select_buf[128], *state_string, *work_dir;
 	size_t offset = 0, tot_size, wrote;
-	enum job_states job_state;
+	uint32_t job_state;
 	uint32_t time_limit;
 
 	if ((log_name == NULL) || (job_comp_fd < 0)) {

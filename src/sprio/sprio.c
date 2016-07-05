@@ -69,6 +69,7 @@ uint32_t weight_fs; /* weight for Fairshare factor */
 uint32_t weight_js; /* weight for Job Size factor */
 uint32_t weight_part; /* weight for Partition factor */
 uint32_t weight_qos; /* weight for QOS factor */
+char    *weight_tres; /* weights for TRES factors */
 
 static int _get_info(priority_factors_request_msg_t *factors_req,
 		     priority_factors_response_msg_t **factors_resp);
@@ -104,6 +105,7 @@ int main (int argc, char *argv[])
 		weight_js   = slurm_ctl_conf_ptr->priority_weight_js;
 		weight_part = slurm_ctl_conf_ptr->priority_weight_part;
 		weight_qos  = slurm_ctl_conf_ptr->priority_weight_qos;
+		weight_tres = slurm_ctl_conf_ptr->priority_weight_tres;
 		prio_type   = xstrdup(slurm_ctl_conf_ptr->priority_type);
 		slurm_free_ctl_conf(slurm_ctl_conf_ptr);
 	} else {
@@ -112,6 +114,7 @@ int main (int argc, char *argv[])
 		weight_js   = slurm_get_priority_weight_job_size();
 		weight_part = slurm_get_priority_weight_partition();
 		weight_qos  = slurm_get_priority_weight_qos();
+		weight_tres = slurm_get_priority_weight_tres();
 		prio_type   = slurm_get_priority_type();
 	}
 
@@ -119,8 +122,7 @@ int main (int argc, char *argv[])
 	if (strcasecmp(prio_type, "priority/basic") == 0) {
 		fprintf (stderr, "You are not running a supported "
 			 "priority plugin\n(%s).\n"
-			 "Only 'priority/multifactor' and "
-			 "'priority/multifactor2' are supported.\n",
+			 "Only 'priority/multifactor' is supported.\n",
 			 prio_type);
 		exit(1);
 	}
@@ -150,7 +152,7 @@ int main (int argc, char *argv[])
 		if (params.normalized) {
 			if (params.long_list)
 				params.format = "%.15i %.8u %10y %10a %10f "
-					"%10j %10p %10q";
+					"%10j %10p %10q %20t";
 			else{
 				params.format = xstrdup("%.15i");
 				if (params.users)
@@ -166,11 +168,13 @@ int main (int argc, char *argv[])
 					xstrcat(params.format, " %10p");
 				if (weight_qos)
 					xstrcat(params.format, " %10q");
+				if (weight_tres)
+					xstrcat(params.format, " %20t");
 			}
 		} else {
 			if (params.long_list)
 				params.format = "%.15i %.8u %.10Y %.10A %.10F "
-					"%.10J %.10P %.10Q %.6N";
+					"%.10J %.10P %.10Q %.6N %.20T";
 			else{
 				params.format = xstrdup("%.15i");
 				if (params.users)
@@ -186,6 +190,8 @@ int main (int argc, char *argv[])
 					xstrcat(params.format, " %.10P");
 				if (weight_qos)
 					xstrcat(params.format, " %.10Q");
+				if (weight_tres)
+					xstrcat(params.format, " %.20T");
 			}
 		}
 	}
@@ -203,7 +209,7 @@ int main (int argc, char *argv[])
 #if 0
 	/* Free storage here if we want to verify that logic.
 	 * Since we exit next, this is not important */
- 	list_destroy(params.format_list);
+	FREE_NULL_LIST(params.format_list);
 	slurm_free_priority_factors_response_msg(resp_msg);
 #endif
 

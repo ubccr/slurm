@@ -4,7 +4,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2015 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -63,18 +63,23 @@
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/node_select.h"
+#include "src/common/power.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_priority.h"
+#include "src/common/slurm_topology.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/layouts_mgr.h"
 
 #include "src/slurmctld/acct_policy.h"
 #include "src/slurmctld/agent.h"
+#include "src/slurmctld/burst_buffer.h"
 #include "src/slurmctld/front_end.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/licenses.h"
 #include "src/slurmctld/node_scheduler.h"
+#include "src/slurmctld/powercapping.h"
 #include "src/slurmctld/preempt.h"
 #include "src/slurmctld/proc_req.h"
 #include "src/slurmctld/reservation.h"
@@ -101,11 +106,16 @@ struct node_set {		/* set of nodes with same configuration */
 
 static int  _build_node_list(struct job_record *job_ptr,
 			     struct node_set **node_set_pptr,
-			     int *node_set_size, char **err_msg);
+			     int *node_set_size, char **err_msg,
+			     bool test_only);
 static int  _fill_in_gres_fields(struct job_record *job_ptr);
+static void _filter_by_node_owner(struct job_record *job_ptr,
+				  bitstr_t *usable_node_mask);
 static void _filter_nodes_in_set(struct node_set *node_set_ptr,
 				 struct job_details *detail_ptr,
 				 char **err_msg);
+
+static bool _first_array_task(struct job_record *job_ptr);
 static void _launch_prolog(struct job_record *job_ptr);
 static int  _match_feature(char *seek, struct node_set *node_set_ptr);
 static int _nodes_in_sets(bitstr_t *req_bitmap,
@@ -470,10 +480,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 			select_serial = 1;
 	}
 
-	license_job_return(job_ptr);
 	acct_policy_job_fini(job_ptr);
-	if (slurm_sched_g_freealloc(job_ptr) != SLURM_SUCCESS)
-		error("slurm_sched_freealloc(%u): %m", job_ptr->job_id);
 	if (select_g_job_fini(job_ptr) != SLURM_SUCCESS)
 		error("select_g_job_fini(%u): %m", job_ptr->job_id);
 	(void) epilog_slurmctld(job_ptr);
@@ -525,11 +532,11 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 			job_ptr->node_cnt = 0;
 		} else {
 			bool set_fe_comp = false;
-			if (front_end_ptr->job_cnt_run)
+			if (front_end_ptr->job_cnt_run) {
 				front_end_ptr->job_cnt_run--;
-			else {
-				error("front_end %s job_cnt_run underflow",
-				      front_end_ptr->name);
+			} else {
+				error("%s: front_end %s job_cnt_run underflow",
+				      __func__, front_end_ptr->name);
 			}
 			if (front_end_ptr->job_cnt_run == 0) {
 				uint32_t state_flags;
@@ -572,7 +579,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 				build_cg_bitmap(job_ptr);
 			}
 			bit_clear(job_ptr->node_bitmap_cg, i);
-			job_update_cpu_cnt(job_ptr, i);
+			job_update_tres_cnt(job_ptr, i);
 			/* node_cnt indicates how many nodes we are waiting
 			 * to get epilog complete messages from, so do not
 			 * count down nodes. NOTE: The job's node_cnt will not
@@ -725,6 +732,51 @@ _resolve_shared_status(struct job_record *job_ptr, uint16_t part_max_share,
 	}
 }
 
+/* Remove nodes from consideration for allocation based upon "ownership" by
+ * other users
+ * job_ptr IN - Job to be scheduled
+ * usable_node_mask IN/OUT - Nodes available for use by this job's user
+ */
+static void _filter_by_node_owner(struct job_record *job_ptr,
+				  bitstr_t *usable_node_mask)
+{
+	ListIterator job_iterator;
+	struct job_record *job_ptr2;
+	struct node_record *node_ptr;
+	int i;
+
+	if ((job_ptr->details->whole_node == 0) &&
+	    (job_ptr->part_ptr->flags & PART_FLAG_EXCLUSIVE_USER))
+		job_ptr->details->whole_node = 2;
+
+	if (job_ptr->details->whole_node == 2) {
+		/* Need to remove all nodes allocated to any active job from
+		 * any other user */
+		job_iterator = list_iterator_create(job_list);
+		while ((job_ptr2 = (struct job_record *)
+				   list_next(job_iterator))) {
+			if (IS_JOB_PENDING(job_ptr2) ||
+			    IS_JOB_COMPLETED(job_ptr2) ||
+			    (job_ptr->user_id == job_ptr2->user_id) ||
+			    !job_ptr2->node_bitmap)
+				continue;
+			bit_not(job_ptr2->node_bitmap);
+			bit_and(usable_node_mask, job_ptr2->node_bitmap);
+			bit_not(job_ptr2->node_bitmap);
+		}
+		list_iterator_destroy(job_iterator);
+		return;
+	}
+
+	/* Need to filter out any nodes exclusively allocated to other users */
+	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
+	     i++, node_ptr++) {
+		if ((node_ptr->owner != NO_VAL) &&
+		    (node_ptr->owner != job_ptr->user_id))
+			bit_clear(usable_node_mask, i);
+	}
+}
+
 /*
  * If the job has required feature counts, then accumulate those
  * required resources using multiple calls to _pick_best_nodes()
@@ -752,6 +804,8 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 	List preemptee_candidates = NULL;
 	bool has_xand = false;
 	bool resv_overlap = false;
+	uint32_t powercap;
+	int layout_power;
 
 	/* Mark nodes reserved for other jobs as off limit for this job.
 	 * If the job has a reservation, we've already limited the contents
@@ -795,6 +849,10 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 				     &exc_core_bitmap, &resv_overlap);
 		FREE_NULL_BITMAP(resv_bitmap);
 	}
+
+	if (!save_avail_node_bitmap)
+		save_avail_node_bitmap = bit_copy(avail_node_bitmap);
+	_filter_by_node_owner(job_ptr, avail_node_bitmap);
 
 	/* save job and request state */
 	saved_min_nodes = min_nodes;
@@ -857,10 +915,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 			req_nodes = feat_ptr->count;
 			job_ptr->details->min_nodes = feat_ptr->count;
 			job_ptr->details->min_cpus = feat_ptr->count;
-			if (*preemptee_job_list) {
-				list_destroy(*preemptee_job_list);
-				*preemptee_job_list = NULL;
-			}
+			FREE_NULL_LIST(*preemptee_job_list);
 			error_code = _pick_best_nodes(tmp_node_set_ptr,
 					tmp_node_set_size, &feature_bitmap,
 					job_ptr, part_ptr, min_nodes,
@@ -940,10 +995,11 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 		job_ptr->details->min_cpus = saved_min_cpus;
 		job_ptr->details->min_nodes = saved_job_min_nodes;
 	}
+
 #if 0
 {
 	char *tmp_str = bitmap2node_name(job_ptr->details->req_node_bitmap);
-	info("job %u requires %d:%d:%d nodes %s err:%u",
+	info("job %u requires %d:%d:%d req_nodes:%s err:%u",
 	     job_ptr->job_id, min_nodes, req_nodes, max_nodes,
 	     tmp_str, error_code);
 	xfree(tmp_str);
@@ -951,10 +1007,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 #endif
 	xfree(tmp_node_set_ptr);
 	if (error_code == SLURM_SUCCESS) {
-		if (*preemptee_job_list) {
-			list_destroy(*preemptee_job_list);
-			*preemptee_job_list = NULL;
-		}
+		FREE_NULL_LIST(*preemptee_job_list);
 		error_code = _pick_best_nodes(node_set_ptr, node_set_size,
 				select_bitmap, job_ptr, part_ptr, min_nodes,
 				max_nodes, req_nodes, test_only,
@@ -969,8 +1022,170 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 	xfree(tmp_str);
 }
 #endif
-	if (preemptee_candidates)
-		list_destroy(preemptee_candidates);
+
+	/*
+	 * PowerCapping logic : now that we have the list of selected nodes
+	 * we need to ensure that using this nodes respects the amount of
+	 * available power as returned by the capping logic.
+	 * If it is not the case, then ensure that the job stays pending
+	 * by returning a relevant error code:
+	 *  ESLURM_POWER_NOT_AVAIL : if the current capping is blocking
+	 *  ESLURM_POWER_RESERVED  : if the current capping and the power
+	 *                           reservations are blocking
+	 */
+	if (error_code != SLURM_SUCCESS) {
+		debug3("powercapping: checking job %u : skipped, not eligible",
+		       job_ptr->job_id);
+	} else if ((powercap = powercap_get_cluster_current_cap()) == 0) {
+		debug3("powercapping: checking job %u : skipped, capping "
+		       "disabled", job_ptr->job_id);
+	} else if ((layout_power = which_power_layout()) == 0) {
+		debug3("powercapping disabled %d", which_power_layout());
+	} else if (!power_layout_ready()){
+		debug3("powercapping:checking job %u : skipped, problems with"
+		       "layouts, capping disabled", job_ptr->job_id);
+	} else {
+		uint32_t min_watts, max_watts, job_cap, tmp_pcap_cpu_freq = 0;
+		uint32_t cur_max_watts, tmp_max_watts = 0;
+		uint32_t cpus_per_node, *tmp_max_watts_dvfs = NULL;
+		bitstr_t *tmp_bitmap;
+		int k = 1, *allowed_freqs;
+		float ratio = 0;
+
+		/*
+		 *centralized synchronization of all key/values
+		 */
+		layouts_entity_pull_kv("power", "Cluster", "CurrentSumPower");
+
+		/*
+		 * get current powercapping logic state (min,cur,max)
+		 */
+		max_watts = powercap_get_cluster_max_watts();
+		min_watts = powercap_get_cluster_min_watts();
+		cur_max_watts = powercap_get_cluster_current_max_watts();
+		/* in case of INFINITE cap, set it to max watts as it
+		 * is done in the powercapping logic */
+		if (powercap == INFINITE)
+			powercap = max_watts;
+
+		/* build a temporary bitmap using idle_node_bitmap and
+		 * remove the selected bitmap from this bitmap.
+		 * Then compute the amount of power required for such a
+		 * configuration to check that is is allowed by the current
+		 * power cap */
+		tmp_bitmap = bit_copy(idle_node_bitmap);
+		bit_not(*select_bitmap);
+		bit_and(tmp_bitmap, *select_bitmap);
+		bit_not(*select_bitmap);
+		if (layout_power == 1)
+			tmp_max_watts =
+				 powercap_get_node_bitmap_maxwatts(tmp_bitmap);
+		else if (layout_power == 2) {
+			allowed_freqs =
+				 powercap_get_job_nodes_numfreq(*select_bitmap,
+					  job_ptr->details->cpu_freq_min,
+					  job_ptr->details->cpu_freq_max);
+			if (allowed_freqs[0] != 0) {
+				tmp_max_watts_dvfs =
+					xmalloc(sizeof(uint32_t) *
+						(allowed_freqs[0]+1));
+			}
+			cpus_per_node = job_ptr->details->min_cpus /
+					job_ptr->details->min_nodes;
+			tmp_max_watts =
+				powercap_get_node_bitmap_maxwatts_dvfs(
+					tmp_bitmap, *select_bitmap,
+					tmp_max_watts_dvfs, allowed_freqs,
+					cpus_per_node);
+		}
+		bit_free(tmp_bitmap);
+
+		/* get job cap based on power reservation on the system,
+		 * if no reservation matches the job caracteristics, the
+		 * powercap or the max_wattswill be returned.
+		 * select the return code based on the impact of
+		 * reservations on the failure */
+		job_cap = powercap_get_job_cap(job_ptr, time(NULL));
+
+		if ((layout_power == 1) ||
+		    ((layout_power == 2) && (allowed_freqs[0] == 0))) {
+			if (tmp_max_watts > job_cap) {
+				FREE_NULL_BITMAP(*select_bitmap);
+				if ((job_cap < powercap) &&
+				    (tmp_max_watts <= powercap))
+					error_code = ESLURM_POWER_RESERVED;
+				else
+					error_code = ESLURM_POWER_NOT_AVAIL;
+			}
+		} else if (layout_power == 2) {
+			if (((tmp_max_watts > job_cap) ||
+			    (job_cap < powercap) ||
+			    (powercap < max_watts)) && (tmp_max_watts_dvfs)) {
+
+			/* Calculation of the CPU Frequency to set for the job:
+			 * The optimal CPU Frequency is the maximum allowed
+			 * CPU Frequency that all idle nodes could run so that
+			 * the total power consumption of the cluster is below
+			 * the powercap value.since the number of Idle nodes
+			 * may change in every schedule the optimal CPU
+			 * Frequency may also change from one job to another.*/
+				k = powercap_get_job_optimal_cpufreq(job_cap,
+							  allowed_freqs);
+				while ((tmp_max_watts_dvfs[k] > job_cap) &&
+				       (k < allowed_freqs[0] + 1)) {
+					k++;
+				}
+				if (k == allowed_freqs[0] + 1) {
+					if ((job_cap < powercap) &&
+					    (tmp_max_watts_dvfs[k] <= powercap)){
+						error_code =
+							ESLURM_POWER_RESERVED;
+					} else {
+						error_code =
+							ESLURM_POWER_NOT_AVAIL;
+					}
+				} else {
+					tmp_max_watts = tmp_max_watts_dvfs[k];
+					tmp_pcap_cpu_freq =
+						powercap_get_cpufreq(
+							*select_bitmap,
+							allowed_freqs[k]);
+				}
+
+				job_ptr->details->cpu_freq_min = tmp_pcap_cpu_freq;
+				job_ptr->details->cpu_freq_max = tmp_pcap_cpu_freq;
+				job_ptr->details->cpu_freq_gov = 0x10;
+
+			/* Since we alter the DVFS of jobs we need to deal with
+			 * their time_limit to calculate the extra time needed
+			 * for them to complete the execution without getting
+			 * killed there should be a parameter to declare the
+			 * effect of cpu frequency on execution time for the
+			 * moment we use time_limit and time_min
+			 * This has to be done to allow backfilling */
+
+				ratio = (1 + (float)allowed_freqs[k] /
+					     (float)allowed_freqs[-1]);
+				if ((job_ptr->time_limit != INFINITE) &&
+				    (job_ptr->time_limit != NO_VAL))
+					job_ptr->time_limit = (ratio *
+						  job_ptr->time_limit);
+				if ((job_ptr->time_min != INFINITE) &&
+				    (job_ptr->time_min != NO_VAL))
+					job_ptr->time_min = (ratio *
+						  job_ptr->time_min);
+			}
+		}
+		xfree(tmp_max_watts_dvfs);
+
+		debug2("powercapping: checking job %u : min=%u cur=%u "
+		       "[new=%u] [resv_cap=%u] [cap=%u] max=%u : %s",
+		       job_ptr->job_id, min_watts, cur_max_watts,
+		       tmp_max_watts, job_cap, powercap, max_watts,
+		       slurm_strerror(error_code));
+	}
+
+	FREE_NULL_LIST(preemptee_candidates);
 
 	/* restore job's initial required node bitmap */
 	FREE_NULL_BITMAP(job_ptr->details->req_node_bitmap);
@@ -1114,7 +1329,8 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		if (total_nodes > max_nodes) {	/* exceeds node limit */
 			return ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
 		}
-		if (job_ptr->details->core_spec != (uint16_t) NO_VAL) {
+		if ((job_ptr->details->core_spec != (uint16_t) NO_VAL) &&
+		    ((job_ptr->details->core_spec & CORE_SPEC_THREAD) == 0)) {
 			i = bit_ffs(job_ptr->details->req_node_bitmap);
 			if (i >= 0) {
 				node_ptr = node_record_table_ptr + i;
@@ -1270,10 +1486,13 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 				avail_bitmap = bit_copy(node_set_ptr[i].
 							my_bitmap);
 			}
-			avail_nodes = bit_set_count(avail_bitmap);
+
 			tried_sched = false;	/* need to test these nodes */
-			if ((shared || preempt_flag)	&&
-			    ((i+1) < node_set_size)	&&
+
+			if ((shared || preempt_flag ||
+			    (switch_record_cnt > 1))     &&
+			    ((i+1) < node_set_size)	 &&
+			    (min_feature == max_feature) &&
 			    (node_set_ptr[i].weight ==
 			     node_set_ptr[i+1].weight)) {
 				/* Keep accumulating so we can pick the
@@ -1281,6 +1500,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 				continue;
 			}
 
+			avail_nodes = bit_set_count(avail_bitmap);
 			if ((avail_nodes  < min_nodes)	||
 			    ((avail_nodes >= min_nodes)	&&
 			     (avail_nodes < req_nodes)	&&
@@ -1290,10 +1510,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			/* NOTE: select_g_job_test() is destructive of
 			 * avail_bitmap, so save a backup copy */
 			backup_bitmap = bit_copy(avail_bitmap);
-			if (*preemptee_job_list) {
-				list_destroy(*preemptee_job_list);
-				*preemptee_job_list = NULL;
-			}
+			FREE_NULL_LIST(*preemptee_job_list);
 			if (job_ptr->details->req_node_bitmap == NULL)
 				bit_and(avail_bitmap, avail_node_bitmap);
 			/* Only preempt jobs when all possible nodes are being
@@ -1349,10 +1566,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		    ((job_ptr->details->req_node_bitmap == NULL) ||
 		     bit_super_set(job_ptr->details->req_node_bitmap,
 				   avail_bitmap))) {
-			if (*preemptee_job_list) {
-				list_destroy(*preemptee_job_list);
-				*preemptee_job_list = NULL;
-			}
+			FREE_NULL_LIST(*preemptee_job_list);
 			pick_code = select_g_job_test(job_ptr, avail_bitmap,
 						      min_nodes, max_nodes,
 						      req_nodes,
@@ -1454,11 +1668,12 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 	ListIterator iter;
 	struct job_record *job_ptr;
 	uint16_t mode;
-	int job_cnt = 0, rc = SLURM_SUCCESS;
+	int job_cnt = 0, rc;
 	checkpoint_msg_t ckpt_msg;
 
 	iter = list_iterator_create(preemptee_job_list);
 	while ((job_ptr = (struct job_record *) list_next(iter))) {
+		rc = SLURM_SUCCESS;
 		mode = slurm_job_preempt_mode(job_ptr);
 		if (mode == PREEMPT_MODE_CANCEL) {
 			job_cnt++;
@@ -1505,9 +1720,10 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 			   (slurm_get_preempt_mode() & PREEMPT_MODE_GANG)) {
 			debug("preempted job %u suspended by gang scheduler",
 			      job_ptr->job_id);
-		} else {
-			error("Invalid preempt_mode: %u", mode);
-			rc = SLURM_ERROR;
+		} else if (mode == PREEMPT_MODE_OFF) {
+			error("%s: Invalid preempt_mode %u for job %u",
+			      __func__, mode, job_ptr->job_id);
+			continue;
 		}
 
 		if (rc != SLURM_SUCCESS) {
@@ -1517,12 +1733,13 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 				continue;
 
 			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0, true);
-			if (rc == SLURM_SUCCESS)
-				info("preempted job %u had to be killed",
-				     job_ptr->job_id);
-			else {
-				info("preempted job %u kill failure %s",
-				     job_ptr->job_id, slurm_strerror(rc));
+			if (rc == SLURM_SUCCESS) {
+				info("%s: preempted job %u had to be killed",
+				     __func__, job_ptr->job_id);
+			} else {
+				info("%s: preempted job %u kill failure %s",
+				     __func__, job_ptr->job_id,
+				     slurm_strerror(rc));
 			}
 		}
 	}
@@ -1530,6 +1747,29 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 
 	if (job_cnt > 0)
 		*error_code = ESLURM_NODES_BUSY;
+}
+
+/* Return true if this job record is
+ * 1) not a job array OR
+ * 2) the first task of a job array to begin execution */
+static bool _first_array_task(struct job_record *job_ptr)
+{
+	struct job_record *meta_job_ptr;
+
+	if (job_ptr->array_task_id == NO_VAL)
+		return true;
+
+	meta_job_ptr = find_job_record(job_ptr->array_job_id);
+	if (!meta_job_ptr || !meta_job_ptr->array_recs) {
+		error("%s: Could not find meta job record for job %u",
+		      __func__, job_ptr->array_job_id);
+		return true;
+	}
+	if ((meta_job_ptr->array_recs->tot_run_tasks == 1) &&	/* This task */
+	    (meta_job_ptr->array_recs->tot_comp_tasks == 0))
+		return true;
+
+	return false;
 }
 
 /*
@@ -1568,8 +1808,9 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	bool configuring = false;
 	List preemptee_job_list = NULL;
 	slurmdb_qos_rec_t *qos_ptr = NULL;
-	slurmdb_association_rec_t *assoc_ptr = NULL;
+	slurmdb_assoc_rec_t *assoc_ptr = NULL;
 	uint32_t selected_node_cnt = NO_VAL;
+	uint64_t tres_req_cnt[slurmctld_tres_cnt];
 
 	xassert(job_ptr);
 	xassert(job_ptr->magic == JOB_MAGIC);
@@ -1579,7 +1820,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 
 	part_ptr = job_ptr->part_ptr;
 	qos_ptr = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
-	assoc_ptr = (slurmdb_association_rec_t *)job_ptr->assoc_ptr;
+	assoc_ptr = (slurmdb_assoc_rec_t *)job_ptr->assoc_ptr;
 
 	/* identify partition */
 	if (part_ptr == NULL) {
@@ -1614,6 +1855,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 
 	if (job_ptr->priority == 0) {	/* user/admin hold */
 		if (job_ptr->state_reason != FAIL_BAD_CONSTRAINTS
+		    && (job_ptr->state_reason != FAIL_BURST_BUFFER_OP)
 		    && (job_ptr->state_reason != WAIT_HELD)
 		    && (job_ptr->state_reason != WAIT_HELD_USER)
 		    && job_ptr->state_reason != WAIT_MAX_REQUEUE) {
@@ -1624,7 +1866,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 
 	/* build sets of usable nodes based upon their configuration */
 	error_code = _build_node_list(job_ptr, &node_set_ptr, &node_set_size,
-				      err_msg);
+				      err_msg, test_only);
 	if (error_code)
 		return error_code;
 
@@ -1646,7 +1888,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	/*    job_ptr->details->max_nodes, part_ptr->max_nodes); */
 
 	/* On BlueGene systems don't adjust the min/max node limits
-	   here.  We are working on midplane values. */
+	 * here.  We are working on midplane values. */
 	if (qos_ptr && (qos_ptr->flags & QOS_FLAG_PART_MIN_NODE))
 		min_nodes = job_ptr->details->min_nodes;
 	else
@@ -1661,8 +1903,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 				part_ptr->max_nodes);
 
 	/* Don't call functions in MIN/MAX it will result in the
-	   function being called multiple times.
-	*/
+	 * function being called multiple times. */
 	acct_max_nodes = acct_policy_get_max_nodes(job_ptr, &wait_reason);
 	max_nodes = MIN(max_nodes, acct_max_nodes);
 
@@ -1678,7 +1919,8 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	}
 
 	max_nodes = MIN(max_nodes, 500000);	/* prevent overflows */
-	if (!job_ptr->limit_set_max_nodes && job_ptr->details->max_nodes)
+	if (!job_ptr->limit_set.tres[TRES_ARRAY_NODE] &&
+	    job_ptr->details->max_nodes)
 		req_nodes = max_nodes;
 	else
 		req_nodes = min_nodes;
@@ -1727,13 +1969,24 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		job_ptr->node_cnt_wag = selected_node_cnt;
 	}
 
+	memcpy(tres_req_cnt, job_ptr->tres_req_cnt, sizeof(tres_req_cnt));
+	tres_req_cnt[TRES_ARRAY_CPU] =
+		(uint64_t)(job_ptr->total_cpus ?
+			   job_ptr->total_cpus : job_ptr->details->min_cpus);
+	tres_req_cnt[TRES_ARRAY_MEM] = job_get_tres_mem(
+		job_ptr->details->pn_min_memory,
+		tres_req_cnt[TRES_ARRAY_CPU],
+		selected_node_cnt);
+	tres_req_cnt[TRES_ARRAY_NODE] = (uint64_t)selected_node_cnt;
+
+	gres_set_job_tres_cnt(job_ptr->gres_list,
+			      selected_node_cnt,
+			      tres_req_cnt,
+			      false);
+
 	if (!test_only && (error_code == SLURM_SUCCESS)
 	    && (selected_node_cnt != NO_VAL)
-	    && !acct_policy_job_runnable_post_select(
-		    job_ptr, selected_node_cnt,
-		    job_ptr->total_cpus ? job_ptr->total_cpus
-		    : job_ptr->details->min_cpus,
-		    job_ptr->details->pn_min_memory)) {
+	    && !acct_policy_job_runnable_post_select(job_ptr, tres_req_cnt)) {
 		error_code = ESLURM_ACCOUNTING_POLICY;
 		goto cleanup;
 	}
@@ -1775,17 +2028,43 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		/* Non-fatal errors for job below */
 		} else if (error_code == ESLURM_NODE_NOT_AVAIL) {
 			/* Required nodes are down or drained */
+			char *node_str = NULL, *unavail_node = NULL;
 			debug3("JobId=%u required nodes not avail",
 			       job_ptr->job_id);
 			job_ptr->state_reason = WAIT_NODE_NOT_AVAIL;
 			xfree(job_ptr->state_desc);
-			xstrfmtcat(job_ptr->state_desc,
-				   "ReqNodeNotAvail, May be reserved for other job");
-			if (unavail_node_str) {
-				xstrfmtcat(job_ptr->state_desc,
-					   ", UnavailableNodes:%s",
-					   unavail_node_str);
+			if (unavail_node_str) {	/* Set in few cases */
+				node_str = unavail_node_str;
+			} else {
+				bitstr_t *unavail_bitmap;
+				unavail_bitmap = bit_copy(avail_node_bitmap);
+				bit_not(unavail_bitmap);
+				if (job_ptr->details  &&
+				    job_ptr->details->req_node_bitmap &&
+				    bit_overlap(unavail_bitmap,
+					   job_ptr->details->req_node_bitmap)) {
+					bit_and(unavail_bitmap,
+						job_ptr->details->
+						req_node_bitmap);
+				}
+				if (bit_ffs(unavail_bitmap) != -1) {
+					unavail_node = bitmap2node_name(
+								unavail_bitmap);
+					node_str = unavail_node;
+				}
+				FREE_NULL_BITMAP(unavail_bitmap);
 			}
+			if (node_str) {
+				xstrfmtcat(job_ptr->state_desc,
+					   "ReqNodeNotAvail, "
+					   "UnavailableNodes:%s",
+					   node_str);
+			} else {
+				xstrfmtcat(job_ptr->state_desc,
+					   "ReqNodeNotAvail, May be reserved "
+					   "for other job");
+			}
+			xfree(unavail_node);
 			last_job_update = now;
 		} else if ((error_code == ESLURM_RESERVATION_NOT_USABLE) ||
 			   (error_code == ESLURM_RESERVATION_BUSY)) {
@@ -1794,10 +2073,20 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		} else if ((job_ptr->state_reason == WAIT_BLOCK_MAX_ERR) ||
 			   (job_ptr->state_reason == WAIT_BLOCK_D_ACTION)) {
 			/* state_reason was already setup */
+		} else if ((job_ptr->state_reason == WAIT_HELD) &&
+			   (job_ptr->priority == 0)) {
+			/* Held by select plugin due to some failure */
 		} else {
-			job_ptr->state_reason = WAIT_RESOURCES;
+			if (error_code == ESLURM_POWER_NOT_AVAIL)
+				job_ptr->state_reason = WAIT_POWER_NOT_AVAIL;
+			else if (error_code == ESLURM_POWER_RESERVED)
+				job_ptr->state_reason = WAIT_POWER_RESERVED;
+			else
+				job_ptr->state_reason = WAIT_RESOURCES;
 			xfree(job_ptr->state_desc);
-			if (error_code == ESLURM_NODES_BUSY)
+			if ((error_code == ESLURM_NODES_BUSY) ||
+			    (error_code == ESLURM_POWER_NOT_AVAIL) ||
+			    (error_code == ESLURM_POWER_RESERVED))
 				slurm_sched_g_job_is_pending();
 		}
 		goto cleanup;
@@ -1817,8 +2106,8 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	xfree(job_ptr->sched_nodes);
 	job_ptr->exit_code = 0;
 	gres_plugin_job_clear(job_ptr->gres_list);
-	step_list_purge(job_ptr);
-	job_ptr->step_list = list_create(NULL);
+	if (!job_ptr->step_list)
+		job_ptr->step_list = list_create(NULL);
 
 	job_ptr->node_bitmap = select_bitmap;
 
@@ -1834,11 +2123,25 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 			job_ptr->time_limit = part_ptr->default_time;
 		else
 			job_ptr->time_limit = part_ptr->max_time;
+		job_ptr->limit_set.time = 1;
 	}
 
 	job_end_time_reset(job_ptr);
 
 	job_array_post_sched(job_ptr);
+	if (bb_g_job_begin(job_ptr) != SLURM_SUCCESS) {
+		/* Leave job queued, something is hosed */
+		error_code = ESLURM_INVALID_BURST_BUFFER_REQUEST;
+		error("bb_g_job_begin(%u): %s", job_ptr->job_id,
+		      slurm_strerror(error_code));
+		job_ptr->start_time = 0;
+		job_ptr->time_last_active = 0;
+		job_ptr->end_time = 0;
+		job_ptr->node_bitmap = NULL;
+		job_ptr->priority = 0;
+		job_ptr->state_reason = WAIT_HELD;
+		goto cleanup;
+	}
 	if (select_g_job_begin(job_ptr) != SLURM_SUCCESS) {
 		/* Leave job queued, something is hosed */
 		error("select_g_job_begin(%u): %m", job_ptr->job_id);
@@ -1880,11 +2183,16 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		error("select_g_select_nodeinfo_set(%u): %m", job_ptr->job_id);
 		/* not critical ... by now */
 	}
-	if (job_ptr->mail_type & MAIL_JOB_BEGIN)
+	if ((job_ptr->mail_type & MAIL_JOB_BEGIN) && _first_array_task(job_ptr))
 		mail_job_info(job_ptr, MAIL_JOB_BEGIN);
 
 	slurmctld_diag_stats.jobs_started++;
+
+	/* job_set_alloc_tres has to be done before acct_policy_job_begin */
+	job_set_alloc_tres(job_ptr, false);
 	acct_policy_job_begin(job_ptr);
+
+	job_claim_resv(job_ptr);
 
 	/* Update the job_record's gres and gres_alloc fields with
 	 * strings representing the amount of each GRES type requested
@@ -1900,25 +2208,26 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	 * job if happening right away.  If the job has already
 	 * become eligible and registered in the db then the start
 	 * message. */
-	if (!with_slurmdbd || (with_slurmdbd && job_ptr->db_index))
-		jobacct_storage_g_job_start(acct_db_conn, job_ptr);
+	jobacct_storage_job_start_direct(acct_db_conn, job_ptr);
 
 	prolog_slurmctld(job_ptr);
 	reboot_job_nodes(job_ptr);
 	slurm_sched_g_newalloc(job_ptr);
+	power_g_job_start(job_ptr);
 
 	/* Request asynchronous launch of a prolog for a
 	 * non batch job. */
-	if (slurmctld_conf.prolog_flags & PROLOG_FLAG_ALLOC)
+	if ((slurmctld_conf.prolog_flags & PROLOG_FLAG_ALLOC) ||
+	    (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN))
 		_launch_prolog(job_ptr);
 
       cleanup:
 	if (job_ptr->array_recs && job_ptr->array_recs->task_id_bitmap &&
-	    !IS_JOB_STARTED(job_ptr)) {
+	    !IS_JOB_STARTED(job_ptr) &&
+	    (bit_ffs(job_ptr->array_recs->task_id_bitmap) != -1)) {
 		job_ptr->array_task_id = NO_VAL;
 	}
-	if (preemptee_job_list)
-		list_destroy(preemptee_job_list);
+	FREE_NULL_LIST(preemptee_job_list);
 	if (select_node_bitmap)
 		*select_node_bitmap = select_bitmap;
 	else
@@ -1949,6 +2258,8 @@ static void _launch_prolog(struct job_record *job_ptr)
 {
 	prolog_launch_msg_t *prolog_msg_ptr;
 	agent_arg_t *agent_arg_ptr;
+	job_resources_t *job_resrcs_ptr;
+	slurm_cred_arg_t cred_arg;
 #ifndef HAVE_FRONT_END
 	int i;
 #endif
@@ -1966,7 +2277,8 @@ static void _launch_prolog(struct job_record *job_ptr)
 	prolog_msg_ptr = xmalloc(sizeof(prolog_launch_msg_t));
 
 	/* Locks: Write job */
-	if (!(slurmctld_conf.prolog_flags & PROLOG_FLAG_NOHOLD))
+	if ((slurmctld_conf.prolog_flags & PROLOG_FLAG_ALLOC) &&
+	    !(slurmctld_conf.prolog_flags & PROLOG_FLAG_NOHOLD))
 		job_ptr->state_reason = WAIT_PROLOG;
 
 	prolog_msg_ptr->job_id = job_ptr->job_id;
@@ -1982,6 +2294,35 @@ static void _launch_prolog(struct job_record *job_ptr)
 	prolog_msg_ptr->spank_job_env = xduparray(job_ptr->spank_job_env_size,
 						  job_ptr->spank_job_env);
 
+	xassert(job_ptr->job_resrcs);
+	job_resrcs_ptr = job_ptr->job_resrcs;
+	memset(&cred_arg, 0, sizeof(slurm_cred_arg_t));
+	cred_arg.jobid               = job_ptr->job_id;
+	cred_arg.stepid              = SLURM_EXTERN_CONT;
+	cred_arg.uid                 = job_ptr->user_id;
+	cred_arg.job_core_spec       = job_ptr->details->core_spec;
+	cred_arg.job_gres_list       = job_ptr->gres_list;
+	cred_arg.job_nhosts          = job_ptr->job_resrcs->nhosts;
+	cred_arg.job_constraints     = job_ptr->details->features;
+	cred_arg.job_mem_limit       = job_ptr->details->pn_min_memory;
+	cred_arg.step_mem_limit      = job_ptr->details->pn_min_memory;
+	cred_arg.cores_per_socket    = job_resrcs_ptr->cores_per_socket;
+	cred_arg.job_core_bitmap     = job_resrcs_ptr->core_bitmap;
+	cred_arg.step_core_bitmap    = job_resrcs_ptr->core_bitmap;
+	cred_arg.sockets_per_node    = job_resrcs_ptr->sockets_per_node;
+	cred_arg.sock_core_rep_count = job_resrcs_ptr->sock_core_rep_count;
+
+#ifdef HAVE_FRONT_END
+	xassert(job_ptr->batch_host);
+	cred_arg.job_hostlist    = job_ptr->batch_host;
+	cred_arg.step_hostlist   = job_ptr->batch_host;
+#else
+	cred_arg.job_hostlist    = job_ptr->job_resrcs->nodes;
+	cred_arg.step_hostlist   = job_ptr->job_resrcs->nodes;
+#endif
+	prolog_msg_ptr->cred = slurm_cred_create(slurmctld_config.cred_ctx,
+						 &cred_arg,
+						 SLURM_PROTOCOL_VERSION);
 	agent_arg_ptr = (agent_arg_t *) xmalloc(sizeof(agent_arg_t));
 	agent_arg_ptr->retry = 0;
 #ifdef HAVE_FRONT_END
@@ -2029,7 +2370,7 @@ static int _fill_in_gres_fields(struct job_record *job_ptr)
 	char *subtok, *sublast = NULL;
 	char *req_config  = job_ptr->gres;
 	char *tmp_str;
-	uint32_t ngres_req;
+	uint64_t ngres_req;
 	int      rv = SLURM_SUCCESS;
 
 	/* First build the GRES requested field. */
@@ -2064,11 +2405,11 @@ static int _fill_in_gres_fields(struct job_record *job_ptr)
 			 * GRES type but don't find a quantity for it,
 			 * we simply write ":0" for the quantity.
 			 */
-			if (ngres_req == NO_VAL)
+			if (ngres_req == NO_VAL64)
 				ngres_req = 0;
 
 			/* Append value to the gres string. */
-			snprintf(buf, sizeof(buf), "%s%s:%u",
+			snprintf(buf, sizeof(buf), "%s%s:%"PRIu64,
 				 prefix, subtok,
 				 ngres_req * job_ptr->node_cnt);
 
@@ -2078,7 +2419,7 @@ static int _fill_in_gres_fields(struct job_record *job_ptr)
 				prefix = ",";
 			if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES) {
 				debug("(%s:%d) job id:%u -- ngres_req:"
-				      "%u, gres_req substring = (%s)",
+				      "%"PRIu64", gres_req substring = (%s)",
 				      THIS_FILE, __LINE__,
 				      job_ptr->job_id, ngres_req, buf);
 			}
@@ -2320,11 +2661,12 @@ static int _no_reg_nodes(void)
  * OUT node_set_pptr - list of node sets which could be used for the job
  * OUT node_set_size - number of node_set entries
  * OUT err_msg - error message for job, caller must xfree
+ * IN  test_only - true if only testing if job can be started at some point
  * RET error code
  */
 static int _build_node_list(struct job_record *job_ptr,
 			    struct node_set **node_set_pptr,
-			    int *node_set_size, char **err_msg)
+			    int *node_set_size, char **err_msg, bool test_only)
 {
 	int adj_cpus, i, node_set_inx, power_cnt, rc;
 	struct node_set *node_set_ptr;
@@ -2376,6 +2718,7 @@ static int _build_node_list(struct job_record *job_ptr,
 	}
 	if ((job_ptr->details->min_nodes == 0) &&
 	    (job_ptr->details->max_nodes == 0)) {
+		FREE_NULL_BITMAP(usable_node_mask);
 		*node_set_pptr = NULL;
 		*node_set_size = 0;
 		return SLURM_SUCCESS;
@@ -2517,8 +2860,8 @@ static int _build_node_list(struct job_record *job_ptr,
 
 	if (node_set_inx == 0) {
 		rc = ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
-		info("No nodes satisfy job %u requirements in partition %s",
-		     job_ptr->job_id, job_ptr->part_ptr->name);
+		info("%s: No nodes satisfy job %u requirements in partition %s",
+		     __func__, job_ptr->job_id, job_ptr->part_ptr->name);
 		xfree(node_set_ptr);
 		xfree(job_ptr->state_desc);
 		if (job_ptr->resv_name) {
@@ -2899,7 +3242,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 				    (!bit_test(job_ptr->node_bitmap_cg, i)))
 					continue;
 				bit_clear(job_ptr->node_bitmap_cg, i);
-				job_update_cpu_cnt(job_ptr, i);
+				job_update_tres_cnt(job_ptr, i);
 				if (node_ptr->comp_job_cnt)
 					(node_ptr->comp_job_cnt)--;
 				if ((job_ptr->node_cnt > 0) &&
@@ -2929,7 +3272,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 		} else if (IS_NODE_DOWN(node_ptr)) {
 			/* Consider job already completed */
 			bit_clear(job_ptr->node_bitmap_cg, i);
-			job_update_cpu_cnt(job_ptr, i);
+			job_update_tres_cnt(job_ptr, i);
 			if (node_ptr->comp_job_cnt)
 				(node_ptr->comp_job_cnt)--;
 			if ((job_ptr->node_cnt > 0) &&

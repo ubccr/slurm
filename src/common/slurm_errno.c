@@ -108,7 +108,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ SLURMCTLD_COMMUNICATIONS_SHUTDOWN_ERROR,
 	  "Unable to contact slurm controller (shutdown failure)"},
 
-	/* _info.c/communcation layer RESPONSE_SLURM_RC message codes */
+	/* _info.c/communication layer RESPONSE_SLURM_RC message codes */
 
 	{ SLURM_NO_CHANGE_IN_DATA,	/* Not really an error */
 	  "Data has not changed since time specified"		},
@@ -147,6 +147,12 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Requested node configuration is not available"	},
 	{ ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE,
 	  "Requested partition configuration not available now" },
+	{ ESLURM_POWER_NOT_AVAIL,
+	  "Required power not available now"},
+	{ ESLURM_POWER_RESERVED,
+	  "Required power at least partially reserved"},
+	{ ESLURM_INVALID_POWERCAP,
+	  "Required powercap is not valid, check min/max values"},
 	{ ESLURM_NODES_BUSY,
 	  "Requested nodes are busy"				},
 	{ ESLURM_INVALID_JOB_ID,
@@ -219,9 +225,9 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_SAME_PARENT_ACCOUNT,
 	  "Account already child of parent account specified"   },
 	{ ESLURM_INVALID_QOS,
-	  "Job has invalid qos"					},
+	  "Invalid qos specification"				},
 	{ ESLURM_INVALID_WCKEY,
-	  "Job has invalid wckey"				},
+	  "Invalid wckey specification"				},
 	{ ESLURM_INVALID_LICENSES,
 	  "Invalid license specification"			},
 	{ ESLURM_NEED_RESTART,
@@ -306,6 +312,17 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Duplicate event trigger"				},
 	{ ESLURM_INTERNAL,
 	  "Slurm internal error, contact system administrator"	},
+	{ ESLURM_INVALID_BURST_BUFFER_CHANGE,
+	  "BurstBufferType change requires restart of slurmctld daemon "
+	  "to take effect"},
+	{ ESLURM_BURST_BUFFER_PERMISSION,
+	  "Burst Buffer permission denied"			},
+	{ ESLURM_BURST_BUFFER_LIMIT,
+	  "Burst Buffer resource limit exceeded"		},
+	{ ESLURM_INVALID_BURST_BUFFER_REQUEST,
+	  "Burst Buffer request invalid"			},
+	{ ESLURM_PRIO_RESET_FAIL,
+	  "Changes to job priority are not persistent, change nice instead" },
 
 	/* slurmd error codes */
 	{ ESLRUMD_PIPE_ERROR_ON_TASK_SPAWN,
@@ -371,7 +388,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESCRIPT_CHDIR_FAILED,
 	  "unable to change directory to work directory"	},
 	{ ESCRIPT_OPEN_OUTPUT_FAILED,
-	  "cound not open output file"			        },
+	  "could not open output file"			        },
 	{ ESCRIPT_NON_ZERO_RETURN,
 	  "Script terminated with non-zero exit code"		},
 

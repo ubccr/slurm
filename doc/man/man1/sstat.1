@@ -66,11 +66,18 @@ lowest step running if not specified, unless the \-\-allsteps flag is
 set where not specifying a step will result in all running steps to be
 displayed.
 NOTE: A step id of 'batch' will display the information about the batch step.
+NOTE: A step id of 'extern' will display the information about the
+extern step.  This step is only available when using PrologFlags=contain
 
 .TP
 \f3\-n\fP\f3,\fP \f3\-\-noheader\fP
 No heading will be added to the output. The default action is to
 display a header.
+
+.TP
+\f3\-\-noconvert\fP
+Don't convert units from their original type (e.g. 2048M won't be converted to
+2G).
 
 .TP
 \f3\-o\fP\f3,\fP \f3\-\-format\fP,\fP \f3\-\-fields\fP

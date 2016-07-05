@@ -151,17 +151,21 @@ static int _mysql_query_internal(MYSQL *db_conn, char *query)
 		}
 		error("mysql_query failed: %d %s\n%s", errno, err_str, query);
 		if (errno == ER_LOCK_WAIT_TIMEOUT) {
+			/* FIXME: If we get ER_LOCK_WAIT_TIMEOUT here we need
+			 * to restart the connections, but it appears restarting
+			 * the calling program is the only way to handle this.
+			 * If anyone in the future figures out a way to handle
+			 * this, super.  Until then we will need to restart the
+			 * calling program if you ever get this error.
+			 */
 			fatal("mysql gave ER_LOCK_WAIT_TIMEOUT as an error. "
 			      "The only way to fix this is restart the "
 			      "calling program");
+		} else if (errno == ER_HOST_IS_BLOCKED) {
+			fatal("MySQL gave ER_HOST_IS_BLOCKED as an error. "
+			      "You will need to call 'mysqladmin flush-hosts' "
+			      "to regain connectivity.");
 		}
-		/* FIXME: If we get ER_LOCK_WAIT_TIMEOUT here we need
-		 * to restart the connections, but it appears restarting
-		 * the calling program is the only way to handle this.
-		 * If anyone in the future figures out a way to handle
-		 * this, super.  Until then we will need to restart the
-		 * calling program if you ever get this error.
-		 */
 		rc = SLURM_ERROR;
 	}
 end_it:
@@ -264,8 +268,18 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 
 
 	itr = list_iterator_create(columns);
+#ifdef NO_ALTER_IGNORE_MYSQL
+	/* In MySQL 5.7.4 we lost the ability to run 'alter ignore'.  This was
+	 * needed when converting old tables to new schemas.  If people convert
+	 * in the future from an older version of Slurm that needed the ignore
+	 * to work they will have to downgrade mysql to <= 5.7.3 to make things
+	 * work correctly or manually edit the database to get things to work.
+	 */
 	query = xstrdup_printf("alter table %s", table_name);
-	correct_query = xstrdup_printf("alter table %s", table_name);
+#else
+	query = xstrdup_printf("alter ignore table %s", table_name);
+#endif
+	correct_query = xstrdup(query);
 	START_TIMER;
 	while (fields[i].name) {
 		int found = 0;
@@ -323,7 +337,7 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 	}
 
 	list_iterator_destroy(itr);
-	list_destroy(columns);
+	FREE_NULL_LIST(columns);
 
 	if ((temp = strstr(ending, "primary key ("))) {
 		int open = 0, close =0;
@@ -419,9 +433,12 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 				xstrfmtcat(correct_query,
 					   " drop key %s,", db_key->name);
 				_destroy_db_key(db_key);
-			} else
+			} else {
+				xstrfmtcat(correct_query,
+					   " drop key %s,", new_key_name);
 				info("adding %s to table %s",
 				     new_key, table_name);
+			}
 
 			xstrfmtcat(query, " add %s,",  new_key);
 			xstrfmtcat(correct_query, " add %s,",  new_key);
@@ -439,7 +456,7 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 	}
 	list_iterator_destroy(itr);
 
-	list_destroy(keys_list);
+	FREE_NULL_LIST(keys_list);
 
 	query[strlen(query)-1] = ';';
 	correct_query[strlen(correct_query)-1] = ';';
@@ -597,7 +614,7 @@ extern int destroy_mysql_conn(mysql_conn_t *mysql_conn)
 		xfree(mysql_conn->pre_commit_query);
 		xfree(mysql_conn->cluster_name);
 		slurm_mutex_destroy(&mysql_conn->lock);
-		list_destroy(mysql_conn->update_list);
+		FREE_NULL_LIST(mysql_conn->update_list);
 		xfree(mysql_conn);
 	}
 

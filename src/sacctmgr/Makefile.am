@@ -20,13 +20,15 @@ sacctmgr_SOURCES =	\
 	event_functions.c	\
 	file_functions.c	\
 	job_functions.c		\
+	reservation_functions.c	\
 	resource_functions.c	\
 	sacctmgr.c sacctmgr.h	\
 	qos_functions.c		\
 	txn_functions.c		\
 	user_functions.c	\
 	wckey_functions.c	\
-	problem_functions.c
+	problem_functions.c     \
+	tres_function.c
 
 sacctmgr_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
 

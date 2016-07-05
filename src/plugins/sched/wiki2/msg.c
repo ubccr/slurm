@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  msg.c - Message/communcation manager for Wiki plugin
+ *  msg.c - Message/communication manager for Wiki plugin
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -42,7 +42,7 @@
 #include "src/slurmctld/locks.h"
 #include "src/plugins/sched/wiki2/crypto.h"
 #include "src/plugins/sched/wiki2/msg.h"
-#include <sys/poll.h>
+#include <poll.h>
 
 #define _DEBUG 0
 
@@ -130,7 +130,7 @@ extern void term_msg_thread(void)
 		fd = slurm_open_stream(&addr, true);
 		if (fd != -1) {
 			/* we don't care if the open failed */
-			slurm_close_stream(fd);
+			slurm_close(fd);
 		}
 
 		debug2("waiting for sched/wiki2 thread to exit");
@@ -202,7 +202,7 @@ static void *_msg_thread(void *no_data)
 			_proc_msg(new_fd, msg);
 			xfree(msg);
 		}
-		slurm_close_accepted_conn(new_fd);
+		slurm_close(new_fd);
 	}
 	verbose("wiki: message engine shutdown");
 	if (sock_fd > 0)

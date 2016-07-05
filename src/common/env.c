@@ -49,7 +49,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include <signal.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/param.h>		/* MAXPATHLEN */
@@ -417,7 +417,7 @@ int setup_env(env_t *env, bool preserve_env)
 			rc = SLURM_FAILURE;
 		}
 
-	if (env->distribution == SLURM_DIST_PLANE)
+	if ((env->distribution & SLURM_DIST_STATE_BASE) == SLURM_DIST_PLANE)
 		if (setenvf(&env->env, "SLURM_DIST_PLANESIZE", "%u",
 			    env->plane_size)) {
 			error("Can't set SLURM_DIST_PLANESIZE "
@@ -631,24 +631,9 @@ int setup_env(env_t *env, bool preserve_env)
 		}
 	}
 
-	if ((env->cpu_freq != NO_VAL) && /* Default value from srun */
-	    (env->cpu_freq != 0)) {      /* Default value from slurmstepd
-					  * for batch jobs */
-		int sts;
-
-		if (env->cpu_freq & CPU_FREQ_RANGE_FLAG) {
-			char buf[32];
-			cpu_freq_to_string(buf, sizeof(buf), env->cpu_freq);
-			sts = setenvf(&env->env, "SLURM_CPU_FREQ_REQ", buf);
-		} else {
-			sts = setenvf(&env->env, "SLURM_CPU_FREQ_REQ", "%u",
-				      env->cpu_freq);
-		}
-		if (sts) {
-			error("Unable to set SLURM_CPU_FREQ_REQ");
-			rc = SLURM_FAILURE;
-		}
-	}
+	if (cpu_freq_set_env("SLURM_CPU_FREQ_REQ", env->cpu_freq_min,
+			env->cpu_freq_max, env->cpu_freq_gov) != SLURM_SUCCESS)
+		rc = SLURM_FAILURE;
 
 	if (env->overcommit
 	    && (setenvf(&env->env, "SLURM_OVERCOMMIT", "1"))) {
@@ -856,6 +841,37 @@ int setup_env(env_t *env, bool preserve_env)
 		}
 	}
 
+	if (env->account) {
+		if (setenvf(&env->env,
+			    "SLURM_JOB_ACCOUNT",
+			    "%s",
+			    env->account)) {
+			error("%s: can't set SLURM_JOB_ACCOUNT env variable",
+			      __func__);
+			rc = SLURM_FAILURE;
+		}
+	}
+	if (env->qos) {
+		if (setenvf(&env->env,
+			    "SLURM_JOB_QOS",
+			    "%s",
+			    env->qos)) {
+			error("%s: can't set SLURM_JOB_QOS env variable",
+				__func__);
+			rc = SLURM_FAILURE;
+		}
+	}
+	if (env->resv_name) {
+		if (setenvf(&env->env,
+			    "SLURM_JOB_RESERVATION",
+			    "%s",
+			    env->resv_name)) {
+			error("%s: can't set SLURM_JOB_RESERVATION env variable",
+				__func__);
+			rc = SLURM_FAILURE;
+		}
+	}
+
 	return rc;
 }
 
@@ -972,9 +988,10 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 {
 	char *tmp = NULL;
 	char *dist = NULL, *lllp_dist = NULL;
+	char *key, *value;
 	slurm_step_layout_t *step_layout = NULL;
 	uint32_t num_tasks = desc->num_tasks;
-	int rc = SLURM_SUCCESS;
+	int i, rc = SLURM_SUCCESS;
 	uint32_t node_cnt = alloc->node_cnt;
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
@@ -1006,7 +1023,7 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 		env_array_overwrite_fmt(dest, "SLURM_DISTRIBUTION", "%s",
 					dist);
 
-	if (desc->task_dist == SLURM_DIST_PLANE)
+	if ((desc->task_dist & SLURM_DIST_STATE_BASE) == SLURM_DIST_PLANE)
 		env_array_overwrite_fmt(dest, "SLURM_DIST_PLANESIZE",
 					"%u", desc->plane_size);
 
@@ -1054,7 +1071,7 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 		//num_tasks = desc->min_cpus;
 	}
 
-	if (desc->task_dist == SLURM_DIST_ARBITRARY) {
+	if ((desc->task_dist & SLURM_DIST_STATE_BASE) == SLURM_DIST_ARBITRARY) {
 		tmp = desc->req_nodes;
 		env_array_overwrite_fmt(dest, "SLURM_ARBITRARY_NODELIST",
 					"%s", tmp);
@@ -1076,6 +1093,21 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 	slurm_step_layout_destroy(step_layout);
 	env_array_overwrite_fmt(dest, "SLURM_TASKS_PER_NODE", "%s", tmp);
 	xfree(tmp);
+
+	if (alloc->env_size) {	/* Used to set Burst Buffer environment */
+		for (i = 0; i < alloc->env_size; i++) {
+			tmp = xstrdup(alloc->environment[i]);
+			key = tmp;
+			value = strchr(tmp, '=');
+			if (value) {
+				value[0] = '\0';
+				value++;
+				env_array_overwrite(dest, key, value);
+			}
+			xfree(tmp);
+		}
+	}
+
 	return rc;
 }
 
@@ -1115,7 +1147,7 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	slurm_step_layout_t *step_layout = NULL;
 	uint32_t num_tasks = batch->ntasks;
 	uint16_t cpus_per_task;
-	uint16_t task_dist;
+	uint32_t task_dist;
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
 	_setup_particulars(cluster_flags, dest, batch->select_jobinfo);
@@ -1172,12 +1204,16 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	else
 		cpus_per_task = 1;	/* default value */
 
+	/* Only overwrite this if it is set.  They are set in
+	 * sbatch directly and could have changed. */
+	if (getenvp(*dest, "SLURM_CPUS_PER_TASK"))
+		env_array_overwrite_fmt(dest, "SLURM_CPUS_PER_TASK", "%u",
+					cpus_per_task);
+
 	if (num_tasks) {
-		env_array_overwrite_fmt(dest, "SLURM_NTASKS", "%u",
-					num_tasks);
+		env_array_append_fmt(dest, "SLURM_NTASKS", "%u", num_tasks);
 		/* keep around for old scripts */
-		env_array_overwrite_fmt(dest, "SLURM_NPROCS", "%u",
-					num_tasks);
+		env_array_append_fmt(dest, "SLURM_NPROCS", "%u", num_tasks);
 	} else {
 		num_tasks = num_cpus / cpus_per_task;
 	}
@@ -1215,8 +1251,32 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 					tmp_mem);
 	}
 
-	return SLURM_SUCCESS;
+	/* Set the SLURM_JOB_ACCOUNT,  SLURM_JOB_QOS
+	 * and SLURM_JOB_RESERVATION if set by
+	 * the controller.
+	 */
+	if (batch->account) {
+		env_array_overwrite_fmt(dest,
+					"SLURM_JOB_ACCOUNT",
+					"%s",
+					batch->account);
+	}
 
+	if (batch->qos) {
+		env_array_overwrite_fmt(dest,
+					"SLURM_JOB_QOS",
+					"%s",
+					batch->qos);
+	}
+
+	if (batch->resv_name) {
+		env_array_overwrite_fmt(dest,
+					"SLURM_JOB_RESERVATION",
+					"%s",
+					batch->resv_name);
+	}
+
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -1263,6 +1323,8 @@ env_array_for_step(char ***dest,
 	env_array_overwrite_fmt(dest, "SLURM_STEP_ID", "%u", step->job_step_id);
 	env_array_overwrite_fmt(dest, "SLURM_STEP_NODELIST",
 				"%s", step->step_layout->node_list);
+	env_array_append_fmt(dest, "SLURM_JOB_NODELIST",
+			     "%s", step->step_layout->node_list);
 	if (cluster_flags & CLUSTER_FLAG_BG) {
 		char geo_char[HIGHEST_DIMENSIONS+1];
 
@@ -1630,6 +1692,32 @@ void env_array_merge_slurm(char ***dest_array, const char **src_array)
 					      value, ENV_BUFSIZE) &&
 		    (strncmp(name, "SLURM", 5) == 0))
 			env_array_overwrite(dest_array, name, value);
+	}
+	xfree(value);
+}
+
+/*
+ * Merge all of the environment variables in src_array into the array
+ * dest_array and strip any header names of "SPANK_".  Any variables already
+ * found in dest_array will be overwritten with the value from src_array.
+ */
+void env_array_merge_spank(char ***dest_array, const char **src_array)
+{
+	char **ptr;
+	char name[256], *value;
+
+	if (src_array == NULL)
+		return;
+
+	value = xmalloc(ENV_BUFSIZE);
+	for (ptr = (char **)src_array; *ptr != NULL; ptr++) {
+		if (_env_array_entry_splitter(*ptr, name, sizeof(name),
+					      value, ENV_BUFSIZE)) {
+			if (strncmp(name, "SPANK_" ,6))
+				env_array_overwrite(dest_array, name, value);
+			else
+				env_array_overwrite(dest_array, name+6, value);
+		}
 	}
 	xfree(value);
 }

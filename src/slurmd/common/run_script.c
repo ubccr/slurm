@@ -76,18 +76,16 @@ int waitpid_timeout (const char *name, pid_t pid, int *pstatus, int timeout)
 		if (rc < 0) {
 			if (errno == EINTR)
 				continue;
-			error("waidpid: %m");
+			error("waitpid: %m");
 			return (-1);
-		}
-		else if (timeout_ms <= 0) {
+		} else if (timeout_ms <= 0) {
 			info ("%s%stimeout after %ds: killing pgid %d",
 			      name != NULL ? name : "",
 			      name != NULL ? ": " : "",
 			      timeout, pid);
 			killpg(pid, SIGKILL);
 			options = 0;
-		}
-		else {
+		} else {
 			poll(NULL, 0, delay);
 			timeout_ms -= delay;
 			delay = MIN (timeout_ms, MIN(max_delay, delay*2));
@@ -236,7 +234,7 @@ int run_script(const char *name, const char *pattern, uint32_t job_id,
 
 	}
 	list_iterator_destroy (i);
-	list_destroy (l);
+	FREE_NULL_LIST (l);
 
 	return rc;
 }

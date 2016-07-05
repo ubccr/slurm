@@ -5,7 +5,7 @@
  *  Written by Bull- Yiannis Georgiou
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -98,17 +98,13 @@
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as the job accounting API
- * matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 
 const char plugin_name[] = "AcctGatherInfiniband OFED plugin";
 const char plugin_type[] = "acct_gather_infiniband/ofed";
-const uint32_t plugin_version = 100;
+const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
 typedef struct {
 	uint32_t port;
@@ -140,6 +136,8 @@ static uint8_t pc[1024];
 static slurm_ofed_conf_t ofed_conf;
 static uint64_t debug_flags = 0;
 static pthread_mutex_t ofed_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int dataset_id = -1; /* id of the dataset for profile data */
 
 static uint8_t *_slurm_pma_query_via(void *rcvbuf, ib_portid_t * dest, int port,
 				     unsigned timeout, unsigned id,
@@ -264,20 +262,50 @@ static int _read_ofed_values(void)
  */
 static int _update_node_infiniband(void)
 {
-	acct_network_data_t net;
-	int rc = SLURM_SUCCESS;
+	int rc;
+
+	enum {
+		FIELD_PACKIN,
+		FIELD_PACKOUT,
+		FIELD_MBIN,
+		FIELD_MBOUT,
+		FIELD_CNT
+	};
+
+	acct_gather_profile_dataset_t dataset[] = {
+		{ "PacketsIn", PROFILE_FIELD_UINT64 },
+		{ "PacketsOut", PROFILE_FIELD_UINT64 },
+		{ "InMB", PROFILE_FIELD_DOUBLE },
+		{ "OutMB", PROFILE_FIELD_DOUBLE },
+		{ NULL, PROFILE_FIELD_NOT_SET }
+	};
+
+	union {
+		double d;
+		uint64_t u64;
+	} data[FIELD_CNT];
+
+	if (dataset_id < 0) {
+		dataset_id = acct_gather_profile_g_create_dataset("Network",
+			NO_PARENT, dataset);
+		if (debug_flags & DEBUG_FLAG_INFINIBAND)
+			debug("IB: dataset created (id = %d)", dataset_id);
+		if (dataset_id == SLURM_ERROR) {
+			error("IB: Failed to create the dataset for ofed");
+			return SLURM_ERROR;
+		}
+	}
 
 	slurm_mutex_lock(&ofed_lock);
-	rc = _read_ofed_values();
+	if ((rc = _read_ofed_values()) != SLURM_SUCCESS) {
+		slurm_mutex_unlock(&ofed_lock);
+		return rc;
+	}
 
-	memset(&net, 0, sizeof(acct_network_data_t));
-
-	net.packets_in = ofed_sens.rcvpkts;
-	net.packets_out = ofed_sens.xmtpkts;
-	net.size_in = (double) ofed_sens.rcvdata / 1048576;
-	net.size_out = (double) ofed_sens.xmtdata / 1048576;
-	acct_gather_profile_g_add_sample_data(ACCT_GATHER_PROFILE_NETWORK,
-					      &net);
+	data[FIELD_PACKIN].u64 = ofed_sens.rcvpkts;
+	data[FIELD_PACKOUT].u64 = ofed_sens.xmtpkts;
+	data[FIELD_MBIN].d = (double) ofed_sens.rcvdata / (1 << 20);
+	data[FIELD_MBOUT].d = (double) ofed_sens.xmtdata / (1 << 20);
 
 	if (debug_flags & DEBUG_FLAG_INFINIBAND) {
 		info("ofed-thread = %d sec, transmitted %"PRIu64" bytes, "
@@ -287,7 +315,13 @@ static int _update_node_infiniband(void)
 	}
 	slurm_mutex_unlock(&ofed_lock);
 
-	return rc;
+	if (debug_flags & DEBUG_FLAG_PROFILE) {
+		char str[256];
+		info("PROFILE-Network: %s", acct_gather_profile_dataset_str(
+			     dataset, data, str, sizeof(str)));
+	}
+	return acct_gather_profile_g_add_sample_data(dataset_id, (void *)data,
+						     ofed_sens.update_time);
 }
 
 static bool _run_in_daemon(void)

@@ -105,6 +105,8 @@ const char * plugin_strerror(plugin_err_t e)
 		case EPLUGIN_MISSING_SYMBOL:
 			return ("Plugin missing a required symbol use "
 				"debug3 to see");
+		case EPLUGIN_BAD_VERSION:
+			return ("Incompatible plugin version");
 	}
 	return ("Unknown error");
 }
@@ -135,14 +137,18 @@ plugin_peek( const char *fq_path,
 		return SLURM_ERROR;
 	}
 
-	if ( ( version = (uint32_t *) dlsym( plug, PLUGIN_VERSION ) ) != NULL ) {
-		if ( plugin_version != NULL ) {
-			*plugin_version = *version;
-		}
-	} else {
-		dlclose( plug );
-		/* could be vestigial library, don't treat as an error */
-		verbose( "%s: not a SLURM plugin", fq_path );
+	version = (uint32_t *) dlsym(plug, PLUGIN_VERSION);
+	if (!version) {
+		verbose("%s: plugin_version symbol not defined", fq_path);
+	} else if ((*version != SLURM_VERSION_NUMBER) && strcmp(type, "spank")){
+		/* NOTE: We could alternatly test just the MAJOR.MINOR values */
+		int plugin_major, plugin_minor, plugin_micro;
+		plugin_major = SLURM_VERSION_MAJOR(*version);
+		plugin_minor = SLURM_VERSION_MINOR(*version);
+		plugin_micro = SLURM_VERSION_MICRO(*version);
+		dlclose(plug);
+		info("%s: Incompatible Slurm plugin version (%d.%d.%d)",
+		     fq_path, plugin_major, plugin_minor, plugin_micro);
 		return SLURM_ERROR;
 	}
 
@@ -155,6 +161,8 @@ plugin_load_from_file(plugin_handle_t *p, const char *fq_path)
 {
 	plugin_handle_t plug;
 	int (*init)(void);
+	uint32_t *version;
+	char *type = NULL;
 
 	*p = PLUGIN_INVALID_HANDLE;
 
@@ -188,10 +196,24 @@ plugin_load_from_file(plugin_handle_t *p, const char *fq_path)
 
 	/* Now see if our required symbols are defined. */
 	if ((dlsym(plug, PLUGIN_NAME) == NULL) ||
-	    (dlsym(plug, PLUGIN_TYPE) == NULL) ||
-	    (dlsym(plug, PLUGIN_VERSION) == NULL)) {
-		dlclose (plug);
+	    ((type = dlsym(plug, PLUGIN_TYPE)) == NULL)) {
+		dlclose(plug);
 		return EPLUGIN_MISSING_NAME;
+	}
+
+	version = (uint32_t *) dlsym(plug, PLUGIN_VERSION);
+	if (!version) {
+		verbose("%s: plugin_version symbol not defined", fq_path);
+	} else if ((*version != SLURM_VERSION_NUMBER) && strcmp(type, "spank")){
+		/* NOTE: We could alternatly test just the MAJOR.MINOR values */
+		int plugin_major, plugin_minor, plugin_micro;
+		plugin_major = SLURM_VERSION_MAJOR(*version);
+		plugin_minor = SLURM_VERSION_MINOR(*version);
+		plugin_micro = SLURM_VERSION_MICRO(*version);
+		dlclose(plug);
+		info("%s: Incompatible Slurm plugin version (%d.%d.%d)",
+		     fq_path, plugin_major, plugin_minor, plugin_micro);
+		return EPLUGIN_BAD_VERSION;
 	}
 
 	/*
@@ -298,7 +320,18 @@ plugin_unload( plugin_handle_t plug )
 		if ( ( fini = dlsym( plug, "fini" ) ) != NULL ) {
 			(*fini)();
 		}
+#ifndef MEMORY_LEAK_DEBUG
+/**************************************************************************\
+ * To test for memory leaks, set MEMORY_LEAK_DEBUG to 1 using
+ * "configure --enable-memory-leak-debug" then execute
+ *
+ * Note that without --enable-memory-leak-debug the daemon will
+ * unload the shared objects at exit thus preventing valgrind
+ * to display the stack where the eventual leaks may be.
+ * It is always best to test with and without --enable-memory-leak-debug.
+\**************************************************************************/
 		(void) dlclose( plug );
+#endif
 	}
 }
 
@@ -335,8 +368,9 @@ plugin_get_version( plugin_handle_t plug )
 {
 	uint32_t *ptr;
 
-	if ( plug == PLUGIN_INVALID_HANDLE ) return 0;
-	ptr = (uint32_t *) dlsym( plug, PLUGIN_VERSION );
+	if (plug == PLUGIN_INVALID_HANDLE)
+		return 0;
+	ptr = (uint32_t *) dlsym(plug, PLUGIN_VERSION);
 	return ptr ? *ptr : 0;
 }
 

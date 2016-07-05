@@ -60,7 +60,9 @@ extern char *default_plugstack;
 #define ACCOUNTING_ENFORCE_SAFE   0x0010
 #define ACCOUNTING_ENFORCE_NO_JOBS 0x0020
 #define ACCOUNTING_ENFORCE_NO_STEPS 0x0040
+#define ACCOUNTING_ENFORCE_TRES   0x0080
 
+#define DEFAULT_ACCOUNTING_TRES  "cpu,mem,energy,node"
 #define DEFAULT_ACCOUNTING_DB      "slurm_acct_db"
 #define DEFAULT_ACCOUNTING_ENFORCE  0
 #define DEFAULT_ACCOUNTING_STORAGE_TYPE "accounting_storage/none"
@@ -116,13 +118,16 @@ extern char *default_plugstack;
 #define DEFAULT_MAIL_PROG           "/bin/mail"
 #define DEFAULT_MAX_ARRAY_SIZE      1001
 #define DEFAULT_MAX_JOB_COUNT       10000
-#define DEFAULT_MAX_JOB_ID          0xffff0000
+#define DEFAULT_MAX_JOB_ID          0x7fff0000
 #define DEFAULT_MAX_STEP_COUNT      40000
 #define DEFAULT_MEM_PER_CPU         0
 #define DEFAULT_MAX_MEM_PER_CPU     0
 #define DEFAULT_MIN_JOB_AGE         300
 #define DEFAULT_MPI_DEFAULT         "none"
+#define DEFAULT_MSG_AGGR_WINDOW_MSGS 1
+#define DEFAULT_MSG_AGGR_WINDOW_TIME 100
 #define DEFAULT_MSG_TIMEOUT         10
+#define DEFAULT_POWER_PLUGIN        ""
 #ifdef HAVE_AIX		/* AIX specific default configuration parameters */
 #  define DEFAULT_CHECKPOINT_TYPE   "checkpoint/aix"
 #  define DEFAULT_PROCTRACK_TYPE    "proctrack/aix"
@@ -245,12 +250,14 @@ typedef struct slurm_conf_partition {
 	char *alternate;	/* name of alternate partition */
 	uint16_t cr_type;	/* Custom CR values for partition (supported
 				 * by select/cons_res plugin only) */
+	char *billing_weights_str;/* per TRES billing weights */
 	uint32_t def_mem_per_cpu; /* default MB memory per allocated CPU */
 	bool default_flag;	/* Set if default partition */
 	uint32_t default_time;	/* minutes or INFINITE */
 	uint16_t disable_root_jobs; /* if set then user root can't run
 				     * jobs if NO_VAL use global
 				     * default */
+	uint16_t exclusive_user; /* 1 if node allocations by user */
 	uint32_t grace_time;	/* default grace time for partition */
 	bool     hidden_flag;	/* 1 if hidden by default */
 	bool     lln_flag;	/* 1 if nodes are selected in LLN order */
@@ -264,6 +271,7 @@ typedef struct slurm_conf_partition {
 	char 	*nodes;		/* comma delimited list names of nodes */
 	uint16_t preempt_mode;	/* See PREEMPT_MODE_* in slurm/slurm.h */
 	uint16_t priority;	/* scheduling priority for jobs */
+	char    *qos_char;      /* Name of QOS associated with partition */
 	bool     req_resv_flag; /* 1 if partition can only be used in a
 				 * reservation */
 	bool     root_only_flag;/* 1 if allocate/submit RPC can only be

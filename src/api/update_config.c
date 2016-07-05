@@ -129,6 +129,17 @@ slurm_update_node ( update_node_msg_t * node_msg)
 {
 	return _slurm_update ((void *) node_msg, REQUEST_UPDATE_NODE);
 }
+/*
+ * slurm_update_layout - issue RPC to a layout's configuration per request,
+ *	only usable by user root
+ * IN layout_msg - command line (same format as conf)
+ * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ */
+int
+slurm_update_layout ( update_layout_msg_t * layout_msg)
+{
+	return _slurm_update ((void *) layout_msg, REQUEST_UPDATE_LAYOUT);
+}
 
 /*
  * slurm_create_partition - create a new partition, only usable by user root
@@ -163,6 +174,17 @@ int
 slurm_delete_partition ( delete_part_msg_t * part_msg )
 {
 	return _slurm_update ((void *) part_msg, REQUEST_DELETE_PARTITION);
+}
+
+/*
+ * slurm_update_powercap - issue RPC to update powercapping cap 
+ * IN powercap_msg - description of powercapping updates
+ * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ */
+int
+slurm_update_powercap ( update_powercap_msg_t * powercap_msg )
+{
+	return _slurm_update ((void *) powercap_msg, REQUEST_UPDATE_POWERCAP);
 }
 
 /*

@@ -4,6 +4,9 @@
  *  Copyright (C) 2011-2012 National University of Defense Technology.
  *  Written by Hongjia Cao <hjcao@nudt.edu.cn>.
  *  All rights reserved.
+ *  Portions copyright (C) 2015 Mellanox Technologies Inc.
+ *  Written by Artem Polyakov <artemp@mellanox.com>.
+ *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -45,7 +48,7 @@
 
 #include <slurm/slurm_errno.h>
 #include "src/common/slurm_xlator.h"
-#include "src/common/mpi.h"
+#include "src/common/slurm_mpi.h"
 
 #include "setup.h"
 #include "agent.h"
@@ -72,15 +75,12 @@
  * of how this plugin satisfies that application.  SLURM will only load
  * a switch plugin if the plugin_type string has a prefix of "switch/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as this API matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "mpi PMI2 plugin";
 const char plugin_type[]        = "mpi/pmi2";
-const uint32_t plugin_version   = 100;
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 /*
  * The following is executed in slurmstepd.
@@ -178,4 +178,12 @@ int p_mpi_hook_client_fini(mpi_plugin_client_state_t *state)
 	spawn_job_wait();
 
 	return SLURM_SUCCESS;
+}
+
+extern int fini()
+{
+	/* cleanup after ourself */
+	pmi2_stop_agent();
+	pmi2_cleanup_stepd();
+	return 0;
 }

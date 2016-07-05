@@ -83,15 +83,12 @@ resource_allocation_response_msg_t *global_resp = NULL;
  * of how this plugin satisfies that application.  SLURM will only load
  * a task plugin if the plugin_type string has a prefix of "task/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as this API matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "launch aprun plugin";
 const char plugin_type[]        = "launch/aprun";
-const uint32_t plugin_version   = 101;
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 static pid_t aprun_pid = 0;
 
@@ -319,7 +316,8 @@ static void _handle_timeout(srun_timeout_msg_t *timeout_msg)
 static void _handle_msg(slurm_msg_t *msg)
 {
 	static uint32_t slurm_uid = NO_VAL;
-	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
+	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred,
+					     slurm_get_auth_info());
 	uid_t uid = getuid();
 	job_step_kill_msg_t *ss;
 	srun_user_msg_t *um;
@@ -389,12 +387,12 @@ static void *_msg_thr_internal(void *arg)
 		if (slurm_receive_msg(newsockfd, msg, 0) != 0) {
 			error("slurm_receive_msg: %m");
 			/* close the new socket */
-			slurm_close_accepted_conn(newsockfd);
+			slurm_close(newsockfd);
 			continue;
 		}
 		_handle_msg(msg);
 		slurm_free_msg(msg);
-		slurm_close_accepted_conn(newsockfd);
+		slurm_close(newsockfd);
 	}
 	return NULL;
 }
@@ -473,16 +471,23 @@ extern int launch_p_setup_srun_opt(char **rest)
 			"%u", opt.cpus_per_task);
 	}
 
-	if (opt.shared != (uint16_t)NO_VAL) {
-		opt.argc += 2;
-		xrealloc(opt.argv, opt.argc * sizeof(char *));
-		opt.argv[command_pos++] = xstrdup("-F");
-		opt.argv[command_pos++] = xstrdup("share");
-	} else if (opt.exclusive) {
+	if (opt.exclusive) {
 		opt.argc += 2;
 		xrealloc(opt.argv, opt.argc * sizeof(char *));
 		opt.argv[command_pos++] = xstrdup("-F");
 		opt.argv[command_pos++] = xstrdup("exclusive");
+	} else if (opt.shared == 1) {
+		opt.argc += 2;
+		xrealloc(opt.argv, opt.argc * sizeof(char *));
+		opt.argv[command_pos++] = xstrdup("-F");
+		opt.argv[command_pos++] = xstrdup("share");
+	}
+
+	if (opt.cpu_bind_type & CPU_BIND_ONE_THREAD_PER_CORE) {
+		opt.argc += 2;
+		xrealloc(opt.argv, opt.argc * sizeof(char *));
+		opt.argv[command_pos++] = xstrdup("-j");
+		opt.argv[command_pos++] = xstrdup("1");
 	}
 
 	if (opt.nodelist) {

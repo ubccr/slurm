@@ -138,6 +138,11 @@ is configured).
 If not specified, the scontrol show job will display 'ReqS:C:T=*:*:*'.
 
 .TP
+\fB\-\-bb\fR=<\fIspec\fR>
+Burst buffer specification.
+The form of the specification is system dependent.
+
+.TP
 \fB\-\-begin\fR=<\fItime\fR>
 Submit the batch script to the Slurm controller immediately, like normal, but
 tell the controller to defer the allocation of the job until the specified time.
@@ -266,6 +271,107 @@ cores per socket.  See additional information under \fB\-B\fR option
 above when task/affinity plugin is enabled.
 
 .TP
+\fB\-\-cpu\-freq\fR =<\fIp1\fR[\-\fIp2\fR[:\fIp3\fR]]>
+
+Request that job steps initiated by srun commands inside this sbatch script
+be run at some requested frequency if possible, on the CPUs selected
+for the step on the compute node(s).
+
+\fBp1\fR can be  [#### | low | medium | high | highm1] which will set the
+frequency scaling_speed to the corresponding value, and set the frequency
+scaling_governor to UserSpace. See below for definition of the values.
+
+\fBp1\fR can be [Conservative | OnDemand | Performance | PowerSave] which
+will set the scaling_governor to the corresponding value. The governor has to be
+in the list set by the slurm.conf option CpuFreqGovernors.
+
+When \fBp2\fR is present, p1 will be the minimum scaling frequency and
+p2 will be the maximum scaling frequency.
+
+\fBp2\fR can be  [#### | medium | high | highm1] p2 must be greater than p1.
+
+\fBp3\fR can be [Conservative | OnDemand | Performance | PowerSave | UserSpace]
+which will set the governor to the corresponding value.
+
+If \fBp3\fR is UserSpace, the frequency scaling_speed will be set by a power
+or energy aware scheduling strategy to a value between p1 and p2 that lets the
+job run within the site's power goal. The job may be delayed if p1 is higher
+than a frequency that allows the job to run within the goal.
+
+If the current frequency is < min, it will be set to min. Likewise,
+if the current frequency is > max, it will be set to max.
+
+Acceptable values at present include:
+.RS
+.TP 14
+\fB####\fR
+frequency in kilohertz
+.TP
+\fBLow\fR
+the lowest available frequency
+.TP
+\fBHigh\fR
+the highest available frequency
+.TP
+\fBHighM1\fR
+(high minus one) will select the next highest available frequency
+.TP
+\fBMedium\fR
+attempts to set a frequency in the middle of the available range
+.TP
+\fBConservative\fR
+attempts to use the Conservative CPU governor
+.TP
+\fBOnDemand\fR
+attempts to use the OnDemand CPU governor (the default value)
+.TP
+\fBPerformance\fR
+attempts to use the Performance CPU governor
+.TP
+\fBPowerSave\fR
+attempts to use the PowerSave CPU governor
+.TP
+\fBUserSpace\fR
+attempts to use the UserSpace CPU governor
+.TP
+.RE
+
+The following informational environment variable is set in the job
+step when \fB\-\-cpu\-freq\fR option is requested.
+.nf
+        SLURM_CPU_FREQ_REQ
+.fi
+
+This environment variable can also be used to supply the value for the
+CPU frequency request if it is set when the 'srun' command is issued.
+The \fB\-\-cpu\-freq\fR on the command line will override the
+environment variable value.  The form on the environment variable is
+the same as the command line.
+See the \fBENVIRONMENT VARIABLES\fR
+section for a description of the SLURM_CPU_FREQ_REQ variable.
+
+\fBNOTE\fR: This parameter is treated as a request, not a requirement.
+If the job step's node does not support setting the CPU frequency, or
+the requested value is outside the bounds of the legal frequencies, an
+error is logged, but the job step is allowed to continue.
+
+\fBNOTE\fR: Setting the frequency for just the CPUs of the job step
+implies that the tasks are confined to those CPUs.  If task
+confinement (i.e., TaskPlugin=task/affinity or
+TaskPlugin=task/cgroup with the "ConstrainCores" option) is not
+configured, this parameter is ignored.
+
+\fBNOTE\fR: When the step completes, the frequency and governor of each
+selected CPU is reset to the configured \fBCpuFreqDef\fR value with a
+default value of the OnDemand CPU governor.
+
+\fBNOTE\fR: When submitting jobs with  the \fB\-\-cpu\-freq\fR option
+with linuxproc as the ProctrackType can cause jobs to run too quickly before
+Accounting is able to poll for job information. As a result not all of
+accounting information will be present.
+.RE
+
+.TP
 \fB\-c\fR, \fB\-\-cpus\-per\-task\fR=<\fIncpus\fR>
 Advise the Slurm controller that ensuing job steps will require \fIncpus\fR
 number of processors per task.  Without this option, the controller will
@@ -284,10 +390,16 @@ of 4 nodes, one for each of the 4 tasks.
 Defer the start of this job until the specified dependencies have been
 satisfied completed.
 <\fIdependency_list\fR> is of the form
-<\fItype:job_id[:job_id][,type:job_id[:job_id]]\fR>.
+<\fItype:job_id[:job_id][,type:job_id[:job_id]]\fR> or
+<\fItype:job_id[:job_id][?type:job_id[:job_id]]\fR>.
+All dependencies must be satisfied if the "," separator is used.
+Any dependency may be satisfied if the "?" separator is used.
 Many jobs can share the same dependency and these jobs may even belong to
 different  users. The  value may be changed after job submission using the
 scontrol command.
+Once a job dependency fails due to the termination state of a preceding job,
+the dependent job will never be run, even if the preceding job is requeued and
+has a different termination state in a subsequent execution.
 .PD
 .RS
 .TP
@@ -334,8 +446,9 @@ replaced by the job ID.
 See the \fB\-\-input\fR option for filename specification options.
 
 .TP
-\fB\-\-exclusive\fR
-The job allocation can not share nodes with other running jobs.
+\fB\-\-exclusive[=user]\fR
+The job allocation can not share nodes with other running jobs (or just other
+users with the "=user" option).
 The default shared/exclusive behavior depends on system configuration and the
 partition's \fBShared\fR option takes precedence over the job's option.
 
@@ -502,7 +615,7 @@ read on sbatch's standard input.
 .TP
 \fB\-\-jobid\fR=<\fIjobid\fR>
 Allocate resources as the specified job id.
-NOTE: Only valid for user root.
+NOTE: Only valid for users root and SlurmUser.
 
 .TP
 \fB\-k\fR, \fB\-\-no\-kill\fR
@@ -515,6 +628,14 @@ new job steps on the remaining nodes in their allocation.
 
 By default Slurm terminates the entire job allocation if any node fails in its
 range of allocated nodes.
+
+.TP
+\fB\-\-kill-on-invalid-dep\fR=<\fIyes|no\fR>
+If a job has an invalid dependency and it can never run this parameter tells
+Slurm to terminate it or not. A terminated job state will be JOB_CANCELLED.
+If this option is not specified the system wide behavior applies.
+By default the job stays pending with reason DependencyNeverSatisfied or if the
+kill_invalid_depend is specified in slurm.conf the job is terminated.
 
 .TP
 \fB\-L\fR, \fB\-\-licenses\fR=<\fBlicense\fR>
@@ -637,12 +758,15 @@ fashion across sockets.
 .TP
 \fB\-\-mail\-type\fR=<\fItype\fR>
 Notify user by email when certain event types occur.
-Valid \fItype\fR values are BEGIN, END, FAIL, REQUEUE, ALL (equivalent to
-BEGIN, END, FAIL and REQUEUE), TIME_LIMIT, TIME_LIMIT_90 (reached 90 percent of
-time limit), TIME_LIMIT_80 (reached 80 percent of time limit), and TIME_LIMIT_50
+Valid \fItype\fR values are NONE, BEGIN, END, FAIL, REQUEUE, ALL (equivalent to
+BEGIN, END, FAIL, REQUEUE, and STAGE_OUT), STAGE_OUT (burst buffer stage out
+and teardown completed), TIME_LIMIT, TIME_LIMIT_90 (reached 90 percent of time limit),
+TIME_LIMIT_80 (reached 80 percent of time limit), and TIME_LIMIT_50
 (reached 50 percent of time limit).
 Multiple \fItype\fR values may be specified in a comma separated list.
 The user to be notified is indicated with \fB\-\-mail\-user\fR.
+Mail notifications on job BEGIN, END and FAIL apply to a job array as a whole
+rather than generating individual email messages for each task in the job array.
 
 .TP
 \fB\-\-mail\-user\fR=<\fIuser\fR>
@@ -947,9 +1071,10 @@ ignored if \fISchedulerType=sched/wiki\fR or
 
 .TP
 \fB\-\-no\-requeue\fR
-Specifies that the batch job should not be requeued after node failure.
+Specifies that the batch job should never be requeued under any circumstances.
 Setting this option will prevent system administrators from being able
-to restart the job (for example, after a scheduled downtime).
+to restart the job (for example, after a scheduled downtime), recover from
+a node failure, or be requeued upon preemption by a higher priority job.
 When a job is requeued, the batch script is initiated from its beginning.
 Also see the \fB\-\-requeue\fR option.
 The \fIJobRequeue\fR configuration parameter controls the default
@@ -1027,6 +1152,11 @@ The default value is specified by the system configuration parameter
 \fIJobFileAppend\fR.
 
 .TP
+\fB\-\-parsable\fR
+Outputs only the job id number and the cluster name if present.
+The values are separated by a semicolon. Errors will still be displayed.
+
+.TP
 \fB\-p\fR, \fB\-\-partition\fR=<\fIpartition_names\fR>
 Request a specific partition for the resource allocation.  If not specified,
 the default behavior is to allow the slurm controller to select the default
@@ -1038,9 +1168,17 @@ When the job is initiated, the name of the partition used will be placed first
 in the job record partition string.
 
 .TP
+\fB\-\-power\fR=<\fIflags\fR>
+Comma separated list of power management plugin options.
+Currently available flags include:
+level (all nodes allocated to the job should have identical power caps,
+may be disabled by the Slurm configuration option PowerParameters=job_no_level).
+
+.TP
 \fB\-\-priority\fR=<value>
 Request a specific job priority.
 May be subject to configuration specific constraints.
+Only Slurm operators and administrators can set the priority of a job.
 
 .TP
 \fB\-\-profile\fR=<all|none|[energy[,|task[,|lustre[,|network]]]]>
@@ -1074,11 +1212,6 @@ Lustre data is collected.
 \fBNetwork\fR
 Network (InfiniBand) data is collected.
 .RE
-
-.TP
-\fB\-\-parsable\fR
-Outputs only the job id number and the cluster name if present.
-The values are separated by a semicolon. Errors will still be displayed.
 
 .TP
 \fB\-\-propagate\fR[=\fIrlimitfR]
@@ -1146,7 +1279,9 @@ silently ignored.
 
 .TP
 \fB\-\-requeue\fR
-Specifies that the batch job should be requeued after node failure.
+Specifies that the batch job should eligible to being requeue.
+The job may be requeued explicitly by a system administrator, after node
+failure, or upon preemption by a higher priority job.
 When a job is requeued, the batch script is initiated from its beginning.
 Also see the \fB\-\-no\-requeue\fR option.
 The \fIJobRequeue\fR configuration parameter controls the default
@@ -1177,6 +1312,12 @@ Default value is dependent upon the node's configured CoreSpecCount value.
 If a value of zero is designated and the Slurm configuration option
 AllowSpecResourcesUsage is enabled, the job will be allowed to override
 CoreSpecCount and use the specialized resources on nodes it is allocated.
+This option can not be used with the \fB\-\-thread\-spec\fR option.
+
+.TP
+\fB\-\-sicp\fR
+Identify a job as one which jobs submitted to other clusters can be dependent
+upon.
 
 .TP
 \fB\-\-signal\fR=[B:]<\fIsig_num\fR>[@<\fIsig_time\fR>]
@@ -1223,10 +1364,13 @@ be left in a PENDING state (possibly indefinitely).  The default time
 limit is the partition's default time limit.  When the time limit is reached,
 each task in each job step is sent SIGTERM followed by SIGKILL.  The
 interval between signals is specified by the Slurm configuration
-parameter \fBKillWait\fR.  A time limit of zero requests that no time
-limit be imposed.  Acceptable time formats include "minutes",
-"minutes:seconds", "hours:minutes:seconds", "days\-hours",
-"days\-hours:minutes" and "days\-hours:minutes:seconds".
+parameter \fBKillWait\fR.  The \fBOverTimeLimit\fR configuration parameter may
+permit the job to run longer than scheduled.  Time resolution is one minute
+and second values are rounded up to the next minute.
+
+A time limit of zero requests that no time limit be imposed.  Acceptable time
+formats include "minutes", "minutes:seconds", "hours:minutes:seconds",
+"days\-hours", "days\-hours:minutes" and "days\-hours:minutes:seconds".
 
 .TP
 \fB\-\-tasks\-per\-node\fR=<\fIn\fR>
@@ -1238,6 +1382,13 @@ Equivalent to \fB\-\-ntasks\-per\-node\fR.
 Validate the batch script and return an estimate of when a job would be
 scheduled to run given the current job queue and all the other arguments
 specifying the job requirements. No job is actually submitted.
+
+.TP
+\fB\-\-thread\-spec\fR=<\fInum\fR>
+Count of specialized threads per node reserved by the job for system operations
+and not used by the application. The application will not use these threads,
+but will be charged for their allocation.
+This option can not be used with the \fB\-\-core\-spec\fR option.
 
 .TP
 \fB\-\-threads\-per\-core\fR=<\fIthreads\fR>
@@ -1418,6 +1569,9 @@ Same as \fB\-a, \-\-array\fR
 \fBSBATCH_BLRTS_IMAGE\fR
 Same as \fB\-\-blrts\-image\fR
 .TP
+\fBSBATCH_BURST_BUFFER\fR
+Same as \fB\-\-bb\fR
+.TP
 \fBSBATCH_CHECKPOINT\fR
 Same as \fB\-\-checkpoint\fR
 .TP
@@ -1436,7 +1590,6 @@ Same as \fB\-\-conn\-type\fR
 \fBSBATCH_CORE_SPEC\fR
 Same as \fB\-\-core\-spec\fR
 .TP
-.TP
 \fBSBATCH_DEBUG\fR
 Same as \fB\-v, \-\-verbose\fR
 .TP
@@ -1445,12 +1598,6 @@ Same as \fB\-m, \-\-distribution\fR
 .TP
 \fBSBATCH_EXCLUSIVE\fR
 Same as \fB\-\-exclusive\fR
-.TP
-\fBSLURM_EXIT_ERROR\fR
-Specifies the exit code generated when a Slurm error occurs
-(e.g. invalid options).
-This can be used by a script to distinguish application exit codes from
-various Slurm error conditions.
 .TP
 \fBSBATCH_EXPORT\fR
 Same as \fB\-\-export\fR
@@ -1506,6 +1653,9 @@ Same as \fB\-O, \-\-overcommit\fR
 \fBSBATCH_PARTITION\fR
 Same as \fB\-p, \-\-partition\fR
 .TP
+\fBSBATCH_POWER\fR
+Same as \fB\-\-power\fR
+.TP
 \fBSBATCH_PROFILE\fR
 Same as \fB\-\-profile\fR
 .TP
@@ -1526,8 +1676,14 @@ for that number of switches. See \fB\-\-switches\fR
 \fBSBATCH_REQUEUE\fR
 Same as \fB\-\-requeue\fR
 .TP
+\fBSBATCH_SICP\fR
+Same as \fB\-\-sicp\fR
+.TP
 \fBSBATCH_SIGNAL\fR
 Same as \fB\-\-signal\fR
+.TP
+\fBSBATCH_THREAD_SPEC\fR
+Same as \fB\-\-thread\-spec\fR
 .TP
 \fBSBATCH_TIMELIMIT\fR
 Same as \fB\-t, \-\-time\fR
@@ -1543,6 +1699,12 @@ Same as \fB\-\-wckey\fR
 .TP
 \fBSLURM_CONF\fR
 The location of the Slurm configuration file.
+.TP
+\fBSLURM_EXIT_ERROR\fR
+Specifies the exit code generated when a Slurm error occurs
+(e.g. invalid options).
+This can be used by a script to distinguish application exit codes from
+various Slurm error conditions.
 .TP
 \fBSLURM_STEP_KILLED_MSG_NODE_ID\fR=ID
 If set, only the specified node will log when the job or step are killed
@@ -1565,8 +1727,50 @@ Do not free a block on Blue Gene L/P systems only.
 \fBMPIRUN_PARTITION\fR
 The block name on Blue Gene systems only.
 .TP
+\fBSBATCH_CPU_BIND\fR
+Set to value of the \-\-cpu_bind\fR option.
+.TP
+\fBSBATCH_CPU_BIND_VERBOSE\fR
+Set to "verbose" if the \-\-cpu_bind\fR option includes the verbose option.
+Set to "quiet" otherwise.
+.TP
+\fBSBATCH_CPU_BIND_TYPE\fR
+Set to the CPU binding type specified with the \-\-cpu_bind\fR option.
+Possible values two possible comma separated strings.
+The first possible string identifies the entity to be bound to: "threads",
+"cores", "sockets", "ldoms" and "boards".
+The second string identifies manner in which tasks are bound:
+"none", "rank", "map_cpu", "mask_cpu", "rank_ldom", "map_ldom" or "mask_ldom".
+.TP
+\fBSBATCH_CPU_BIND_LIST\fR
+Set to bit mask used for CPU binding.
+
+.TP
+\fBSBATCH_MEM_BIND\fR
+Set to value of the \-\-mem_bind\fR option.
+.TP
+\fBSBATCH_MEM_BIND_VERBOSE\fR
+Set to "verbose" if the \-\-mem_bind\fR option includes the verbose option.
+Set to "quiet" otherwise.
+.TP
+\fBSBATCH_MEM_BIND_TYPE\fR
+Set to the memory binding type specified with the \-\-mem_bind\fR option.
+Possible values are "none", "rank", "map_map", "mask_mem" and "local".
+.TP
+\fBSBATCH_MEM_BIND_LIST\fR
+Set to bit mask used for memory binding.
+.TP
 \fBSLURM_ARRAY_TASK_ID\fR
 Job array ID (index) number.
+.TP
+\fBSLURM_ARRAY_TASK_MAX\fR
+Job array's maximum ID (index) number.
+.TP
+\fBSLURM_ARRAY_TASK_MIN\fR
+Job array's minimum ID (index) number.
+.TP
+\fBSLURM_ARRAY_TASK_STEP\fR
+Job array's index step size.
 .TP
 \fBSLURM_ARRAY_JOB_ID\fR
 Job array's master job ID number.
@@ -1620,9 +1824,6 @@ Name of the partition in which the job is running.
 \fBSLURM_LOCALID\fR
 Node local task ID for the process within a job.
 .TP
-\fBSLURM_MEM_BIND\fR
-Set to value of the \-\-mem_bind\fR option.
-.TP
 \fBSLURM_NODE_ALIASES\fR
 Sets of node name, communication address and hostname for nodes allocated to
 the job from the cloud. Each element in the set if colon separated and each
@@ -1631,9 +1832,6 @@ SLURM_NODE_ALIASES=ec0:1.2.3.4:foo,ec1:1.2.3.5:bar
 .TP
 \fBSLURM_NODEID\fR
 ID of the nodes allocated.
-.TP
-\fBSLURMD_NODENAME\fR
-Names of all the allocated nodes.
 .TP
 \fBSLURM_NTASKS\fR (and \fBSLURM_NPROCS\fR for backwards compatibility)
 Same as \fB\-n, \-\-ntasks\fR
@@ -1696,6 +1894,9 @@ configured. The value will be set  component  types  listed   in
 SLURM_TOPOLOGY_ADDR.   Each  component will be identified as
 either "switch" or "node".  A period is  used  to separate each
 hardware component type.
+.TP
+\fBSLURMD_NODENAME\fR
+Name of the node running the job script.
 
 .SH "EXAMPLES"
 .LP
@@ -1759,7 +1960,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010\-2013 SchedMD LLC.
+Copyright (C) 2010\-2015 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <http://slurm.schedmd.com/>.

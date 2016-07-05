@@ -5,9 +5,10 @@ ConditionPathExists=@sysconfdir@/slurm.conf
 
 [Service]
 Type=forking
-EnvironmentFile=/etc/default/slurmctld
+EnvironmentFile=-/etc/sysconfig/slurmctld
 ExecStart=@sbindir@/slurmctld $SLURMCTLD_OPTIONS
-PIDFile=/var/run/slurm/slurmctld.pid
+ExecReload=/bin/kill -HUP $MAINPID
+PIDFile=/var/run/slurmctld.pid
 
 [Install]
 WantedBy=multi-user.target

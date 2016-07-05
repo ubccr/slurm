@@ -73,11 +73,12 @@
 
 extern char *acct_coord_table;
 extern char *acct_table;
+extern char *tres_table;
 extern char *assoc_day_table;
 extern char *assoc_hour_table;
 extern char *assoc_month_table;
 extern char *assoc_table;
-extern char * clus_res_table;
+extern char *clus_res_table;
 extern char *cluster_day_table;
 extern char *cluster_hour_table;
 extern char *cluster_month_table;
@@ -122,7 +123,7 @@ extern int last_affected_rows(mysql_conn_t *mysql_conn);
 extern void reset_mysql_conn(mysql_conn_t *mysql_conn);
 extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name);
 extern int remove_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name);
-extern int setup_association_limits(slurmdb_association_rec_t *assoc,
+extern int setup_assoc_limits(slurmdb_assoc_rec_t *assoc,
 				    char **cols, char **vals,
 				    char **extra, qos_level_t qos_level,
 				    bool for_add);
@@ -145,19 +146,24 @@ extern int remove_common(mysql_conn_t *mysql_conn,
 			 List ret_list,
 			 bool *jobs_running);
 
+extern void mod_tres_str(char **out, char *mod, char *cur,
+			 char *cur_par, char *name, char **vals,
+			 uint32_t id, bool assoc);
+
+
 /*local api functions */
 extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit);
 
-extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
+extern int acct_storage_p_add_assocs(mysql_conn_t *mysql_conn,
 					   uint32_t uid,
-					   List association_list);
+					   List assoc_list);
 
 extern int acct_storage_p_add_wckeys(mysql_conn_t *mysql_conn, uint32_t uid,
 				     List wckey_list);
 
-extern List acct_storage_p_get_associations(
+extern List acct_storage_p_get_assocs(
 	mysql_conn_t *mysql_conn, uid_t uid,
-	slurmdb_association_cond_t *assoc_cond);
+	slurmdb_assoc_cond_t *assoc_cond);
 
 extern List acct_storage_p_get_wckeys(mysql_conn_t *mysql_conn, uid_t uid,
 				      slurmdb_wckey_cond_t *wckey_cond);

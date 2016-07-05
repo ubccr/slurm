@@ -59,18 +59,19 @@
 #  include "src/common/unsetenv.h"
 #endif
 
-#include <sys/wait.h>
-#include <sys/stat.h>
-#include <sys/param.h>
-#include <sys/poll.h>
-#include <unistd.h>
-#include <pwd.h>
 #include <grp.h>
+#include <poll.h>
+#include <pthread.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/utsname.h>
+#include <sys/param.h>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 #if HAVE_STDLIB_H
 #  include <stdlib.h>
@@ -90,14 +91,15 @@
 #include "src/common/env.h"
 #include "src/common/fd.h"
 #include "src/common/forward.h"
+#include "src/common/gres.h"
 #include "src/common/hostlist.h"
 #include "src/common/log.h"
-#include "src/common/mpi.h"
 #include "src/common/node_select.h"
 #include "src/common/plugstack.h"
 #include "src/common/safeopen.h"
-#include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_acct_gather_profile.h"
+#include "src/common/slurm_jobacct_gather.h"
+#include "src/common/slurm_mpi.h"
 #include "src/common/switch.h"
 #include "src/common/util-net.h"
 #include "src/common/xmalloc.h"
@@ -115,6 +117,7 @@
 #include "src/slurmd/common/run_script.h"
 #include "src/slurmd/common/reverse_tree.h"
 #include "src/slurmd/common/set_oomadj.h"
+#include "src/slurmd/common/xcpuinfo.h"
 
 #include "src/slurmd/slurmstepd/slurmstepd.h"
 #include "src/slurmd/slurmstepd/mgr.h"
@@ -177,7 +180,7 @@ typedef struct kill_thread {
  */
 static int  _access(const char *path, int modes, uid_t uid, gid_t gid);
 static void _send_launch_failure(launch_tasks_request_msg_t *,
-				 slurm_addr_t *, int);
+				 slurm_addr_t *, int, uint16_t);
 static int  _drain_node(char *reason);
 static int  _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized);
 static int  _become_user(stepd_step_rec_t *job, struct priv_state *ps);
@@ -195,6 +198,7 @@ static int  _send_exit_msg(stepd_step_rec_t *job, uint32_t *tid, int n,
 static void _wait_for_children_slurmstepd(stepd_step_rec_t *job);
 static int  _send_pending_exit_msgs(stepd_step_rec_t *job);
 static void _send_step_complete_msgs(stepd_step_rec_t *job);
+static void _set_job_state(stepd_step_rec_t *job, slurmstepd_state_t new_state);
 static void _wait_for_all_tasks(stepd_step_rec_t *job);
 static int  _wait_for_any_task(stepd_step_rec_t *job, bool waitflag);
 
@@ -228,17 +232,17 @@ static stepd_step_rec_t *reattach_job;
  */
 extern stepd_step_rec_t *
 mgr_launch_tasks_setup(launch_tasks_request_msg_t *msg, slurm_addr_t *cli,
-		       slurm_addr_t *self)
+		       slurm_addr_t *self, uint16_t protocol_version)
 {
 	stepd_step_rec_t *job = NULL;
 
-	if (!(job = stepd_step_rec_create(msg))) {
+	if (!(job = stepd_step_rec_create(msg, protocol_version))) {
 		/* We want to send back to the slurmd the reason we
 		   failed so keep track of it since errno could be
 		   reset in _send_launch_failure.
 		*/
 		int fail = errno;
-		_send_launch_failure (msg, cli, errno);
+		_send_launch_failure(msg, cli, errno, protocol_version);
 		errno = fail;
 		return NULL;
 	}
@@ -250,6 +254,7 @@ mgr_launch_tasks_setup(launch_tasks_request_msg_t *msg, slurm_addr_t *cli,
 	job->envtp->cli = cli;
 	job->envtp->self = self;
 	job->envtp->select_jobinfo = msg->select_jobinfo;
+	job->accel_bind_type = msg->accel_bind_type;
 
 	return job;
 }
@@ -348,7 +353,7 @@ static int _call_select_plugin_from_stepd(stepd_step_rec_t *job,
 	int rc;
 
 	fake_job_record.job_id		= job->jobid;
-	fake_job_record.job_state	= (uint16_t)NO_VAL;
+	fake_job_record.job_state	= NO_VAL;
 	fake_job_record.select_jobinfo	= select_g_select_jobinfo_alloc();
 	select_g_select_jobinfo_set(fake_job_record.select_jobinfo,
 				    SELECT_JOBDATA_RESV_ID, &job->resv_id);
@@ -553,8 +558,7 @@ _setup_normal_io(stepd_step_rec_t *job)
 						job->task[ii]->id,
 						same ? job->task[ii]->id : -2);
 					if (rc != SLURM_SUCCESS) {
-						error("Could not open output "
-						      "file %s: %m",
+						error("Could not open output file %s: %m",
 						      job->task[ii]->ofname);
 						rc = ESLURMD_IO_ERROR;
 						goto claim;
@@ -570,8 +574,7 @@ _setup_normal_io(stepd_step_rec_t *job)
 					file_flags, job, job->labelio,
 					-1, same ? -1 : -2);
 				if (rc != SLURM_SUCCESS) {
-					error("Could not open output "
-					      "file %s: %m",
+					error("Could not open output file %s: %m",
 					      job->task[0]->ofname);
 					rc = ESLURMD_IO_ERROR;
 					goto claim;
@@ -592,9 +595,7 @@ _setup_normal_io(stepd_step_rec_t *job)
 							job->labelio,
 							-2, job->task[ii]->id);
 						if (rc != SLURM_SUCCESS) {
-							error("Could not "
-							      "open error "
-							      "file %s: %m",
+							error("Could not open error file %s: %m",
 							      job->task[ii]->
 							      efname);
 							rc = ESLURMD_IO_ERROR;
@@ -609,8 +610,7 @@ _setup_normal_io(stepd_step_rec_t *job)
 						file_flags, job, job->labelio,
 						-2, -1);
 					if (rc != SLURM_SUCCESS) {
-						error("Could not open error "
-						      "file %s: %m",
+						error("Could not open error file %s: %m",
 						      job->task[0]->efname);
 						rc = ESLURMD_IO_ERROR;
 						goto claim;
@@ -712,6 +712,10 @@ _send_exit_msg(stepd_step_rec_t *job, uint32_t *tid, int n, int status)
 		    (resp.address.sin_addr.s_addr == 0))
 			continue;	/* no srun or sattach here */
 
+		/* This should always be set to something else we have a bug. */
+		xassert(srun->protocol_version);
+		resp.protocol_version = srun->protocol_version;
+
 		if (_send_srun_resp_msg(&resp, job->nnodes) != SLURM_SUCCESS)
 			error("Failed to send MESSAGE_TASK_EXIT: %m");
 	}
@@ -762,7 +766,6 @@ _wait_for_children_slurmstepd(stepd_step_rec_t *job)
 	pthread_mutex_unlock(&step_complete.lock);
 }
 
-
 /*
  * Send a single step completion message, which represents a single range
  * of complete job step nodes.
@@ -782,15 +785,15 @@ _one_step_complete_msg(stepd_step_rec_t *job, int first, int last)
 
 	debug2("_one_step_complete_msg: first=%d, last=%d", first, last);
 
-	memset(&msg, 0, sizeof(step_complete_msg_t));
-	msg.job_id = job->jobid;
-	msg.job_step_id = job->stepid;
 	if (job->batch) {	/* Nested batch step anomalies */
 		if (first == -1)
 			first = 0;
 		if (last == -1)
 			last = 0;
 	}
+	memset(&msg, 0, sizeof(step_complete_msg_t));
+	msg.job_id = job->jobid;
+	msg.job_step_id = job->stepid;
 	msg.range_first = first;
 	msg.range_last = last;
 	msg.step_rc = step_complete.step_rc;
@@ -832,7 +835,27 @@ _one_step_complete_msg(stepd_step_rec_t *job, int first, int last)
 		/* on error AGAIN, send to the slurmctld instead */
 		debug3("Rank %d sending complete to slurmctld instead, range "
 		       "%d to %d", step_complete.rank, first, last);
-	} else {
+	} else if (conf->msg_aggr_window_msgs > 1) {
+		/* this is the base of the tree, its parent is slurmctld */
+		debug3("Rank %d sending complete to slurmd for message aggr, "
+		       "range %d to %d",
+		       step_complete.rank, first, last);
+		/* this is the base of the tree, but we are doing
+		 * message aggr so send it to the slurmd to handle */
+		req.msg_type = REQUEST_STEP_COMPLETE_AGGR;
+		slurm_set_addr_char(&req.address, conf->port, conf->hostname);
+		for (i = 0; i <= REVERSE_TREE_PARENT_RETRY; i++) {
+			if (i)
+				sleep(1);
+			retcode = slurm_send_recv_rc_msg_only_one(&req, &rc, 0);
+			if ((retcode == 0) && (rc == 0))
+				goto finished;
+		}
+		req.msg_type = REQUEST_STEP_COMPLETE;
+		/* this is the base of the tree, its parent is slurmctld */
+		debug3("Rank %d sending complete to slurmctld instead, range "
+		       "%d to %d", step_complete.rank, first, last);
+	}  else {
 		/* this is the base of the tree, its parent is slurmctld */
 		debug3("Rank %d sending complete to slurmctld, range %d to %d",
 		       step_complete.rank, first, last);
@@ -953,6 +976,96 @@ extern void agent_queue_request(void *dummy)
 	      "checkpoint plugin");
 }
 
+static void _set_job_state(stepd_step_rec_t *job, slurmstepd_state_t new_state)
+{
+	slurm_mutex_lock(&job->state_mutex);
+	job->state = new_state;
+	pthread_cond_signal(&job->state_cond);
+	slurm_mutex_unlock(&job->state_mutex);
+}
+
+static int _spawn_job_container(stepd_step_rec_t *job)
+{
+	jobacctinfo_t *jobacct = NULL;
+	struct rusage rusage;
+	jobacct_id_t jobacct_id;
+	int status = 0;
+	pid_t pid;
+
+	set_oom_adj(0);	/* the tasks may be killed by OOM */
+	if (task_g_pre_setuid(job)) {
+		error("%s: Failed to invoke task plugins: one of "
+		      "task_p_pre_setuid functions returned error", __func__);
+	}
+
+	acct_gather_profile_g_task_start(0);
+	pid = fork();
+	if (pid == 0) {
+		setpgid(0, 0);
+		setsid();
+		acct_gather_profile_g_child_forked();
+		/* Need to exec() something for proctrack/linuxproc to work,
+		 * it will not keep a process named "slurmstepd" */
+		execl(SLEEP_CMD, "sleep", "1000000", NULL);
+		error("execl: %m");
+		sleep(1);
+		exit(0);
+	} else if (pid < 0) {
+		error("fork: %m");
+		_set_job_state(job, SLURMSTEPD_STEP_ENDING);
+		return SLURM_ERROR;
+	}
+
+	job->pgid = pid;
+	proctrack_g_add(job, pid);
+
+	jobacct_id.nodeid = job->nodeid;
+	jobacct_id.taskid = job->nodeid;   /* Treat node ID as global task ID */
+	jobacct_id.job    = job;
+	jobacct_gather_set_proctrack_container_id(job->cont_id);
+	jobacct_gather_add_task(pid, &jobacct_id, 1);
+	container_g_add_cont(job->jobid, job->cont_id);
+
+	_set_job_state(job, SLURMSTEPD_STEP_RUNNING);
+	if (!conf->job_acct_gather_freq)
+		jobacct_gather_stat_task(0);
+
+	while ((wait4(pid, &status, 0, &rusage) < 0) && (errno == EINTR)) {
+		;	       /* Wait until above processs exits from signal */
+	}
+
+	jobacct = jobacct_gather_remove_task(pid);
+	if (jobacct) {
+		jobacctinfo_setinfo(jobacct,
+				    JOBACCT_DATA_RUSAGE, &rusage,
+				    SLURM_PROTOCOL_VERSION);
+		job->jobacct->energy.consumed_energy = 0;
+		jobacctinfo_aggregate(job->jobacct, jobacct);
+		jobacctinfo_destroy(jobacct);
+	}
+	acct_gather_profile_g_task_end(pid);
+	step_complete.rank = job->nodeid;
+	acct_gather_profile_endpoll();
+	acct_gather_profile_g_node_step_end();
+	acct_gather_profile_fini();
+
+	/* Call the other plugins to clean up
+	 * the cgroup hierarchy.
+	 */
+	step_terminate_monitor_start(job->jobid, job->stepid);
+	proctrack_g_signal(job->cont_id, SIGKILL);
+	proctrack_g_wait(job->cont_id);
+	step_terminate_monitor_stop();
+
+	task_g_post_step(job);
+
+	/* Notify srun of completion AFTER frequency reset to avoid race
+	 * condition starting another job on these CPUs. */
+	while (_send_pending_exit_msgs(job)) {;}
+
+	return SLURM_SUCCESS;
+}
+
 /*
  * Executes the functions of the slurmd job manager process,
  * which runs as root and performs shared memory and interconnect
@@ -996,7 +1109,7 @@ job_manager(stepd_step_rec_t *job)
 		goto fail1;
 	}
 
-	if (!job->batch &&
+	if (!job->batch && (job->stepid != SLURM_EXTERN_CONT) &&
 	    (switch_g_job_preinit(job->switch_job) < 0)) {
 		rc = ESLURM_INTERCONNECT_FAILURE;
 		goto fail1;
@@ -1007,6 +1120,14 @@ job_manager(stepd_step_rec_t *job)
 		error("proctrack_g_create: %m");
 		rc = ESLURMD_SETUP_ENVIRONMENT_ERROR;
 		goto fail1;
+	}
+
+	if (job->stepid == SLURM_EXTERN_CONT)
+		return _spawn_job_container(job);
+
+	if (!job->batch && job->accel_bind_type) {
+		(void) gres_plugin_node_config_load(conf->cpus, conf->node_name,
+						    (void *)&xcpuinfo_abs_to_mac);
 	}
 
 #ifdef HAVE_ALPS_CRAY
@@ -1072,6 +1193,23 @@ job_manager(stepd_step_rec_t *job)
 		goto fail2;
 	}
 
+	if (!job->batch && job->accel_bind_type && (job->node_tasks <= 1))
+		job->accel_bind_type = 0;
+	if (!job->batch && job->accel_bind_type && (job->node_tasks > 1)) {
+		uint64_t gpu_cnt, mic_cnt, nic_cnt;
+		gpu_cnt = gres_plugin_step_count(job->step_gres_list, "gpu");
+		mic_cnt = gres_plugin_step_count(job->step_gres_list, "mic");
+		nic_cnt = gres_plugin_step_count(job->step_gres_list, "nic");
+		if ((gpu_cnt <= 1) || (gpu_cnt == NO_VAL64))
+			job->accel_bind_type &= (~ACCEL_BIND_CLOSEST_GPU);
+		if ((mic_cnt <= 1) || (mic_cnt == NO_VAL64))
+			job->accel_bind_type &= (~ACCEL_BIND_CLOSEST_MIC);
+		if ((nic_cnt <= 1) || (nic_cnt == NO_VAL64))
+			job->accel_bind_type &= (~ACCEL_BIND_CLOSEST_NIC);
+		if (job->accel_bind_type == ACCEL_BIND_VERBOSE)
+			job->accel_bind_type = 0;
+	}
+
 	/* Calls pam_setup() and requires pam_finish() if
 	 * successful.  Only check for < 0 here since other slurm
 	 * error codes could come that are more descriptive. */
@@ -1095,7 +1233,7 @@ job_manager(stepd_step_rec_t *job)
 	xsignal_block (mgr_sigarray);
 	reattach_job = job;
 
-	job->state = SLURMSTEPD_STEP_RUNNING;
+	_set_job_state(job, SLURMSTEPD_STEP_RUNNING);
 
 	/* Attach slurmstepd to system cgroups, if configured */
 	attach_system_cgroup_pid(getpid());
@@ -1114,7 +1252,7 @@ job_manager(stepd_step_rec_t *job)
 	acct_gather_profile_g_node_step_end();
 	acct_gather_profile_fini();
 
-	job->state = SLURMSTEPD_STEP_ENDING;
+	_set_job_state(job, SLURMSTEPD_STEP_ENDING);
 
 	if (!job->batch &&
 	    (switch_g_job_fini(job->switch_job) < 0)) {
@@ -1133,6 +1271,7 @@ fail2:
 	 * terminated before the switch window can be released by
 	 * switch_g_job_postfini().
 	 */
+	_set_job_state(job, SLURMSTEPD_STEP_ENDING);
 	step_terminate_monitor_start(job->jobid, job->stepid);
 	if (job->cont_id != 0) {
 		proctrack_g_signal(job->cont_id, SIGKILL);
@@ -1155,7 +1294,11 @@ fail2:
 	 */
 	task_g_post_step(job);
 
-	if (job->cpu_freq != NO_VAL)
+	/*
+	 * Reset cpu frequency if it was changed
+	 */
+	if (job->cpu_freq_min != NO_VAL || job->cpu_freq_max != NO_VAL ||
+	    job->cpu_freq_gov != NO_VAL)
 		cpu_freq_reset(job);
 
 	/* Notify srun of completion AFTER frequency reset to avoid race
@@ -1181,6 +1324,7 @@ fail1:
 	/* If interactive job startup was abnormal,
 	 * be sure to notify client.
 	 */
+	_set_job_state(job, SLURMSTEPD_STEP_ENDING);
 	if (rc != 0) {
 		error("job_manager exiting abnormally, rc = %d", rc);
 		_send_launch_resp(job, rc);
@@ -1224,13 +1368,13 @@ struct exec_wait_info {
 	int childfd;
 };
 
-static struct exec_wait_info * exec_wait_info_create (int i)
+static struct exec_wait_info * _exec_wait_info_create (int i)
 {
 	int fdpair[2];
 	struct exec_wait_info * e;
 
 	if (pipe (fdpair) < 0) {
-		error ("exec_wait_info_create: pipe: %m");
+		error ("_exec_wait_info_create: pipe: %m");
 		return NULL;
 	}
 
@@ -1246,36 +1390,40 @@ static struct exec_wait_info * exec_wait_info_create (int i)
 	return (e);
 }
 
-static void exec_wait_info_destroy (struct exec_wait_info *e)
+static void _exec_wait_info_destroy (struct exec_wait_info *e)
 {
 	if (e == NULL)
 		return;
 
-	if (e->parentfd >= 0)
+	if (e->parentfd >= 0) {
 		close (e->parentfd);
-	if (e->childfd >= 0)
+		e->parentfd = -1;
+	}
+	if (e->childfd >= 0) {
 		close (e->childfd);
+		e->childfd = -1;
+	}
 	e->id = -1;
 	e->pid = -1;
 	xfree(e);
 }
 
-static pid_t exec_wait_get_pid (struct exec_wait_info *e)
+static pid_t _exec_wait_get_pid (struct exec_wait_info *e)
 {
 	if (e == NULL)
 		return (-1);
 	return (e->pid);
 }
 
-static struct exec_wait_info * fork_child_with_wait_info (int id)
+static struct exec_wait_info * _fork_child_with_wait_info (int id)
 {
 	struct exec_wait_info *e;
 
-	if (!(e = exec_wait_info_create (id)))
+	if (!(e = _exec_wait_info_create (id)))
 		return (NULL);
 
 	if ((e->pid = fork ()) < 0) {
-		exec_wait_info_destroy (e);
+		_exec_wait_info_destroy (e);
 		return (NULL);
 	}
 	/*
@@ -1284,20 +1432,19 @@ static struct exec_wait_info * fork_child_with_wait_info (int id)
 	if (e->pid == 0) {
 		close (e->parentfd);
 		e->parentfd = -1;
-	}
-	else {
+	} else {
 		close (e->childfd);
 		e->childfd = -1;
 	}
 	return (e);
 }
 
-static int exec_wait_child_wait_for_parent (struct exec_wait_info *e)
+static int _exec_wait_child_wait_for_parent (struct exec_wait_info *e)
 {
 	char c;
 
 	if (read (e->childfd, &c, sizeof (c)) != 1)
-		return error ("wait_for_parent: failed: %m");
+		return error ("_exec_wait_child_wait_for_parent: failed: %m");
 
 	return (0);
 }
@@ -1407,7 +1554,7 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 
 	set_oom_adj(0);	/* the tasks may be killed by OOM */
 	if (task_g_pre_setuid(job)) {
-		error("Failed task affinity setup");
+		error("Failed to invoke task plugins: one of task_p_pre_setuid functions returned error");
 		return SLURM_ERROR;
 	}
 
@@ -1486,7 +1633,7 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 		goto fail4;
 	}
 
-	exec_wait_list = list_create ((ListDelF) exec_wait_info_destroy);
+	exec_wait_list = list_create ((ListDelF) _exec_wait_info_destroy);
 	if (!exec_wait_list) {
 		error ("Unable to create exec_wait_list");
 		rc = SLURM_ERROR;
@@ -1502,19 +1649,19 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 		struct exec_wait_info *ei;
 
 		acct_gather_profile_g_task_start(i);
-		if ((ei = fork_child_with_wait_info (i)) == NULL) {
+		if ((ei = _fork_child_with_wait_info (i)) == NULL) {
 			error("child fork: %m");
 			exec_wait_kill_children (exec_wait_list);
 			rc = SLURM_ERROR;
 			goto fail4;
-		} else if ((pid = exec_wait_get_pid (ei)) == 0)  { /* child */
+		} else if ((pid = _exec_wait_get_pid (ei)) == 0)  { /* child */
 			/*
 			 *  Destroy exec_wait_list in the child.
 			 *   Only exec_wait_info for previous tasks have been
 			 *   added to the list so far, so everything else
 			 *   can be discarded.
 			 */
-			list_destroy (exec_wait_list);
+			FREE_NULL_LIST (exec_wait_list);
 
 #ifdef HAVE_AIX
 			(void) mkcrid(0);
@@ -1561,7 +1708,7 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 			 *   children in any process groups or containers
 			 *   before they make a call to exec(2).
 			 */
-			if (exec_wait_child_wait_for_parent (ei) < 0)
+			if (_exec_wait_child_wait_for_parent (ei) < 0)
 				exit (1);
 
 			exec_task(job, i);
@@ -1657,7 +1804,7 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 	 * Now it's ok to unblock the tasks, so they may call exec.
 	 */
 	list_for_each (exec_wait_list, (ListForF) exec_wait_signal, job);
-	list_destroy (exec_wait_list);
+	FREE_NULL_LIST (exec_wait_list);
 
 	for (i = 0; i < job->node_tasks; i++) {
 		/*
@@ -1679,8 +1826,7 @@ fail4:
 	}
 fail3:
 	_reclaim_privileges (&sprivs);
-	if (exec_wait_list)
-		list_destroy (exec_wait_list);
+	FREE_NULL_LIST (exec_wait_list);
 fail2:
 	io_close_task_fds(job);
 fail1:
@@ -1701,12 +1847,13 @@ _send_pending_exit_msgs(stepd_step_rec_t *job)
 	int  nsent  = 0;
 	int  status = 0;
 	bool set    = false;
-	uint32_t  tid[job->node_tasks];
+	uint32_t *tid;
 
 	/*
 	 * Collect all exit codes with the same status into a
 	 * single message.
 	 */
+	tid = xmalloc(sizeof(uint32_t) * job->node_tasks);
 	for (i = 0; i < job->node_tasks; i++) {
 		stepd_step_task_info_t *t = job->task[i];
 
@@ -1727,6 +1874,7 @@ _send_pending_exit_msgs(stepd_step_rec_t *job)
 		debug2("Aggregated %d task exit messages", nsent);
 		_send_exit_msg(job, tid, nsent, status);
 	}
+	xfree(tid);
 
 	return nsent;
 }
@@ -1789,7 +1937,7 @@ _wait_for_any_task(stepd_step_rec_t *job, bool waitflag)
 				debug("No child processes");
 				if (completed == 0)
 					completed = -1;
-				goto done;
+				break;
 			} else if (errno == EINTR) {
 				debug("wait3 was interrupted");
 				continue;
@@ -1798,7 +1946,7 @@ _wait_for_any_task(stepd_step_rec_t *job, bool waitflag)
 				continue;
 			}
 		} else if (pid == 0) { /* WNOHANG and no pids available */
-			goto done;
+			break;
 		}
 
 		/************* acct stuff ********************/
@@ -1870,7 +2018,6 @@ _wait_for_any_task(stepd_step_rec_t *job, bool waitflag)
 
 	} while ((pid > 0) && !waitflag);
 
-done:
 	return completed;
 }
 
@@ -2083,7 +2230,8 @@ static int _drain_node(char *reason)
 }
 
 static void
-_send_launch_failure (launch_tasks_request_msg_t *msg, slurm_addr_t *cli, int rc)
+_send_launch_failure(launch_tasks_request_msg_t *msg, slurm_addr_t *cli, int rc,
+		     uint16_t protocol_version)
 {
 	slurm_msg_t resp_msg;
 	launch_tasks_response_msg_t resp;
@@ -2106,6 +2254,7 @@ _send_launch_failure (launch_tasks_request_msg_t *msg, slurm_addr_t *cli, int rc
 		       NULL);
 	resp_msg.data = &resp;
 	resp_msg.msg_type = RESPONSE_LAUNCH_TASKS;
+	resp_msg.protocol_version = protocol_version;
 
 	resp.node_name     = name;
 	resp.return_code   = rc ? rc : -1;
@@ -2132,6 +2281,7 @@ _send_launch_resp(stepd_step_rec_t *job, int rc)
 
 	slurm_msg_t_init(&resp_msg);
 	resp_msg.address	= srun->resp_addr;
+	resp_msg.protocol_version = srun->protocol_version;
 	resp_msg.data		= &resp;
 	resp_msg.msg_type	= RESPONSE_LAUNCH_TASKS;
 
@@ -2164,9 +2314,13 @@ _send_complete_batch_script_msg(stepd_step_rec_t *job, int err, int status)
 	char *		select_type;
 	bool		msg_to_ctld;
 
-	select_type = slurm_get_select_type();
-	msg_to_ctld = strcmp(select_type, "select/serial");
-	xfree(select_type);
+	if (conf->msg_aggr_window_msgs > 1)
+		msg_to_ctld = 0;
+	else {
+		select_type = slurm_get_select_type();
+		msg_to_ctld = strcmp(select_type, "select/serial");
+		xfree(select_type);
+	}
 
 	req.job_id	= job->jobid;
 	req.job_rc      = status;
@@ -2191,7 +2345,7 @@ _send_complete_batch_script_msg(stepd_step_rec_t *job, int err, int status)
 			 * may get a new job to launch */
 			if (i == 0) {
 				slurm_set_addr_char(&req_msg.address,
-						    conf->port, "localhost");
+						    conf->port, conf->hostname);
 			}
 			msg_rc = slurm_send_recv_rc_msg_only_one(&req_msg,
 								 &rc, 0);
@@ -2230,6 +2384,15 @@ _drop_privileges(stepd_step_rec_t *job, bool do_setuid,
 		strncpy (ps->saved_cwd, "/tmp", sizeof (ps->saved_cwd));
 	}
 
+#ifdef HAVE_NATIVE_CRAY
+	/* LDAP on Native Cray is not sufficiently scalable to support the
+	 * getgroups() call */
+	ps->ngids = 1;
+	if (get_list) {
+		ps->gid_list = (gid_t *) xmalloc(sizeof(gid_t));
+		ps->gid_list[0] = job->gid;
+	}
+#else
 	ps->ngids = getgroups(0, NULL);
 	if (get_list) {
 		ps->gid_list = (gid_t *) xmalloc(ps->ngids * sizeof(gid_t));
@@ -2241,6 +2404,7 @@ _drop_privileges(stepd_step_rec_t *job, bool do_setuid,
 			return -1;
 		}
 	}
+#endif
 
 	/*
 	 * No need to drop privileges if we're not running as root
@@ -2430,10 +2594,34 @@ _become_user(stepd_step_rec_t *job, struct priv_state *ps)
 	return SLURM_SUCCESS;
 }
 
+#ifndef HAVE_NATIVE_CRAY
+/* _get_primary_group()
+ */
+static int
+_get_primary_group(const char *user, gid_t *gid)
+{
+	struct passwd pwd;
+	struct passwd *pwd0 = NULL;
+	char buf[256];
+	int cc;
+
+	cc = getpwnam_r(user, &pwd, buf, sizeof(buf), &pwd0);
+	if ((cc != 0) || (pwd0 == NULL)) {
+		error("%s: getpwnam_r() failed: %m", __func__);
+		return -1;
+	}
+
+	*gid = pwd0->pw_gid;
+	return 0;
+}
+#endif
 
 static int
 _initgroups(stepd_step_rec_t *job)
 {
+#ifndef HAVE_NATIVE_CRAY
+	gid_t primary_gid = 0;
+#endif
 	int rc;
 
 	if (job->ngids > 0) {
@@ -2453,6 +2641,48 @@ _initgroups(stepd_step_rec_t *job)
 		}
 		return -1;
 	}
+
+#ifndef HAVE_NATIVE_CRAY
+	/* LDAP on Native Cray is not sufficiently scalable to support the
+	 * getpwnam_r() call */
+	rc = _get_primary_group(job->user_name, &primary_gid);
+	if (rc < 0) {
+		error("%s: _get_primary_group() failed", __func__);
+		return -1;
+	}
+	/* If job->gid is not the primary group for the
+	 * user job->user_name then add the primary group
+	 * in the list of user groups.
+	 */
+	if (primary_gid != job->gid) {
+		int ngroups_max = sysconf(_SC_NGROUPS_MAX);
+		gid_t grps[ngroups_max];
+		int size, max;
+
+		max = ngroups_max;
+
+		size = getgrouplist(job->user_name,
+				    job->gid,
+				    grps,
+				    &ngroups_max);
+		if (size < 0) {
+			error("%s: getgrouplist() failed: %m", __func__);
+			return -1;
+		}
+		if (size > max - 1) {
+			error("\
+%s: too many groups %d max %d for user %s groups %d %d\n",
+			      __func__, size, max, job->user_name,
+			      primary_gid, job->gid);
+		}
+		grps[size++] = primary_gid;
+
+		if (setgroups(size, grps)) {
+			error("%s: setgroups() failed: %m", __func__);
+			return -1;
+		}
+	}
+#endif
 	return 0;
 }
 
@@ -2516,11 +2746,11 @@ _run_script_as_user(const char *name, const char *path, stepd_step_rec_t *job,
 		return -1;
 	}
 
-	if ((ei = fork_child_with_wait_info(0)) == NULL) {
+	if ((ei = _fork_child_with_wait_info(0)) == NULL) {
 		error ("executing %s: fork: %m", name);
 		return -1;
 	}
-	if ((cpid = exec_wait_get_pid (ei)) == 0) {
+	if ((cpid = _exec_wait_get_pid (ei)) == 0) {
 		struct priv_state sprivs;
 		char *argv[2];
 
@@ -2562,16 +2792,25 @@ _run_script_as_user(const char *name, const char *path, stepd_step_rec_t *job,
 		/*
 		 *  Wait for signal from parent
 		 */
-		exec_wait_child_wait_for_parent (ei);
+		_exec_wait_child_wait_for_parent (ei);
 
-		execve(path, argv, env);
-		error("execve(%s): %m", path);
+		while (1) {
+			execve(path, argv, env);
+			error("execve(%s): %m", path);
+			if ((errno == ENFILE) || (errno == ENOMEM)) {
+				/* System limit on open files or memory reached,
+				 * retry after short delay */
+				sleep(1);
+			} else {
+				break;
+			}
+		}
 		exit(127);
 	}
 
 	if (exec_wait_signal_child (ei) < 0)
 		error ("run_script_as_user: Failed to wakeup %s", name);
-	exec_wait_info_destroy (ei);
+	_exec_wait_info_destroy (ei);
 
 	if (max_wait < 0)
 		opt = 0;

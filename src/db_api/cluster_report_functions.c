@@ -55,11 +55,10 @@ typedef enum {
 	CLUSTER_REPORT_WU
 } cluster_report_t;
 
-static void _process_ua(List user_list, slurmdb_association_rec_t *assoc)
+static void _process_ua(List user_list, slurmdb_assoc_rec_t *assoc)
 {
 	ListIterator itr = NULL;
 	slurmdb_report_user_rec_t *slurmdb_report_user = NULL;
-	slurmdb_accounting_rec_t *accting = NULL;
 
 	/* make sure we add all associations to this
 	   user rec because we could have some in
@@ -93,24 +92,17 @@ static void _process_ua(List user_list, slurmdb_association_rec_t *assoc)
 
 		list_append(user_list, slurmdb_report_user);
 	}
+
 	/* get the amount of time this assoc used
 	   during the time we are looking at */
-	itr = list_iterator_create(assoc->accounting_list);
-	while((accting = list_next(itr))) {
-		slurmdb_report_user->cpu_secs +=
-			(uint64_t)accting->alloc_secs;
-		slurmdb_report_user->consumed_energy +=
-			(uint64_t)accting->consumed_energy;
-	}
-	list_iterator_destroy(itr);
+	slurmdb_transfer_acct_list_2_tres(assoc->accounting_list,
+					  &slurmdb_report_user->tres_list);
 }
 
-static void _process_au(List assoc_list, slurmdb_association_rec_t *assoc)
+static void _process_au(List assoc_list, slurmdb_assoc_rec_t *assoc)
 {
 	slurmdb_report_assoc_rec_t *slurmdb_report_assoc =
 		xmalloc(sizeof(slurmdb_report_assoc_rec_t));
-	ListIterator itr = NULL;
-	slurmdb_accounting_rec_t *accting = NULL;
 
 	list_append(assoc_list, slurmdb_report_assoc);
 
@@ -121,22 +113,13 @@ static void _process_au(List assoc_list, slurmdb_association_rec_t *assoc)
 
 	/* get the amount of time this assoc used
 	   during the time we are looking at */
-	itr = list_iterator_create(assoc->accounting_list);
-	while((accting = list_next(itr))) {
-		slurmdb_report_assoc->cpu_secs +=
-			(uint64_t)accting->alloc_secs;
-		slurmdb_report_assoc->consumed_energy +=
-			(uint64_t)accting->consumed_energy;
-	}
-	list_iterator_destroy(itr);
-
+	slurmdb_transfer_acct_list_2_tres(assoc->accounting_list,
+					  &slurmdb_report_assoc->tres_list);
 }
 
 static void _process_uw(List user_list, slurmdb_wckey_rec_t *wckey)
 {
-	ListIterator itr = NULL;
 	slurmdb_report_user_rec_t *slurmdb_report_user = NULL;
-	slurmdb_accounting_rec_t *accting = NULL;
 	struct passwd *passwd_ptr = NULL;
 	uid_t uid = NO_VAL;
 
@@ -158,14 +141,8 @@ static void _process_uw(List user_list, slurmdb_wckey_rec_t *wckey)
 
 	/* get the amount of time this wckey used
 	   during the time we are looking at */
-	itr = list_iterator_create(wckey->accounting_list);
-	while((accting = list_next(itr))) {
-		slurmdb_report_user->cpu_secs +=
-			(uint64_t)accting->alloc_secs;
-		slurmdb_report_user->consumed_energy +=
-			(uint64_t)accting->consumed_energy;
-	}
-	list_iterator_destroy(itr);
+	slurmdb_transfer_acct_list_2_tres(wckey->accounting_list,
+					  &slurmdb_report_user->tres_list);
 }
 
 static void _process_wu(List assoc_list, slurmdb_wckey_rec_t *wckey)
@@ -173,7 +150,6 @@ static void _process_wu(List assoc_list, slurmdb_wckey_rec_t *wckey)
 	slurmdb_report_assoc_rec_t *slurmdb_report_assoc = NULL,
 		*parent_assoc = NULL;
 	ListIterator itr = NULL;
-	slurmdb_accounting_rec_t *accting = NULL;
 
 	/* find the parent */
 	itr = list_iterator_create(assoc_list);
@@ -200,18 +176,10 @@ static void _process_wu(List assoc_list, slurmdb_wckey_rec_t *wckey)
 
 	/* get the amount of time this wckey used
 	   during the time we are looking at */
-	itr = list_iterator_create(wckey->accounting_list);
-	while((accting = list_next(itr))) {
-		slurmdb_report_assoc->cpu_secs +=
-			(uint64_t)accting->alloc_secs;
-		parent_assoc->cpu_secs +=
-			(uint64_t)accting->alloc_secs;
-		slurmdb_report_assoc->consumed_energy +=
-			(uint64_t)accting->consumed_energy;
-		parent_assoc->consumed_energy +=
-			(uint64_t)accting->consumed_energy;
-	}
-	list_iterator_destroy(itr);
+	slurmdb_transfer_acct_list_2_tres(wckey->accounting_list,
+					  &slurmdb_report_assoc->tres_list);
+	slurmdb_transfer_acct_list_2_tres(wckey->accounting_list,
+					  &parent_assoc->tres_list);
 }
 
 static void _process_assoc_type(
@@ -220,7 +188,7 @@ static void _process_assoc_type(
 	char *cluster_name,
 	cluster_report_t type)
 {
-	slurmdb_association_rec_t *assoc = NULL;
+	slurmdb_assoc_rec_t *assoc = NULL;
 
 	/* now add the associations of interest here by user */
 	while((assoc = list_next(itr))) {
@@ -298,11 +266,11 @@ static List _process_util_by_report(void *db_conn, char *calling_name,
 	cluster_cond.with_deleted = 1;
 	cluster_cond.with_usage = 1;
 	if ((type == CLUSTER_REPORT_UA) || (type == CLUSTER_REPORT_AU)) {
-		start_time = ((slurmdb_association_cond_t *)cond)->usage_start;
-		end_time = ((slurmdb_association_cond_t *)cond)->usage_end;
+		start_time = ((slurmdb_assoc_cond_t *)cond)->usage_start;
+		end_time = ((slurmdb_assoc_cond_t *)cond)->usage_end;
 
 		cluster_cond.cluster_list =
-			((slurmdb_association_cond_t *)cond)->cluster_list;
+			((slurmdb_assoc_cond_t *)cond)->cluster_list;
 	} else if ((type == CLUSTER_REPORT_UW) || (type == CLUSTER_REPORT_WU)) {
 		start_time = ((slurmdb_wckey_cond_t *)cond)->usage_start;
 		end_time = ((slurmdb_wckey_cond_t *)cond)->usage_end;
@@ -334,9 +302,9 @@ static List _process_util_by_report(void *db_conn, char *calling_name,
 	}
 
 	if ((type == CLUSTER_REPORT_UA) || (type == CLUSTER_REPORT_AU)) {
-		((slurmdb_association_cond_t *)cond)->usage_start = start_time;
-		((slurmdb_association_cond_t *)cond)->usage_end = end_time;
-		type_list = acct_storage_g_get_associations(
+		((slurmdb_assoc_cond_t *)cond)->usage_start = start_time;
+		((slurmdb_assoc_cond_t *)cond)->usage_end = end_time;
+		type_list = acct_storage_g_get_assocs(
 			db_conn, my_uid, cond);
 	} else if ((type == CLUSTER_REPORT_UW) || (type == CLUSTER_REPORT_WU)) {
 		((slurmdb_wckey_cond_t *)cond)->usage_start = start_time;
@@ -392,35 +360,17 @@ static List _process_util_by_report(void *db_conn, char *calling_name,
 	list_iterator_destroy(itr);
 
 end_it:
-
-	if (type_list) {
-		list_destroy(type_list);
-		type_list = NULL;
-	}
-
-	if (first_list) {
-		list_destroy(first_list);
-		first_list = NULL;
-	}
-
-	if (cluster_list) {
-		list_destroy(cluster_list);
-		cluster_list = NULL;
-	}
-
-	if (exit_code) {
-		if (ret_list) {
-			list_destroy(ret_list);
-			ret_list = NULL;
-		}
-	}
-
+	FREE_NULL_LIST(type_list);
+	FREE_NULL_LIST(first_list);
+	FREE_NULL_LIST(cluster_list);
+	if (exit_code)
+		FREE_NULL_LIST(ret_list);
 	return ret_list;
 }
 
 
 extern List slurmdb_report_cluster_account_by_user(void *db_conn,
-	slurmdb_association_cond_t *assoc_cond)
+	slurmdb_assoc_cond_t *assoc_cond)
 {
 	return _process_util_by_report(db_conn,
 				       "slurmdb_report_cluster_account_by_user",
@@ -428,7 +378,7 @@ extern List slurmdb_report_cluster_account_by_user(void *db_conn,
 }
 
 extern List slurmdb_report_cluster_user_by_account(void *db_conn,
-	slurmdb_association_cond_t *assoc_cond)
+	slurmdb_assoc_cond_t *assoc_cond)
 {
 	return _process_util_by_report(db_conn,
 				       "slurmdb_report_cluster_user_by_account",

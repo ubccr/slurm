@@ -31,8 +31,8 @@
 source ./globals
 
 set test_id     "20.8"
-set file_in     "$test_id\.script"
-set job_name    "$test_id\.newname"
+set file_in     "test$test_id\.bash"
+set job_name    "test$test_id\.newname"
 set job_id      0
 set exit_code   0
 
@@ -108,6 +108,9 @@ expect {
 }
 
 check_name $job_id $job_name
+if {[cancel_job $job_id] != 0} {
+	set exit_code 1
+}
 
 if {$exit_code == 0} {
 	exec $bin_rm -f $file_in

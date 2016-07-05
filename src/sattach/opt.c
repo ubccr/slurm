@@ -65,17 +65,16 @@
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/parse_time.h"
+#include "src/common/proc_args.h"
+#include "src/common/read_config.h" /* contains getnodename() */
+#include "src/common/slurm_mpi.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_rlimits_info.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/slurm_rlimits_info.h"
-#include "src/common/read_config.h" /* contains getnodename() */
-#include "src/common/proc_args.h"
 
 #include "src/sattach/opt.h"
-
-#include "src/common/mpi.h"
 
 /* generic getopt_long flags, integers and *not* valid characters */
 #define LONG_OPT_LAYOUT_ONLY   0x100
@@ -460,7 +459,7 @@ static bool _opt_verify(void)
 	 */
 	if ((opt.input_filter_set || opt.output_filter_set ||
 	     opt.error_filter_set) && opt.pty) {
-		error("don't specifiy both --pty and I/O filtering");
+		error("don't specify both --pty and I/O filtering");
 		verified = false;
 	}
 	if (opt.input_filter_set)

@@ -56,9 +56,8 @@
 #include "src/slurmctld/state_save.h"
 #include "src/slurmctld/trigger_mgr.h"
 
-/* Change FRONT_END_STATE_VERSION value when changing the state save format */
+/* No need to change we always pack SLURM_PROTOCOL_VERSION */
 #define FRONT_END_STATE_VERSION        "PROTOCOL_VERSION"
-#define FRONT_END_2_6_STATE_VERSION    "VER001"	/* SLURM version 2.6 */
 
 front_end_record_t *front_end_nodes = NULL;
 uint16_t front_end_node_cnt = 0;
@@ -158,20 +157,6 @@ static void _pack_front_end(struct front_end_record *dump_front_end_ptr,
 		pack32(dump_front_end_ptr->reason_uid, buffer);
 
 		pack_time(dump_front_end_ptr->slurmd_start_time, buffer);
-	} else if (protocol_version >= SLURM_2_6_PROTOCOL_VERSION) {
-		packstr(dump_front_end_ptr->allow_groups, buffer);
-		packstr(dump_front_end_ptr->allow_users, buffer);
-		pack_time(dump_front_end_ptr->boot_time, buffer);
-		packstr(dump_front_end_ptr->deny_groups, buffer);
-		packstr(dump_front_end_ptr->deny_users, buffer);
-		packstr(dump_front_end_ptr->name, buffer);
-		pack16(dump_front_end_ptr->node_state, buffer);
-
-		packstr(dump_front_end_ptr->reason, buffer);
-		pack_time(dump_front_end_ptr->reason_time, buffer);
-		pack32(dump_front_end_ptr->reason_uid, buffer);
-
-		pack_time(dump_front_end_ptr->slurmd_start_time, buffer);
 	} else {
 		error("_pack_front_end: Unsupported slurm version %u",
 		      protocol_version);
@@ -234,24 +219,41 @@ extern front_end_record_t *assign_front_end(struct job_record *job_ptr)
 	uint32_t state_flags;
 	int i;
 
-	for (i = 0, front_end_ptr = front_end_nodes; i < front_end_node_cnt;
-	     i++, front_end_ptr++) {
-		if (job_ptr->batch_host) {   /* Find specific front-end node */
-			if (strcmp(job_ptr->batch_host, front_end_ptr->name))
-				continue;
-			if (!_front_end_access(front_end_ptr, job_ptr))
-				break;
-		} else {		/* Find some usable front-end node */
-			if (IS_NODE_DOWN(front_end_ptr) ||
-			    IS_NODE_DRAIN(front_end_ptr) ||
-			    IS_NODE_NO_RESPOND(front_end_ptr))
-				continue;
-			if (!_front_end_access(front_end_ptr, job_ptr))
-				continue;
-		}
-		if ((best_front_end == NULL) ||
-		    (front_end_ptr->job_cnt_run < best_front_end->job_cnt_run))
+	if (!job_ptr->batch_host && (job_ptr->batch_flag == 0) &&
+	    (front_end_ptr = find_front_end_record(job_ptr->alloc_node))) {
+		/* Use submit host for interactive job */
+		if (!IS_NODE_DOWN(front_end_ptr)  &&
+		    !IS_NODE_DRAIN(front_end_ptr) &&
+		    !IS_NODE_NO_RESPOND(front_end_ptr) &&
+		    _front_end_access(front_end_ptr, job_ptr)) {
 			best_front_end = front_end_ptr;
+		} else {
+			info("%s: front-end node %s not available for job %u",
+			     __func__, job_ptr->alloc_node, job_ptr->job_id);
+			return NULL;
+		}
+	} else {
+		for (i = 0, front_end_ptr = front_end_nodes;
+		     i < front_end_node_cnt; i++, front_end_ptr++) {
+			if (job_ptr->batch_host) { /* Find specific front-end */
+				if (strcmp(job_ptr->batch_host,
+					   front_end_ptr->name))
+					continue;
+				if (!_front_end_access(front_end_ptr, job_ptr))
+					break;
+			} else {	      /* Find a usable front-end node */
+				if (IS_NODE_DOWN(front_end_ptr) ||
+				    IS_NODE_DRAIN(front_end_ptr) ||
+				    IS_NODE_NO_RESPOND(front_end_ptr))
+					continue;
+				if (!_front_end_access(front_end_ptr, job_ptr))
+					continue;
+			}
+			if ((best_front_end == NULL) ||
+			    (front_end_ptr->job_cnt_run <
+			     best_front_end->job_cnt_run))
+				best_front_end = front_end_ptr;
+		}
 	}
 
 	if (best_front_end) {
@@ -830,12 +832,8 @@ extern int load_all_front_end_state(bool state_only)
 
 	safe_unpackstr_xmalloc( &ver_str, &name_len, buffer);
 	debug3("Version string in front_end_state header is %s", ver_str);
-	if (ver_str) {
-		if (!strcmp(ver_str, FRONT_END_STATE_VERSION)) {
-			safe_unpack16(&protocol_version, buffer);
-		} else
-			protocol_version = SLURM_2_6_PROTOCOL_VERSION;
-	}
+	if (ver_str && !strcmp(ver_str, FRONT_END_STATE_VERSION))
+		safe_unpack16(&protocol_version, buffer);
 
 	if (protocol_version == (uint16_t) NO_VAL) {
 		error("*****************************************************");
@@ -869,14 +867,6 @@ extern int load_all_front_end_state(bool state_only)
 			safe_unpack_time (&reason_time, buffer);
 			safe_unpack32 (&reason_uid,  buffer);
 			safe_unpack16 (&obj_protocol_version, buffer);
-			node_state = tmp_state;
-			base_state = node_state & NODE_STATE_BASE;
-		} else if (protocol_version >= SLURM_2_6_PROTOCOL_VERSION) {
-			safe_unpackstr_xmalloc (&node_name, &name_len, buffer);
-			safe_unpack16 (&tmp_state,  buffer);
-			safe_unpackstr_xmalloc (&reason,    &name_len, buffer);
-			safe_unpack_time (&reason_time, buffer);
-			safe_unpack32 (&reason_uid,  buffer);
 			node_state = tmp_state;
 			base_state = node_state & NODE_STATE_BASE;
 		} else
@@ -1016,7 +1006,8 @@ extern void sync_front_end_state(void)
 				     job_ptr->batch_host);
 			} else if (IS_JOB_COMPLETING(job_ptr)) {
 				job_ptr->front_end_ptr->job_cnt_comp++;
-			} else if (IS_JOB_RUNNING(job_ptr)) {
+			} else if (IS_JOB_RUNNING(job_ptr) ||
+				   IS_JOB_SUSPENDED(job_ptr)) {
 				job_ptr->front_end_ptr->job_cnt_run++;
 			}
 		} else {

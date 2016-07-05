@@ -50,6 +50,7 @@
 #include <termios.h>
 
 #include "src/common/read_config.h"
+#include "src/common/slurm_time.h"
 #include "src/common/xstring.h"
 #include "src/squeue/squeue.h"
 
@@ -59,9 +60,9 @@
 struct squeue_parameters params;
 int max_line_size;
 
-/************
- * Funtions *
- ************/
+/*************
+ * Functions *
+ *************/
 static int  _get_info(bool clear_old);
 static int  _get_window_width( void );
 static void _print_date( void );
@@ -168,7 +169,8 @@ _get_window_width( void )
 static int
 _print_job ( bool clear_old )
 {
-	static job_info_msg_t * old_job_ptr = NULL, * new_job_ptr;
+	static job_info_msg_t *old_job_ptr;
+	job_info_msg_t *new_job_ptr;
 	int error_code;
 	uint16_t show_flags = 0;
 
@@ -274,10 +276,10 @@ _print_job_steps( bool clear_old )
 			error_code = SLURM_SUCCESS;
 			new_step_ptr = old_step_ptr;
 		}
-	}
-	else
+	} else {
 		error_code = slurm_get_job_steps((time_t) 0, NO_VAL, NO_VAL,
 						 &new_step_ptr, show_flags);
+	}
 	if (error_code) {
 		slurm_perror ("slurm_get_job_steps error");
 		return SLURM_ERROR;
@@ -313,5 +315,5 @@ _print_date( void )
 	time_t now;
 
 	now = time( NULL );
-	printf("%s", ctime( &now ));
+	printf("%s", slurm_ctime( &now ));
 }

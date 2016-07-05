@@ -327,11 +327,13 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 	/* get the correct number of hosts to run tasks on */
 	if (opt.nodelist)
 		step_nodelist = opt.nodelist;
-	else if ((opt.distribution == SLURM_DIST_ARBITRARY) && (count == 0))
+	else if (((opt.distribution & SLURM_DIST_STATE_BASE) ==
+		  SLURM_DIST_ARBITRARY) && (count == 0))
 		step_nodelist = getenv("SLURM_ARBITRARY_NODELIST");
 	if (step_nodelist) {
 		hl = hostlist_create(step_nodelist);
-		if (opt.distribution != SLURM_DIST_ARBITRARY)
+		if ((opt.distribution & SLURM_DIST_STATE_BASE) !=
+		    SLURM_DIST_ARBITRARY)
 			hostlist_uniq(hl);
 		if (!hostlist_count(hl)) {
 			error("Hostlist is now nothing!  Can not run job.");
@@ -352,8 +354,8 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 		opt.nodelist = buf;
 	}
 
-	if ((opt.distribution == SLURM_DIST_ARBITRARY) &&
-	    (count != opt.ntasks)) {
+	if (((opt.distribution & SLURM_DIST_STATE_BASE) == SLURM_DIST_ARBITRARY)
+	    && (count != opt.ntasks)) {
 		error("You asked for %d tasks but hostlist specified %d nodes",
 		      opt.ntasks, count);
 		goto error;
@@ -402,6 +404,11 @@ job_create_allocation(resource_allocation_response_msg_t *resp)
 	i->select_jobinfo = select_g_select_jobinfo_copy(resp->select_jobinfo);
 
 	job = _job_create_structure(i);
+	if (job) {
+		job->account = xstrdup(resp->account);
+		job->qos = xstrdup(resp->qos);
+		job->resv_name = xstrdup(resp->resv_name);
+	}
 
 	xfree(i->nodelist);
 	xfree(i);
@@ -469,6 +476,9 @@ extern void init_srun(int ac, char **av,
 
 	/* Set up slurmctld message handler */
 	slurmctld_msg_init();
+
+	/* save process startup time to be used with -I<timeout> */
+	srun_begin_time = time(NULL);
 }
 
 extern void create_srun_job(srun_job_t **p_job, bool *got_alloc,
@@ -669,7 +679,7 @@ extern void fini_srun(srun_job_t *job, bool got_alloc, uint32_t *global_rc,
 	if (got_alloc) {
 		cleanup_allocation();
 
-		/* send the controller we were cancelled */
+		/* Tell slurmctld that we were cancelled */
 		if (job->state >= SRUN_JOB_CANCELLED)
 			slurm_complete_job(job->jobid, NO_VAL);
 		else
@@ -1131,7 +1141,8 @@ static int _run_srun_script (srun_job_t *job, char *script)
 
 static void _set_env_vars(resource_allocation_response_msg_t *resp)
 {
-	char *tmp;
+	char *key, *value, *tmp;
+	int i;
 
 	if (!getenv("SLURM_JOB_CPUS_PER_NODE")) {
 		tmp = uint32_compressed_to_str(resp->num_cpu_groups,
@@ -1151,6 +1162,20 @@ static void _set_env_vars(resource_allocation_response_msg_t *resp)
 		}
 	} else {
 		unsetenv("SLURM_NODE_ALIASES");
+	}
+
+	if (resp->env_size) {	/* Used to set Burst Buffer environment */
+		for (i = 0; i < resp->env_size; i++) {
+			tmp = xstrdup(resp->environment[i]);
+			key = tmp;
+			value = strchr(tmp, '=');
+			if (value) {
+				value[0] = '\0';
+				value++;
+				setenv(key, value, 0);
+			}
+			xfree(tmp);
+		}
 	}
 
 	return;
@@ -1245,7 +1270,7 @@ static int _set_rlimit_env(void)
 	return rc;
 }
 
-/* Set SLURM_CLUSTER_NAME< SLURM_SUBMIT_DIR and SLURM_SUBMIT_HOST environment 
+/* Set SLURM_CLUSTER_NAME< SLURM_SUBMIT_DIR and SLURM_SUBMIT_HOST environment
  * variables within current state */
 static void _set_submit_dir_env(void)
 {

@@ -4,6 +4,9 @@
  *  Copyright (C) 2011-2012 National University of Defense Technology.
  *  Written by Hongjia Cao <hjcao@nudt.edu.cn>.
  *  All rights reserved.
+ *  Portions copyright (C) 2015 Mellanox Technologies Inc.
+ *  Written by Artem Y. Polyakov <artemp@mellanox.com>.
+ *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -54,10 +57,10 @@
 #include <dlfcn.h>
 
 #include "src/common/slurm_xlator.h"
-#include "src/common/mpi.h"
-#include "src/common/xstring.h"
-#include "src/common/proc_args.h"
 #include "src/common/net.h"
+#include "src/common/proc_args.h"
+#include "src/common/slurm_mpi.h"
+#include "src/common/xstring.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 #include "src/slurmd/common/reverse_tree_math.h"
 
@@ -66,6 +69,7 @@
 #include "pmi.h"
 #include "spawn.h"
 #include "kvs.h"
+#include "ring.h"
 
 #define PMI2_SOCK_ADDR_FMT "/tmp/sock.pmi2.%u.%u"
 
@@ -288,7 +292,6 @@ _setup_stepd_sockets(const stepd_step_rec_t *job, char ***env)
 
 	/* remove the tree socket file on exit */
 	strncpy(tree_sock_addr, sa.sun_path, 128);
-	atexit(_remove_tree_sock);
 
 	task_socks = xmalloc(2 * job->node_tasks * sizeof(int));
 	for (i = 0; i < job->node_tasks; i ++) {
@@ -370,33 +373,42 @@ pmi2_setup_stepd(const stepd_step_rec_t *job, char ***env)
 	if (rc != SLURM_SUCCESS)
 		return rc;
 
+	/* TODO: finalize pmix_ring state somewhere */
+	/* initialize pmix_ring state */
+	rc = pmix_ring_init(&job_info, env);
+	if (rc != SLURM_SUCCESS)
+		return rc;
+
 	return SLURM_SUCCESS;
 }
 
+extern void
+pmi2_cleanup_stepd()
+{
+	close(tree_sock);
+	_remove_tree_sock();
+}
 /**************************************************************/
 
 /* returned string should be xfree-ed by caller */
 static char *
 _get_proc_mapping(const mpi_plugin_client_info_t *job)
 {
-	uint32_t node_cnt, task_cnt, task_mapped, node_task_cnt, **tids,
-		block;
-	uint16_t task_dist, *tasks, *rounds;
+	uint32_t node_cnt, task_cnt, task_mapped, node_task_cnt, **tids;
+	uint32_t task_dist, block;
+	uint16_t *tasks, *rounds;
 	int i, start_id, end_id;
 	char *mapping = NULL;
 
 	node_cnt = job->step_layout->node_cnt;
 	task_cnt = job->step_layout->task_cnt;
-	task_dist = job->step_layout->task_dist;
+	task_dist = job->step_layout->task_dist & SLURM_DIST_STATE_BASE;
 	tasks = job->step_layout->tasks;
 	tids = job->step_layout->tids;
 
 	/* for now, PMI2 only supports vector processor mapping */
 
-	if (task_dist == SLURM_DIST_CYCLIC ||
-	    task_dist == SLURM_DIST_CYCLIC_CFULL ||
-	    task_dist == SLURM_DIST_CYCLIC_CYCLIC ||
-	    task_dist == SLURM_DIST_CYCLIC_BLOCK) {
+	if ((task_dist & SLURM_DIST_NODEMASK) == SLURM_DIST_NODECYCLIC) {
 		mapping = xstrdup("(vector");
 
 		rounds = xmalloc (node_cnt * sizeof(uint16_t));

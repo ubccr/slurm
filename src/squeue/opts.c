@@ -66,10 +66,11 @@
 #include "src/squeue/squeue.h"
 
 /* getopt_long options, integers but not characters */
-#define OPT_LONG_HELP  0x100
-#define OPT_LONG_USAGE 0x101
-#define OPT_LONG_HIDE  0x102
-#define OPT_LONG_START 0x103
+#define OPT_LONG_HELP      0x100
+#define OPT_LONG_USAGE     0x101
+#define OPT_LONG_HIDE      0x102
+#define OPT_LONG_START     0x103
+#define OPT_LONG_NOCONVERT 0x104
 
 /* FUNCTIONS */
 static List  _build_job_list( char* str );
@@ -80,7 +81,7 @@ static List  _build_step_list( char* str );
 static List  _build_user_list( char* str );
 static char *_get_prefix(char *token);
 static void  _help( void );
-static int   _parse_state( char* str, uint16_t* states );
+static int   _parse_state( char* str, uint32_t* states );
 static void  _parse_token( char *token, char *field, int *field_size,
 			   bool *right_justify, char **suffix);
 static void _parse_long_token( char *token, char *sep, int *field_size,
@@ -115,6 +116,7 @@ parse_command_line( int argc, char* argv[] )
 		{"cluster",    required_argument, 0, 'M'},
 		{"clusters",   required_argument, 0, 'M'},
 		{"name",       required_argument, 0, 'n'},
+                {"noconvert",  no_argument,       0, OPT_LONG_NOCONVERT},
 		{"node",       required_argument, 0, 'w'},
 		{"nodes",      required_argument, 0, 'w'},
 		{"nodelist",   required_argument, 0, 'w'},
@@ -134,6 +136,8 @@ parse_command_line( int argc, char* argv[] )
 		{"version",    no_argument,       0, 'V'},
 		{NULL,         0,                 0, 0}
 	};
+
+	params.convert_flags = CONVERT_NUM_UNIT_EXACT;
 
 	if (getenv("SQUEUE_ALL"))
 		params.all_flag = true;
@@ -197,7 +201,7 @@ parse_command_line( int argc, char* argv[] )
 			break;
 		case (int) 'M':
 			if (params.clusters)
-				list_destroy(params.clusters);
+				FREE_NULL_LIST(params.clusters);
 			if (!(params.clusters =
 			      slurmdb_get_info_cluster(optarg))) {
 				print_db_notok(optarg, 0);
@@ -255,6 +259,7 @@ parse_command_line( int argc, char* argv[] )
 			break;
 		case (int)'r':
 			params.array_flag = true;
+			setenv("SLURM_BITSTR_LEN", "0", 1);
 			break;
 		case (int) 's':
 			if (optarg) {
@@ -307,6 +312,9 @@ parse_command_line( int argc, char* argv[] )
 		case OPT_LONG_START:
 			params.start_flag = true;
 			override_format_env = true;
+			break;
+		case OPT_LONG_NOCONVERT:
+			params.convert_flags |= CONVERT_NUM_UNIT_NO;
 			break;
 		case OPT_LONG_USAGE:
 			_usage();
@@ -468,13 +476,13 @@ parse_command_line( int argc, char* argv[] )
  * RET 0 or error code
  */
 static int
-_parse_state( char* str, uint16_t* states )
+_parse_state( char* str, uint32_t* states )
 {
-	int i;
+	uint32_t i;
 	char *state_names;
 
-	if ((i = job_state_num(str)) >= 0) {
-		*states = (uint16_t) i;
+	if ((i = job_state_num(str)) != NO_VAL) {
+		*states = i;
 		return SLURM_SUCCESS;
 	}
 
@@ -1059,6 +1067,11 @@ extern int parse_long_format( char* format_long )
 							  field_size,
 							  right_justify,
 							  suffix );
+			else if (!strcasecmp(token,"burstbuffer"))
+				job_format_add_burst_buffer(params.format_list,
+							    field_size,
+							    right_justify,
+							    suffix );
 			else if (!strcasecmp(token,"mincpus"))
 				job_format_add_min_cpus( params.format_list,
 							 field_size,
@@ -1451,6 +1464,11 @@ extern int parse_long_format( char* format_long )
 							   field_size,
 							   right_justify,
 							   suffix );
+			else if (!strcasecmp(token, "tres"))
+				job_format_add_tres(params.format_list,
+						    field_size,
+						    right_justify,
+						    suffix );
 			else {
 				job_format_add_invalid( params.format_list,
 							field_size,
@@ -1556,7 +1574,7 @@ _print_options(void)
 	int i;
 	char *license, *name, *part;
 	uint32_t *user;
-	enum job_states *state_id;
+	uint32_t *state_id;
 	squeue_job_step_t *job_step_id;
 	char hostlist[8192];
 
@@ -1747,7 +1765,7 @@ _build_state_list( char* str )
 {
 	List my_list;
 	char *state = NULL, *tmp_char = NULL, *my_state_list = NULL;
-	uint16_t *state_id = NULL;
+	uint32_t *state_id = NULL;
 
 	if ( str == NULL)
 		return NULL;
@@ -1759,7 +1777,7 @@ _build_state_list( char* str )
 	state = strtok_r( my_state_list, ",", &tmp_char );
 	while (state)
 	{
-		state_id = xmalloc( sizeof( uint16_t ) );
+		state_id = xmalloc( sizeof( uint32_t ) );
 		if ( _parse_state( state, state_id ) != SLURM_SUCCESS )
 			exit( 1 );
 		list_append( my_list, state_id );
@@ -1767,6 +1785,15 @@ _build_state_list( char* str )
 	}
 	return my_list;
 
+}
+
+static void _append_state_list(List my_list, uint32_t state_id)
+{
+	uint16_t *state_rec;
+
+	state_rec = xmalloc(sizeof(uint32_t));
+	*state_rec = state_id;
+	list_append(my_list, state_rec);
 }
 
 /*
@@ -1777,21 +1804,16 @@ static List
 _build_all_states_list( void )
 {
 	List my_list;
-	int i;
-	uint16_t * state_id;
+	uint32_t i;
 
 	my_list = list_create( NULL );
-	for (i = 0; i<JOB_END; i++) {
-		state_id = xmalloc( sizeof(uint16_t) );
-		*state_id = (uint16_t) i;
-		list_append( my_list, state_id );
-	}
-	state_id = xmalloc( sizeof(uint16_t) );
-	*state_id = (uint16_t) JOB_COMPLETING;
-	list_append( my_list, state_id );
-	state_id = xmalloc( sizeof(uint16_t) );
-	*state_id = (uint16_t) JOB_CONFIGURING;
-	list_append( my_list, state_id );
+	for (i = 0; i < JOB_END; i++)
+		_append_state_list(my_list, i);
+
+	_append_state_list(my_list, JOB_COMPLETING);
+	_append_state_list(my_list, JOB_CONFIGURING);
+	_append_state_list(my_list, JOB_SPECIAL_EXIT);
+
 	return my_list;
 
 }
@@ -1904,6 +1926,8 @@ Usage: squeue [OPTIONS]\n\
                                   current cluster.  cluster with no name will\n\
                                   reset to default.\n\
   -n, --name=job_name(s)          comma separated list of job names to view\n\
+  --noconvert                     don't convert units from their original type\n\
+				  (e.g. 2048M won't be converted to 2G).\n\
   -o, --format=format             format specification\n\
   -p, --partition=partition(s)    comma separated list of partitions\n\
 				  to view, default is all partitions\n\

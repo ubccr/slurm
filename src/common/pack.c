@@ -70,6 +70,8 @@ strong_alias(pack_time,		slurm_pack_time);
 strong_alias(unpack_time,	slurm_unpack_time);
 strong_alias(packdouble,	slurm_packdouble);
 strong_alias(unpackdouble,	slurm_unpackdouble);
+strong_alias(packlongdouble,	slurm_packlongdouble);
+strong_alias(unpacklongdouble,	slurm_unpacklongdouble);
 strong_alias(pack64,		slurm_pack64);
 strong_alias(unpack64,		slurm_unpack64);
 strong_alias(pack32,		slurm_pack32);
@@ -151,7 +153,7 @@ Buf init_buf(int size)
 	my_buf->magic = BUF_MAGIC;
 	my_buf->size = size;
 	my_buf->processed = 0;
-	my_buf->head = xmalloc_nz(sizeof(char)*size);
+	my_buf->head = xmalloc(sizeof(char)*size);
 	return my_buf;
 }
 
@@ -208,6 +210,7 @@ int unpack_time(time_t * valp, Buf buffer)
  * Given a double, multiple by FLOAT_MULT and then
  * typecast to a uint64_t in host byte order, convert to network byte order
  * store in buffer, and adjust buffer counters.
+ * NOTE: There is an IEEE standard format for double.
  */
 void 	packdouble(double val, Buf buffer)
 {
@@ -240,6 +243,7 @@ void 	packdouble(double val, Buf buffer)
  * Given a buffer containing a network byte order 64-bit integer,
  * typecast as double, and  divide by FLOAT_MULT
  * store a host double at 'valp', and adjust buffer counters.
+ * NOTE: There is an IEEE standard format for double.
  */
 int	unpackdouble(double *valp, Buf buffer)
 {
@@ -258,6 +262,38 @@ int	unpackdouble(double *valp, Buf buffer)
 	uval.u = NTOH_uint64(nl);
 	*valp = uval.d / FLOAT_MULT;
 
+	return SLURM_SUCCESS;
+}
+
+/*
+ * long double has no standard format, so pass the data as a string
+ */
+void 	packlongdouble(long double val, Buf buffer)
+{
+	char val_str[256];
+
+	snprintf(val_str, sizeof(val_str), "%Lf", val);
+	packstr(val_str, buffer);
+}
+
+/*
+ * long double has no standard format, so pass the data as a string
+ */
+int	unpacklongdouble(long double *valp, Buf buffer)
+{
+	long double nl;
+	char *val_str = NULL;
+	uint32_t size_val_str = 0;
+	int rc;
+
+	rc = unpackmem_ptr(&val_str, &size_val_str, buffer);
+	if (rc != SLURM_SUCCESS)
+		return rc;
+
+	if (sscanf(val_str, "%Lf", &nl) != 1)
+		return SLURM_ERROR;
+
+	*valp = nl;
 	return SLURM_SUCCESS;
 }
 
@@ -425,6 +461,60 @@ int unpack64_array(uint64_t ** valp, uint32_t * size_val, Buf buffer)
 	}
 	return SLURM_SUCCESS;
 }
+
+void packdouble_array(double *valp, uint32_t size_val, Buf buffer)
+{
+	uint32_t i = 0;
+
+	pack32(size_val, buffer);
+
+	for (i = 0; i < size_val; i++) {
+		packdouble(*(valp + i), buffer);
+	}
+}
+
+int unpackdouble_array(double **valp, uint32_t* size_val, Buf buffer)
+{
+	uint32_t i = 0;
+
+	if (unpack32(size_val, buffer))
+		return SLURM_ERROR;
+
+	*valp = xmalloc_nz((*size_val) * sizeof(double));
+	for (i = 0; i < *size_val; i++) {
+		if (unpackdouble((*valp) + i, buffer))
+			return SLURM_ERROR;
+	}
+	return SLURM_SUCCESS;
+}
+
+void packlongdouble_array(long double *valp, uint32_t size_val, Buf buffer)
+{
+	uint32_t i = 0;
+
+	pack32(size_val, buffer);
+
+	for (i = 0; i < size_val; i++) {
+		packlongdouble(*(valp + i), buffer);
+	}
+}
+
+int unpacklongdouble_array(long double **valp, uint32_t* size_val, Buf buffer)
+{
+	uint32_t i = 0;
+
+	if (unpack32(size_val, buffer))
+		return SLURM_ERROR;
+
+	*valp = xmalloc_nz((*size_val) * sizeof(long double));
+	for (i = 0; i < *size_val; i++) {
+		if (unpacklongdouble((*valp) + i, buffer))
+			return SLURM_ERROR;
+	}
+	return SLURM_SUCCESS;
+}
+
+
 
 /*
  * Given a 16-bit integer in host byte order, convert to network byte order,

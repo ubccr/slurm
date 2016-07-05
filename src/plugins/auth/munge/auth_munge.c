@@ -71,6 +71,7 @@
 
 #include "slurm/slurm_errno.h"
 #include "src/common/slurm_xlator.h"
+#include "src/common/slurm_time.h"
 
 #define MUNGE_ERRNO_OFFSET	1000
 #define RETRY_COUNT		20
@@ -98,15 +99,13 @@
  * only load authentication plugins if the plugin_type string has a prefix
  * of "auth/".
  *
- * plugin_version   - specifies the version number of the plugin.
- * min_plug_version - specifies the minumum version number of incoming
- *                    messages that this plugin can accept
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]       	= "auth plugin for Munge "
 				  "(http://code.google.com/p/munge/)";
 const char plugin_type[]       	= "auth/munge";
-const uint32_t plugin_version   = 10;
-const uint32_t min_plug_version = 10; /* minimum version accepted */
+const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
 static int plugin_errno = SLURM_SUCCESS;
 static int bad_cred_test = -1;
@@ -437,10 +436,6 @@ slurm_auth_unpack( Buf buf )
 		return NULL;
 	}
 	safe_unpack32( &version, buf );
-	if ( version < min_plug_version ) {
-		plugin_errno = SLURM_AUTH_VERSION;
-		return NULL;
-	}
 
 	/* Allocate and initialize credential. */
 	cred = xmalloc(sizeof(*cred));
@@ -670,10 +665,10 @@ _print_cred_info(munge_info_t *mi)
 	xassert(mi != NULL);
 
 	if (mi->encoded > 0)
-		info ("ENCODED: %s", slurm_ctime_r(&mi->encoded, buf));
+		info ("ENCODED: %s", slurm_ctime2_r(&mi->encoded, buf));
 
 	if (mi->decoded > 0)
-		info ("DECODED: %s", slurm_ctime_r(&mi->decoded, buf));
+		info ("DECODED: %s", slurm_ctime2_r(&mi->decoded, buf));
 }
 
 
@@ -688,28 +683,21 @@ _print_cred(munge_ctx_t ctx)
 	cred_info_destroy(mi);
 }
 
-/* Convert AuthInfo to a socket path. Accepts two input formats:
- * 1) <path>		(Old format)
- * 2) socket=<path>[,]	(New format)
+/* Convert AuthInfo to a socket path. Accepts "socket=<path>[,]"
  * NOTE: Caller must xfree return value
  */
 static char *_auth_opts_to_socket(char *opts)
 {
 	char *socket = NULL, *sep, *tmp;
 
-	if (!opts)
-		return NULL;
-
-	tmp = strstr(opts, "socket=");
-	if (tmp) {	/* New format */
-		socket = xstrdup(tmp + 7);
-		sep = strchr(socket, ',');
-		if (sep)
-			sep[0] = '\0';
-	} else if (strchr(opts, '=')) {
-		;	/* New format, but socket not specified */
-	} else {
-		socket = xstrdup(opts);	/* Old format */
+	if (opts) {
+		tmp = strstr(opts, "socket=");
+		if (tmp) {	/* New format */
+			socket = xstrdup(tmp + 7);
+			sep = strchr(socket, ',');
+			if (sep)
+				sep[0] = '\0';
+		}
 	}
 
 	return socket;

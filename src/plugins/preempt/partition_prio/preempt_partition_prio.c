@@ -51,7 +51,7 @@
 
 const char	plugin_name[]	= "Preempt by partition priority plugin";
 const char	plugin_type[]	= "preempt/partition_prio";
-const uint32_t	plugin_version	= 100;
+const uint32_t	plugin_version	= SLURM_VERSION_NUMBER;
 
 static uint32_t _gen_job_prio(struct job_record *job_ptr);
 static int  _sort_by_prio (void *x, void *y);
@@ -179,9 +179,13 @@ static int _sort_by_prio (void *x, void *y)
 /**************************************************************************/
 extern uint16_t job_preempt_mode(struct job_record *job_ptr)
 {
-	if (job_ptr->part_ptr &&
-	    (job_ptr->part_ptr->preempt_mode != (uint16_t) NO_VAL))
-		return job_ptr->part_ptr->preempt_mode;
+	struct part_record *part_ptr = job_ptr->part_ptr;
+	if (part_ptr && (part_ptr->preempt_mode != (uint16_t) NO_VAL)) {
+		if (part_ptr->preempt_mode & PREEMPT_MODE_GANG)
+			verbose("Partition '%s' preempt mode 'gang' has no "
+				"sense. Filtered out.\n", part_ptr->name);
+		return (part_ptr->preempt_mode & (~PREEMPT_MODE_GANG));
+	}
 
 	return (slurm_get_preempt_mode() & (~PREEMPT_MODE_GANG));
 }

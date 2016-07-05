@@ -59,6 +59,7 @@ void *db_conn = NULL;
 uint32_t my_uid = 0;
 List g_qos_list = NULL;
 List g_res_list = NULL;
+List g_tres_list = NULL;
 bool tree_display = 0;
 
 static void	_add_it (int argc, char *argv[]);
@@ -242,10 +243,10 @@ main (int argc, char *argv[])
 		exit_code = local_exit_code;
 	acct_storage_g_close_connection(&db_conn);
 	slurm_acct_storage_fini();
-	if (g_qos_list)
-		list_destroy(g_qos_list);
-	if (g_res_list)
-		list_destroy(g_res_list);
+	FREE_NULL_LIST(g_qos_list);
+	FREE_NULL_LIST(g_res_list);
+	FREE_NULL_LIST(g_tres_list);
+
 	exit(exit_code);
 }
 
@@ -637,7 +638,7 @@ static void _show_it (int argc, char *argv[])
 		error_code = sacctmgr_list_account((argc - 1), &argv[1]);
 	} else if (strncasecmp(argv[0], "Associations",
 				MAX(command_len, 2)) == 0) {
-		error_code = sacctmgr_list_association((argc - 1), &argv[1]);
+		error_code = sacctmgr_list_assoc((argc - 1), &argv[1]);
 	} else if (strncasecmp(argv[0], "Clusters",
 				MAX(command_len, 2)) == 0) {
 		error_code = sacctmgr_list_cluster((argc - 1), &argv[1]);
@@ -652,8 +653,11 @@ static void _show_it (int argc, char *argv[])
 		error_code = sacctmgr_list_problem((argc - 1), &argv[1]);
 	} else if (strncasecmp(argv[0], "QOS", MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_qos((argc - 1), &argv[1]);
-	} else if (!strncasecmp(argv[0], "Resource", MAX(command_len, 1))) {
+	} else if (!strncasecmp(argv[0], "Resource", MAX(command_len, 4))) {
 		error_code = sacctmgr_list_res((argc - 1), &argv[1]);
+	} else if (!strncasecmp(argv[0], "Reservations", MAX(command_len, 4)) ||
+		   !strncasecmp(argv[0], "Resv", MAX(command_len, 4))) {
+		error_code = sacctmgr_list_reservation((argc - 1), &argv[1]);
 	} else if (!strncasecmp(argv[0], "Transactions", MAX(command_len, 1))
 		   || !strncasecmp(argv[0], "Txn", MAX(command_len, 1))) {
 		error_code = sacctmgr_list_txn((argc - 1), &argv[1]);
@@ -661,6 +665,8 @@ static void _show_it (int argc, char *argv[])
 		error_code = sacctmgr_list_user((argc - 1), &argv[1]);
 	} else if (strncasecmp(argv[0], "WCKeys", MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_wckey((argc - 1), &argv[1]);
+	} else if (strncasecmp(argv[0], "tres", MAX(command_len, 2)) == 0) {
+		error_code = sacctmgr_list_tres(argc - 1, &argv[1]);
 	} else {
 	helpme:
 		exit_code = 1;
@@ -668,8 +674,8 @@ static void _show_it (int argc, char *argv[])
 		fprintf(stderr, "Input line must include ");
 		fprintf(stderr, "\"Account\", \"Association\", "
 			"\"Cluster\", \"Configuration\",\n\"Event\", "
-			"\"Problem\", \"QOS\", \"Resource\", \"Transaction\", "
-			"\"User\", or \"WCKey\"\n");
+			"\"Problem\", \"QOS\", \"Resource\", \"Reservation\", "
+			"\"Transaction\", \"TRES\", \"User\", or \"WCKey\"\n");
 	}
 
 	if (error_code != SLURM_SUCCESS) {
@@ -846,7 +852,8 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                                                                            \n\
   <ENTITY> may be \"account\", \"association\", \"cluster\",               \n\
                   \"configuration\", \"coordinator\", \"event\", \"job\",  \n\
-                  \"problem\", \"qos\", \"resource\", \"transaction\",     \n\
+                  \"problem\", \"qos\", \"resource\", \"reservation\",     \n\
+                  \"transaction\", \"tres\",                               \n\
                    \"user\" or \"wckey\"                                   \n\
                                                                            \n\
   <SPECS> are different for each command entity pair.                      \n\
@@ -855,15 +862,15 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             WithDeleted, WithCoordinators, WithRawQOS,     \n\
                             and WOPLimits                                  \n\
        add account        - Clusters=, DefaultQOS=, Description=, Fairshare=,\n\
-                            GrpCPUMins=, GrpCPUs=, GrpJobs=, GrpMemory=,   \n\
-                            GrpNodes=, GrpSubmitJob=, GrpWall=, MaxCPUMins=,\n\
-                            MaxCPUs=, MaxJobs=, MaxNodes=, MaxSubmitJobs=, \n\
+                            GrpTRESMins=, GrpTRES=, GrpJobs=, GrpMemory=,   \n\
+                            GrpNodes=, GrpSubmitJob=, GrpWall=, MaxTRESMins=,\n\
+                            MaxTRES=, MaxJobs=, MaxNodes=, MaxSubmitJobs=, \n\
                             MaxWall=, Names=, Organization=, Parent=,      \n\
                             and QosLevel=                                  \n\
        modify account     - (set options) DefaultQOS=, Description=,       \n\
-                            Fairshare=, GrpCPUMins=, GrpCPURunMins=,       \n\
-                            GrpCPUs=, GrpJobs=, GrpMemory=, GrpNodes=,     \n\
-                            GrpSubmitJob=, GrpWall=, MaxCPUMins=, MaxCPUs=,\n\
+                            Fairshare=, GrpTRESMins=, GrpTRESRunMins=,       \n\
+                            GrpTRES=, GrpJobs=, GrpMemory=, GrpNodes=,     \n\
+                            GrpSubmitJob=, GrpWall=, MaxTRESMins=, MaxTRES=,\n\
                             MaxJobs=, MaxNodes=, MaxSubmitJobs=, MaxWall=, \n\
                             Names=, Organization=, Parent=, and QosLevel=  \n\
                             RawUsage= (with admin privileges only)         \n\
@@ -880,14 +887,14 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                                                                            \n\
        list cluster       - Classification=, DefaultQOS=, Flags=, Format=, \n\
                             Names=, RPC=, and WOLimits                     \n\
-       add cluster        - DefaultQOS=, Fairshare=, GrpCPUs=, GrpJobs=,   \n\
-                            GrpMemory=, GrpNodes=, GrpSubmitJob=, MaxCPUMins=,\n\
-                            MaxJobs=, MaxNodes=, MaxSubmitJobs=, MaxWall=, \n\
-                            Name=, and QosLevel=                           \n\
-       modify cluster     - (set options) DefaultQOS=, Fairshare=, GrpCPUs=,\n\
-                            GrpJobs=, GrpMemory=, GrpNodes=, GrpSubmitJob=, \n\
-                            MaxCPUMins=, MaxJobs=, MaxNodes=, MaxSubmitJobs=,\n\
-                            MaxWall=, and QosLevel=                        \n\
+       add cluster        - DefaultQOS=, Fairshare=, GrpTRES=, GrpJobs=,   \n\
+                            GrpMemory=, GrpNodes=, GrpSubmitJob=,          \n\
+                            MaxTRESMins=, MaxJobs=, MaxNodes=,             \n\
+                            MaxSubmitJobs=, MaxWall=, Name=, and QosLevel= \n\
+       modify cluster     - (set options) DefaultQOS=, Fairshare=, GrpTRES=,\n\
+                            GrpJobs=, GrpMemory=, GrpNodes=, GrpSubmitJob=,\n\
+                            MaxTRESMins=, MaxJobs=, MaxNodes=,             \n\
+                            MaxSubmitJobs=, MaxWall=, and QosLevel=        \n\
                             (where options) Classification=, Flags=,       \n\
                             and Names=                                     \n\
        delete cluster     - Classification=, DefaultQOS=, Flags=, and Names=\n\
@@ -904,21 +911,19 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                                                                            \n\
        list qos           - Descriptions=, Format=, Id=, Names=,           \n\
                             PreemptMode=, and WithDeleted                  \n\
-       add qos            - Description=, Flags=, GraceTime=, GrpCPUMins=, \n\
-                            GGrpCPUs=, GrpJobs=, GrpMemory=, GrpNodes=,    \n\
-                            GrpSubmitJob=, GrpWall=, MaxCPUMins=, MaxCPUs=,\n\
-                            MaxCPUsPerUser=, MaxJobs=, MaxNodesPerUser=,   \n\
-                            MaxCPUsPerUser=, MaxNodes=, MaxSubmitJobs=,    \n\
+       add qos            - Description=, Flags=, GraceTime=, GrpJobs=,    \n\
+                            GrpSubmitJob=, GrpTRES=, GrpTRESMins=, GrpWall=,\n\
+                            MaxJobs=, MaxSubmitJobsPerUser=, MaxTRESMins=, \n\
+                            MaxTRESPerJob=, MaxTRESPerNode=, MaxTRESPerUser=,\n\
                             MaxWall=, Names=, Preempt=, PreemptMode=,      \n\
                             Priority=, UsageFactor=, and UsageThreshold=   \n\
        modify qos         - (set options) Description=, Flags=, GraceTime=,\n\
-                            GrpCPUMins=, GrpCPURunMins=, GrpCPUs=, GrpJobs=,\n\
-                            GrpMemory=, GrpNodes=, GrpSubmitJob=, GrpWall=,\n\
-                            MaxCPUMins=, MaxCPUs=,                         \n\
-                            MaxCPUsPerUser=, MaxJobs=, MaxNodes=,          \n\
-                            MaxNodesPerUser=, MaxSubmitJobs=, MaxWall=,    \n\
-                            Names=, Preempt=, PreemptMode=, Priority=,     \n\
-                            RawUsage= (with admin privileges only),        \n\
+                            GrpJobs=, GrpSubmitJob=, GrpTRES=, GrpTRESMins=,\n\
+                            GrpWall=,\n\
+                            MaxJobs=, MaxSubmitJobsPerUser=, MaxTRESMins=, \n\
+                            MaxTRESPerJob=, MaxTRESPerNode=, MaxTRESPerUser=,\n\
+                            MaxWall=, Names=, Preempt=, PreemptMode=,      \n\
+                            Priority=, RawUsage= (admin only),             \n\
                             UsageFactor=, and UsageThreshold=              \n\
                             (where options) Descriptions=, ID=, Names=     \n\
                             and PreemptMode=                               \n\
@@ -935,8 +940,12 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             (where options) Clusters=, Names=, Servers=,   \n\
        delete resource    - Clusters=, Names=                              \n\
                                                                            \n\
+       list reservation   - Clusters=, End=, ID=, Names=, Nodes=, Start=   \n\
+                                                                           \n\
        list transactions  - Accounts=, Action=, Actor=, Clusters=, End=,   \n\
                             Format=, ID=, Start=, User=, and WithAssoc     \n\
+                                                                           \n\
+       list tres          - ID=, Name=, Type=, WithDeleted                 \n\
                                                                            \n\
        list user          - AdminLevel=, DefaultAccount=,                  \n\
                             DefaultWCKey=, Format=, Names=,                \n\
@@ -944,12 +953,12 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             WithDeleted, WithRawQOS, and WOPLimits         \n\
        add user           - Accounts=, AdminLevel=, Clusters=,             \n\
                             DefaultAccount=, DefaultQOS=, DefaultWCKey=,   \n\
-                            Fairshare=, MaxCPUMins=, MaxCPUs=,             \n\
+                            Fairshare=, MaxTRESMins=, MaxTRES=,            \n\
                             MaxJobs=, MaxNodes=, MaxSubmitJobs=, MaxWall=, \n\
                             Names=, Partitions=, and QosLevel=             \n\
        modify user        - (set options) AdminLevel=, DefaultAccount=,    \n\
                             DefaultQOS=, DefaultWCKey=, Fairshare=,        \n\
-                            MaxCPUMins=, MaxCPUs=, MaxJobs=, MaxNodes=,    \n\
+                            MaxTRESMins=, MaxTRES=, MaxJobs=, MaxNodes=,    \n\
                             MaxSubmitJobs=, MaxWall=, and QosLevel=,       \n\
                             RawUsage= (with admin privileges only)         \n\
                             (where options) Accounts=, AdminLevel=,        \n\
@@ -976,38 +985,41 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
        Account            - Account, Coordinators, Description, Organization\n\
                                                                            \n\
        Association        - Account, Cluster, DefaultQOS, Fairshare,       \n\
-                            GrpCPUMins, GrpCPURunMins, GrpCPUs, GrpJobs,   \n\
+                            GrpTRESMins, GrpTRESRunMins, GrpTRES, GrpJobs, \n\
                             GrpMemory, GrpNodes, GrpSubmitJob, GrpWall,    \n\
-                            ID, LFT, MaxCPUMins, MaxCPUs,                  \n\
+                            ID, LFT, MaxTRESMins, MaxTRES,                  \n\
                             MaxJobs, MaxNodes, MaxSubmitJobs, MaxWall, QOS,\n\
                             ParentID, ParentName, Partition, RawQOS, RGT,  \n\
                             User                                           \n\
                                                                            \n\
        Cluster            - Classification, Cluster, ClusterNodes,         \n\
-                            ControlHost, ControlPort, CpuCount, DefaultQOS,\n\
-                            Fairshare, Flags, GrpCPUMins, GrpCPUs, GrpJobs,\n\
-                            GrpMemory, GrpNodes, GrpSubmitJob, MaxCPUMins, \n\
-                            MaxCPUs, MaxJobs, MaxNodes, MaxSubmitJobs,     \n\
-                            MaxWall, NodeCount, PluginIDSelect, RPC        \n\
+                            ControlHost, ControlPort, DefaultQOS,          \n\
+                            Fairshare, Flags, GrpTRESMins, GrpTRES GrpJobs,\n\
+                            GrpMemory, GrpNodes, GrpSubmitJob, MaxTRESMins, \n\
+                            MaxTRES, MaxJobs, MaxNodes, MaxSubmitJobs,     \n\
+                            MaxWall, NodeCount, PluginIDSelect, RPC, TRES  \n\
                                                                            \n\
-       Event              - Cluster, ClusterNodes, CPUs, Duration, End,    \n\
+       Event              - Cluster, ClusterNodes, Duration, End,          \n\
                             Event, EventRaw, NodeName, Reason, Start,      \n\
-                            State, StateRaw, User                          \n\
+                            State, StateRaw, TRES, User                    \n\
                                                                            \n\
-       QOS                - Description, Flags, GraceTime, GrpCPUMins,     \n\
-                            GrpCPURunMins, GrpCPUs, GrpJobs, GrpMemory,    \n\
-                            GrpNodes, GrpSubmitJob, GrpWall, ID, MaxCPUMins,\n\
-                            MaxCPUs, MaxCPUsPerUser,                       \n\
-                            MaxJobs, MaxNodes, MaxNodesPerUser,            \n\
-                            MaxSubmitJobs, MaxWall, Name,                  \n\
-                            Preempt, PreemptMode, Priority, UsageFactor,   \n\
-                            UsageThreshold                                 \n\
+       QOS                - Description, Flags, GraceTime, GrpJobs,        \n\
+                            GrpSubmitJob, GrpTRES, GrpTRESMins, GrpWall,   \n\
+                            MaxJobs, MaxSubmitJobsPerUser, MaxTRESMins,    \n\
+                            MaxTRESPerJob, MaxTRESPerNode, MaxTRESPerUser, \n\
+                            MaxWall, Name, Preempt, PreemptMode,           \n\
+                            Priority, UsageFactor, UsageThreshold          \n\
                                                                            \n\
        Resource           - Cluster, Count, CountAllowed, CountUsed,       \n\
                             Description, Flags, Manager, Name,             \n\
-                            PercentAllowed, PercentUsed, Server, and Type  \n\
+                            PercentAllowed, PercentUsed, Server, Type      \n\
+                                                                           \n\
+       Reservation        - Assoc, Cluster, End, Flags, ID, Name,          \n\
+                            NodeNames, Start, TRES                         \n\
                                                                            \n\
        Transactions       - Action, Actor, Info, TimeStamp, Where          \n\
+                                                                           \n\
+       TRES               - ID, Name, Type                                 \n\
                                                                            \n\
        User               - AdminLevel, Coordinators, DefaultAccount,      \n\
                             DefaultWCKey, User                             \n\

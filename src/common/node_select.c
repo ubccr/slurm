@@ -136,8 +136,7 @@ extern void destroy_select_ba_request(void *arg)
 
 	if (ba_request) {
 		xfree(ba_request->save_name);
-		if (ba_request->elongate_geos)
-			list_destroy(ba_request->elongate_geos);
+		FREE_NULL_LIST(ba_request->elongate_geos);
 
 		xfree(ba_request->blrtsimage);
 		xfree(ba_request->linuximage);
@@ -393,11 +392,6 @@ done:
 				      select_type_param_string(cr_type),
 				      cr_type);
 			}
-		} else {
-#ifdef HAVE_XCPU
-			error("%s is incompatible with XCPU use", type);
-			fatal("Use SelectType=select/linear");
-#endif
 		}
 	}
 

@@ -39,20 +39,24 @@ set file_in    "test$test_id\_sc"
 
 print_header $test_id
 
+if {![test_accting_steps]} {
+	send_user "\nWARNING: This test can not be run with nosteps or nojobs "
+	send_user "(AccountingStorageEnforce)\n"
+	exit 0
+}
 if { [test_super_user] == 0 } {
 	send_user "WARNING: Test can only be run as SlurmUser\n"
 	exit $exit_code
 }
 
-
-proc mod_state { state } {
+proc mod_state { state reason } {
 
 	global scontrol node exit_code
 
-	spawn $scontrol update nodename=$node state=$state
+	spawn $scontrol update nodename=$node state=$state reason=$reason
 	expect {
 		timeout {
-			send_user "\nFAILURE:  scontrol is not responding\n"
+			send_user "\nFAILURE: scontrol is not responding\n"
 			set exit_code 1
 		}
 		eof {
@@ -89,19 +93,23 @@ proc check_step { num } {
 	}
 }
 
+# Count the number of jobs and steps with a specific job ID and state
+# NOTE: Skip "extern" job container optionally spawned by "PrologFlags=contain"
 proc check_sacct_states { states log_it } {
 	global job_id sacct
 
 	log_user $log_it
 	set state_num 0
 	if { $log_it == 1 } {
-		spawn $sacct --job=$job_id --duplicates --parsable2 --start=today
+		spawn $sacct --job=$job_id --duplicates --parsable2 --start=today -o JobID,State
 	} else {
-		spawn $sacct --job=$job_id --duplicates --parsable2 --start=today --noheader --format=state
+		spawn $sacct --job=$job_id --duplicates --parsable2 --start=today --noheader -o JobID,State
 	}
 	expect {
-		-re ($states) {
-			incr state_num
+		-re "(\[0-9_\.a-z\]+)\\|($states)" {
+			if {[string first "extern" $expect_out(1,string)] == -1} {
+				incr state_num
+			}
 			exp_continue
 		}
 		timeout {
@@ -198,13 +206,13 @@ if {$job_id == 0} {
 wait_for_job $job_id RUNNING
 
 # Set the node that the job is running on to down
-mod_state "down"
+mod_state "down" "test$test_id"
 
 # Wait a little bit for node state to change
 sleep 5
 
 # Set the node back to resume
-mod_state "resume"
+mod_state "resume" "test$test_id"
 
 # Check the number of steps
 check_step 0
@@ -346,6 +354,6 @@ cancel_job $job_id
 
 if {$exit_code == 0} {
 	exec $bin_rm $file_in
-	send_user "\nSUCCCESS\n"
+	send_user "\nSUCCESS\n"
 }
 exit $exit_code

@@ -181,7 +181,7 @@ int slurm_send_kvs_comm_set(struct kvs_comm_set *kvs_set_ptr,
 	msg_send.msg_type = PMI_KVS_PUT_REQ;
 	msg_send.data = (void *) kvs_set_ptr;
 
-	/* Send the RPC to the local srun communcation manager.
+	/* Send the RPC to the local srun communication manager.
 	 * Since the srun can be sent thousands of messages at
 	 * the same time and refuse some connections, retry as
 	 * needed. Spread out messages by task's rank. Also
@@ -264,7 +264,7 @@ int  slurm_get_kvs_comm_set(struct kvs_comm_set **kvs_set_ptr,
 	msg_send.msg_type = PMI_KVS_GET_REQ;
 	msg_send.data = &data;
 
-	/* Send the RPC to the local srun communcation manager.
+	/* Send the RPC to the local srun communication manager.
 	 * Since the srun can be sent thousands of messages at
 	 * the same time and refuse some connections, retry as
 	 * needed. Wait until all key-pairs have been sent by
@@ -307,7 +307,7 @@ int  slurm_get_kvs_comm_set(struct kvs_comm_set **kvs_set_ptr,
 		if (errno == EINTR)
 			continue;
 		error("slurm_receive_msg: %m");
-		slurm_close_accepted_conn(srun_fd);
+		slurm_close(srun_fd);
 		return errno;
 	}
 	if (msg_rcv.auth_cred)
@@ -315,13 +315,13 @@ int  slurm_get_kvs_comm_set(struct kvs_comm_set **kvs_set_ptr,
 
 	if (msg_rcv.msg_type != PMI_KVS_GET_RESP) {
 		error("slurm_get_kvs_comm_set msg_type=%d", msg_rcv.msg_type);
-		slurm_close_accepted_conn(srun_fd);
+		slurm_close(srun_fd);
 		return SLURM_UNEXPECTED_MSG_ERROR;
 	}
 	if (slurm_send_rc_msg(&msg_rcv, SLURM_SUCCESS) < 0)
 		error("slurm_send_rc_msg: %m");
 
-	slurm_close_accepted_conn(srun_fd);
+	slurm_close(srun_fd);
 	*kvs_set_ptr = msg_rcv.data;
 
 	rc = _forward_comm_set(*kvs_set_ptr);

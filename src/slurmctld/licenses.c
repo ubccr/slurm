@@ -86,7 +86,7 @@ static inline void _licenses_print(char *header, List licenses, int job_id)
 	list_iterator_destroy(iter);
 }
 
-/* Free a license_t record (for use by list_destroy) */
+/* Free a license_t record (for use by FREE_NULL_LIST) */
 extern void license_free_rec(void *x)
 {
 	licenses_t *license_entry = (licenses_t *) x;
@@ -105,7 +105,7 @@ static int _license_find_rec(void *x, void *key)
 
 	if ((license_entry->name == NULL) || (name == NULL))
 		return 0;
-	if (strcmp(license_entry->name, name))
+	if (xstrcmp(license_entry->name, name))
 		return 0;
 	return 1;
 }
@@ -170,8 +170,7 @@ static List _build_license_list(char *licenses, bool *valid)
 	xfree(tmp_str);
 
 	if (*valid == false) {
-		list_destroy(lic_list);
-		lic_list = NULL;
+		FREE_NULL_LIST(lic_list);
 	}
 	return lic_list;
 }
@@ -313,7 +312,7 @@ extern int license_update(char *licenses)
         }
         list_iterator_destroy(iter);
 
-        list_destroy(license_list);
+        FREE_NULL_LIST(license_list);
         license_list = new_list;
         _licenses_print("update_license", license_list, 0);
         slurm_mutex_unlock(&license_mutex);
@@ -512,19 +511,33 @@ extern void license_free(void)
 /*
  * license_validate - Test if the required licenses are valid
  * IN licenses - required licenses
+ * OUT tres_req_cnt - appropriate counts for each requested gres,
+ *                    since this only matters on pending jobs you can
+ *                    send in NULL otherwise
  * OUT valid - true if required licenses are valid and a sufficient number
  *             are configured (though not necessarily available now)
  * RET license_list, must be destroyed by caller
  */
-extern List license_validate(char *licenses, bool *valid)
+extern List license_validate(char *licenses,
+			     uint64_t *tres_req_cnt, bool *valid)
 {
 	ListIterator iter;
 	licenses_t *license_entry, *match;
 	List job_license_list;
+	static bool first_run = 1;
+	static slurmdb_tres_rec_t tres_req;
+	int tres_pos;
 
 	job_license_list = _build_license_list(licenses, valid);
 	if (!job_license_list)
 		return job_license_list;
+
+	/* we only need to init this once */
+	if (first_run) {
+		first_run = 0;
+		memset(&tres_req, 0, sizeof(slurmdb_tres_rec_t));
+		tres_req.type = "license";
+	}
 
 	slurm_mutex_lock(&license_mutex);
 	_licenses_print("request_license", job_license_list, 0);
@@ -548,13 +561,20 @@ extern List license_validate(char *licenses, bool *valid)
 			*valid = false;
 			break;
 		}
+
+		if (tres_req_cnt) {
+			tres_req.name = license_entry->name;
+			if ((tres_pos = assoc_mgr_find_tres_pos(
+				     &tres_req, false)) != -1)
+				tres_req_cnt[tres_pos] =
+					(uint64_t)license_entry->total;
+		}
 	}
 	list_iterator_destroy(iter);
 	slurm_mutex_unlock(&license_mutex);
 
 	if (!(*valid)) {
-		list_destroy(job_license_list);
-		job_license_list = NULL;
+		FREE_NULL_LIST(job_license_list);
 	}
 	return job_license_list;
 }
@@ -810,6 +830,123 @@ get_all_license_info(char **buffer_ptr,
 
 	*buffer_size = get_buf_offset(buffer);
 	buffer_ptr[0] = xfer_buf_data(buffer);
+}
+
+extern uint32_t get_total_license_cnt(char *name)
+{
+	uint32_t count = 0;
+	licenses_t *lic;
+
+	slurm_mutex_lock(&license_mutex);
+	if (license_list) {
+		lic = list_find_first(
+			license_list, _license_find_rec, name);
+
+		if (lic)
+			count = lic->total;
+	}
+	slurm_mutex_unlock(&license_mutex);
+
+	return count;
+}
+
+/* Get how many of a given license are in a list */
+extern uint32_t license_get_total_cnt_from_list(List license_list, char *name)
+{
+	licenses_t *license_entry;
+	uint32_t total = 0;
+
+	license_entry = list_find_first(
+		license_list, _license_find_rec, name);
+
+	if(license_entry)
+		total = license_entry->total;
+	return total;
+}
+
+/* node_read should be locked before coming in here
+ * returns 1 if change happened.
+ */
+extern char *licenses_2_tres_str(List license_list)
+{
+	ListIterator itr;
+	slurmdb_tres_rec_t *tres_rec;
+	licenses_t *license_entry;
+	char *tres_str = NULL;
+	static bool first_run = 1;
+	static slurmdb_tres_rec_t tres_req;
+	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
+				   READ_LOCK, NO_LOCK, NO_LOCK };
+
+	if (!license_list)
+		return NULL;
+
+	/* we only need to init this once */
+	if (first_run) {
+		first_run = 0;
+		memset(&tres_req, 0, sizeof(slurmdb_tres_rec_t));
+		tres_req.type = "license";
+	}
+
+	assoc_mgr_lock(&locks);
+	itr = list_iterator_create(license_list);
+	while ((license_entry = list_next(itr))) {
+		tres_req.name = license_entry->name;
+		if (!(tres_rec = assoc_mgr_find_tres_rec(&tres_req)))
+			continue; /* not tracked */
+
+		if (slurmdb_find_tres_count_in_string(
+			    tres_str, tres_rec->id) != INFINITE64)
+			continue; /* already handled */
+		/* New license */
+		xstrfmtcat(tres_str, "%s%u=%"PRIu64,
+			   tres_str ? "," : "",
+			   tres_rec->id, (uint64_t)license_entry->total);
+	}
+	list_iterator_destroy(itr);
+	assoc_mgr_unlock(&locks);
+
+	return tres_str;
+}
+
+extern void license_set_job_tres_cnt(List license_list,
+				     uint64_t *tres_cnt,
+				     bool locked)
+{
+	ListIterator itr;
+	licenses_t *license_entry;
+	static bool first_run = 1;
+	static slurmdb_tres_rec_t tres_rec;
+	int tres_pos;
+	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
+				   READ_LOCK, NO_LOCK, NO_LOCK };
+
+	/* we only need to init this once */
+	if (first_run) {
+		first_run = 0;
+		memset(&tres_rec, 0, sizeof(slurmdb_tres_rec_t));
+		tres_rec.type = "license";
+	}
+
+	if (!license_list || !tres_cnt)
+		return;
+
+	if (!locked)
+		assoc_mgr_lock(&locks);
+
+	itr = list_iterator_create(license_list);
+	while ((license_entry = list_next(itr))) {
+		tres_rec.name = license_entry->name;
+		if ((tres_pos = assoc_mgr_find_tres_pos(
+			     &tres_rec, locked)) != -1)
+			tres_cnt[tres_pos] = (uint64_t)license_entry->total;
+	}
+	list_iterator_destroy(itr);
+
+	if (!locked)
+		assoc_mgr_unlock(&locks);
+
+	return;
 }
 
 /* pack_license()

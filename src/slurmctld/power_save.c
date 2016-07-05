@@ -185,6 +185,7 @@ static void _do_power_work(time_t now)
 		    (node_ptr->sus_job_cnt == 0)			&&
 		    (!IS_NODE_COMPLETING(node_ptr))			&&
 		    (!IS_NODE_POWER_UP(node_ptr))			&&
+		    (node_ptr->last_idle != 0)				&&
 		    (node_ptr->last_idle < (now - idle_time))		&&
 		    ((exc_node_bitmap == NULL) ||
 		     (bit_test(exc_node_bitmap, i) == 0))) {
@@ -197,7 +198,9 @@ static void _do_power_work(time_t now)
 			suspend_cnt_f++;
 			node_ptr->node_state |= NODE_STATE_POWER_SAVE;
 			node_ptr->node_state &= (~NODE_STATE_NO_RESPOND);
-			bit_set(avail_node_bitmap,   i);
+			if (!IS_NODE_DOWN(node_ptr) &&
+			    !IS_NODE_DRAIN(node_ptr))
+				bit_set(avail_node_bitmap,   i);
 			bit_set(power_node_bitmap,   i);
 			bit_set(sleep_node_bitmap,   i);
 			bit_set(suspend_node_bitmap, i);
@@ -485,12 +488,12 @@ static int _init_power_config(void)
 		debug("power_save module disabled, SuspendTime < 0");
 		return -1;
 	}
-	if (suspend_rate < 1) {
-		error("power_save module disabled, SuspendRate < 1");
+	if (suspend_rate < 0) {
+		error("power_save module disabled, SuspendRate < 0");
 		return -1;
 	}
-	if (resume_rate < 1) {
-		error("power_save module disabled, ResumeRate < 1");
+	if (resume_rate < 0) {
+		error("power_save module disabled, ResumeRate < 0");
 		return -1;
 	}
 	if (suspend_prog == NULL) {
@@ -607,7 +610,7 @@ extern void start_power_mgr(pthread_t *thread_id)
 }
 
 /*
- * init_power_save - Onitialize the power save module. Started as a
+ * init_power_save - Initialize the power save module. Started as a
  *	pthread. Terminates automatically at slurmctld shutdown time.
  *	Input and output are unused.
  */

@@ -165,7 +165,8 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 				limit_str, sizeof(limit_str));
 	if (job_step_ptr->array_job_id) {
 		if (job_step_ptr->step_id == INFINITE) {	/* Pending */
-			snprintf(tmp_line, sizeof(tmp_line), "StepId=%u_%u.TBD ",
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "StepId=%u_%u.TBD ",
 				 job_step_ptr->array_job_id,
 				 job_step_ptr->array_task_id);
 		} else {
@@ -200,7 +201,7 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 		 job_state_string(job_step_ptr->state));
 	xstrcat(out, tmp_line);
 	if (cluster_flags & CLUSTER_FLAG_BG) {
-		char *io_nodes;
+		char *io_nodes = NULL;
 		select_g_select_jobinfo_get(job_step_ptr->select_jobinfo,
 					    SELECT_JOBDATA_IONODES,
 					    &io_nodes);
@@ -236,11 +237,12 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 					    SELECT_JOBDATA_NODE_CNT,
 					    &nodes);
 		convert_num_unit((float)nodes, tmp_node_cnt,
-				 sizeof(tmp_node_cnt), UNIT_NONE);
+				 sizeof(tmp_node_cnt), UNIT_NONE,
+				 CONVERT_NUM_UNIT_EXACT);
 	} else {
 		convert_num_unit((float)_nodes_in_list(job_step_ptr->nodes),
 				 tmp_node_cnt, sizeof(tmp_node_cnt),
-				 UNIT_NONE);
+				 UNIT_NONE, CONVERT_NUM_UNIT_EXACT);
 	}
 
 	snprintf(tmp_line, sizeof(tmp_line),
@@ -254,6 +256,15 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 		xstrcat(out, "\n   ");
 
 	/****** Line 4 ******/
+	snprintf(tmp_line, sizeof(tmp_line), "TRES=%s",
+		 job_step_ptr->tres_alloc_str);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** Line 5 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
 		"ResvPorts=%s Checkpoint=%u CheckpointDir=%s",
 		 job_step_ptr->resv_ports,
@@ -264,19 +275,18 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 5 ******/
-	if (job_step_ptr->cpu_freq == NO_VAL) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "CPUFreqReq=Default\n\n");
-	} else if (job_step_ptr->cpu_freq & CPU_FREQ_RANGE_FLAG) {
-		char buf[32];
-		cpu_freq_to_string(buf, sizeof(buf), job_step_ptr->cpu_freq);
-		snprintf(tmp_line, sizeof(tmp_line), "CPUFreqReq=%s\n\n", buf);
+	/****** Line 6 ******/
+	if (cpu_freq_debug(NULL, NULL, tmp_line, sizeof(tmp_line),
+			   job_step_ptr->cpu_freq_gov,
+			   job_step_ptr->cpu_freq_min,
+			   job_step_ptr->cpu_freq_max, NO_VAL) != 0) {
+		xstrcat(out, tmp_line);
 	} else {
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "CPUFreqReq=%u\n\n", job_step_ptr->cpu_freq);
+		xstrcat(out, "CPUFreqReq=Default");
 	}
-	xstrcat(out, tmp_line);
+	xstrfmtcat(out, " Dist=%s",
+		   slurm_step_layout_type_name(job_step_ptr->task_dist));
+	xstrcat(out, "\n\n");
 
 	return out;
 }
@@ -473,7 +483,7 @@ extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
 		}
 	}
 	list_iterator_destroy(itr);
-	list_destroy(ret_list);
+	FREE_NULL_LIST(ret_list);
 
 	if (resp_out->stats_list)
 		list_sort(resp_out->stats_list, (ListCmpF)_sort_stats_by_name);
@@ -581,7 +591,7 @@ extern int slurm_job_step_get_pids(uint32_t job_id, uint32_t step_id,
                 }
         }
         list_iterator_destroy(itr);
-        list_destroy(ret_list);
+        FREE_NULL_LIST(ret_list);
 
  	if (resp_out->pid_list)
 		list_sort(resp_out->pid_list, (ListCmpF)_sort_pids_by_name);
@@ -606,8 +616,7 @@ extern void slurm_job_step_pids_response_msg_free(void *object)
 	job_step_pids_response_msg_t *step_pids_msg =
 		(job_step_pids_response_msg_t *) object;
 	if (step_pids_msg) {
-		if (step_pids_msg->pid_list)
-			list_destroy(step_pids_msg->pid_list);
+		FREE_NULL_LIST(step_pids_msg->pid_list);
 		xfree(step_pids_msg);
 	}
 }
@@ -622,8 +631,7 @@ extern void slurm_job_step_stat_response_msg_free(void *object)
 	job_step_stat_response_msg_t *step_stat_msg =
 		(job_step_stat_response_msg_t *) object;
 	if (step_stat_msg) {
-		if (step_stat_msg->stats_list)
-			list_destroy(step_stat_msg->stats_list);
+		FREE_NULL_LIST(step_stat_msg->stats_list);
 		xfree(step_stat_msg);
 	}
 }

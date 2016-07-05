@@ -308,8 +308,17 @@ extern int get_up_time(uint32_t *up_time)
 		*up_time = 0;
 		return errno;
 	}
-
+#if defined(_TEST_REBOOT)
+{
+	/* Make node look like it rebooted when slurmd started, for testing */
+	static uint32_t orig_uptime = 0;
+	if (orig_uptime == 0)
+		orig_uptime = info.uptime;
+	*up_time = info.uptime - orig_uptime;
+}
+#else
 	*up_time = info.uptime;
+#endif
 #endif
 	return 0;
 }
@@ -348,6 +357,25 @@ extern int get_cpu_load(uint32_t *cpu_load)
 	}
 
 	*cpu_load = (info.loads[1] / shift_float) * 100.0;
+#endif
+	return 0;
+}
+
+extern int get_free_mem(uint32_t *free_mem)
+{
+#if defined(HAVE_AIX) || defined(__sun) || defined(__APPLE__) || defined(__NetBSD__) || defined(__FreeBSD__) || defined(__CYGWIN__)
+	/* Not sure how to get CPU load on above systems.
+	 * Perhaps some method below works. */
+	*free_mem = 0;
+#else
+	struct sysinfo info;
+
+	if (sysinfo(&info) < 0) {
+		*free_mem = 0;
+		return errno;
+	}
+
+	*free_mem = (((uint64_t )info.freeram)*info.mem_unit)/(1024*1024);
 #endif
 	return 0;
 }

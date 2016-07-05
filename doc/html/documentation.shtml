@@ -37,6 +37,8 @@ Documentation for other versions of Slurm is distributed with the code</b></p>
 <ul>
 <li><a href="quickstart_admin.html">Quick Start Administrator Guide</a></li>
 <li><a href="accounting.html">Accounting</a></li>
+<li><a href="reservations.html">Advanced Resource Reservation Guide</a></li>
+<li><a href="burst_buffer.html">Burst Buffer Guide</a></li>
 <li><a href="cgroups.html">Cgroups Guide</a></li>
 <li><a href="configurator.html">Configuration Tool (Full version)</a></li>
 <li><a href="configurator.easy.html">Configuration Tool (Simplified version)</a></li>
@@ -44,14 +46,15 @@ Documentation for other versions of Slurm is distributed with the code</b></p>
 <li><a href="nonstop.html">Failure Management Support</a></li>
 <li><a href="big_sys.html">Large Cluster Administration Guide</a></li>
 <li><a href="licenses.html">License Management</a></li>
-<li><a href="power_save.html">Power Saving Guide</a></li>
+<li><a href="power_mgmt.html">Power Management Guide (power capping)</a></li>
+<li><a href="power_save.html">Power Saving Guide (power down idle nodes)</a></li>
 <li><a href="prolog_epilog.html">Prolog and Epilog Guide</a></li>
 <li><a href="troubleshoot.html">Troubleshooting Guide</a></li>
+<li><a href="user_permissions.html">User Permissions</a></li>
 <li><a href="wckey.html">WCKey Management</a></li>
 <li>Workload Prioritization</li>
 <ul>
 <li><a href="priority_multifactor.html">Multifactor Job Priority</a></li>
-<li><a href="priority_multifactor2.html">Ticket-Based Multifactor Job Priority</a></li>
 <li><a href="priority_multifactor3.html">Depth-Oblivious Fair-share Factor</a></li>
 <li><a href="fair_tree.html">Fair Tree Fairshare Algorithm</a></li>
 </ul>
@@ -60,7 +63,6 @@ Documentation for other versions of Slurm is distributed with the code</b></p>
 <li><a href="sched_config.html">Scheduling Configuration Guide</a></li>
 <li><a href="cons_res.html">Consumable Resources Guide</a></li>
 <li><a href="core_spec.html">Core Specialization</a></li>
-<li><a href="dynalloc.html">Dynamic Resources Allocation (dynalloc)</a></li>
 <li><a href="elastic_computing.html">Elastic Computing</a></li>
 <li><a href="gang_scheduling.html">Gang Scheduling</a></li>
 <li><a href="gres.html">Generic Resource (GRES) Scheduling</a></li>
@@ -71,6 +73,7 @@ Documentation for other versions of Slurm is distributed with the code</b></p>
 <li><a href="reservations.html">Resource Reservation Guide</a></li>
 <li><a href="cons_res_share.html">Sharing Consumable Resources</a></li>
 <li><a href="topology.html">Topology</a></li>
+<li><a href="tres.html">Trackable Resources (TRES)</a></li>
 </ul>
 <li>External Schedulers</li>
 <ul>
@@ -106,6 +109,7 @@ Documentation for other versions of Slurm is distributed with the code</b></p>
 <li>Plugin Interface Details</li>
 <ul>
 <li><a href="authplugins.html">Authentication Plugin Programmer Guide</a></li>
+<li><a href="bb_plugins.html">Burst Buffer Plugin Programmer Guide</a></li>
 <li><a href="core_spec_plugins.html">Core Specialization Plugin Programmer Guide</a></li>
 <li><a href="crypto_plugins.html">Cryptographic Plugin Programmer Guide</a></li>
 <li><a href="ext_sensorsplugins.html">External Sensors Plugin Programmer Guide</a></li>
@@ -119,6 +123,7 @@ Documentation for other versions of Slurm is distributed with the code</b></p>
 <li><a href="launch_plugins.html">Launch Plugin Programmer Guide</a></li>
 <li><a href="mpiplugins.html">MPI Plugin Programmer Guide</a></li>
 <li><a href="acct_gather_energy_plugins.html">Energy Accounting Plugin Programmer Guide</a></li>
+<li><a href="power_plugins.html">Power Management Plugin Programmer Guide</a></li>
 <li><a href="preemption_plugins.html">Preemption Plugin Programmer Guide</a></li>
 <li><a href="priority_plugins.html">Priority Plugin Programmer Guide</a></li>
 <li><a href="proctrack_plugins.html">Process Tracking Plugin Programmer Guide</a></li>
@@ -132,6 +137,6 @@ Documentation for other versions of Slurm is distributed with the code</b></p>
 </li>
 </ul>
 
-<p style="text-align:center;">Last modified 25 March 2015</p>
+<p style="text-align:center;">Last modified 20 October 2015</p>
 
 <!--#include virtual="footer.txt"-->

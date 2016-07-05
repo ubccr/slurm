@@ -1,7 +1,9 @@
 /*****************************************************************************\
  *  scancel.h - definitions for scancel data structures and functions
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2010-2015 SchedMD LLC.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette<jette1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -50,24 +52,29 @@ typedef struct scancel_options {
 	bool batch;		/* --batch, -b			*/
 	bool ctld;		/* --ctld			*/
 	List clusters;          /* --cluster=cluster_name -Mcluster-name */
+	bool full;		/* --full, -f			*/
 	bool interactive;	/* --interactive, -i		*/
 	char *job_name;		/* --name=n, -nn		*/
 	char *partition;	/* --partition=n, -pn		*/
 	char *qos;		/* --qos=n, -qn			*/
 	char *reservation;	/* --reservation=n, -Rn		*/
 	uint16_t signal;	/* --signal=n, -sn		*/
-	uint16_t state;		/* --state=n, -tn		*/
+	uint32_t state;		/* --state=n, -tn		*/
 	uid_t user_id;		/* derived from user_name	*/
 	char *user_name;	/* --user=n, -un		*/
 	int verbose;		/* --verbose, -v		*/
-
-	uint16_t job_cnt;	/* count of job_id's specified	*/
-	uint32_t *job_id;	/* list of job_id's		*/
-	uint32_t *array_id;	/* list of job array IDs	*/
-	uint32_t *step_id;	/* list of job step id's	*/
 	char *wckey;		/* --wckey			*/
 	char *nodelist;		/* --nodelist, -w		*/
-	char **job_list;        /* list of job ids as char *    */
+
+	char **job_list;        /* job ID input, NULL termated
+				 * Expanded in to arrays below	*/
+
+	uint16_t job_cnt;	/* count of job_id's specified	*/
+	uint32_t *job_id;	/* list of job ID's		*/
+	uint32_t *array_id;	/* list of job array task IDs	*/
+	uint32_t *step_id;	/* list of job step ID's	*/
+	bool *job_found;	/* Set if the job record is found */
+	bool *job_pend;		/* Set fi job is pending	*/
 } opt_t;
 
 opt_t opt;
@@ -80,6 +87,10 @@ opt_t opt;
  */
 extern int initialize_and_process_args(int argc, char *argv[]);
 
+/*
+ * No job filtering options were specified (e.g. by user or state), only the
+ * job ids is on the command line.
+ */
 extern bool has_default_opt(void);
 extern bool has_job_steps(void);
 #endif	/* _HAVE_SCANCEL_H */

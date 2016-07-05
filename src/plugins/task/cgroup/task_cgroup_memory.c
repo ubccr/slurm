@@ -278,7 +278,7 @@ static int memcg_initialize (xcgroup_ns_t *ns, xcgroup_t *cg,
 		return -1;
 	}
 
-	xcgroup_set_param (cg, "memory.use_hierarchy","1");
+	xcgroup_set_param (cg, "memory.use_hierarchy", "1");
 
 	/* when RAM space has not to be constrained and we are here, it
 	 * means that only Swap space has to be constrained. Thus set
@@ -286,6 +286,12 @@ static int memcg_initialize (xcgroup_ns_t *ns, xcgroup_t *cg,
 	if ( ! constrain_ram_space )
 		mlb = mls;
 	xcgroup_set_uint64_param (cg, "memory.limit_in_bytes", mlb);
+
+	/*
+	 * Also constrain kernel memory (if available).
+	 * See https://lwn.net/Articles/516529/
+	 */
+	xcgroup_set_uint64_param (cg, "memory.kmem.limit_in_bytes", mlb);
 
 	/* this limit has to be set only if ConstrainSwapSpace is set to yes */
 	if ( constrain_swap_space ) {
@@ -339,7 +345,7 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 		if (snprintf(job_cgroup_path,PATH_MAX,"%s/job_%u",
 			      user_cgroup_path,jobid) >= PATH_MAX) {
 			error("task/cgroup: unable to build job %u memory "
-			      "cg relative path : %m",jobid);
+			      "cg relative path : %m", jobid);
 			return SLURM_ERROR;
 		}
 	}
@@ -347,23 +353,21 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 	/* build job step cgroup relative path (should not be) */
 	if (*jobstep_cgroup_path == '\0') {
 		int cc;
-
 		if (stepid == SLURM_BATCH_SCRIPT) {
 			cc = snprintf(jobstep_cgroup_path, PATH_MAX,
 				      "%s/step_batch", job_cgroup_path);
-			if (cc >= PATH_MAX) {
-				error("task/cgroup: unable to build "
-				      "step batch memory cg path : %m");
-
-			}
-
+		} else if (stepid == SLURM_EXTERN_CONT) {
+			cc = snprintf(jobstep_cgroup_path, PATH_MAX,
+				      "%s/step_extern", job_cgroup_path);
 		} else {
-			if (snprintf(jobstep_cgroup_path, PATH_MAX, "%s/step_%u",
-				     job_cgroup_path,stepid) >= PATH_MAX) {
-				error("task/cgroup: unable to build job step %u memory "
-				      "cg relative path : %m",stepid);
-				return SLURM_ERROR;
-			}
+			cc = snprintf(jobstep_cgroup_path, PATH_MAX,
+				      "%s/step_%u",
+				      job_cgroup_path, stepid);
+		}
+		if (cc >= PATH_MAX) {
+			error("task/cgroup: unable to build job step %u.%u "
+			      "memory cg relative path : %m", jobid, stepid);
+			return SLURM_ERROR;
 		}
 	}
 
@@ -379,7 +383,7 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 	 * a task. The release_agent will have to lock the root memory cgroup
 	 * to avoid this scenario.
 	 */
-	if (xcgroup_create(&memory_ns,&memory_cg,"",0,0) != XCGROUP_SUCCESS) {
+	if (xcgroup_create(&memory_ns, &memory_cg, "",0,0) != XCGROUP_SUCCESS) {
 		error("task/cgroup: unable to create root memory xcgroup");
 		return SLURM_ERROR;
 	}
@@ -399,7 +403,7 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 	 * are not working well so it will be really difficult to manage
 	 * addition/removal of memory amounts at this level. (kernel 2.6.34)
 	 */
-	if (xcgroup_create(&memory_ns,&user_memory_cg,
+	if (xcgroup_create(&memory_ns, &user_memory_cg,
 			    user_cgroup_path,
 			    getuid(),getgid()) != XCGROUP_SUCCESS) {
 		goto error;
@@ -408,7 +412,7 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 		xcgroup_destroy(&user_memory_cg);
 		goto error;
 	}
-	if ( xcgroup_set_param(&user_memory_cg,"memory.use_hierarchy","1")
+	if ( xcgroup_set_param(&user_memory_cg, "memory.use_hierarchy", "1")
 	     != XCGROUP_SUCCESS ) {
 		error("task/cgroup: unable to ask for hierarchical accounting"
 		      "of user memcg '%s'",user_memory_cg.path);
@@ -457,7 +461,7 @@ extern int task_cgroup_memory_attach_task(stepd_step_rec_t *job)
 	 * Attach the current task to the step memory cgroup
 	 */
 	pid = getpid();
-	if (xcgroup_add_pids(&step_memory_cg,&pid,1) != XCGROUP_SUCCESS) {
+	if (xcgroup_add_pids(&step_memory_cg, &pid, 1) != XCGROUP_SUCCESS) {
 		error("task/cgroup: unable to add task[pid=%u] to "
 		      "memory cg '%s'",pid,step_memory_cg.path);
 		fstatus = SLURM_ERROR;
@@ -526,4 +530,9 @@ extern int task_cgroup_memory_check_oom(stepd_step_rec_t *job)
 		      "unable to create root memcg : %m");
 
 	return SLURM_SUCCESS;
+}
+
+extern int task_cgroup_memory_add_pid(pid_t pid)
+{
+	return xcgroup_add_pids(&step_memory_cg, &pid, 1);
 }

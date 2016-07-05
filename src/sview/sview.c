@@ -92,6 +92,7 @@ job_info_msg_t *g_job_info_ptr = NULL;
 node_info_msg_t *g_node_info_ptr = NULL;
 partition_info_msg_t *g_part_info_ptr = NULL;
 reserve_info_msg_t *g_resv_info_ptr = NULL;
+burst_buffer_info_msg_t *g_bb_info_ptr = NULL;
 slurm_ctl_conf_info_msg_t *g_ctl_info_ptr = NULL;
 job_step_info_response_msg_t *g_step_info_ptr = NULL;
 topo_info_response_msg_t *g_topo_info_msg_ptr = NULL;
@@ -126,6 +127,10 @@ display_data_t main_display_data[] = {
 	 refresh_main, create_model_resv, admin_edit_resv,
 	 get_info_resv, specific_info_resv,
 	 set_menus_resv, NULL},
+	{G_TYPE_NONE, BB_PAGE, "Burst Buffers", TRUE, -1,
+	 refresh_main, create_model_bb, admin_edit_bb,
+	 get_info_bb, specific_info_bb,
+	 set_menus_bb, NULL},
 #ifdef HAVE_BG
 	{G_TYPE_NONE, BLOCK_PAGE, "BG Blocks", TRUE, -1,
 	 refresh_main, NULL, NULL,
@@ -320,9 +325,9 @@ static void _page_switched(GtkNotebook     *notebook,
 		/* If we return here we would not clear the grid which
 		   may need to be done. */
 		/* if (toggled || force_refresh) { */
-		/* 	(main_display_data[i].get_info)( */
-		/* 		table, &main_display_data[i]); */
-		/* 	return; */
+		/*	(main_display_data[i].get_info)( */
+		/*		table, &main_display_data[i]); */
+		/*	return; */
 		/* } */
 
 		page_thr = xmalloc(sizeof(page_thr_t));
@@ -382,10 +387,7 @@ static void _set_hidden(GtkToggleAction *action)
 		tmp = g_strdup_printf(
 			"Hidden partitions and their jobs are now visible");
 	if (apply_hidden_change) {
-		if (grid_button_list) {
-			list_destroy(grid_button_list);
-			grid_button_list = NULL;
-		}
+		FREE_NULL_LIST(grid_button_list);
 		get_system_stats(main_grid_table);
 	}
 	apply_hidden_change = TRUE;
@@ -460,6 +462,7 @@ static void _set_ruled(GtkToggleAction *action)
 	cluster_change_part();
 	cluster_change_job();
 	cluster_change_node();
+	cluster_change_bb();
 
 	refresh_main(NULL, NULL);
 	display_edit_note(tmp);
@@ -632,16 +635,11 @@ static gboolean _delete(GtkWidget *widget,
 	select_g_ba_fini();
 
 #ifdef MEMORY_LEAK_DEBUG
-	if (popup_list)
-		list_destroy(popup_list);
-	if (grid_button_list)
-		list_destroy(grid_button_list);
-	if (multi_button_list)
-		list_destroy(multi_button_list);
-	if (signal_params_list)
-		list_destroy(signal_params_list);
-	if (cluster_list)
-		list_destroy(cluster_list);
+	FREE_NULL_LIST(popup_list);
+	FREE_NULL_LIST(grid_button_list);
+	FREE_NULL_LIST(multi_button_list);
+	FREE_NULL_LIST(signal_params_list);
+	FREE_NULL_LIST(cluster_list);
 	xfree(orig_cluster_name);
 	uid_cache_clear();
 #endif
@@ -995,12 +993,12 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 	}
 	xfree(ui_description);
 	/* GList *action_list = */
-	/* 	gtk_action_group_list_actions(menu_action_group); */
+	/*	gtk_action_group_list_actions(menu_action_group); */
 	/* GtkAction *action = NULL; */
 	/* int i=0; */
 	/* while ((action = g_list_nth_data(action_list, i++))) { */
-	/* 	g_print("got %s and %x\n", gtk_action_get_name(action), */
-	/* 		action); */
+	/*	g_print("got %s and %x\n", gtk_action_get_name(action), */
+	/*		action); */
 	/* } */
 
 	/* Get the pointers to the correct action so if we ever need
@@ -1116,8 +1114,8 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 	   going back to the same cluster we were just at.
 	*/
 	/* if (working_cluster_rec) { */
-	/* 	if (!strcmp(cluster_rec->name, working_cluster_rec->name)) */
-	/* 		return; */
+	/*	if (!strcmp(cluster_rec->name, working_cluster_rec->name)) */
+	/*		return; */
 	/* } */
 
 	/* free old info under last cluster */
@@ -1125,6 +1123,8 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 	g_block_info_ptr = NULL;
 	slurm_free_front_end_info_msg(g_front_end_info_ptr);
 	g_front_end_info_ptr = NULL;
+	slurm_free_burst_buffer_info_msg(g_bb_info_ptr);
+	g_bb_info_ptr = NULL;
 	slurm_free_job_info_msg(g_job_info_ptr);
 	g_job_info_ptr = NULL;
 	slurm_free_node_info_msg(g_node_info_ptr);
@@ -1208,11 +1208,11 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 	cluster_change_part();
 	cluster_change_job();
 	cluster_change_node();
+	cluster_change_bb();
 
 	/* destroy old stuff */
 	if (grid_button_list) {
-		list_destroy(grid_button_list);
-		grid_button_list = NULL;
+		FREE_NULL_LIST(grid_button_list);
 		got_grid = 1;
 	}
 
@@ -1292,10 +1292,7 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 			/* I know we just did this before, but it
 			   needs to be done again here.
 			*/
-			if (grid_button_list) {
-				list_destroy(grid_button_list);
-				grid_button_list = NULL;
-			}
+			FREE_NULL_LIST(grid_button_list);
 			get_system_stats(main_grid_table);
 		}
 
@@ -1323,8 +1320,7 @@ static GtkWidget *_create_cluster_combo(void)
 
 	cluster_list = slurmdb_get_info_cluster(NULL);
 	if (!cluster_list || !list_count(cluster_list)) {
-		if (cluster_list)
-			list_destroy(cluster_list);
+		FREE_NULL_LIST(cluster_list);
 		return NULL;
 	}
 
@@ -1458,6 +1454,8 @@ int main(int argc, char *argv[])
 	int i=0;
 	log_options_t lopts = LOG_OPTS_STDERR_ONLY;
 
+	if (!getenv("SLURM_BITSTR_LEN"))
+		setenv("SLURM_BITSTR_LEN", "128", 1);	/* More array info */
 	slurm_conf_init(NULL);
 	log_init(argv[0], lopts, SYSLOG_FACILITY_USER, NULL);
 	load_defaults();

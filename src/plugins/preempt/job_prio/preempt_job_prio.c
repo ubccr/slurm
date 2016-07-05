@@ -25,7 +25,7 @@
  *  Written by Morris jette <jette1@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -79,7 +79,7 @@
 
 const char  plugin_name[]   = "Preempt by Job Priority and Runtime";
 const char  plugin_type[]   = "preempt/job_prio";
-const uint32_t  plugin_version  = 100;
+const uint32_t  plugin_version  = SLURM_VERSION_NUMBER;
 
 /* The acct_usage_element data structure holds informaiton about
  * an association's current usage and current CPU count*/
@@ -102,15 +102,15 @@ typedef struct acct_usage_element
 static bool _account_preemptable(struct job_record *preemptor_job_ptr,
 				 struct job_record *preemptee_job_ptr)
 {
-	slurmdb_association_rec_t *preemptor_assoc, *preemptee_assoc;
+	slurmdb_assoc_rec_t *preemptor_assoc, *preemptee_assoc;
 	slurmdb_qos_rec_t *preemptor_qos, *preemptee_qos;
 	bool is_from_same_account = false;
 	int i;
 
 	preemptor_assoc =
-		(slurmdb_association_rec_t *)preemptor_job_ptr->assoc_ptr;
+		(slurmdb_assoc_rec_t *)preemptor_job_ptr->assoc_ptr;
 	preemptee_assoc =
-		(slurmdb_association_rec_t *)preemptee_job_ptr->assoc_ptr;
+		(slurmdb_assoc_rec_t *)preemptee_job_ptr->assoc_ptr;
 	if (!preemptor_assoc || !preemptee_assoc)
 		return false;
 
@@ -184,17 +184,17 @@ static bool _account_preemptable(struct job_record *preemptor_job_ptr,
 	 * its share. If the account is using more than its share, then this
 	 * job is a candidate. If not, it is NOT a candidate. */
 	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO) {
-		info("%s: Preemptor(%u) UsedCPUs:%u Shares: %f Tot_CPU %u "
-		     "TOT: %f",
+		info("%s: Preemptor(%u) UsedCPUs:%"PRIu64
+		     " Shares: %f Tot_CPU %u TOT: %f",
 		     plugin_type, preemptor_job_ptr->job_id,
-		     preemptee_assoc->usage->grp_used_cpus,
+		     preemptee_assoc->usage->grp_used_tres[TRES_ARRAY_CPU],
 		     preemptee_assoc->usage->shares_norm,
 		     preemptor_job_ptr->part_ptr->total_cpus,
 		     (preemptor_job_ptr->part_ptr->total_cpus *
 		      preemptee_assoc->usage->shares_norm));
 	}
 
-	if ((preemptee_assoc->usage->grp_used_cpus >
+	if ((preemptee_assoc->usage->grp_used_tres[TRES_ARRAY_CPU] >
 	     preemptee_assoc->usage->shares_norm *
 	     preemptee_job_ptr->part_ptr->total_cpus) || is_from_same_account) {
 		if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO) {
@@ -315,7 +315,8 @@ static int _get_nb_cpus(struct job_record *job_ptr)
 	}
 	max_nodes = MIN(max_nodes, 500000);	/* prevent overflows */
 
-	if (!job_ptr->limit_set_max_nodes && job_ptr->details->max_nodes)
+	if (!job_ptr->limit_set.tres[TRES_ARRAY_NODE] &&
+	    job_ptr->details->max_nodes)
 		req_nodes = max_nodes;
 	else
 		req_nodes = min_nodes;
@@ -342,19 +343,19 @@ static int _get_nb_cpus(struct job_record *job_ptr)
 	return cpu_cnt;
 }
 
-/* Determine fair share assocation to use for some job */
-static slurmdb_association_rec_t *
+/* Determine fair share association to use for some job */
+static slurmdb_assoc_rec_t *
 _get_job_fs_ass(char *job_type, struct job_record *job_ptr)
 {
-	slurmdb_association_rec_t *temp_fs_ass =
-		(slurmdb_association_rec_t *)job_ptr->assoc_ptr;
+	slurmdb_assoc_rec_t *temp_fs_ass =
+		(slurmdb_assoc_rec_t *)job_ptr->assoc_ptr;
 
 	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO) {
 		info("%s: Pre %s JobID:%u ParentAcct:%s MyAcct:%s "
 		     "UsageParent:%s",
 		     plugin_type, job_type,job_ptr->job_id,
 		     temp_fs_ass->parent_acct, temp_fs_ass->acct,
-		     ((slurmdb_association_rec_t*)
+		     ((slurmdb_assoc_rec_t*)
 		      temp_fs_ass->usage->parent_assoc_ptr)->acct);
 	}
 
@@ -369,7 +370,7 @@ _get_job_fs_ass(char *job_type, struct job_record *job_ptr)
 			     plugin_type, job_type, job_ptr->job_id,
 			     temp_fs_ass->parent_acct,
 			     temp_fs_ass->acct,
-			     ((slurmdb_association_rec_t*)
+			     ((slurmdb_assoc_rec_t*)
 			      temp_fs_ass->usage->parent_assoc_ptr)->acct);
 		temp_fs_ass = temp_fs_ass->usage->parent_assoc_ptr;
 	}
@@ -379,7 +380,7 @@ _get_job_fs_ass(char *job_type, struct job_record *job_ptr)
 		     "UsageParent:%s",
 		     plugin_type, job_type, job_ptr->job_id,
 		     temp_fs_ass->parent_acct, temp_fs_ass->acct,
-		     ((slurmdb_association_rec_t*)temp_fs_ass->
+		     ((slurmdb_assoc_rec_t*)temp_fs_ass->
 		      usage->parent_assoc_ptr)->acct);
 	}
 	return temp_fs_ass;
@@ -388,14 +389,14 @@ _get_job_fs_ass(char *job_type, struct job_record *job_ptr)
 static void _account_under_alloc(struct job_record *preemptor_job_ptr,
 				 List preemptee_job_list)
 {
-	slurmdb_association_rec_t *preemptor_assoc;
+	slurmdb_assoc_rec_t *preemptor_assoc;
 	List acct_usage_list = list_create(_destroy_acct_usage_element);
 	uint32_t preemptor_cpu_cnt = _get_nb_cpus(preemptor_job_ptr);
 	uint32_t preemptee_cpu_cnt;
 	uint32_t preemptor_grp_used_cpu, preemptee_grp_used_cpu;
 	uint32_t preemptee_assoc_id;
-	slurmdb_association_rec_t *preemptor_temp_fs_ass;
-	slurmdb_association_rec_t *preemptee_temp_fs_ass, *preemptee_assoc;
+	slurmdb_assoc_rec_t *preemptor_temp_fs_ass;
+	slurmdb_assoc_rec_t *preemptee_temp_fs_ass, *preemptee_assoc;
 	acct_usage_element_t *new_acct_usage_ptr = NULL;
 	acct_usage_element_t *preemptee_acct_usage_ptr = NULL;
 	acct_usage_element_t *preemptor_acct_usage_ptr = NULL;
@@ -406,10 +407,11 @@ static void _account_under_alloc(struct job_record *preemptor_job_ptr,
 	acct_usage_element_t *found_acct_usage_ptr = NULL;
 	char *share_type;
 
-	preemptor_assoc = (slurmdb_association_rec_t *)
+	preemptor_assoc = (slurmdb_assoc_rec_t *)
 			  preemptor_job_ptr->assoc_ptr;
 	preemptor_temp_fs_ass = _get_job_fs_ass("preemptor", preemptor_job_ptr);
-	preemptor_grp_used_cpu = preemptor_temp_fs_ass->usage->grp_used_cpus;
+	preemptor_grp_used_cpu = preemptor_temp_fs_ass->usage->
+		grp_used_tres[TRES_ARRAY_CPU];
 
 	it = list_iterator_create(preemptee_job_list);
 	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO) {
@@ -418,13 +420,16 @@ static void _account_under_alloc(struct job_record *preemptor_job_ptr,
 	}
 
 	while ((preemptee_job_ptr = (struct job_record *) list_next(it))) {
-		preemptee_assoc = ((slurmdb_association_rec_t *)
+		preemptee_assoc = ((slurmdb_assoc_rec_t *)
 				   preemptee_job_ptr->assoc_ptr);
 		preemptee_assoc_id = preemptee_assoc->id;
 		preemptee_temp_fs_ass = _get_job_fs_ass("preemptee",
 							preemptee_job_ptr);
+		/* FIXME: This appears to only work off cpus at the
+		 * moment, probably should work off TRES.
+		 */
 		preemptee_grp_used_cpu = preemptee_temp_fs_ass->usage->
-					 grp_used_cpus;
+					 grp_used_tres[TRES_ARRAY_CPU];
 		preemptee_cpu_cnt = _get_nb_cpus(preemptee_job_ptr);
 		if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO) {
 			info("%s: Preemptee (%u %s) grp_used_cpu:%u",
@@ -515,7 +520,7 @@ static void _account_under_alloc(struct job_record *preemptor_job_ptr,
 		preemptee_current_usage =
 			(long)(preemptee_acct_usage_ptr->current_usage*EPSILON);
 		if (((strcmp(preemptor_assoc->acct,
-			     ((slurmdb_association_rec_t *)
+			     ((slurmdb_assoc_rec_t *)
 			      preemptee_job_ptr->assoc_ptr)->acct) != 0) &&
 		    (preemptor_new_usage >= preemptee_acct_usage_ptr->current_usage ||
 		     preemptee_acct_usage_ptr->current_cpu_count <= 0)) &&
@@ -534,9 +539,9 @@ static void _account_under_alloc(struct job_record *preemptor_job_ptr,
 				      preemptor_new_usage,
 				      preemptee_current_usage,
 				      preemptor_new_usage_long,
-				      ((slurmdb_association_rec_t*)
+				      ((slurmdb_assoc_rec_t*)
 				       preemptee_job_ptr->assoc_ptr)->acct,
-				      ((slurmdb_association_rec_t*)
+				      ((slurmdb_assoc_rec_t*)
 				       preemptee_job_ptr->assoc_ptr)->
 				       parent_acct);
 			}
@@ -557,8 +562,7 @@ static void _account_under_alloc(struct job_record *preemptor_job_ptr,
 	}
 	list_iterator_destroy(it);
 
-	if (acct_usage_list)
-		list_destroy(acct_usage_list);
+	FREE_NULL_LIST(acct_usage_list);
 }
 
 /* Test if preemptor request will overallocate the account */
@@ -566,7 +570,7 @@ static int _overalloc_test(struct job_record *preemptor,
 			   struct job_record *preemptee)
 {
 	uint32_t cpu_cnt_preemptee, cpu_cnt_preemptor;
-	slurmdb_association_rec_t *assoc_preemptee, *assoc_preemptor;
+	slurmdb_assoc_rec_t *assoc_preemptee, *assoc_preemptor;
 	double shares_preemptee, shares_preemptor;
 	uint32_t new_usage_preemptee, new_usage_preemptor;
 	double allotment_preemptee, allotment_preemptor;
@@ -578,8 +582,8 @@ static int _overalloc_test(struct job_record *preemptor,
 	cpu_cnt_preemptee = _get_nb_cpus(preemptee);
 	cpu_cnt_preemptor = _get_nb_cpus(preemptor);
 
-	assoc_preemptee = (slurmdb_association_rec_t *)preemptee->assoc_ptr;
-	assoc_preemptor = (slurmdb_association_rec_t *)preemptor->assoc_ptr;
+	assoc_preemptee = (slurmdb_assoc_rec_t *)preemptee->assoc_ptr;
+	assoc_preemptor = (slurmdb_assoc_rec_t *)preemptor->assoc_ptr;
 
 	if (!assoc_preemptee || !assoc_preemptee->usage ||
 	    !assoc_preemptor || !assoc_preemptor->usage) {
@@ -589,12 +593,20 @@ static int _overalloc_test(struct job_record *preemptor,
 
 	shares_preemptee = assoc_preemptee->usage->shares_norm;
 	shares_preemptor = assoc_preemptor->usage->shares_norm;
-	new_usage_preemptee = assoc_preemptee->usage->grp_used_cpus;
-	new_usage_preemptor = assoc_preemptor->usage->grp_used_cpus +
-			      cpu_cnt_preemptor;
 
-	allotment_preemptee = shares_preemptee * preemptee->part_ptr->total_cpus;
-	allotment_preemptor = shares_preemptor * preemptor->part_ptr->total_cpus;
+	/* FIXME: this appears to only work for CPUS at the moment, it
+	 * probably should work for other TRES as well.
+	 */
+	new_usage_preemptee = assoc_preemptee->usage->
+		grp_used_tres[TRES_ARRAY_CPU];
+	new_usage_preemptor = assoc_preemptor->usage->
+		grp_used_tres[TRES_ARRAY_CPU] +
+		cpu_cnt_preemptor;
+
+	allotment_preemptee =
+		shares_preemptee * preemptee->part_ptr->total_cpus;
+	allotment_preemptor =
+		shares_preemptor * preemptor->part_ptr->total_cpus;
 
 	/* Fairshare will be less than 1 if running the job will not overrun
 	 * the share allocation */
@@ -636,11 +648,11 @@ static int _overalloc_test(struct job_record *preemptor,
 		     assoc_preemptor->acct, relation, preemptee->job_id,
 		     preemptee->name, assoc_preemptee->acct,
 		     new_fairshare_preemptor, new_fairshare_preemptor);
-		info("%s:   CPUs Needed: %u and %u  Used CPUS: %u and %u  "
-		     "Shares: %f and %f  CPUsTotal: %u and %u",
+		info("%s:   CPUs Needed: %u and %u  Used CPUS: %"PRIu64
+		     " and %"PRIu64" Shares: %f and %f  CPUsTotal: %u and %u",
 		     plugin_type, cpu_cnt_preemptor, cpu_cnt_preemptee,
-		     assoc_preemptor->usage->grp_used_cpus,
-		     assoc_preemptee->usage->grp_used_cpus,
+		     assoc_preemptor->usage->grp_used_tres[TRES_ARRAY_CPU],
+		     assoc_preemptee->usage->grp_used_tres[TRES_ARRAY_CPU],
 		     shares_preemptor, shares_preemptee,
 		     preemptor->part_ptr->total_cpus,
 		     preemptee->part_ptr->total_cpus);

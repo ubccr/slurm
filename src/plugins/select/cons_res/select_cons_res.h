@@ -55,11 +55,12 @@
 #include "src/common/node_select.h"
 #include "src/common/pack.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_resource_info.h"
+#include "src/common/slurm_topology.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/slurm_resource_info.h"
-#include "src/common/slurm_topology.h"
+#include "src/slurmctld/powercapping.h"
 #include "src/slurmctld/preempt.h"
 #include "src/slurmctld/slurmctld.h"
 
@@ -69,15 +70,15 @@
 struct part_row_data {
 	bitstr_t *row_bitmap;		/* contains core bitmap for all jobs in
 					 * this row */
-	uint32_t num_jobs;		/* Number of jobs in this row */
 	struct job_resources **job_list;/* List of jobs in this row */
 	uint32_t job_list_size;		/* Size of job_list array */
+	uint32_t num_jobs;		/* Number of occupied entries in job_list array */
 };
 
 /* partition CPU allocation data */
 struct part_res_record {
 	struct part_res_record *next;	/* Ptr to next part_res_record */
-	uint16_t num_rows;		/* Number of row_bitmaps */
+	uint16_t num_rows;		/* Number of elements in "row" array */
 	struct part_record *part_ptr;   /* controller part record pointer */
 	struct part_row_data *row;	/* array of rows containing jobs */
 };
@@ -89,9 +90,11 @@ struct node_res_record {
 	uint16_t boards; 		/* count of boards configured */
 	uint16_t sockets;		/* count of sockets configured */
 	uint16_t cores;			/* count of cores configured */
+	uint16_t threads;		/* count of hyperthreads per core */
 	uint16_t vpus;			/* count of virtual cpus (hyperthreads)
 					 * configured per core */
 	uint32_t real_memory;		/* MB of real memory configured */
+	uint32_t mem_spec_limit;	/* MB of specialized/system memory */
 };
 
 /* per-node resource usage record */
@@ -103,7 +106,11 @@ struct node_use_record {
 	uint16_t node_state;		/* see node_cr_state comments */
 };
 
+extern bool     backfill_busy_nodes;
+extern bool     have_dragonfly;
 extern bool     pack_serial_at_end;
+extern bool     preempt_by_part;
+extern bool     preempt_by_qos;
 extern uint64_t select_debug_flags;
 extern uint16_t select_fast_schedule;
 

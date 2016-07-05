@@ -15,6 +15,8 @@ slurmctld_SOURCES =     \
 	agent.c  	\
 	agent.h		\
 	backup.c	\
+	burst_buffer.c	\
+	burst_buffer.h	\
 	controller.c 	\
 	front_end.c	\
 	front_end.h	\
@@ -42,6 +44,8 @@ slurmctld_SOURCES =     \
 	port_mgr.c	\
 	port_mgr.h	\
 	power_save.c	\
+	powercapping.c	\
+	powercapping.h	\
 	preempt.c	\
 	preempt.h	\
 	proc_req.c	\
@@ -52,6 +56,8 @@ slurmctld_SOURCES =     \
 	reservation.h	\
 	sched_plugin.c	\
 	sched_plugin.h	\
+	sicp.c		\
+	sicp.h		\
 	slurmctld.h	\
 	srun_comm.c	\
 	srun_comm.h	\

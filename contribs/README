@@ -69,6 +69,13 @@ of the Slurm contribs distribution follows:
      This PAM module will restrict who can login to a node to users who have
      been allocated resources on the node and user root.
 
+  pam_slurm_adopt    [ Plugin for PAM to place incoming connections into
+                       existing Slurm job container ]
+     This Slurm plugin provides a mechanism for new incomming connections to
+     be placed into existing Slurm jobs containers so that then can be accounted
+     for and killed at job termination. See the README file in the subdirectory
+     for more details.
+
   perlapi/           [ Perl API to Slurm source ]
      API to Slurm using perl.  Making available all Slurm command that exist
      in the Slurm proper API.
@@ -92,6 +99,11 @@ of the Slurm contribs distribution follows:
   sgather            [ shell script ]
      Gather remote files from a job into a central location. Reverse of of
      sbcast command.
+
+  sgi/               [Tools for use on SGI systems]
+     netloc_to_topology.c   [ C program ]
+     Used to construct a Slurm topology.conf file based upon SGI network APIs.
+     README.txt      [Documentation]
 
   sjobexit/          [ Perl programs ]
      Tools for managing job exit code records

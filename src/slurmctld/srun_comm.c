@@ -81,6 +81,7 @@ static void _srun_agent_launch(slurm_addr_t *addr, char *host,
 extern void srun_allocate (uint32_t job_id)
 {
 	struct job_record *job_ptr = find_job_record (job_id);
+	int i;
 
 	xassert(job_ptr);
 	if (job_ptr && job_ptr->alloc_resp_port && job_ptr->alloc_node &&
@@ -104,6 +105,19 @@ extern void srun_allocate (uint32_t job_id)
 		if (job_ptr->details) {
 			msg_arg->pn_min_memory = job_ptr->details->
 						 pn_min_memory;
+			msg_arg->cpu_freq_min = job_ptr->details->cpu_freq_min;
+			msg_arg->cpu_freq_max = job_ptr->details->cpu_freq_max;
+			msg_arg->cpu_freq_gov = job_ptr->details->cpu_freq_gov;
+			if (job_ptr->details->env_cnt) {
+				msg_arg->env_size = job_ptr->details->env_cnt;
+				msg_arg->environment = xmalloc(
+					sizeof(char *) * msg_arg->env_size);
+				for (i = 0; i < msg_arg->env_size; i++) {
+					msg_arg->environment[i] =
+						xstrdup(job_ptr->details->
+							env_sup[i]);
+				}
+			}
 		}
 		memcpy(msg_arg->cpus_per_node,
 		       job_resrcs_ptr->cpu_array_value,
@@ -117,6 +131,7 @@ extern void srun_allocate (uint32_t job_id)
 		msg_arg->select_jobinfo = select_g_select_jobinfo_copy(
 				job_ptr->select_jobinfo);
 		msg_arg->error_code	= SLURM_SUCCESS;
+
 		_srun_agent_launch(addr, job_ptr->alloc_node,
 				   RESPONSE_RESOURCE_ALLOCATION, msg_arg,
 				   job_ptr->start_protocol_ver);

@@ -1,7 +1,7 @@
 ############################################################################
 # Copyright (C) 2002-2007 The Regents of the University of California.
 # Copyright (C) 2008-2011 Lawrence Livermore National Security.
-# Copyright (C) 2010-2014 SchedMD LLC
+# Copyright (C) 2010-2015 SchedMD LLC
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # Additions by Joseph Donaghy <donaghy1@llnl.gov>
@@ -177,6 +177,9 @@ test1.72   Validate JobAcctGatherFrequency configuration parameter is enforced.
 test1.73   Validate OverTimeLimit configuration parameter is enforced.
 test1.74   Validate MaxNode and GrpNode limit enforcment with QoS & association.
 test1.75   Test that --cpu-freq is enforced when using non-numeric values
+test1.76   Test that --cpu-freq sets min-max:gov
+test1.77   Test that job name specified at the command line overwrites
+           the environment variable SLURM_JOB_NAME
 
 **NOTE**   The following tests attempt to utilize multiple CPUs or partitions,
 	   The test will print "WARNING" and terminate with an exit code of
@@ -206,7 +209,10 @@ test1.94   Test of MPICH2 task spawn logic
 test1.95   Basic UPC (Unified Parallel C) test via srun.
 test1.96   Basic SHMEM test via srun.
 test1.97   Test that --ntask-per-node and -c options are enforced
+test1.98   AVAILBLE...
 test1.99   Validate that SrunPortRange is enforced when using srun
+test1.100  Test of pack/nopack task distribution.
+test1.101  Test of --bcast option.
 **NOTE**   The above tests for multiple processor/partition systems only
 
 test2.#    Testing of scontrol options (to be run as unprivileged user).
@@ -236,6 +242,7 @@ test2.21   Validate scontrol requeue of failed or completed job.
 test2.22   Validate scontrol requeuehold requeues job to held pending state.
 test2.23   Validate scontrol requeuehold State=SpecialExit.
 test2.24   Validate the scontrol write config creates accurate config
+test2.25   Validate scontrol show assoc_mgr command.
 
 
 test3.#    Testing of scontrol options (best run as SlurmUser or root).
@@ -253,6 +260,8 @@ test3.10   Test of "scontrol notify <jobid> <message>"
 test3.11   Validate scontrol create, delete, and update of reservations.
 test3.12   Validate scontrol update command for front end nodes.
 test3.13   Validate scontrol update command for jobs by JobName and UserID.
+test3.14   Test of advanced reservation "replace" option.
+test3.15   Test of advanced reservation of licenses.
 UNTESTED   "scontrol abort"    would stop slurm
 UNTESTED   "scontrol shutdown" would stop slurm
 
@@ -275,6 +284,8 @@ test4.10   Confirm that sinfo reports a proper version number (--version
 	   option).
 test4.11   Test down node reason display (--list-reasons option).
 test4.12   Test cpu total and allocation numbers.
+test4.13   Test sinfo's -O (--Format) option.
+test4.14   Test that multiple partitions can be specified in the env variable.
 
 
 test5.#    Testing of squeue options.
@@ -292,6 +303,7 @@ test5.8    Confirm that squeue reports a proper version number (--version
 	   option).
 test5.9    Validate that squeue -O displays correct job/step format.
 test5.10   Validate that squeue --priority is listing jobs by priority.
+test5.11   Validate that job node estimation is accurate.
 
 
 test6.#    Testing of scancel options.
@@ -310,10 +322,10 @@ test6.10   Validate scancel user and partition filters, delete all remaining
 test6.11   Validate scancel quiet option, no warning if job gone
 	   (--quiet option).
 test6.12   Test scancel signal to batch script (--batch option)
-test6.13   Test routing all signals through slurmctld rather than directly
-	   to slurmd (undocumented --ctld option).
-test6.14   Test scancel nodelist option (--nodelist or -w)
-
+test6.13   Test routing all signals through slurmctld rather than slurmd
+	   (undocumented --ctld option).
+test6.14   Test scancel nodelist option (--nodelist or -w).
+test6.15   Test scancel signal of full job including batch script (--full option).
 
 test7.#    Testing of other functionality.
 ==========================================
@@ -452,6 +464,7 @@ test14.7   Test sbcast security issues.
 test14.8   Test sbcast transmission buffer options (--size and
 	   --fanout options).
 test14.9   Verify that an sbcast credential is properly validated.
+test14.10  Validate sbcast for a job step allocation (subset of job allocation).
 
 test15.#   Testing of salloc options.
 =====================================
@@ -557,7 +570,10 @@ test17.35  Test performance/timing of job submissions.
 test17.36  Test that the shared option in partitions is enforced.
 test17.37  Validate that afternotok dependency is enforced.
 test17.38  Test for sbatch --signal.
-
+test17.39  Validate dependecy OR option.
+test17.40  Test of --thread-spec option.
+test17.41  Validate that sbatch, srun, salloc return partition error message.
+test17.43  Test sbatch handling of very long lines in script
 
 test19.#   Testing of strigger options.
 =======================================
@@ -623,6 +639,8 @@ test21.29  sacctmgr clear (modify) QoS values
 test21.30  sacctmgr test if the QoS values are enforced
 test21.31  sacctmgr modify Resource values
 test21.32  Validate that mod qos =,+=,-= change the preempt value
+test21.34  Validate that partition and job qos limits are enforced
+test21.35  Validate DenyOnLimit QoS flag is enforced on QoS and Associations.
 
 
 test22.#   Testing of sreport commands and options.
@@ -680,6 +698,9 @@ test28.5   Validates that scontrol can hold and release a whole job
 test28.6   Validates that when a job array is submitted to multiple
 	   partitions that the jobs run on them.
 test28.7   Confirms job array dependencies.
+test28.8   Test of job array suspend/resume.
+test28.9   Test of maximum running task count in a job array.
+test28.10  Test change to maximum running task count in a job array.
 
 
 test29.#   Testing of smd command and option.
@@ -727,3 +748,8 @@ test34.*   Test of Slurm preemption.
 ====================================
 test34.1   Validate that partition PreemptMode is enforced.
 test34.2   Validate that qos PreemptMode is enforced.
+
+test35.*   Burst buffer tests
+=============================
+test35.1   Cray persistent burst buffer creation
+test35.2   Cray job-specific burst buffer use

@@ -45,26 +45,12 @@
 #endif
 
 #include "slurm/slurm.h"
+#include "src/common/file_bcast.h"
 #include "src/common/macros.h"
 #include "src/common/slurm_protocol_defs.h"
 
-struct sbcast_parameters {
-	uint32_t block_size;
-	bool compress;
-	int  fanout;
-	bool force;
-	uint32_t jobid;
-	bool preserve;
-	int  timeout;
-	int  verbose;
-	char *src_fname;
-	char *dst_fname;
-};
-
-extern struct sbcast_parameters params;
+extern struct bcast_parameters params;
 
 extern void parse_command_line(int argc, char *argv[]);
-extern void send_rpc(file_bcast_msg_t *bcast_msg,
-		     job_sbcast_cred_msg_t *sbcast_cred);
 
 #endif

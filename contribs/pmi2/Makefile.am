@@ -4,6 +4,7 @@
 AUTOMAKE_OPTIONS = foreign
 
 pkginclude_HEADERS = slurm/pmi2.h
+noinst_HEADERS = pmi2_util.h
 
 if WITH_GNU_LD
 PMI2_VERSION_SCRIPT = \
@@ -26,6 +27,7 @@ libpmi2_la_LDFLAGS = $(LIB_LDFLAGS) -version-info $(libpmi2_current):$(libpmi2_r
 $(PMI2_VERSION_SCRIPT) :
 	(echo "{ global:"; \
 	echo "   PMI2_*;"; \
+	echo "   PMIX_*;"; \
 	echo "  local: *;"; \
 	echo "};") > $(PMI2_VERSION_SCRIPT)
 

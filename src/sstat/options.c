@@ -43,6 +43,9 @@
 #include "sstat.h"
 #include <time.h>
 
+/* getopt_long options, integers but not characters */
+#define OPT_LONG_NOCONVERT 0x100
+
 void _help_fields_msg(void);
 void _help_msg(void);
 void _usage(void);
@@ -85,10 +88,14 @@ sstat [<OPTION>] -j <job(.stepid)>                                          \n\
                    running if not specified, unless the --allsteps flag is  \n\
                    set where not specifying a step will result in all       \n\
                    running steps to be displayed.  A step id of 'batch'     \n\
-                   will display the information about the batch step.       \n\
+                   will display the information about the batch step. A     \n\
+                   step id of 'extern' will display the information about   \n\
+                   the extern step when using PrologFlags=contain.          \n\
      -n, --noheader:                                                        \n\
 	           No header will be added to the beginning of output.      \n\
                    The default is to print a header.                        \n\
+     --noconvert:  Don't convert units from their original type             \n\
+		   (e.g. 2048M won't be converted to 2G).                   \n\
      -o, --format:                                                          \n\
 	           Comma separated list of fields. (use \"--helpformat\"    \n\
                    for a list of available fields).                         \n\
@@ -132,6 +139,7 @@ void _do_help(void)
 void _init_params()
 {
 	memset(&params, 0, sizeof(sstat_parameters_t));
+	params.convert_flags = CONVERT_NUM_UNIT_EXACT;
 }
 
 /* returns number of objects added to list */
@@ -182,9 +190,13 @@ static int _addto_job_list(List job_list, char *names)
 						*dot++ = 0;
 						/* can't use NO_VAL
 						 * since that means all */
-						if (!strcmp(dot, "batch"))
+						if (!strcasecmp(dot, "batch"))
 							selected_step->stepid =
-								INFINITE;
+								SSTAT_EXTERN_STEP;
+						else if (!strcasecmp(dot,
+								     "extern"))
+							selected_step->stepid =
+								SSTAT_EXTERN_STEP;
 						else
 							selected_step->stepid =
 								atoi(dot);
@@ -250,8 +262,12 @@ static int _addto_job_list(List job_list, char *names)
 			} else {
 				*dot++ = 0;
 				/* can't use NO_VAL since that means all */
-				if (!strcmp(dot, "batch"))
-					selected_step->stepid = INFINITE;
+				if (!strcasecmp(dot, "batch"))
+					selected_step->stepid =
+						SSTAT_BATCH_STEP;
+				else if (!strcasecmp(dot, "extern"))
+					selected_step->stepid =
+						SSTAT_EXTERN_STEP;
 				else
 					selected_step->stepid = atoi(dot);
 			}
@@ -339,6 +355,7 @@ void parse_command_line(int argc, char **argv)
 		{"noheader", 0, 0, 'n'},
 		{"fields", 1, 0, 'o'},
 		{"format", 1, 0, 'o'},
+                {"noconvert",  no_argument, 0, OPT_LONG_NOCONVERT},
 		{"pidformat", 0, 0, 'i'},
 		{"parsable", 0, 0, 'p'},
 		{"parsable2", 0, 0, 'P'},
@@ -381,6 +398,9 @@ void parse_command_line(int argc, char **argv)
 			break;
 		case 'n':
 			print_fields_have_header = 0;
+			break;
+		case OPT_LONG_NOCONVERT:
+			params.convert_flags |= CONVERT_NUM_UNIT_NO;
 			break;
 		case 'o':
 			xstrfmtcat(params.opt_field_list, "%s,", optarg);

@@ -420,7 +420,7 @@ static int _attach_to_tasks(uint32_t jobid,
 	}
 
 	_handle_response_msg_list(nodes_resp, tasks_started);
-	list_destroy(nodes_resp);
+	FREE_NULL_LIST(nodes_resp);
 
 	return SLURM_SUCCESS;
 }
@@ -460,7 +460,7 @@ static message_thread_state_t *_msg_thr_create(int num_nodes, int num_tasks)
 	pthread_cond_init(&mts->cond, NULL);
 	mts->tasks_started = bit_alloc(num_tasks);
 	mts->tasks_exited = bit_alloc(num_tasks);
-	mts->msg_handle = eio_handle_create();
+	mts->msg_handle = eio_handle_create(0);
 	mts->num_resp_port = _estimate_nports(num_nodes, 48);
 	mts->resp_port = xmalloc(sizeof(uint16_t) * mts->num_resp_port);
 	for (i = 0; i < mts->num_resp_port; i++) {
@@ -577,7 +577,8 @@ static void
 _handle_msg(void *arg, slurm_msg_t *msg)
 {
 	message_thread_state_t *mts = (message_thread_state_t *)arg;
-	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
+	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred,
+					     slurm_get_auth_info());
 	static uid_t slurm_uid;
 	static bool slurm_uid_set = false;
 	uid_t uid = getuid();

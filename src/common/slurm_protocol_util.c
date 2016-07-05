@@ -50,14 +50,6 @@
 #include "src/common/xmalloc.h"
 #include "src/slurmdbd/read_config.h"
 
-uint16_t _get_slurm_version(uint32_t rpc_version)
-{
-	if (rpc_version >= SLURM_PROTOCOL_VERSION)
-		return SLURM_PROTOCOL_VERSION;
-	else
-		return SLURM_2_6_PROTOCOL_VERSION;
-}
-
 /*
  * check_header_version checks to see that the specified header was sent
  * from a node running the same version of the protocol as the current node
@@ -68,15 +60,13 @@ int check_header_version(header_t * header)
 {
 	uint16_t check_version = SLURM_PROTOCOL_VERSION;
 
-	if (working_cluster_rec) {
-		check_version = _get_slurm_version(
-			working_cluster_rec->rpc_version);
-	}
+	if (working_cluster_rec)
+		check_version = working_cluster_rec->rpc_version;
 
 	if (slurmdbd_conf) {
 		if ((header->version != SLURM_PROTOCOL_VERSION)     &&
-		    (header->version != SLURM_14_03_PROTOCOL_VERSION) &&
-		    (header->version != SLURM_2_6_PROTOCOL_VERSION)) {
+		    (header->version != SLURM_14_11_PROTOCOL_VERSION) &&
+		    (header->version != SLURM_14_03_PROTOCOL_VERSION)) {
 			debug("unsupported RPC version %hu msg type %s(%u)",
 			      header->version, rpc_num2string(header->msg_type),
 			      header->msg_type);
@@ -100,13 +90,14 @@ int check_header_version(header_t * header)
 			}
 		default:
 			if ((header->version != SLURM_PROTOCOL_VERSION)     &&
-			    (header->version != SLURM_14_03_PROTOCOL_VERSION) &&
-			    (header->version != SLURM_2_6_PROTOCOL_VERSION)) {
+			    (header->version != SLURM_14_11_PROTOCOL_VERSION) &&
+			    (header->version != SLURM_14_03_PROTOCOL_VERSION)) {
 				debug("Unsupported RPC version %hu "
 				      "msg type %s(%u)", header->version,
 				      rpc_num2string(header->msg_type),
 				      header->msg_type);
-				slurm_seterrno_ret(SLURM_PROTOCOL_VERSION_ERROR);
+				slurm_seterrno_ret(
+					SLURM_PROTOCOL_VERSION_ERROR);
 			}
 			break;
 
@@ -132,14 +123,13 @@ void init_header(header_t *header, slurm_msg_t *msg, uint16_t flags)
 	if (msg->protocol_version != (uint16_t)NO_VAL)
 		header->version = msg->protocol_version;
 	else if (working_cluster_rec)
-		msg->protocol_version = header->version = _get_slurm_version(
-			working_cluster_rec->rpc_version);
+		msg->protocol_version = header->version =
+			working_cluster_rec->rpc_version;
 	else if ((msg->msg_type == ACCOUNTING_UPDATE_MSG) ||
 	         (msg->msg_type == ACCOUNTING_FIRST_REG)) {
-		uint32_t rpc_version =
+		uint16_t rpc_version =
 			((accounting_update_msg_t *)msg->data)->rpc_version;
-		msg->protocol_version = header->version =
-			_get_slurm_version(rpc_version);
+		msg->protocol_version = header->version = rpc_version;
 	} else
 		msg->protocol_version = header->version =
 			SLURM_PROTOCOL_VERSION;
@@ -153,6 +143,7 @@ void init_header(header_t *header, slurm_msg_t *msg, uint16_t flags)
 	else
 		header->ret_cnt = 0;
 	header->ret_list = msg->ret_list;
+	header->msg_index = msg->msg_index;
 	header->orig_addr = msg->orig_addr;
 }
 

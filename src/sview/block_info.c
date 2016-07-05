@@ -236,10 +236,7 @@ static void _block_info_free(sview_block_info_t *block_ptr)
 		xfree(block_ptr->imagemloader);
 		xfree(block_ptr->imageramdisk);
 
-		if (block_ptr->job_list) {
-			list_destroy(block_ptr->job_list);
-			block_ptr->job_list = NULL;
-		}
+		FREE_NULL_LIST(block_ptr->job_list);
 
 		/* don't xfree(block_ptr->mp_inx);
 		   it isn't copied like the chars and is freed in the api
@@ -354,10 +351,11 @@ static void _layout_block_record(GtkTreeView *treeview,
 						   block_ptr->bg_node_use));
 	}
 	convert_num_unit((float)block_ptr->cnode_cnt, tmp_cnt, sizeof(tmp_cnt),
-			 UNIT_NONE);
+			 UNIT_NONE, working_sview_config.convert_flags);
 	if (cluster_flags & CLUSTER_FLAG_BGQ) {
 		convert_num_unit((float)block_ptr->cnode_err_cnt, tmp_cnt2,
-				 sizeof(tmp_cnt2), UNIT_NONE);
+				 sizeof(tmp_cnt2), UNIT_NONE,
+				 working_sview_config.convert_flags);
 		tmp_char = xstrdup_printf("%s/%s", tmp_cnt, tmp_cnt2);
 	} else
 		tmp_char = tmp_cnt;
@@ -388,10 +386,12 @@ static void _update_block_record(sview_block_info_t *block_ptr,
 	char *tmp_char = NULL, *tmp_char2 = NULL, *tmp_char3 = NULL;
 
 	convert_num_unit((float)block_ptr->cnode_cnt, cnode_cnt,
-			 sizeof(cnode_cnt), UNIT_NONE);
+			 sizeof(cnode_cnt), UNIT_NONE,
+			 working_sview_config.convert_flags);
 	if (cluster_flags & CLUSTER_FLAG_BGQ) {
 		convert_num_unit((float)block_ptr->cnode_err_cnt, cnode_cnt2,
-				 sizeof(cnode_cnt), UNIT_NONE);
+				 sizeof(cnode_cnt), UNIT_NONE,
+				 working_sview_config.convert_flags);
 		tmp_char3 = xstrdup_printf("%s/%s", cnode_cnt, cnode_cnt2);
 	} else
 		tmp_char3 = cnode_cnt;
@@ -705,7 +705,7 @@ static List _create_block_list(partition_info_msg_t *part_info_ptr,
 
 	if (last_list) {
 		list_iterator_destroy(last_list_itr);
-		list_destroy(last_list);
+		FREE_NULL_LIST(last_list);
 	}
 
 	return block_list;
@@ -1400,7 +1400,7 @@ display_it:
 
 	_update_info_block(send_block_list,
 			   GTK_TREE_VIEW(spec_info->display_widget));
-	list_destroy(send_block_list);
+	FREE_NULL_LIST(send_block_list);
 end_it:
 	popup_win->toggled = 0;
 	popup_win->force_refresh = 0;

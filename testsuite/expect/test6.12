@@ -71,9 +71,9 @@ file delete $file_out $file_err
 make_bash_script $file_in "
 $srun $bin_sleep 500 &
 
-trap /bin/true SIGINT
+trap true SIGINT
 
-while /bin/true; do
+while true; do
 	wait
 	if \[ \$? -ge 128 \]; then
 		echo \"INTerrupted wait, resuming\"
@@ -94,7 +94,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun not responding\n"
+		send_user "\nFAILURE: sbatch not responding\n"
 		slow_kill $sbatch_pid
 		exit 1
 	}
@@ -159,7 +159,7 @@ if {$found_step == 0} {
 	send_user "\nFAILURE: job step not found, apparently killed\n"
 	set exit_code 1
 }
-exec $scancel --quiet $job_id
+cancel_job $job_id
 
 #
 # Build and run second test script
@@ -241,7 +241,7 @@ if {$found_job == 0} {
 				wait
 			}
 		}
-		exec $scancel --quiet $job_id
+		cancel_job $job_id
 		set exit_code 1
 	}
 }
@@ -319,7 +319,9 @@ if {$found_step == 1} {
 	set exit_code 1
 }
 
-cancel_job $job_id
+if {[cancel_job $job_id] != 0} {
+	set exit_code 1
+}
 
 if {$exit_code == 0} {
 	send_user "\nSUCCESS\n"

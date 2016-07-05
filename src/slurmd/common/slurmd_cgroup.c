@@ -7,7 +7,7 @@
  *  Written by Martin Perry <martin.perry@bull.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -432,10 +432,17 @@ extern int set_system_cgroup_cpus(char *phys_cpu_str)
 
 extern int set_system_cgroup_mem_limit(uint32_t mem_spec_limit)
 {
-	uint64_t mem_spec_bytes = mem_spec_limit * 1024 * 1024;
+    uint64_t mem_spec_bytes = (uint64_t)mem_spec_limit * 1024 * 1024;
 	xcgroup_set_uint64_param(&system_memory_cg, "memory.limit_in_bytes",
 				 mem_spec_bytes);
 	return SLURM_SUCCESS;
+}
+
+extern int disable_system_cgroup_mem_oom()
+{
+	/* 1: disables the oom killer */
+	return xcgroup_set_uint64_param(&system_memory_cg, "memory.oom_control",
+					1);
 }
 
 extern int attach_system_cpuset_pid(pid_t pid)
@@ -452,7 +459,23 @@ extern int attach_system_memory_pid(pid_t pid)
 	return SLURM_SUCCESS;
 }
 
-extern bool check_cgroup_job_confinement(void)
+extern bool check_memspec_cgroup_job_confinement(void)
+{
+	char *task_plugin_type = NULL;
+	bool status = false;
+
+	if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
+		return false;
+	task_plugin_type = slurm_get_task_plugin();
+	if (slurm_cgroup_conf.constrain_ram_space &&
+	    strstr(task_plugin_type, "cgroup"))
+		status = true;
+	xfree(task_plugin_type);
+	free_slurm_cgroup_conf(&slurm_cgroup_conf);
+	return status;
+}
+
+extern bool check_corespec_cgroup_job_confinement(void)
 {
 	char *task_plugin_type = NULL;
 	bool status = FALSE;

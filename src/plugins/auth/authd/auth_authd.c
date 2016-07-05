@@ -63,6 +63,7 @@
 
 #include "slurm/slurm_errno.h"
 #include "src/common/slurm_xlator.h"
+#include "src/common/slurm_time.h"
 
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -86,14 +87,12 @@
  * only load authentication plugins if the plugin_type string has a prefix
  * of "auth/".
  *
- * plugin_version   - specifies the version number of the plugin.
- * min_plug_version - specifies the minumum version number of incoming
- *                    messages that this plugin can accept
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "Brent Chun's authd authentication plugin";
 const char plugin_type[]        = "auth/authd";
-const uint32_t plugin_version   = 100;
-const uint32_t min_plug_version = 90;
+const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
 /* Default timeout. */
 static const int AUTHD_TTL = 2;
@@ -291,10 +290,6 @@ slurm_auth_unpack( Buf buf )
 	}
 
 	safe_unpack32( &version, buf );
-	if ( version < min_plug_version ) {
-		plugin_errno = SLURM_AUTH_VERSION;
-		return NULL;
-	}
 
 	/* Allocate a credential. */
 	cred = (slurm_auth_credential_t *)
@@ -330,8 +325,8 @@ slurm_auth_print( slurm_auth_credential_t *cred, FILE *fp )
 	verbose( "BEGIN AUTHD CREDENTIAL" );
 	verbose( "   UID: %u", cred->cred.uid );
 	verbose( "   GID: %u", cred->cred.gid );
-	verbose( "   Valid from: %s", slurm_ctime( &cred->cred.valid_from ) );
-	verbose( "   Valid to: %s", slurm_ctime( &cred->cred.valid_to ) );
+	verbose( "   Valid from: %s", slurm_ctime2( &cred->cred.valid_from ) );
+	verbose( "   Valid to: %s", slurm_ctime2( &cred->cred.valid_to ) );
 	verbose( "   Signature: 0x%02x%02x%02x%02x ...",
 			 cred->sig.data[ 0 ], cred->sig.data[ 1 ],
 			 cred->sig.data[ 2 ], cred->sig.data[ 3 ] );

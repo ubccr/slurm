@@ -47,7 +47,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <stdbool.h>
 #include <time.h>
 #include <netinet/in.h> /* for ntohs() */
@@ -294,40 +294,24 @@ slurm_allocate_resources_blocking (const job_desc_msg_t *user_req,
  */
 int slurm_job_will_run (job_desc_msg_t *req)
 {
-	slurm_msg_t req_msg, resp_msg;
-	will_run_response_msg_t *will_run_resp;
+	will_run_response_msg_t *will_run_resp = NULL;
 	char buf[64];
 	bool host_set = false;
 	int rc;
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 	char *type = "processors";
-	/* req.immediate = true;    implicit */
+
 	if ((req->alloc_node == NULL) &&
 	    (gethostname_short(buf, sizeof(buf)) == 0)) {
 		req->alloc_node = buf;
 		host_set = true;
 	}
-	slurm_msg_t_init(&req_msg);
-	req_msg.msg_type = REQUEST_JOB_WILL_RUN;
-	req_msg.data     = req;
 
-	rc = slurm_send_recv_controller_msg(&req_msg, &resp_msg);
+	rc = slurm_job_will_run2(req, &will_run_resp);
 
-	if (host_set)
-		req->alloc_node = NULL;
-
-	if (rc < 0)
-		return SLURM_SOCKET_ERROR;
-
-	switch (resp_msg.msg_type) {
-	case RESPONSE_SLURM_RC:
-		if (_handle_rc_msg(&resp_msg) < 0)
-			return SLURM_PROTOCOL_ERROR;
-		break;
-	case RESPONSE_JOB_WILL_RUN:
+	if ((rc == 0) && will_run_resp) {
 		if (cluster_flags & CLUSTER_FLAG_BG)
 			type = "cnodes";
-		will_run_resp = (will_run_response_msg_t *) resp_msg.data;
 		slurm_make_time_str(&will_run_resp->start_time,
 				    buf, sizeof(buf));
 		info("Job %u to start at %s using %u %s"
@@ -346,11 +330,51 @@ int slurm_job_will_run (job_desc_msg_t *req)
 					sep = ",";
 				xstrfmtcat(job_list, "%s%u", sep, *job_id_ptr);
 			}
+			list_iterator_destroy(itr);
 			info("  Preempts: %s", job_list);
 			xfree(job_list);
 		}
 
 		slurm_free_will_run_response_msg(will_run_resp);
+	}
+
+	if (host_set)
+		req->alloc_node = NULL;
+
+	return rc;
+}
+
+/*
+ * slurm_job_will_run2 - determine if a job would execute immediately if
+ * 	submitted now
+ * IN job_desc_msg - description of resource allocation request
+ * OUT will_run_resp - job run time data
+ * 	free using slurm_free_will_run_response_msg()
+ * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ */
+int slurm_job_will_run2 (job_desc_msg_t *req,
+			 will_run_response_msg_t **will_run_resp)
+{
+	slurm_msg_t req_msg, resp_msg;
+	int rc;
+	/* req.immediate = true;    implicit */
+
+	slurm_msg_t_init(&req_msg);
+	req_msg.msg_type = REQUEST_JOB_WILL_RUN;
+	req_msg.data     = req;
+
+	rc = slurm_send_recv_controller_msg(&req_msg, &resp_msg);
+
+	if (rc < 0)
+		return SLURM_SOCKET_ERROR;
+
+	switch (resp_msg.msg_type) {
+	case RESPONSE_SLURM_RC:
+		if (_handle_rc_msg(&resp_msg) < 0)
+			return SLURM_PROTOCOL_ERROR;
+		break;
+	case RESPONSE_JOB_WILL_RUN:
+		*will_run_resp = (will_run_response_msg_t *) resp_msg.data;
 		break;
 	default:
 		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
@@ -486,18 +510,21 @@ slurm_allocation_lookup_lite(uint32_t jobid,
 /*
  * slurm_sbcast_lookup - retrieve info for an existing resource allocation
  *	including a credential needed for sbcast
- * IN jobid - job allocation identifier
+ * IN job_id - job allocation identifier
+ * IN step_id - step allocation identifier (or NO_VAL for entire job)
  * OUT info - job allocation information including a credential for sbcast
  * RET 0 on success, otherwise return -1 and set errno to indicate the error
  * NOTE: free the "resp" using slurm_free_sbcast_cred_msg
  */
-int slurm_sbcast_lookup(uint32_t jobid, job_sbcast_cred_msg_t **info)
+int slurm_sbcast_lookup(uint32_t job_id, uint32_t step_id,
+			job_sbcast_cred_msg_t **info)
 {
-	job_alloc_info_msg_t req;
+	step_alloc_info_msg_t req;
 	slurm_msg_t req_msg;
 	slurm_msg_t resp_msg;
 
-	req.job_id = jobid;
+	req.job_id = job_id;
+	req.step_id = step_id;
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
 	req_msg.msg_type = REQUEST_JOB_SBCAST_CRED;
@@ -723,7 +750,8 @@ static void _destroy_allocation_response_socket(listen_t *listen)
 static int
 _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 {
-	uid_t req_uid   = g_slurm_auth_get_uid(msg->auth_cred, NULL);
+	uid_t req_uid   = g_slurm_auth_get_uid(msg->auth_cred,
+					       slurm_get_auth_info());
 	uid_t uid       = getuid();
 	uid_t slurm_uid = (uid_t) slurm_get_slurm_user_id();
 	int rc = 0;
@@ -745,8 +773,8 @@ _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 			info("Job has been cancelled");
 			break;
 		default:
-			error("received spurious message type: %d",
-			      msg->msg_type);
+			error("%s: received spurious message type: %u",
+			      __func__, msg->msg_type);
 	}
 	return rc;
 }
@@ -782,20 +810,20 @@ _accept_msg_connection(int listen_fd,
 		slurm_free_msg(msg);
 
 		if (errno == EINTR) {
-			slurm_close_accepted_conn(conn_fd);
+			slurm_close(conn_fd);
 			*resp = NULL;
 			return 0;
 		}
 
 		error("_accept_msg_connection[%s]: %m", host);
-		slurm_close_accepted_conn(conn_fd);
+		slurm_close(conn_fd);
 		return SLURM_ERROR;
 	}
 
 	rc = _handle_msg(msg, resp); /* handle_msg frees msg */
 	slurm_free_msg(msg);
 
-	slurm_close_accepted_conn(conn_fd);
+	slurm_close(conn_fd);
 	return rc;
 }
 

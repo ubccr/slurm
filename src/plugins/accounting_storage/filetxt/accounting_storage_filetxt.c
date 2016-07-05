@@ -65,16 +65,13 @@
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as the job accounting API
- * matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[] = "Accounting storage FileTxt plugin";
 const char plugin_type[] = "accounting_storage/filetxt";
-const uint32_t plugin_version = 100;
+const uint32_t plugin_version = SLURM_VERSION_NUMBER;
+
 static FILE *		LOGFILE;
 static int		LOGFILE_FD;
 static pthread_mutex_t  logfile_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -304,8 +301,14 @@ extern int acct_storage_p_add_clusters(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
-extern int acct_storage_p_add_associations(void *db_conn, uint32_t uid,
-					   List association_list)
+extern int acct_storage_p_add_tres(void *db_conn,
+				     uint32_t uid, List tres_list)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_add_assocs(void *db_conn, uint32_t uid,
+				     List assoc_list)
 {
 	return SLURM_SUCCESS;
 }
@@ -355,9 +358,9 @@ extern List acct_storage_p_modify_clusters(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
-extern List acct_storage_p_modify_associations(void *db_conn, uint32_t uid,
-					      slurmdb_association_cond_t *assoc_q,
-					      slurmdb_association_rec_t *assoc)
+extern List acct_storage_p_modify_assocs(void *db_conn, uint32_t uid,
+					      slurmdb_assoc_cond_t *assoc_q,
+					      slurmdb_assoc_rec_t *assoc)
 {
 	return SLURM_SUCCESS;
 }
@@ -421,8 +424,8 @@ extern List acct_storage_p_remove_clusters(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
-extern List acct_storage_p_remove_associations(void *db_conn, uint32_t uid,
-					      slurmdb_association_cond_t *assoc_q)
+extern List acct_storage_p_remove_assocs(void *db_conn, uint32_t uid,
+					      slurmdb_assoc_cond_t *assoc_q)
 {
 	return SLURM_SUCCESS;
 }
@@ -474,8 +477,14 @@ extern List acct_storage_p_get_config(void *db_conn, char *config_name)
 	return NULL;
 }
 
-extern List acct_storage_p_get_associations(void *db_conn, uid_t uid,
-					    slurmdb_association_cond_t *assoc_q)
+extern List acct_storage_p_get_tres(void *db_conn, uid_t uid,
+				      slurmdb_tres_cond_t *tres_cond)
+{
+	return NULL;
+}
+
+extern List acct_storage_p_get_assocs(void *db_conn, uid_t uid,
+				      slurmdb_assoc_cond_t *assoc_q)
 {
 	return NULL;
 }
@@ -487,7 +496,7 @@ extern List acct_storage_p_get_events(void *db_conn, uint32_t uid,
 }
 
 extern List acct_storage_p_get_problems(void *db_conn, uid_t uid,
-					slurmdb_association_cond_t *assoc_q)
+					slurmdb_assoc_cond_t *assoc_q)
 {
 	return NULL;
 }
@@ -510,7 +519,7 @@ extern List acct_storage_p_get_wckeys(void *db_conn, uid_t uid,
 	return NULL;
 }
 
-extern List acct_storage_p_get_reservations(void *mysql_conn, uid_t uid,
+extern List acct_storage_p_get_reservations(void *db_conn, uid_t uid,
 					    slurmdb_reservation_cond_t *resv_cond)
 {
 	return NULL;
@@ -572,9 +581,9 @@ extern int clusteracct_storage_p_fini_ctld(void *db_conn,
 	return SLURM_SUCCESS;
 }
 
-extern int clusteracct_storage_p_cluster_cpus(void *db_conn,
+extern int clusteracct_storage_p_cluster_tres(void *db_conn,
 					      char *cluster_nodes,
-					      uint32_t cpus,
+					      char *tres_str_in,
 					      time_t event_time)
 {
 	return SLURM_SUCCESS;
@@ -648,7 +657,7 @@ extern int jobacct_storage_p_job_complete(void *db_conn,
 					  struct job_record *job_ptr)
 {
 	char buf[BUFFER_SIZE];
-	uint16_t job_state;
+	uint32_t job_state;
 	int duration;
 	uint32_t exit_code;
 

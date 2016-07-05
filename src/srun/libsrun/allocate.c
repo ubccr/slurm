@@ -43,20 +43,21 @@
 
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/types.h>
 #include <pwd.h>
 
+#include "src/common/env.h"
+#include "src/common/fd.h"
+#include "src/common/forward.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_time.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
-#include "src/common/forward.h"
-#include "src/common/env.h"
-#include "src/common/fd.h"
 
 #include "allocate.h"
 #include "opt.h"
@@ -79,7 +80,7 @@ extern uint64_t job_getjid(pid_t pid);
 #define MAX_ALLOC_WAIT	60	/* seconds */
 #define MIN_ALLOC_WAIT	5	/* seconds */
 #define MAX_RETRIES	10
-#define POLL_SLEEP	3	/* retry interval in seconds  */
+#define POLL_SLEEP	0.1	/* retry interval in seconds  */
 
 pthread_mutex_t msg_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t msg_cond = PTHREAD_COND_INITIALIZER;
@@ -117,6 +118,7 @@ static void *_safe_signal_while_allocating(void *in_data)
 	int signo = *(int *)in_data;
 
 	debug("Got signal %d", signo);
+	xfree(in_data);
 	if (signo == SIGCONT)
 		return NULL;
 
@@ -133,6 +135,7 @@ static void _signal_while_allocating(int signo)
 {
 	pthread_t thread_id;
 	pthread_attr_t thread_attr;
+	int *local_signal;
 
 	/* There are places where _signal_while_allocating can't be
 	 * put into a thread, but if this isn't on a separate thread
@@ -143,11 +146,11 @@ static void _signal_while_allocating(int signo)
 	 *
 	 * SO, DON'T PRINT ANYTHING IN THIS FUNCTION.
 	 */
-
+	local_signal = xmalloc(sizeof(int));
+	*local_signal = signo;
 	slurm_attr_init(&thread_attr);
 	pthread_create(&thread_id, &thread_attr,
-		       _safe_signal_while_allocating,
-		       (void *)&signo);
+		       _safe_signal_while_allocating, local_signal);
 	slurm_attr_destroy(&thread_attr);
 }
 
@@ -181,7 +184,7 @@ static void _timeout_handler(srun_timeout_msg_t *msg)
 	if (msg->timeout != last_timeout) {
 		last_timeout = msg->timeout;
 		verbose("job time limit to be reached at %s",
-			slurm_ctime(&msg->timeout));
+			slurm_ctime2(&msg->timeout));
 	}
 }
 
@@ -256,7 +259,8 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 {
 	int is_ready = 0, i, rc;
 	char *block_id = NULL;
-	int cur_delay = 0;
+	double cur_delay = 0;
+	double cur_sleep = 0;
 	int max_delay = BG_FREE_PREVIOUS_BLOCK + BG_MIN_BLOCK_BOOT +
 		(BG_INCR_BLOCK_BOOT * alloc->node_cnt);
 
@@ -264,15 +268,17 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 				    SELECT_JOBDATA_BLOCK_ID,
 				    &block_id);
 
-	for (i=0; (cur_delay < max_delay); i++) {
-		if (i == 1)
+	for (i = 0; cur_delay < max_delay; i++) {
+		cur_sleep = POLL_SLEEP * i;
+		if (i == 1) {
 			debug("Waiting for block %s to become ready for job",
 			      block_id);
+		}
 		if (i) {
-			sleep(POLL_SLEEP);
+			usleep(1000000 * cur_sleep);
 			rc = _blocks_dealloc();
 			if ((rc == 0) || (rc == -1))
-				cur_delay += POLL_SLEEP;
+				cur_delay += cur_sleep;
 			debug2("still waiting");
 		}
 
@@ -348,7 +354,8 @@ static int _blocks_dealloc(void)
 static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 {
 	int is_ready = 0, i, rc;
-	int cur_delay = 0;
+	double cur_delay = 0;
+	double cur_sleep = 0;
 	int suspend_time, resume_time, max_delay;
 
 	suspend_time = slurm_get_suspend_timeout();
@@ -360,14 +367,18 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 
 	pending_job_id = alloc->job_id;
 
-	for (i = 0; (cur_delay < max_delay); i++) {
+	for (i = 0; cur_delay < max_delay; i++) {
 		if (i) {
-			if (i == 1)
-				verbose("Waiting for nodes to boot");
-			else
-				debug("still waiting");
-			sleep(POLL_SLEEP);
-			cur_delay += POLL_SLEEP;
+			cur_sleep = POLL_SLEEP * i;
+			if (i == 1) {
+				verbose("Waiting for nodes to boot (delay looping %d times @ %f secs x index)",
+					max_delay, POLL_SLEEP);
+			} else {
+				debug("Waited %f sec and still waiting: next sleep for %f sec",
+				      cur_delay, cur_sleep);
+			}
+			usleep(1000000 * cur_sleep);
+			cur_delay += cur_sleep;
 		}
 
 		rc = slurm_job_node_ready(alloc->job_id);
@@ -689,7 +700,7 @@ job_desc_msg_create_from_opts (void)
 
 	}
 
-	if (opt.distribution == SLURM_DIST_ARBITRARY
+	if (((opt.distribution & SLURM_DIST_STATE_BASE) == SLURM_DIST_ARBITRARY)
 	   && !j->req_nodes) {
 		error("With Arbitrary distribution you need to "
 		      "specify a nodelist or hostfile with the -w option");
@@ -710,7 +721,7 @@ job_desc_msg_create_from_opts (void)
 	}
 	j->user_id        = opt.uid;
 	j->dependency     = opt.dependency;
-	if (opt.nice)
+	if (opt.nice != NO_VAL)
 		j->nice   = NICE_OFFSET + opt.nice;
 	if (opt.priority)
 		j->priority = opt.priority;
@@ -739,6 +750,8 @@ job_desc_msg_create_from_opts (void)
 
 	if (opt.mail_user)
 		j->mail_user = opt.mail_user;
+	if (opt.burst_buffer)
+		j->burst_buffer = opt.burst_buffer;
 	if (opt.begin)
 		j->begin_time = opt.begin;
 	if (opt.licenses)
@@ -819,12 +832,20 @@ job_desc_msg_create_from_opts (void)
 		j->time_limit          = opt.time_limit;
 	if (opt.time_min != NO_VAL)
 		j->time_min            = opt.time_min;
-	j->shared = opt.shared;
+	if (opt.shared != (uint16_t) NO_VAL)
+		j->shared = opt.shared;
 
 	if (opt.warn_signal)
 		j->warn_signal = opt.warn_signal;
 	if (opt.warn_time)
 		j->warn_time = opt.warn_time;
+
+	if (opt.cpu_freq_min != NO_VAL)
+		j->cpu_freq_min = opt.cpu_freq_min;
+	if (opt.cpu_freq_max != NO_VAL)
+		j->cpu_freq_max = opt.cpu_freq_max;
+	if (opt.cpu_freq_gov != NO_VAL)
+		j->cpu_freq_gov = opt.cpu_freq_gov;
 
 	if (opt.req_switch >= 0)
 		j->req_switch = opt.req_switch;
@@ -840,6 +861,11 @@ job_desc_msg_create_from_opts (void)
 		j->spank_job_env      = opt.spank_job_env;
 		j->spank_job_env_size = opt.spank_job_env_size;
 	}
+
+	if (opt.power_flags)
+		j->power_flags = opt.power_flags;
+	if (opt.sicp_mode)
+		j->sicp_mode = opt.sicp_mode;
 
 	return j;
 }

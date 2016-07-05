@@ -1,6 +1,7 @@
 /*****************************************************************************\
  *  common.c - definitions for functions common to all modules in sacctmgr.
  *****************************************************************************
+ *  Copyright (C) 2010-2015 SchedMD LLC.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -195,6 +196,16 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("% Allowed");
 		field->len = 10;
 		field->print_routine = print_fields_uint16;
+	} else if (!strncasecmp("Associations", object, MAX(command_len, 2))) {
+		field->type = PRINT_ASSOC_NAME;
+		field->name = xstrdup("Assocs");
+		field->len = 10;
+		field->print_routine = print_fields_str;
+	} else if (!strncasecmp("TRES", object, MAX(command_len, 2))) {
+		field->type = PRINT_TRES;
+		field->name = xstrdup("TRES");
+		field->len = 20;
+		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("Classification", object,
 				MAX(command_len, 3))) {
 		field->type = PRINT_CLASS;
@@ -207,7 +218,7 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("Cluster Nodes");
 		field->len = 20;
 		field->print_routine = print_fields_str;
-	} else if (!strncasecmp("Cluster", object, MAX(command_len, 2))) {
+	} else if (!strncasecmp("Clusters", object, MAX(command_len, 2))) {
 		field->type = PRINT_CLUSTER;
 		field->name = xstrdup("Cluster");
 		field->len = 10;
@@ -242,10 +253,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("# Used");
 		field->len = 10;
 		field->print_routine = print_fields_uint32;
-	} else if (!strncasecmp("CPUCount", object, MAX(command_len, 2))) {
+	} else if (!strncasecmp("CPUCount", object,
+				MAX(command_len, 2))) {
 		field->type = PRINT_CPUS;
-		field->name = xstrdup("CPUCount");
-		field->len = 9;
+		field->name = xstrdup("CPU Cnt");
+		field->len = 7;
 		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("DefaultAccount", object,
 				MAX(command_len, 8))) {
@@ -273,11 +285,6 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("Duration");
 		field->len = 13;
 		field->print_routine = print_fields_time_from_secs;
-	} else if (!strncasecmp("End", object, MAX(command_len, 2))) {
-		field->type = PRINT_END;
-		field->name = xstrdup("End");
-		field->len = 19;
-		field->print_routine = print_fields_date;
 	} else if (!strncasecmp("EventRaw", object, MAX(command_len, 6))) {
 		field->type = PRINT_EVENTRAW;
 		field->name = xstrdup("EventRaw");
@@ -298,6 +305,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("GraceTime");
 		field->len = 10;
 		field->print_routine = print_fields_time_from_secs;
+	} else if (!strncasecmp("GrpCPUs", object, MAX(command_len, 6))) {
+		field->type = PRINT_GRPC;
+		field->name = xstrdup("GrpCPUs");
+		field->len = 8;
+		field->print_routine = print_fields_uint64;
 	} else if (!strncasecmp("GrpCPUMins", object, MAX(command_len, 7))) {
 		field->type = PRINT_GRPCM;
 		field->name = xstrdup("GrpCPUMins");
@@ -308,11 +320,22 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("GrpCPURunMins");
 		field->len = 13;
 		field->print_routine = print_fields_uint64;
-	} else if (!strncasecmp("GrpCPUs", object, MAX(command_len, 7))) {
-		field->type = PRINT_GRPC;
-		field->name = xstrdup("GrpCPUs");
-		field->len = 8;
-		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("GrpTRES", object, MAX(command_len, 7))) {
+		field->type = PRINT_GRPT;
+		field->name = xstrdup("GrpTRES");
+		field->len = 13;
+		field->print_routine = sacctmgr_print_tres;
+	} else if (!strncasecmp("GrpTRESMins", object, MAX(command_len, 7))) {
+		field->type = PRINT_GRPTM;
+		field->name = xstrdup("GrpTRESMins");
+		field->len = 13;
+		field->print_routine = sacctmgr_print_tres;
+	} else if (!strncasecmp("GrpTRESRunMins",
+				object, MAX(command_len, 7))) {
+		field->type = PRINT_GRPTRM;
+		field->name = xstrdup("GrpTRESRunMins");
+		field->len = 13;
+		field->print_routine = sacctmgr_print_tres;
 	} else if (!strncasecmp("GrpJobs", object, MAX(command_len, 4))) {
 		field->type = PRINT_GRPJ;
 		field->name = xstrdup("GrpJobs");
@@ -364,8 +387,10 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("MaxCPUMins");
 		field->len = 11;
 		field->print_routine = print_fields_uint64;
-	} else if (!strncasecmp("MaxCPURunMinsPerUser",
-				object, MAX(command_len, 7))) {
+	} else if (!strncasecmp("MaxCPURunMinsPerUser", object,
+				MAX(command_len, 7)) ||
+		   !strncasecmp("MaxCPURunMinsPU", object,
+				MAX(command_len, 7))) {
 		field->type = PRINT_MAXCRM;
 		field->name = xstrdup("MaxCPURunMinsPU");
 		field->len = 15;
@@ -374,20 +399,56 @@ static print_field_t *_get_print_field(char *object)
 		field->type = PRINT_MAXC;
 		field->name = xstrdup("MaxCPUs");
 		field->len = 8;
-		field->print_routine = print_fields_uint;
+		field->print_routine = print_fields_uint64;
 	} else if (!strncasecmp("MaxCPUsPerUser", object,
-				MAX(command_len, 11))) {
+				MAX(command_len, 11)) ||
+		   !strncasecmp("MaxCPUsPU", object,
+				MAX(command_len, 9))) {
 		field->type = PRINT_MAXCU;
 		field->name = xstrdup("MaxCPUsPU");
 		field->len = 9;
 		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("MaxTRESPerJob",
+				object, MAX(command_len, 7))) {
+		field->type = PRINT_MAXT;
+		field->name = xstrdup("MaxTRES");
+		field->len = 13;
+		field->print_routine = sacctmgr_print_tres;
+	} else if (!strncasecmp("MaxTRESPerNode",
+				object, MAX(command_len, 11))) {
+		field->type = PRINT_MAXTN;
+		field->name = xstrdup("MaxTRESPerNode");
+		field->len = 14;
+		field->print_routine = sacctmgr_print_tres;
+	} else if (!strncasecmp("MaxTRESMinsPerJob", object,
+				MAX(command_len, 8))) {
+		field->type = PRINT_MAXTM;
+		field->name = xstrdup("MaxTRESMins");
+		field->len = 13;
+		field->print_routine = sacctmgr_print_tres;
+	} else if (!strncasecmp("MaxTRESRunMinsPerUser", object,
+				MAX(command_len, 8)) ||
+		   !strncasecmp("MaxTRESRunMinsPU", object,
+				MAX(command_len, 8))) {
+		field->type = PRINT_MAXTRM;
+		field->name = xstrdup("MaxTRESRunMinsPU");
+		field->len = 15;
+		field->print_routine = sacctmgr_print_tres;
+	} else if (!strncasecmp("MaxTRESPerUser", object,
+				MAX(command_len, 11))) {
+		field->type = PRINT_MAXTU;
+		field->name = xstrdup("MaxTRESPU");
+		field->len = 13;
+		field->print_routine = sacctmgr_print_tres;
 	} else if (!strncasecmp("MaxJobs", object, MAX(command_len, 4))) {
 		field->type = PRINT_MAXJ;
 		field->name = xstrdup("MaxJobs");
 		field->len = 7;
 		field->print_routine = print_fields_uint;
-	} else if (!strncasecmp("MaxJobsPerUser",
-				object, MAX(command_len, 8))) {
+	} else if (!strncasecmp("MaxJobsPerUser", object,
+				MAX(command_len, 8)) ||
+		   !strncasecmp("MaxJobsPU", object,
+				MAX(command_len, 8))) {
 		field->type = PRINT_MAXJ; /* used same as MaxJobs */
 		field->name = xstrdup("MaxJobsPU");
 		field->len = 9;
@@ -399,7 +460,9 @@ static print_field_t *_get_print_field(char *object)
 		field->len = 8;
 		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("MaxNodesPerUser", object,
-				MAX(command_len, 12))) {
+				MAX(command_len, 12)) ||
+		   !strncasecmp("MaxNodesPU", object,
+				MAX(command_len, 10))) {
 		field->type = PRINT_MAXNU;
 		field->name = xstrdup("MaxNodesPU");
 		field->len = 10;
@@ -409,8 +472,10 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("MaxSubmit");
 		field->len = 9;
 		field->print_routine = print_fields_uint;
-	} else if (!strncasecmp("MaxSubmitJobsPerUser",
-				object, MAX(command_len, 10))) {
+	} else if (!strncasecmp("MaxSubmitJobsPerUser", object,
+				MAX(command_len, 10)) ||
+		   !strncasecmp("MaxSubmitJobsPU", object,
+				MAX(command_len, 10))) {
 		field->type = PRINT_MAXS; /* used same as MaxSubmitJobs */
 		field->name = xstrdup("MaxSubmitPU");
 		field->len = 11;
@@ -426,6 +491,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("MinCPUs");
 		field->len = 8;
 		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("MinTRESPerJob", object, MAX(command_len, 7))) {
+		field->type = PRINT_MINT;
+		field->name = xstrdup("MinTRES");
+		field->len = 13;
+		field->print_routine = sacctmgr_print_tres;
 	} else if (!strncasecmp("Name", object, MAX(command_len, 2))) {
 		field->type = PRINT_NAME;
 		field->name = xstrdup("Name");
@@ -472,7 +542,7 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("PreemptMode");
 		field->len = 11;
 		field->print_routine = print_fields_str;
-	/* Preempt needs to follow PreemptMode */
+		/* Preempt needs to follow PreemptMode */
 	} else if (!strncasecmp("Preempt", object, MAX(command_len, 7))) {
 		field->type = PRINT_PREE;
 		field->name = xstrdup("Preempt");
@@ -498,6 +568,12 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("QOS_RAW");
 		field->len = 10;
 		field->print_routine = print_fields_char_list;
+	} else if (!strncasecmp("Reason", object,
+				MAX(command_len, 1))) {
+		field->type = PRINT_REASON;
+		field->name = xstrdup("Reason");
+		field->len = 30;
+		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("RGT", object, MAX(command_len, 1))) {
 		field->type = PRINT_RGT;
 		field->name = xstrdup("RGT");
@@ -519,11 +595,40 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("Share");
 		field->len = 9;
 		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("StateRaw", object,
+				MAX(command_len, 6))) {
+		field->type = PRINT_STATERAW;
+		field->name = xstrdup("StateRaw");
+		field->len = 8;
+		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("State", object, MAX(command_len, 1))) {
+		field->type = PRINT_STATE;
+		field->name = xstrdup("State");
+		field->len = 6;
+		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("TimeStamp", object, MAX(command_len, 2))) {
 		field->type = PRINT_TS;
 		field->name = xstrdup("Time");
 		field->len = 19;
 		field->print_routine = print_fields_date;
+	} else if (!strncasecmp("TimeStart", object, MAX(command_len, 7)) ||
+		   !strncasecmp("Start", object, MAX(command_len, 3))) {
+		field->type = PRINT_TIMESTART;
+		field->name = xstrdup("TimeStart");
+		field->len = 19;
+		field->print_routine = print_fields_date;
+	} else if (!strncasecmp("TimeEnd", object, MAX(command_len, 5)) ||
+		   !strncasecmp("End", object, MAX(command_len, 2))) {
+		field->type = PRINT_TIMEEND;
+		field->name = xstrdup("TimeEnd");
+		field->len = 19;
+		field->print_routine = print_fields_date;
+	} else if (!strncasecmp("TRES", object,
+				MAX(command_len, 2))) {
+		field->type = PRINT_TRES;
+		field->name = xstrdup("TRES");
+		field->len = 20;
+		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("Type", object, MAX(command_len, 2))) {
 		field->type = PRINT_TYPE;
 		field->name = xstrdup("Type");
@@ -629,7 +734,7 @@ extern int commit_check(char *warning)
 	return 0;
 }
 
-extern int sacctmgr_remove_assoc_usage(slurmdb_association_cond_t *assoc_cond)
+extern int sacctmgr_remove_assoc_usage(slurmdb_assoc_cond_t *assoc_cond)
 {
 	List update_list = NULL;
 	List local_assoc_list = NULL;
@@ -640,7 +745,7 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_association_cond_t *assoc_cond)
 	char *account = NULL;
 	char *cluster = NULL;
 	char *user = NULL;
-	slurmdb_association_rec_t* rec = NULL;
+	slurmdb_assoc_rec_t* rec = NULL;
 	slurmdb_cluster_rec_t* cluster_rec = NULL;
 	slurmdb_update_object_t* update_obj = NULL;
 	slurmdb_cluster_cond_t cluster_cond;
@@ -667,7 +772,7 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_association_cond_t *assoc_cond)
 		return rc;
 	}
 
-	local_assoc_list = acct_storage_g_get_associations(
+	local_assoc_list = acct_storage_g_get_assocs(
 		db_conn, my_uid, assoc_cond);
 
 	slurmdb_init_cluster_cond(&cluster_cond, 0);
@@ -697,7 +802,7 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_association_cond_t *assoc_cond)
 		if (itr3) {
 			while ((user = list_next(itr3))) {
 				while ((account = list_next(itr2))) {
-					rec = sacctmgr_find_association_from_list(
+					rec = sacctmgr_find_assoc_from_list(
 						local_assoc_list,
 						user, account, cluster, "*");
 					if (!rec) {
@@ -718,7 +823,7 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_association_cond_t *assoc_cond)
 			list_iterator_reset(itr3);
 		} else {
 			while ((account = list_next(itr2))) {
-				rec = sacctmgr_find_association_from_list(
+				rec = sacctmgr_find_assoc_from_list(
 					local_assoc_list,
 					NULL, account, cluster, "*");
 				if (!rec) {
@@ -742,7 +847,7 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_association_cond_t *assoc_cond)
 				cluster_rec->control_port,
 				cluster_rec->rpc_version);
 		}
-		list_destroy(update_list);
+		FREE_NULL_LIST(update_list);
 	}
 end_it:
 	list_iterator_destroy(itr);
@@ -750,8 +855,8 @@ end_it:
 	if (itr3)
 		list_iterator_destroy(itr3);
 
-	list_destroy(local_assoc_list);
-	list_destroy(local_cluster_list);
+	FREE_NULL_LIST(local_assoc_list);
+	FREE_NULL_LIST(local_cluster_list);
 
 	return rc;
 }
@@ -854,12 +959,12 @@ end_it:
 	return rc;
 }
 
-extern slurmdb_association_rec_t *sacctmgr_find_account_base_assoc(
+extern slurmdb_assoc_rec_t *sacctmgr_find_account_base_assoc(
 	char *account, char *cluster)
 {
-	slurmdb_association_rec_t *assoc = NULL;
+	slurmdb_assoc_rec_t *assoc = NULL;
 	char *temp = "root";
-	slurmdb_association_cond_t assoc_cond;
+	slurmdb_assoc_cond_t assoc_cond;
 	List assoc_list = NULL;
 
 	if (!cluster)
@@ -868,7 +973,7 @@ extern slurmdb_association_rec_t *sacctmgr_find_account_base_assoc(
 	if (account)
 		temp = account;
 
-	memset(&assoc_cond, 0, sizeof(slurmdb_association_cond_t));
+	memset(&assoc_cond, 0, sizeof(slurmdb_assoc_cond_t));
 	assoc_cond.acct_list = list_create(NULL);
 	list_append(assoc_cond.cluster_list, temp);
 	assoc_cond.cluster_list = list_create(NULL);
@@ -876,22 +981,22 @@ extern slurmdb_association_rec_t *sacctmgr_find_account_base_assoc(
 	assoc_cond.user_list = list_create(NULL);
 	list_append(assoc_cond.user_list, "");
 
-	assoc_list = acct_storage_g_get_associations(db_conn, my_uid,
+	assoc_list = acct_storage_g_get_assocs(db_conn, my_uid,
 						     &assoc_cond);
 
-	list_destroy(assoc_cond.acct_list);
-	list_destroy(assoc_cond.cluster_list);
-	list_destroy(assoc_cond.user_list);
+	FREE_NULL_LIST(assoc_cond.acct_list);
+	FREE_NULL_LIST(assoc_cond.cluster_list);
+	FREE_NULL_LIST(assoc_cond.user_list);
 
 	if (assoc_list)
 		assoc = list_pop(assoc_list);
 
-	list_destroy(assoc_list);
+	FREE_NULL_LIST(assoc_list);
 
 	return assoc;
 }
 
-extern slurmdb_association_rec_t *sacctmgr_find_root_assoc(char *cluster)
+extern slurmdb_assoc_rec_t *sacctmgr_find_root_assoc(char *cluster)
 {
 	return sacctmgr_find_account_base_assoc(NULL, cluster);
 }
@@ -900,14 +1005,14 @@ extern slurmdb_user_rec_t *sacctmgr_find_user(char *name)
 {
 	slurmdb_user_rec_t *user = NULL;
 	slurmdb_user_cond_t user_cond;
-	slurmdb_association_cond_t assoc_cond;
+	slurmdb_assoc_cond_t assoc_cond;
 	List user_list = NULL;
 
 	if (!name)
 		return NULL;
 
 	memset(&user_cond, 0, sizeof(slurmdb_user_cond_t));
-	memset(&assoc_cond, 0, sizeof(slurmdb_association_cond_t));
+	memset(&assoc_cond, 0, sizeof(slurmdb_assoc_cond_t));
 	assoc_cond.user_list = list_create(NULL);
 	list_append(assoc_cond.user_list, name);
 	user_cond.assoc_cond = &assoc_cond;
@@ -915,12 +1020,12 @@ extern slurmdb_user_rec_t *sacctmgr_find_user(char *name)
 	user_list = acct_storage_g_get_users(db_conn, my_uid,
 					     &user_cond);
 
-	list_destroy(assoc_cond.user_list);
+	FREE_NULL_LIST(assoc_cond.user_list);
 
 	if (user_list)
 		user = list_pop(user_list);
 
-	list_destroy(user_list);
+	FREE_NULL_LIST(user_list);
 
 	return user;
 }
@@ -929,14 +1034,14 @@ extern slurmdb_account_rec_t *sacctmgr_find_account(char *name)
 {
 	slurmdb_account_rec_t *account = NULL;
 	slurmdb_account_cond_t account_cond;
-	slurmdb_association_cond_t assoc_cond;
+	slurmdb_assoc_cond_t assoc_cond;
 	List account_list = NULL;
 
 	if (!name)
 		return NULL;
 
 	memset(&account_cond, 0, sizeof(slurmdb_account_cond_t));
-	memset(&assoc_cond, 0, sizeof(slurmdb_association_cond_t));
+	memset(&assoc_cond, 0, sizeof(slurmdb_assoc_cond_t));
 	assoc_cond.acct_list = list_create(NULL);
 	list_append(assoc_cond.acct_list, name);
 	account_cond.assoc_cond = &assoc_cond;
@@ -944,12 +1049,12 @@ extern slurmdb_account_rec_t *sacctmgr_find_account(char *name)
 	account_list = acct_storage_g_get_accounts(db_conn, my_uid,
 						   &account_cond);
 
-	list_destroy(assoc_cond.acct_list);
+	FREE_NULL_LIST(assoc_cond.acct_list);
 
 	if (account_list)
 		account = list_pop(account_list);
 
-	list_destroy(account_list);
+	FREE_NULL_LIST(account_list);
 
 	return account;
 }
@@ -970,22 +1075,22 @@ extern slurmdb_cluster_rec_t *sacctmgr_find_cluster(char *name)
 	cluster_list = acct_storage_g_get_clusters(db_conn, my_uid,
 						   &cluster_cond);
 
-	list_destroy(cluster_cond.cluster_list);
+	FREE_NULL_LIST(cluster_cond.cluster_list);
 
 	if (cluster_list)
 		cluster = list_pop(cluster_list);
 
-	list_destroy(cluster_list);
+	FREE_NULL_LIST(cluster_list);
 
 	return cluster;
 }
 
-extern slurmdb_association_rec_t *sacctmgr_find_association_from_list(
+extern slurmdb_assoc_rec_t *sacctmgr_find_assoc_from_list(
 	List assoc_list, char *user, char *account,
 	char *cluster, char *partition)
 {
 	ListIterator itr = NULL;
-	slurmdb_association_rec_t * assoc = NULL;
+	slurmdb_assoc_rec_t * assoc = NULL;
 
 	if (!assoc_list)
 		return NULL;
@@ -1017,11 +1122,11 @@ extern slurmdb_association_rec_t *sacctmgr_find_association_from_list(
 	return assoc;
 }
 
-extern slurmdb_association_rec_t *sacctmgr_find_account_base_assoc_from_list(
+extern slurmdb_assoc_rec_t *sacctmgr_find_account_base_assoc_from_list(
 	List assoc_list, char *account, char *cluster)
 {
 	ListIterator itr = NULL;
-	slurmdb_association_rec_t *assoc = NULL;
+	slurmdb_assoc_rec_t *assoc = NULL;
 	char *temp = "root";
 
 	if (!cluster || !assoc_list)
@@ -1249,7 +1354,7 @@ extern int get_uint64(char *in_value, uint64_t *out_value, char *type)
 	xfree(meat);
 
 	if (num < 0)
-		*out_value = INFINITE;		/* flag to clear */
+		*out_value = INFINITE64; /* flag to clear */
 	else
 		*out_value = (uint64_t) num;
 	return SLURM_SUCCESS;
@@ -1377,26 +1482,6 @@ end_it:
 	return count;
 }
 
-extern List copy_char_list(List char_list)
-{
-	List ret_list = NULL;
-	char *tmp_char = NULL;
-	ListIterator itr = NULL;
-
-	if (!char_list || !list_count(char_list))
-		return NULL;
-
-	itr = list_iterator_create(char_list);
-	ret_list = list_create(slurm_destroy_char);
-
-	while((tmp_char = list_next(itr)))
-		list_append(ret_list, xstrdup(tmp_char));
-
-	list_iterator_destroy(itr);
-
-	return ret_list;
-}
-
 extern void sacctmgr_print_coord_list(
 	print_field_t *field, List value, int last)
 {
@@ -1490,47 +1575,83 @@ extern void sacctmgr_print_qos_bitstr(print_field_t *field, List qos_list,
 	xfree(print_this);
 }
 
-extern void sacctmgr_print_assoc_limits(slurmdb_association_rec_t *assoc)
+extern void sacctmgr_print_tres(print_field_t *field, char *tres_simple_str,
+				int last)
 {
+	int abs_len = abs(field->len);
+	char *print_this;
+
+	sacctmgr_initialize_g_tres_list();
+
+	print_this = slurmdb_make_tres_string_from_simple(
+		tres_simple_str, g_tres_list);
+
+	if (!print_this)
+		print_this = xstrdup("");
+
+	if (print_fields_parsable_print == PRINT_FIELDS_PARSABLE_NO_ENDING
+	    && last)
+		printf("%s", print_this);
+	else if (print_fields_parsable_print)
+		printf("%s|", print_this);
+	else {
+		if (strlen(print_this) > abs_len)
+			print_this[abs_len-1] = '+';
+
+		if (field->len == abs_len)
+			printf("%*.*s ", abs_len, abs_len, print_this);
+		else
+			printf("%-*.*s ", abs_len, abs_len, print_this);
+	}
+	xfree(print_this);
+}
+
+extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
+{
+	char *tmp_char;
+
 	if (!assoc)
 		return;
 
 	if (assoc->shares_raw == INFINITE)
 		printf("  Fairshare     = NONE\n");
+	else if (assoc->shares_raw == SLURMDB_FS_USE_PARENT)
+		printf("  Fairshare     = parent\n");
 	else if (assoc->shares_raw != NO_VAL)
 		printf("  Fairshare     = %u\n", assoc->shares_raw);
-
-	if (assoc->grp_cpu_mins == INFINITE)
-		printf("  GrpCPUMins    = NONE\n");
-	else if (assoc->grp_cpu_mins != NO_VAL)
-		printf("  GrpCPUMins    = %"PRIu64"\n",
-		       assoc->grp_cpu_mins);
-
-	if (assoc->grp_cpus == INFINITE)
-		printf("  GrpCPUs       = NONE\n");
-	else if (assoc->grp_cpus != NO_VAL)
-		printf("  GrpCPUs       = %u\n", assoc->grp_cpus);
 
 	if (assoc->grp_jobs == INFINITE)
 		printf("  GrpJobs       = NONE\n");
 	else if (assoc->grp_jobs != NO_VAL)
 		printf("  GrpJobs       = %u\n", assoc->grp_jobs);
 
-	if (assoc->grp_mem == INFINITE)
-		printf("  GrpMemory     = NONE\n");
-	else if (assoc->grp_mem != NO_VAL)
-		printf("  GrpMemory     = %u\n", assoc->grp_mem);
-
-	if (assoc->grp_nodes == INFINITE)
-		printf("  GrpNodes      = NONE\n");
-	else if (assoc->grp_nodes != NO_VAL)
-		printf("  GrpNodes      = %u\n", assoc->grp_nodes);
-
 	if (assoc->grp_submit_jobs == INFINITE)
 		printf("  GrpSubmitJobs = NONE\n");
 	else if (assoc->grp_submit_jobs != NO_VAL)
 		printf("  GrpSubmitJobs = %u\n",
 		       assoc->grp_submit_jobs);
+
+	if (assoc->grp_tres) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			assoc->grp_tres, g_tres_list);
+		printf("  GrpTRES       = %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (assoc->grp_tres_mins) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			assoc->grp_tres_mins, g_tres_list);
+		printf("  GrpTRESMins   = %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (assoc->grp_tres_run_mins) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			assoc->grp_tres_run_mins, g_tres_list);
+		printf("  GrpTRESRunMins= %s\n", tmp_char);
+		xfree(tmp_char);
+	}
 
 	if (assoc->grp_wall == INFINITE)
 		printf("  GrpWall       = NONE\n");
@@ -1541,32 +1662,45 @@ extern void sacctmgr_print_assoc_limits(slurmdb_association_rec_t *assoc)
 		printf("  GrpWall       = %s\n", time_buf);
 	}
 
-	if (assoc->max_cpu_mins_pj == (uint64_t)INFINITE)
-		printf("  MaxCPUMins    = NONE\n");
-	else if (assoc->max_cpu_mins_pj != (uint64_t)NO_VAL)
-		printf("  MaxCPUMins    = %"PRIu64"\n",
-		       assoc->max_cpu_mins_pj);
-
-	if (assoc->max_cpus_pj == INFINITE)
-		printf("  MaxCPUs       = NONE\n");
-	else if (assoc->max_cpus_pj != NO_VAL)
-		printf("  MaxCPUs       = %u\n", assoc->max_cpus_pj);
-
 	if (assoc->max_jobs == INFINITE)
 		printf("  MaxJobs       = NONE\n");
 	else if (assoc->max_jobs != NO_VAL)
 		printf("  MaxJobs       = %u\n", assoc->max_jobs);
-
-	if (assoc->max_nodes_pj == INFINITE)
-		printf("  MaxNodes      = NONE\n");
-	else if (assoc->max_nodes_pj != NO_VAL)
-		printf("  MaxNodes      = %u\n", assoc->max_nodes_pj);
 
 	if (assoc->max_submit_jobs == INFINITE)
 		printf("  MaxSubmitJobs = NONE\n");
 	else if (assoc->max_submit_jobs != NO_VAL)
 		printf("  MaxSubmitJobs = %u\n",
 		       assoc->max_submit_jobs);
+
+	if (assoc->max_tres_pj) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			assoc->max_tres_pj, g_tres_list);
+		printf("  MaxTRES       = %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (assoc->max_tres_pn) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			assoc->max_tres_pn, g_tres_list);
+		printf("  MaxTRESPerNode= %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (assoc->max_tres_mins_pj) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			assoc->max_tres_mins_pj, g_tres_list);
+		printf("  MaxTRESMins   = %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (assoc->max_tres_run_mins) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			assoc->max_tres_run_mins, g_tres_list);
+		printf("  MaxTRESRUNMins= %s\n", tmp_char);
+		xfree(tmp_char);
+	}
 
 	if (assoc->max_wall_pj == INFINITE)
 		printf("  MaxWall       = NONE\n");
@@ -1576,6 +1710,9 @@ extern void sacctmgr_print_assoc_limits(slurmdb_association_rec_t *assoc)
 			      time_buf, sizeof(time_buf));
 		printf("  MaxWall       = %s\n", time_buf);
 	}
+
+	if (assoc->parent_acct)
+		printf("  Parent        = %s\n", assoc->parent_acct);
 
 	if (assoc->qos_list) {
 		if (!g_qos_list)
@@ -1588,10 +1725,21 @@ extern void sacctmgr_print_assoc_limits(slurmdb_association_rec_t *assoc)
 			xfree(temp_char);
 		}
 	}
+
+	if (assoc->def_qos_id != NO_VAL) {
+		if (!g_qos_list)
+			g_qos_list =
+				acct_storage_g_get_qos(db_conn, my_uid, NULL);
+		printf("  DefQOS        = %s\n",
+		       slurmdb_qos_str(g_qos_list, assoc->def_qos_id));
+	}
+
 }
 
 extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 {
+	char *tmp_char;
+
 	if (!qos)
 		return;
 
@@ -1609,37 +1757,38 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 	else if (qos->grace_time != NO_VAL)
 		printf("  GraceTime      = %d\n", qos->grace_time);
 
-	if (qos->grp_cpu_mins == INFINITE)
-		printf("  GrpCPUMins     = NONE\n");
-	else if (qos->grp_cpu_mins != NO_VAL)
-		printf("  GrpCPUMins     = %"PRIu64"\n",
-		       qos->grp_cpu_mins);
-
-	if (qos->grp_cpus == INFINITE)
-		printf("  GrpCPUs        = NONE\n");
-	else if (qos->grp_cpus != NO_VAL)
-		printf("  GrpCPUs        = %u\n", qos->grp_cpus);
-
 	if (qos->grp_jobs == INFINITE)
 		printf("  GrpJobs        = NONE\n");
 	else if (qos->grp_jobs != NO_VAL)
 		printf("  GrpJobs        = %u\n", qos->grp_jobs);
-
-	if (qos->grp_mem == INFINITE)
-		printf("  GrpMemory      = NONE\n");
-	else if (qos->grp_mem != NO_VAL)
-		printf("  GrpMemory      = %u\n", qos->grp_mem);
-
-	if (qos->grp_nodes == INFINITE)
-		printf("  GrpNodes       = NONE\n");
-	else if (qos->grp_nodes != NO_VAL)
-		printf("  GrpNodes       = %u\n", qos->grp_nodes);
 
 	if (qos->grp_submit_jobs == INFINITE)
 		printf("  GrpSubmitJobs  = NONE\n");
 	else if (qos->grp_submit_jobs != NO_VAL)
 		printf("  GrpSubmitJobs  = %u\n",
 		       qos->grp_submit_jobs);
+
+	if (qos->grp_tres) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			qos->grp_tres, g_tres_list);
+		printf("  GrpTRES       = %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (qos->grp_tres_mins) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			qos->grp_tres_mins, g_tres_list);
+		printf("  GrpTRESMins   = %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (qos->grp_tres_run_mins) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			qos->grp_tres_run_mins, g_tres_list);
+		printf("  GrpTRESRunMins= %s\n", tmp_char);
+		xfree(tmp_char);
+	}
 
 	if (qos->grp_wall == INFINITE)
 		printf("  GrpWall        = NONE\n");
@@ -1650,42 +1799,53 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		printf("  GrpWall        = %s\n", time_buf);
 	}
 
-	if (qos->max_cpu_mins_pj == (uint64_t)INFINITE)
-		printf("  MaxCPUMins     = NONE\n");
-	else if (qos->max_cpu_mins_pj != (uint64_t)NO_VAL)
-		printf("  MaxCPUMins     = %"PRIu64"\n",
-		       qos->max_cpu_mins_pj);
-
-	if (qos->max_cpus_pj == INFINITE)
-		printf("  MaxCPUs        = NONE\n");
-	else if (qos->max_cpus_pj != NO_VAL)
-		printf("  MaxCPUs        = %u\n", qos->max_cpus_pj);
-
-	if (qos->max_cpus_pu == INFINITE)
-		printf("  MaxCPUsPerUser        = NONE\n");
-	else if (qos->max_cpus_pu != NO_VAL)
-		printf("  MaxCPUsPerUser        = %u\n", qos->max_cpus_pu);
-
 	if (qos->max_jobs_pu == INFINITE)
-		printf("  MaxJobs        = NONE\n");
+		printf("  MaxJobsPerUser = NONE\n");
 	else if (qos->max_jobs_pu != NO_VAL)
-		printf("  MaxJobs        = %u\n", qos->max_jobs_pu);
-
-	if (qos->max_nodes_pj == INFINITE)
-		printf("  MaxNodes       = NONE\n");
-	else if (qos->max_nodes_pj != NO_VAL)
-		printf("  MaxNodes       = %u\n", qos->max_nodes_pj);
-
-	if (qos->max_nodes_pu == INFINITE)
-		printf("  MaxNodesPerUser       = NONE\n");
-	else if (qos->max_nodes_pu != NO_VAL)
-		printf("  MaxNodesPerUser       = %u\n", qos->max_nodes_pu);
+		printf("  MaxJobsPerUser = %u\n",
+		       qos->max_jobs_pu);
 
 	if (qos->max_submit_jobs_pu == INFINITE)
 		printf("  MaxSubmitJobs  = NONE\n");
 	else if (qos->max_submit_jobs_pu != NO_VAL)
 		printf("  MaxSubmitJobs  = %u\n",
 		       qos->max_submit_jobs_pu);
+
+	if (qos->max_tres_pj) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			qos->max_tres_pj, g_tres_list);
+		printf("  MaxTRESPerJob = %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (qos->max_tres_pn) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			qos->max_tres_pn, g_tres_list);
+		printf("  MaxTRESPerNode= %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (qos->max_tres_pu) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			qos->max_tres_pu, g_tres_list);
+		printf("  MaxTRESPerUser= %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (qos->max_tres_mins_pj) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			qos->max_tres_mins_pj, g_tres_list);
+		printf("  MaxTRESMins   = %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+	if (qos->max_tres_run_mins_pu) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			qos->max_tres_run_mins_pu, g_tres_list);
+		printf("  MaxTRESRUNMins= %s\n", tmp_char);
+		xfree(tmp_char);
+	}
 
 	if (qos->max_wall_pj == INFINITE)
 		printf("  MaxWall        = NONE\n");
@@ -1695,11 +1855,6 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 			      time_buf, sizeof(time_buf));
 		printf("  MaxWall        = %s\n", time_buf);
 	}
-
-	if (qos->min_cpus_pj == INFINITE)
-		printf("  MinCPUs        = NONE\n");
-	else if (qos->min_cpus_pj != NO_VAL)
-		printf("  MinCPUs        = %u\n", qos->min_cpus_pj);
 
 	if (qos->preempt_list) {
 		char *temp_char = get_qos_complete_str(g_qos_list,
@@ -1797,10 +1952,21 @@ extern int sacctmgr_validate_cluster_list(List cluster_list)
 	}
 	list_iterator_destroy(itr);
 	list_iterator_destroy(itr_c);
-	list_destroy(temp_list);
+	FREE_NULL_LIST(temp_list);
 
 	if (!list_count(cluster_list))
 		rc = SLURM_ERROR;
 
 	return rc;
+}
+
+
+extern void sacctmgr_initialize_g_tres_list(void)
+{
+	if (!g_tres_list) {
+		slurmdb_tres_cond_t tres_cond;
+		memset(&tres_cond, 0, sizeof(slurmdb_tres_cond_t));
+		tres_cond.with_deleted = 1;
+		g_tres_list = slurmdb_tres_get(db_conn, &tres_cond);
+	}
 }

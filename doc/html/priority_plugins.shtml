@@ -5,7 +5,7 @@
 <h2> Overview</h2>
 <p> This document describes Slurm priority plugins and the API that defines
 them. It is intended as a resource to programmers wishing to write their own
-Slurm priority plugins. This is version 100 of the API.</p>
+Slurm priority plugins.</p>
 
 <p>Slurm priority plugins are Slurm plugins that implement the Slurm priority
 API described herein. They must conform to the Slurm Plugin API with the
@@ -23,10 +23,17 @@ job priority.</li>
 <li><b>multifactor</b>&#151;The multi-factor job priority plugin.</li>
 </ul>
 
-<p>The <span class="commandline">plugin_name</span> and
-<span class="commandline">plugin_version</span> symbols required by the Slurm
-Plugin API require no specialization for job priority support.
-Note carefully, however, the versioning discussion below.</p>
+<p><span class="commandline">const char plugin_name[]</span><br>
+Some descriptive name for the plugin.
+There is no requirement with respect to its format.</p>
+<p><span class="commandline">const uint32_t plugin_version</span><br>
+If specified, identifies the version of Slurm used to build this plugin and
+any attempt to load the plugin from a different version of Slurm will result
+in an error.
+If not specified, then the plugin may be loadeed by Slurm commands and
+daemons from any version, however this may result in difficult to diagnose
+failures due to changes in the arguments to plugin functions or changes
+in other Slurm functions used by the plugin.</p>
 
 <p>The programmer is urged to study
 <span class="commandline">src/plugins/priority/basic/priority_basic.c</span>
@@ -51,7 +58,7 @@ errno, prior to any error condition arising, should be SLURM_SUCCESS. </p>
 <p style="margin-left:.2in"><b>Description</b>: A slurmctld structure that
 contains details about a job.</p>
 
-<p class="commandline"> acct_association_rec_t</p>
+<p class="commandline"> acct_assoc_rec_t</p>
 <p style="margin-left:.2in"><b>Description</b>: A slurm_accounting_storage
 structure that contains details about an association.</p>
 
@@ -114,7 +121,7 @@ when Slurm is reconfigured, but false if an RPC is used to change only the
 debug level of debug flags.</p>
 <p style="margin-left:.2in"><b>Returns</b>: void</p>
 
-<p class="commandline">void priority_p_set_assoc_usage(acct_association_rec_t *assoc)</p>
+<p class="commandline">void priority_p_set_assoc_usage(acct_assoc_rec_t *assoc)</p>
 <p style="margin-left:.2in"><b>Description</b>: Set the normalized and
 effective usage for an association.</p>
 <p style="margin-left:.2in"><b>Arguments</b>:
@@ -137,15 +144,8 @@ containing the requested job priority factors</p>
 <span class="commandline">job_ptr</span> (input) pointer to the job record.</p>
 <p style="margin-left:.2in"><b>Returns</b>: void</p>
 
-
-<h2>Versioning</h2>
-<p> This document describes version 101 of the Slurm Priority API. Future
-releases of Slurm may revise this API. A priority plugin conveys its ability
-to implement a particular API version using the mechanism outlined for Slurm
-plugins.</p>
-
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 8 May 2014</p>
+<p style="text-align:center;">Last modified 27 March 2015</p>
 
 <!--#include virtual="footer.txt"-->

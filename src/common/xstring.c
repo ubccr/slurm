@@ -63,6 +63,7 @@
 #include "slurm/slurm_errno.h"
 
 #include "src/common/macros.h"
+#include "src/common/slurm_time.h"
 #include "src/common/strlcpy.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
@@ -212,7 +213,7 @@ void _xstrftimecat(char **buf, const char *fmt)
 	if (time(&t) == (time_t) -1)
 		fprintf(stderr, "time() failed\n");
 
-	if (!localtime_r(&t, &tm))
+	if (!slurm_localtime_r(&t, &tm))
 		fprintf(stderr, "localtime_r() failed\n");
 
 	strftime(p, sizeof(p), fmt, &tm);
@@ -233,7 +234,7 @@ void _xiso8601timecat(char **buf, bool msec)
 	if (gettimeofday(&tv, NULL) == -1)
 		fprintf(stderr, "gettimeofday() failed\n");
 
-	if (!localtime_r(&tv.tv_sec, &tm))
+	if (!slurm_localtime_r(&tv.tv_sec, &tm))
 		fprintf(stderr, "localtime_r() failed\n");
 
 	if (strftime(p, sizeof(p), "%Y-%m-%dT%T", &tm) == 0)
@@ -259,7 +260,7 @@ void _xrfc5424timecat(char **buf, bool msec)
 	if (gettimeofday(&tv, NULL) == -1)
 		fprintf(stderr, "gettimeofday() failed\n");
 
-	if (!localtime_r(&tv.tv_sec, &tm))
+	if (!slurm_localtime_r(&tv.tv_sec, &tm))
 		fprintf(stderr, "localtime_r() failed\n");
 
 	if (strftime(p, sizeof(p), "%Y-%m-%dT%T", &tm) == 0)
@@ -431,17 +432,17 @@ long int xstrntol(const char *str, char **endptr, size_t n, int base)
  *   pattern (IN)	substring to look for in str
  *   replacement (IN)   string with which to replace the "pattern" string
  */
-void _xstrsubstitute(char **str, const char *pattern, const char *replacement)
+bool _xstrsubstitute(char **str, const char *pattern, const char *replacement)
 {
 	int pat_len, rep_len;
 	char *ptr, *end_copy;
 	int pat_offset;
 
 	if (*str == NULL || pattern == NULL || pattern[0] == '\0')
-		return;
+		return 0;
 
 	if ((ptr = strstr(*str, pattern)) == NULL)
-		return;
+		return 0;
 	pat_offset = ptr - (*str);
 	pat_len = strlen(pattern);
 	if (replacement == NULL)
@@ -456,6 +457,8 @@ void _xstrsubstitute(char **str, const char *pattern, const char *replacement)
 	}
 	strcpy((*str)+pat_offset+rep_len, end_copy);
 	xfree(end_copy);
+
+	return 1;
 }
 
 /*

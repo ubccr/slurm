@@ -115,11 +115,11 @@ struct jobacctinfo {
 			     (used to figure out ave later) */
 	uint32_t min_cpu; /* min cpu time */
 	jobacct_id_t min_cpu_id; /* contains which task it was on */
-	uint32_t tot_cpu; /* total cpu time(used to figure out ave later) */
+	double tot_cpu; /* total cpu time(used to figure out ave later) */
 	uint32_t act_cpufreq; /* actual cpu frequency */
 	acct_gather_energy_t energy;
-	uint32_t last_total_cputime;
-	uint32_t this_sampled_cputime;
+	double last_total_cputime;
+	double this_sampled_cputime;
 	uint32_t current_weighted_freq;
 	uint32_t current_weighted_power;
 	double max_disk_read; /* max disk read data */
@@ -128,6 +128,14 @@ struct jobacctinfo {
 	double max_disk_write; /* max disk write data */
 	jobacct_id_t max_disk_write_id; /* max disk write data task id */
 	double tot_disk_write; /* total local disk writes in megabytes */
+
+	jobacct_id_t id;
+	int dataset_id; /* dataset associated to this task when profiling */
+
+	double last_tot_disk_read;
+	double last_tot_disk_write;
+	time_t cur_time;
+	time_t last_time;
 };
 
 /* Define jobacctinfo_t below to avoid including extraneous slurm headers */

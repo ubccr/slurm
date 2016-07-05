@@ -33,12 +33,14 @@ noinst_LTLIBRARIES = 			\
 libcommon_la_SOURCES = 			\
 	cpu_frequency.c cpu_frequency.h \
 	assoc_mgr.c assoc_mgr.h 	\
+	file_bcast.c file_bcast.h	\
 	xmalloc.c xmalloc.h 		\
 	xassert.c xassert.h		\
 	xstring.c xstring.h		\
 	xsignal.c xsignal.h		\
 	strnatcmp.c strnatcmp.h		\
 	forward.c forward.h     	\
+	msg_aggr.c msg_aggr.h     	\
 	strlcpy.c strlcpy.h		\
 	list.c list.h 			\
 	xtree.c xtree.h			\
@@ -48,13 +50,14 @@ libcommon_la_SOURCES = 			\
 	cbuf.c cbuf.h			\
 	safeopen.c safeopen.h		\
 	bitstring.c bitstring.h 	\
-	mpi.c mpi.h                     \
+	mpi.c slurm_mpi.h               \
 	pack.c pack.h			\
 	parse_config.c parse_config.h	\
 	parse_value.c parse_value.h	\
 	parse_spec.c parse_spec.h	\
 	plugin.c plugin.h		\
 	plugrack.c plugrack.h		\
+	power.c power.h			\
 	print_fields.c print_fields.h	\
 	read_config.c read_config.h	\
 	node_select.c node_select.h	\
@@ -95,7 +98,8 @@ libcommon_la_SOURCES = 			\
 	slurm_acct_gather_infiniband.c slurm_acct_gather_infiniband.h \
 	slurm_acct_gather_filesystem.c slurm_acct_gather_filesystem.h \
 	slurm_jobcomp.c slurm_jobcomp.h	\
-	slurm_route.c slurm_route.h \
+	slurm_route.c slurm_route.h	\
+	slurm_time.c slurm_time.h	\
 	slurm_topology.c slurm_topology.h \
 	switch.c switch.h		\
 	arg_desc.c arg_desc.h		\
@@ -126,7 +130,10 @@ libcommon_la_SOURCES = 			\
 	entity.h entity.c		\
 	layout.h layout.c		\
 	layouts_mgr.h layouts_mgr.c	\
-	xcgroup_read_config.c xcgroup_read_config.h
+	mapping.c mapping.h		\
+	xcgroup_read_config.c xcgroup_read_config.h \
+	xlua.c xlua.h			\
+	callerid.c callerid.h
 
 EXTRA_libcommon_la_SOURCES = 		\
 	$(extra_unsetenv_src)		\

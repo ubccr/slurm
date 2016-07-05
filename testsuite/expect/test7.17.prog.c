@@ -64,6 +64,14 @@ int main(int argc, char *argv[])
 	Buf buffer;
 	List job_gres_list = NULL, node_gres_list = NULL;
 	bitstr_t *cpu_bitmap;
+	char config_dir[10000], test[1000];
+	char slurm_conf[1000];
+
+	/* Setup slurm.conf and gres.conf test paths */
+	strcpy(config_dir, argv[2]);
+	strcpy(config_dir,strcat(config_dir, "/test7.17_configs"));
+	strcpy(test, strcat(config_dir, argv[3]));
+	strcpy(slurm_conf,strcat(test, "/slurm.conf"));
 
 	/* Enable detailed logging for now */
 	opts.stderr_level = LOG_LEVEL_DEBUG;
@@ -72,44 +80,45 @@ int main(int argc, char *argv[])
 	/*
 	 * Logic normally executed by slurmd daemon
 	 */
+	setenv("SLURM_CONF", slurm_conf, 1);
 	rc = gres_plugin_init();
 	if (rc != SLURM_SUCCESS) {
-		slurm_perror("FAILURE: gres_plugin_init");
+		slurm_perror("failure: gres_plugin_init");
 		exit(1);
 	}
 
-	/* FIXME: Read values from slurm.conf? */
-	cpu_count = 32;
-	node_name = "jette";
-	rc = gres_plugin_node_config_load(cpu_count, node_name);
+	setenv("SLURM_CONFIG_DIR",config_dir, 1);
+
+	cpu_count = strtol(argv[4], NULL, 10);
+	node_name = "test_node";
+	rc = gres_plugin_node_config_load(cpu_count, node_name, NULL);
 	if (rc != SLURM_SUCCESS) {
-		slurm_perror("FAILURE: gres_plugin_node_config_load");
+		slurm_perror("failure: gres_plugin_node_config_load");
 		exit(1);
 	}
 
 	buffer = init_buf(1024);
 	rc = gres_plugin_node_config_pack(buffer);
 	if (rc != SLURM_SUCCESS) {
-		slurm_perror("FAILURE: gres_plugin_node_config_pack");
+		slurm_perror("failure: gres_plugin_node_config_pack");
 		exit(1);
 	}
 
 	/*
 	 * Logic normally executed by slurmctld daemon
 	 */
-	/* FIXME: Read values from slurm.conf */
-	orig_config = "craynetwork:4";
+	orig_config = "gpu:8";
 	rc = gres_plugin_init_node_config(node_name, orig_config,
 					  &node_gres_list);
 	if (rc != SLURM_SUCCESS) {
-		slurm_perror("FAILURE: gres_plugin_init_node_config");
+		slurm_perror("failure: gres_plugin_init_node_config");
 		exit(1);
 	}
 
 	set_buf_offset(buffer, 0);
 	rc = gres_plugin_node_config_unpack(buffer, node_name);
 	if (rc != SLURM_SUCCESS) {
-		slurm_perror("FAILURE: gres_plugin_node_config_unpack");
+		slurm_perror("failure: gres_plugin_node_config_unpack");
 		exit(1);
 	}
 
@@ -117,15 +126,16 @@ int main(int argc, char *argv[])
 					      &new_config, &node_gres_list,
 					      0, &reason_down);
 	if (rc != SLURM_SUCCESS) {
-		slurm_perror("FAILURE: gres_plugin_node_config_validate");
+		slurm_perror("failure: gres_plugin_node_config_validate");
 		exit(1);
 	}
 
-	if (argc == 2)
+	if (argc > 2)
 		job_config = argv[1];
+
 	rc = gres_plugin_job_state_validate(job_config, &job_gres_list);
 	if (rc != SLURM_SUCCESS) {
-		slurm_perror("FAILURE: gres_plugin_job_state_validate");
+		slurm_perror("failure: gres_plugin_job_state_validate");
 		exit(1);
 	}
 
@@ -133,6 +143,7 @@ int main(int argc, char *argv[])
 	gres_plugin_job_state_log(job_gres_list, job_id);
 
 	cpu_bitmap = bit_alloc(cpu_count);
+	bit_nset(cpu_bitmap, 0, cpu_count - 1);
 	cpu_alloc = gres_plugin_job_test(job_gres_list, node_gres_list, true,
 					 cpu_bitmap, 0, cpu_count - 1,
 					 job_id, node_name);
@@ -143,10 +154,10 @@ int main(int argc, char *argv[])
 
 	rc = gres_plugin_fini();
 	if (rc != SLURM_SUCCESS) {
-		slurm_perror("FAILURE: gres_plugin_fini");
+		slurm_perror("failure: gres_plugin_fini");
 		exit(1);
 	}
 
-	printf("Test ran to completion\n");
+	printf("Test %s ran to completion\n\n", argv[3]);
 	exit(0);
 }

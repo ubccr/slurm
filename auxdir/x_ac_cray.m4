@@ -16,6 +16,7 @@
 #    Tests for required libraries (non-Cray systems with a Cray network):
 #    * libalpscomm_sn
 #    * libalpscomm_cn
+#    Tests for DataWarp files
 #*****************************************************************************
 #
 # Copyright 2013 Cray Inc. All Rights Reserved.
@@ -29,6 +30,7 @@ AC_DEFUN([X_AC_CRAY],
   ac_have_alps_emulation="no"
   ac_have_alps_cray_emulation="no"
   ac_have_cray_network="no"
+  ac_really_no_cray="no"
 
   AC_ARG_WITH(
     [alps-emulation],
@@ -63,6 +65,15 @@ AC_DEFUN([X_AC_CRAY],
 	yes) ac_have_cray_network="yes" ;;
 	 no) ac_have_cray_network="no"  ;;
 	  *) AC_MSG_ERROR([bad value "$enableval" for --enable-cray-network]) ;:
+      esac ]
+  )
+  AC_ARG_ENABLE(
+    [really-no-cray],
+    AS_HELP_STRING(--enable-really-no-cray,Disable cray support for eslogin machines),
+      [ case "$enableval" in
+   yes) ac_really_no_cray="yes" ;;
+    no) ac_really_no_cray="no"  ;;
+     *) AC_MSG_ERROR([bad value "$enableval" for --enable-really-no-cray])  ;;
       esac ]
   )
 
@@ -139,7 +150,7 @@ AC_DEFUN([X_AC_CRAY],
 	    ]]
 	  )],
 	  [have_cray_files="yes"],
-	  [AC_MSG_ERROR(There is a problem linking to the Cray api.)])
+	  [AC_MSG_ERROR(There is a problem linking to the Cray API)])
 
         # See if we have 5.2UP01 alpscomm functions
         AC_SEARCH_LIBS([alpsc_pre_suspend],
@@ -159,7 +170,7 @@ AC_DEFUN([X_AC_CRAY],
             ]]
           )],
           [have_cray_files="yes"],
-          [AC_MSG_ERROR(There is a problem linking to the Cray API.)])
+          [AC_MSG_ERROR(There is a problem linking to the Cray API)])
       fi
 
       LIBS="$saved_LIBS"
@@ -169,7 +180,7 @@ AC_DEFUN([X_AC_CRAY],
     done
 
     if test -z "$have_cray_files"; then
-      AC_MSG_ERROR([Unable to locate Cray API dir install. (usually in /opt/cray)])
+      AC_MSG_ERROR([Unable to locate Cray APIs (usually in /opt/cray/alpscomm and /opt/cray/job)])
     else
       if test "$ac_have_native_cray" = "yes"; then
         AC_MSG_NOTICE([Running on a Cray system in native mode without ALPS])
@@ -204,15 +215,23 @@ AC_DEFUN([X_AC_CRAY],
     AC_MSG_RESULT([$ac_have_alps_cray])
   fi
 
+  if test "$ac_really_no_cray" = "yes"; then
+    ac_have_alps_cray="no"
+    ac_have_real_cray="no"
+  fi
   if test "$ac_have_alps_cray" = "yes"; then
-    # libexpat is always required for the XML-RPC interface
+    # libexpat is always required for the XML-RPC interface, but it is only
+    # needed in the select plugin, so set it up here instead of everywhere.
     AC_CHECK_HEADER(expat.h, [],
 		    AC_MSG_ERROR([Cray BASIL requires expat headers/rpm]))
-    AC_CHECK_LIB(expat, XML_ParserCreate, [],
+    AC_CHECK_LIB(expat, XML_ParserCreate, [CRAY_SELECT_LDFLAGS="$CRAY_SELECT_LDFLAGS -lexpat"],
 		 AC_MSG_ERROR([Cray BASIL requires libexpat.so (i.e. libexpat1-dev)]))
 
     if test "$ac_have_real_cray" = "yes"; then
-      AC_CHECK_LIB([job], [job_getjid], [],
+      # libjob is needed, but we don't want to put it on the LIBS line here.
+      # If we are on a native system it is handled elsewhere, and on a hybrid
+      # we only need this in libsrun.
+      AC_CHECK_LIB([job], [job_getjid], [CRAY_JOB_LDFLAGS="$CRAY_JOB_LDFLAGS -ljob"],
 	      AC_MSG_ERROR([Need cray-job (usually in /opt/cray/job/default)]))
       AC_DEFINE(HAVE_REAL_CRAY, 1, [Define to 1 for running on a real Cray system])
     fi
@@ -247,4 +266,45 @@ AC_DEFUN([X_AC_CRAY],
   AC_SUBST(CRAY_TASK_CPPFLAGS)
   AC_SUBST(CRAY_TASK_LDFLAGS)
 
+
+  _x_ac_datawarp_dirs="/opt/cray/dws/default"
+  _x_ac_datawarp_libs="lib64 lib"
+
+  AC_ARG_WITH(
+    [datawarp],
+    AS_HELP_STRING(--with-datawarp=PATH,Specify path to DataWarp installation),
+    [_x_ac_datawarp_dirs="$withval $_x_ac_datawarp_dirs"])
+
+  AC_CACHE_CHECK(
+    [for datawarp installation],
+    [x_ac_cv_datawarp_dir],
+    [
+      for d in $_x_ac_datawarp_dirs; do
+        test -d "$d" || continue
+        test -d "$d/include" || continue
+        test -f "$d/include/dws_thin.h" || continue
+	for bit in $_x_ac_datawarp_libs; do
+          test -d "$d/$bit" || continue
+          test -f "$d/$bit/libdws_thin.so" || continue
+          AS_VAR_SET(x_ac_cv_datawarp_dir, $d)
+          break
+        done
+        test -n "$x_ac_cv_datawarp_dir" && break
+      done
+    ])
+
+  if test -z "$x_ac_cv_datawarp_dir"; then
+    AC_MSG_WARN([unable to locate DataWarp installation])
+  else
+    DATAWARP_CPPFLAGS="-I$x_ac_cv_datawarp_dir/include"
+    if test "$ac_with_rpath" = "yes"; then
+      DATAWARP_LDFLAGS="-Wl,-rpath -Wl,$x_ac_cv_datawarp_dir/$bit -L$x_ac_cv_datawarp_dir/$bit -ldws_thin"
+    else
+      DATAWARP_LDFLAGS="-L$x_ac_cv_datawarp_dir/$bit -ldws_thin"
+    fi
+    AC_DEFINE(HAVE_DATAWARP, 1, [Define to 1 if DataWarp library found])
+  fi
+
+  AC_SUBST(DATAWARP_CPPFLAGS)
+  AC_SUBST(DATAWARP_LDFLAGS)
 ])

@@ -34,7 +34,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -305,15 +305,16 @@ _server_read(eio_obj_t *obj, List objs)
 
 		n = io_hdr_read_fd(obj->fd, &s->header);
 		if (n <= 0) { /* got eof or error on socket read */
-
-			if (getenv("SLURM_PTY_PORT") == NULL)
-				error("\
-%s: fd %d got error or unexpected eof reading header",
-				      __func__, obj->fd);
-
-			if (s->cio->sls)
-				step_launch_notify_io_failure(s->cio->sls,
-							      s->node_id);
+			if (n < 0) { /* Error */
+				if (getenv("SLURM_PTY_PORT") == NULL) {
+					error("%s: fd %d error reading header: %m",
+					      __func__, obj->fd);
+				}
+				if (s->cio->sls) {
+					step_launch_notify_io_failure(
+						s->cio->sls, s->node_id);
+				}
+			}
 			close(obj->fd);
 			obj->fd = -1;
 			s->in_eof = true;
@@ -1090,6 +1091,7 @@ client_io_handler_create(slurm_step_io_fds_t fds,
 	uint32_t siglen;
 	char *sig;
 	uint16_t *ports;
+	uint16_t eio_timeout;
 
 	cio = (client_io_t *)xmalloc(sizeof(client_io_t));
 	if (cio == NULL)
@@ -1112,7 +1114,8 @@ client_io_handler_create(slurm_step_io_fds_t fds,
 	memcpy(cio->io_key, sig, siglen);
 	/* no need to free "sig", it is just a pointer into the credential */
 
-	cio->eio = eio_handle_create();
+	eio_timeout = slurm_get_srun_eio_timeout();
+	cio->eio = eio_handle_create(eio_timeout);
 
 	/* Compute number of listening sockets needed to allow
 	 * all of the slurmds to establish IO streams with srun, without
@@ -1338,7 +1341,6 @@ int client_io_handler_send_test_message(client_io_t *cio, int node_id,
 	int rc = SLURM_SUCCESS;
 	pthread_mutex_lock(&cio->ioservers_lock);
 
-	server = (struct server_io_info *)cio->ioserver[node_id]->arg;
 	if (sent_message)
 		*sent_message = false;
 
@@ -1350,6 +1352,7 @@ int client_io_handler_send_test_message(client_io_t *cio, int node_id,
 	if (cio->ioserver[node_id] == NULL) {
 		goto done;
 	}
+	server = (struct server_io_info *)cio->ioserver[node_id]->arg;
 
 	/* In this case, the I/O connection has closed so can't send a test
 	   message.  This error case is handled elsewhere. */

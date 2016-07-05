@@ -1,6 +1,4 @@
 ##*****************************************************************************
-## $Id$
-##*****************************************************************************
 #  AUTHOR:
 #    Mark A. Grondona <mgrondona@llnl.gov>
 #
@@ -65,18 +63,6 @@ AC_DEFUN([X_AC_SLURM_PORTS],
   AC_DEFINE_UNQUOTED(SLURMCTLD_PORT_COUNT, [$slurmctldportcount],
                      [Define the default port count for slurmctld])
   AC_SUBST(SLURMCTLD_PORT_COUNT)
-
-  AC_MSG_CHECKING([for dynamic allocation port to be enabled for Hadoop])
-  AC_ARG_ENABLE([dynamic-allocation],
-    AS_HELP_STRING([--enable-dynamic-allocation, enable dynamic allocation requests from user programs for Hadoop ([disabled])]))
-  if test "$enable_dynamic_allocation" = "yes"; then
-    AC_MSG_RESULT([yes])
-    slurm_enable_dynamic_allocation="yes"
-  else
-    AC_MSG_RESULT([no])
-    slurm_enable_dynamic_allocation="no"
-  fi
-  AM_CONDITIONAL(SLURM_ENABLE_DYNAMIC_ALLOCATION, test "$slurm_enable_dynamic_allocation" = "yes")
 ])
 
 dnl
@@ -180,7 +166,7 @@ for name in CURRENT REVISION AGE; do
    eval SLURM_API_$name=$API
 done
 SLURM_API_MAJOR=`expr $SLURM_API_CURRENT - $SLURM_API_AGE`
-SLURM_API_VERSION=`printf "0x%02x%02x%02x" $SLURM_API_MAJOR $SLURM_API_AGE $SLURM_API_REVISION`
+SLURM_API_VERSION=`printf "0x%02x%02x%02x" ${SLURM_API_MAJOR#0} ${SLURM_API_AGE#0} ${SLURM_API_REVISION#0}`
 
 AC_DEFINE_UNQUOTED(SLURM_API_VERSION,  $SLURM_API_VERSION,  [Define the API's version])
 AC_DEFINE_UNQUOTED(SLURM_API_CURRENT,  $SLURM_API_CURRENT,  [API current version])
@@ -208,7 +194,7 @@ RELEASE="`perl -ne 'print,exit if s/^\s*RELEASE:\s*(\S*).*/\1/i' $srcdir/META`"
 # NOTE: SLURM_VERSION_NUMBER excludes any non-numeric component 
 # (e.g. "pre1" in the MICRO), but may be suitable for the user determining 
 # how to use the APIs or other differences. 
-SLURM_VERSION_NUMBER="`printf "0x%02x%02x%02x" $SLURM_MAJOR $SLURM_MINOR $SLURM_MICRO`"
+SLURM_VERSION_NUMBER="`printf "0x%02x%02x%02x" ${SLURM_MAJOR#0} ${SLURM_MINOR#0} ${SLURM_MICRO#0}`"
 AC_DEFINE_UNQUOTED(SLURM_VERSION_NUMBER, $SLURM_VERSION_NUMBER, [SLURM Version Number])
 AC_SUBST(SLURM_VERSION_NUMBER)
 

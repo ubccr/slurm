@@ -1,8 +1,8 @@
 /*****************************************************************************\
  *  proc_args.c - helper functions for command argument processing
- *  $Id: opt.h 11996 2007-08-10 20:36:26Z jette $
  *****************************************************************************
  *  Copyright (C) 2007 Hewlett-Packard Development Company, L.P.
+ *  Portions Copyright (C) 2010-2015 SchedMD LLC <http://www.schedmd.com>.
  *  Written by Christopher Holmes <cholmes@hp.com>, who borrowed heavily
  *  from existing SLURM source code, particularly src/srun/opt.c
  *
@@ -104,8 +104,8 @@ void set_distribution(task_dist_states_t distribution,
 		      char **dist, char **lllp_dist)
 {
 	if (((int)distribution >= 0)
-	    && (distribution != SLURM_DIST_UNKNOWN)) {
-		switch (distribution) {
+	    && ((distribution & SLURM_DIST_STATE_BASE) != SLURM_DIST_UNKNOWN)) {
+		switch (distribution & SLURM_DIST_STATE_BASE) {
 		case SLURM_DIST_CYCLIC:
 			*dist      = "cyclic";
 			break;
@@ -143,8 +143,80 @@ void set_distribution(task_dist_states_t distribution,
 			*dist      = "block:fcyclic";
 			*lllp_dist = "cyclic";
 			break;
+		case SLURM_DIST_CYCLIC_CYCLIC_CYCLIC:
+			*dist      = "cyclic:cyclic:cyclic";
+			*lllp_dist = "cyclic:cyclic";
+			break;
+		case SLURM_DIST_CYCLIC_CYCLIC_BLOCK:
+			*dist      = "cyclic:cyclic:block";
+			*lllp_dist = "cyclic:block";
+			break;
+		case SLURM_DIST_CYCLIC_CYCLIC_CFULL:
+			*dist      = "cyclic:cyclic:fcyclic";
+			*lllp_dist = "cyclic:fcyclic";
+			break;
+		case SLURM_DIST_CYCLIC_BLOCK_CYCLIC:
+			*dist      = "cyclic:block:cyclic";
+			*lllp_dist = "block:cyclic";
+			break;
+		case SLURM_DIST_CYCLIC_BLOCK_BLOCK:
+			*dist      = "cyclic:block:block";
+			*lllp_dist = "block:block";
+			break;
+		case SLURM_DIST_CYCLIC_BLOCK_CFULL:
+			*dist      = "cyclic:cylic:cyclic";
+			*lllp_dist = "cyclic:cyclic";
+			break;
+		case SLURM_DIST_CYCLIC_CFULL_CYCLIC:
+			*dist      = "cyclic:cylic:cyclic";
+			*lllp_dist = "cyclic:cyclic";
+			break;
+		case SLURM_DIST_CYCLIC_CFULL_BLOCK:
+			*dist      = "cyclic:fcyclic:block";
+			*lllp_dist = "fcyclic:block";
+			break;
+		case SLURM_DIST_CYCLIC_CFULL_CFULL:
+			*dist      = "cyclic:fcyclic:fcyclic";
+			*lllp_dist = "fcyclic:fcyclic";
+			break;
+		case SLURM_DIST_BLOCK_CYCLIC_CYCLIC:
+			*dist      = "block:cyclic:cyclic";
+			*lllp_dist = "cyclic:cyclic";
+			break;
+		case SLURM_DIST_BLOCK_CYCLIC_BLOCK:
+			*dist      = "block:cyclic:block";
+			*lllp_dist = "cyclic:block";
+			break;
+		case SLURM_DIST_BLOCK_CYCLIC_CFULL:
+			*dist      = "block:cyclic:fcyclic";
+			*lllp_dist = "cyclic:fcyclic";
+			break;
+		case SLURM_DIST_BLOCK_BLOCK_CYCLIC:
+			*dist      = "block:block:cyclic";
+			*lllp_dist = "block:cyclic";
+			break;
+		case SLURM_DIST_BLOCK_BLOCK_BLOCK:
+			*dist      = "block:block:block";
+			*lllp_dist = "block:block";
+			break;
+		case SLURM_DIST_BLOCK_BLOCK_CFULL:
+			*dist      = "block:block:fcyclic";
+			*lllp_dist = "block:fcyclic";
+			break;
+		case SLURM_DIST_BLOCK_CFULL_CYCLIC:
+			*dist      = "block:fcyclic:cyclic";
+			*lllp_dist = "fcyclic:cyclic";
+			break;
+		case SLURM_DIST_BLOCK_CFULL_BLOCK:
+			*dist      = "block:fcyclic:block";
+			*lllp_dist = "fcyclic:block";
+			break;
+		case SLURM_DIST_BLOCK_CFULL_CFULL:
+			*dist      = "block:fcyclic:fcyclic";
+			*lllp_dist = "fcyclic:fcyclic";
+			break;
 		default:
-			error("unknown dist, type %d", distribution);
+			error("unknown dist, type 0x%X", distribution);
 			break;
 		}
 	}
@@ -156,55 +228,241 @@ void set_distribution(task_dist_states_t distribution,
  */
 task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size)
 {
-	int len = strlen(arg);
+	int len;
 	char *dist_str = NULL;
 	task_dist_states_t result = SLURM_DIST_UNKNOWN;
-	bool lllp_dist = false, plane_dist = false;
+	bool pack_nodes = false, no_pack_nodes = false;
+	char *tok, *tmp, *save_ptr = NULL;
+	int i, j;
+	char *cur_ptr;
+	char buf[3][25];
+	buf[0][0] = '\0';
+	buf[1][0] = '\0';
+	buf[2][0] = '\0';
+	char outstr[100];
+	outstr[0]='\0';
 
-	dist_str = strchr(arg,':');
-	if (dist_str != NULL) {
-		/* -m cyclic|block:cyclic|block */
-		lllp_dist = true;
-	} else {
-		/* -m plane=<plane_size> */
-		dist_str = strchr(arg,'=');
+	if (!arg)
+		return result;
+
+	tmp = xstrdup(arg);
+	tok = strtok_r(tmp, ",", &save_ptr);
+	while (tok) {
+		bool lllp_dist = false, plane_dist = false;
+		len = strlen(tok);
+		dist_str = strchr(tok, ':');
 		if (dist_str != NULL) {
-			*plane_size=atoi(dist_str+1);
-			len = dist_str-arg;
-			plane_dist = true;
+			/* -m cyclic|block:cyclic|block */
+			lllp_dist = true;
+		} else {
+			/* -m plane=<plane_size> */
+			dist_str = strchr(tok, '=');
+			if (!dist_str)
+				dist_str = getenv("SLURM_DIST_PLANESIZE");
+			else {
+				len = dist_str - tok;
+				dist_str++;
+			}
+			if (dist_str) {
+				*plane_size = atoi(dist_str);
+				plane_dist = true;
+			}
 		}
-	}
 
-	if (lllp_dist) {
-		if (strcasecmp(arg, "cyclic:cyclic") == 0) {
-			result = SLURM_DIST_CYCLIC_CYCLIC;
-		} else if (strcasecmp(arg, "cyclic:block") == 0) {
-			result = SLURM_DIST_CYCLIC_BLOCK;
-		} else if (strcasecmp(arg, "block:block") == 0) {
-			result = SLURM_DIST_BLOCK_BLOCK;
-		} else if (strcasecmp(arg, "block:cyclic") == 0) {
-			result = SLURM_DIST_BLOCK_CYCLIC;
-		} else if (strcasecmp(arg, "block:fcyclic") == 0) {
-			result = SLURM_DIST_BLOCK_CFULL;
-		} else if (strcasecmp(arg, "cyclic:fcyclic") == 0) {
-			result = SLURM_DIST_CYCLIC_CFULL;
+		cur_ptr = tok;
+	 	for (j = 0; j < 3; j++) {
+			for (i = 0; i < 24; i++) {
+				if (*cur_ptr == '\0' || *cur_ptr ==':')
+					break;
+				buf[j][i] = *cur_ptr++;
+			}
+			buf[j][i] = '\0';
+			if (*cur_ptr == '\0')
+				break;
+			buf[j][i] = '\0';
+			cur_ptr++;
 		}
-	} else if (plane_dist) {
-		if (strncasecmp(arg, "plane", len) == 0) {
-			result = SLURM_DIST_PLANE;
+		if (strcmp(buf[0], "*") == 0)
+			/* default node distribution is block */
+			strcpy(buf[0], "block");
+		strcat(outstr, buf[0]);
+		if (strcmp(buf[1], "\0") != 0) {
+			strcat(outstr, ":");
+			if (!strcmp(buf[1], "*") || !strcmp(buf[1], "\0")) {
+				/* default socket distribution is cyclic */
+				strcpy(buf[1], "cyclic");
+			}
+			strcat(outstr, buf[1]);
 		}
-	} else {
-		if (strncasecmp(arg, "cyclic", len) == 0) {
-			result = SLURM_DIST_CYCLIC;
-		} else if (strncasecmp(arg, "block", len) == 0) {
-			result = SLURM_DIST_BLOCK;
-		} else if ((strncasecmp(arg, "arbitrary", len) == 0) ||
-			   (strncasecmp(arg, "hostfile", len) == 0)) {
-			result = SLURM_DIST_ARBITRARY;
+		if (strcmp(buf[2], "\0") != 0) {
+			strcat(outstr, ":");
+			if (!strcmp(buf[2], "*") || !strcmp(buf[2], "\0")) {
+				/* default core dist is inherited socket dist */
+				strcpy(buf[2], buf[1]);
+			}
+			strcat(outstr, buf[2]);
 		}
+
+		if (lllp_dist) {
+			if (strcasecmp(outstr, "cyclic:cyclic") == 0) {
+				result = SLURM_DIST_CYCLIC_CYCLIC;
+			} else if (strcasecmp(outstr, "cyclic:block") == 0) {
+				result = SLURM_DIST_CYCLIC_BLOCK;
+			} else if (strcasecmp(outstr, "block:block") == 0) {
+				result = SLURM_DIST_BLOCK_BLOCK;
+			} else if (strcasecmp(outstr, "block:cyclic") == 0) {
+				result = SLURM_DIST_BLOCK_CYCLIC;
+			} else if (strcasecmp(outstr, "block:fcyclic") == 0) {
+				result = SLURM_DIST_BLOCK_CFULL;
+			} else if (strcasecmp(outstr, "cyclic:fcyclic") == 0) {
+				result = SLURM_DIST_CYCLIC_CFULL;
+			} else if (strcasecmp(outstr, "cyclic:cyclic:cyclic")
+				   == 0) {
+				result = SLURM_DIST_CYCLIC_CYCLIC_CYCLIC;
+			} else if (strcasecmp(outstr, "cyclic:cyclic:block")
+				   == 0) {
+				result = SLURM_DIST_CYCLIC_CYCLIC_BLOCK;
+			} else if (strcasecmp(outstr, "cyclic:cyclic:fcyclic")
+				== 0) {
+				result = SLURM_DIST_CYCLIC_CYCLIC_CFULL;
+			} else if (strcasecmp(outstr, "cyclic:block:cyclic")
+				== 0) {
+				result = SLURM_DIST_CYCLIC_BLOCK_CYCLIC;
+			} else if (strcasecmp(outstr, "cyclic:block:block")
+				== 0) {
+				result = SLURM_DIST_CYCLIC_BLOCK_BLOCK;
+			} else if (strcasecmp(outstr, "cyclic:block:fcyclic")
+				== 0) {
+				result = SLURM_DIST_CYCLIC_BLOCK_CFULL;
+			} else if (strcasecmp(outstr, "cyclic:fcyclic:cyclic")
+				== 0) {
+				result = SLURM_DIST_CYCLIC_CFULL_CYCLIC;
+			} else if (strcasecmp(outstr, "cyclic:fcyclic:block")
+				== 0) {
+				result = SLURM_DIST_CYCLIC_CFULL_BLOCK;
+			} else if (strcasecmp(outstr, "cyclic:fcyclic:fcyclic")
+				== 0) {
+				result = SLURM_DIST_CYCLIC_CFULL_CFULL;
+			} else if (strcasecmp(outstr, "block:cyclic:cyclic")
+				== 0) {
+				result = SLURM_DIST_BLOCK_CYCLIC_CYCLIC;
+			} else if (strcasecmp(outstr, "block:cyclic:block")
+				== 0) {
+				result = SLURM_DIST_BLOCK_CYCLIC_BLOCK;
+			} else if (strcasecmp(outstr, "block:cyclic:fcyclic")
+				== 0) {
+				result = SLURM_DIST_BLOCK_CYCLIC_CFULL;
+			} else if (strcasecmp(outstr, "block:block:cyclic")
+				== 0) {
+				result = SLURM_DIST_BLOCK_BLOCK_CYCLIC;
+			} else if (strcasecmp(outstr, "block:block:block")
+				== 0) {
+				result = SLURM_DIST_BLOCK_BLOCK_BLOCK;
+			} else if (strcasecmp(outstr, "block:block:fcyclic")
+				== 0) {
+				result = SLURM_DIST_BLOCK_BLOCK_CFULL;
+			} else if (strcasecmp(outstr, "block:fcyclic:cyclic")
+				== 0) {
+				result = SLURM_DIST_BLOCK_CFULL_CYCLIC;
+			} else if (strcasecmp(outstr, "block:fcyclic:block")
+				== 0) {
+				result = SLURM_DIST_BLOCK_CFULL_BLOCK;
+			} else if (strcasecmp(outstr, "block:fcyclic:fcyclic")
+				== 0) {
+				result = SLURM_DIST_BLOCK_CFULL_CFULL;
+			}
+		} else if (plane_dist) {
+			if (strncasecmp(tok, "plane", len) == 0) {
+				result = SLURM_DIST_PLANE;
+			}
+		} else {
+			if (strncasecmp(tok, "cyclic", len) == 0) {
+				result = SLURM_DIST_CYCLIC;
+			} else if (strncasecmp(tok, "block", len) == 0) {
+				result = SLURM_DIST_BLOCK;
+			} else if ((strncasecmp(tok, "arbitrary", len) == 0) ||
+				   (strncasecmp(tok, "hostfile", len) == 0)) {
+				result = SLURM_DIST_ARBITRARY;
+			} else if (strncasecmp(tok, "nopack", len) == 0) {
+				no_pack_nodes = true;
+			} else if (strncasecmp(tok, "pack", len) == 0) {
+				pack_nodes = true;
+			}
+		}
+		tok = strtok_r(NULL, ",", &save_ptr);
 	}
+	xfree(tmp);
+
+	if (pack_nodes)
+		result |= SLURM_DIST_PACK_NODES;
+	else if (no_pack_nodes)
+		result |= SLURM_DIST_NO_PACK_NODES;
 
 	return result;
+}
+
+extern char *format_task_dist_states(task_dist_states_t t)
+{
+	switch (t & SLURM_DIST_STATE_BASE) {
+	case SLURM_DIST_BLOCK:
+		return "block";
+	case SLURM_DIST_CYCLIC:
+		return "cyclic";
+	case SLURM_DIST_PLANE:
+		return "plane";
+	case SLURM_DIST_ARBITRARY:
+		return "arbitrary";
+	case SLURM_DIST_CYCLIC_CYCLIC:
+		return "cyclic:cyclic";
+	case SLURM_DIST_CYCLIC_BLOCK:
+		return "cyclic:block";
+	case SLURM_DIST_CYCLIC_CFULL:
+		return "cyclic:fcyclic";
+	case SLURM_DIST_BLOCK_CYCLIC:
+		return "block:cyclic";
+	case SLURM_DIST_BLOCK_BLOCK:
+		return "block:block";
+	case SLURM_DIST_BLOCK_CFULL:
+		return "block:fcyclic";
+	case SLURM_DIST_CYCLIC_CYCLIC_CYCLIC:
+		return "cyclic:cyclic:cyclic";
+	case SLURM_DIST_CYCLIC_CYCLIC_BLOCK:
+		return "cyclic:cyclic:block";
+	case SLURM_DIST_CYCLIC_CYCLIC_CFULL:
+		return "cyclic:cyclic:fcyclic";
+	case SLURM_DIST_CYCLIC_BLOCK_CYCLIC:
+		return "cyclic:block:cyclic";
+	case SLURM_DIST_CYCLIC_BLOCK_BLOCK:
+		return "cyclic:block:block";
+	case SLURM_DIST_CYCLIC_BLOCK_CFULL:
+		return "cyclic:block:fcyclic";
+	case SLURM_DIST_CYCLIC_CFULL_CYCLIC:
+		return "cyclic:fcyclic:cyclic" ;
+	case SLURM_DIST_CYCLIC_CFULL_BLOCK:
+		return "cyclic:fcyclic:block";
+	case SLURM_DIST_CYCLIC_CFULL_CFULL:
+		return "cyclic:fcyclic:fcyclic";
+	case SLURM_DIST_BLOCK_CYCLIC_CYCLIC:
+		return "block:cyclic:cyclic";
+	case SLURM_DIST_BLOCK_CYCLIC_BLOCK:
+		return "block:cyclic:block";
+	case SLURM_DIST_BLOCK_CYCLIC_CFULL:
+		return "block:cyclic:fcyclic";
+	case SLURM_DIST_BLOCK_BLOCK_CYCLIC:
+		return "block:block:cyclic";
+	case SLURM_DIST_BLOCK_BLOCK_BLOCK:
+		return "block:block:block";
+	case SLURM_DIST_BLOCK_BLOCK_CFULL:
+		return "block:block:fcyclic";
+	case SLURM_DIST_BLOCK_CFULL_CYCLIC:
+		return "block:fcyclic:cyclic";
+	case SLURM_DIST_BLOCK_CFULL_BLOCK:
+		return "block:fcyclic:block";
+	case SLURM_DIST_BLOCK_CFULL_CFULL:
+		return "block:fcyclic:fcyclic";
+	default:
+		return "unknown";
+	}
 }
 
 static uint16_t _get_conn_type(char *arg, bool bgp)
@@ -480,7 +738,7 @@ bool verify_node_list(char **node_list_pptr, enum task_dist_states dist,
 	/* If we are using Arbitrary grab count out of the hostfile
 	   using them exactly the way we read it in since we are
 	   saying, lay it out this way! */
-	if (dist == SLURM_DIST_ARBITRARY)
+	if ((dist & SLURM_DIST_STATE_BASE) == SLURM_DIST_ARBITRARY)
 		nodelist = slurm_read_hostfile(*node_list_pptr, task_count);
 	else
 		nodelist = slurm_read_hostfile(*node_list_pptr, NO_VAL);
@@ -713,6 +971,9 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 		}
 	}
 
+	if (!cpu_bind_type)
+		setenvf(NULL, "SLURM_HINT", "%s", arg);
+
 	xfree(buf);
 	return 0;
 }
@@ -721,14 +982,19 @@ uint16_t parse_mail_type(const char *arg)
 {
 	char *buf, *tok, *save_ptr = NULL;
 	uint16_t rc = 0;
+	bool none_set = false;
 
 	if (!arg)
-		return rc;
+		return (uint16_t)INFINITE;
 
 	buf = xstrdup(arg);
 	tok = strtok_r(buf, ",", &save_ptr);
 	while (tok) {
-		if (strcasecmp(tok, "BEGIN") == 0)
+		if (strcasecmp(tok, "NONE") == 0) {
+			rc = 0;
+			none_set = true;
+			break;
+		} else if (strcasecmp(tok, "BEGIN") == 0)
 			rc |= MAIL_JOB_BEGIN;
 		else if  (strcasecmp(tok, "END") == 0)
 			rc |= MAIL_JOB_END;
@@ -738,7 +1004,9 @@ uint16_t parse_mail_type(const char *arg)
 			rc |= MAIL_JOB_REQUEUE;
 		else if (strcasecmp(tok, "ALL") == 0)
 			rc |= MAIL_JOB_BEGIN |  MAIL_JOB_END |  MAIL_JOB_FAIL |
-			      MAIL_JOB_REQUEUE;
+			      MAIL_JOB_REQUEUE | MAIL_JOB_STAGE_OUT;
+		else if (!strcasecmp(tok, "STAGE_OUT"))
+			rc |= MAIL_JOB_STAGE_OUT;
 		else if (strcasecmp(tok, "TIME_LIMIT") == 0)
 			rc |= MAIL_JOB_TIME100;
 		else if (strcasecmp(tok, "TIME_LIMIT_90") == 0)
@@ -750,6 +1018,8 @@ uint16_t parse_mail_type(const char *arg)
 		tok = strtok_r(NULL, ",", &save_ptr);
 	}
 	xfree(buf);
+	if (!rc && !none_set)
+		rc = (uint16_t)INFINITE;
 
 	return rc;
 }
@@ -781,6 +1051,11 @@ char *print_mail_type(const uint16_t type)
 		if (buf[0])
 			strcat(buf, ",");
 		strcat(buf, "REQUEUE");
+	}
+	if (type & MAIL_JOB_STAGE_OUT) {
+		if (buf[0])
+			strcat(buf, ",");
+		strcat(buf, "STAGE_OUT");
 	}
 	if (type & MAIL_JOB_TIME50) {
 		if (buf[0])
@@ -846,8 +1121,17 @@ _create_path_list(void)
 	return l;
 }
 
-char *
-search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode)
+/*
+ * search PATH to confirm the location and access mode of the given command
+ * IN cwd - current working directory
+ * IN cmd - command to execute
+ * IN check_current_dir - if true, search cwd for the command
+ * IN access_mode - required access rights of cmd
+ * IN test_exec - if false, do not confirm access mode of cmd if full path
+ * RET full path of cmd or NULL if not found
+ */
+char *search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode,
+		  bool test_exec)
 {
 	List         l        = NULL;
 	ListIterator i        = NULL;
@@ -855,16 +1139,22 @@ search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode)
 
 #if defined HAVE_BG && !defined HAVE_BG_L_P
 	/* BGQ's runjob command required a fully qualified path */
-	if ( (cmd[0] == '.' || cmd[0] == '/') &&
-	     (access(cmd, access_mode) == 0 ) ) {
+	if (((cmd[0] == '.') || (cmd[0] == '/')) &&
+	    (access(cmd, access_mode) == 0)) {
 		if (cmd[0] == '.')
 			xstrfmtcat(fullpath, "%s/", cwd);
 		xstrcat(fullpath, cmd);
 		goto done;
 	}
 #else
-	if ((cmd[0] == '.') || (cmd[0] == '/'))
-		return NULL;
+	if ((cmd[0] == '.') || (cmd[0] == '/')) {
+		if (test_exec && (access(cmd, access_mode) == 0)) {
+			if (cmd[0] == '.')
+				xstrfmtcat(fullpath, "%s/", cwd);
+			xstrcat(fullpath, cmd);
+		}
+		goto done;
+	}
 #endif
 
 	l = _create_path_list();
@@ -882,11 +1172,9 @@ search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode)
 			goto done;
 
 		xfree(fullpath);
-		fullpath = NULL;
 	}
-  done:
-	if (l)
-		list_destroy(l);
+done:
+	FREE_NULL_LIST(l);
 	return fullpath;
 }
 
@@ -1074,6 +1362,35 @@ extern int parse_uint16(char *aval, uint16_t *ival)
 	*ival = (uint16_t) tval;
 
 	return 0;
+}
+
+/*
+ *  Get a decimal integer from arg.
+ *
+ *  Returns the integer on success, exits program on failure.
+ *
+ */
+extern int parse_int(const char *name, const char *val, bool positive)
+{
+	char *p = NULL;
+	int result = 0;
+
+	if (val)
+		result = strtol(val, &p, 10);
+
+	if ((p == NULL) || (p[0] != '\0') || (result < 0L)
+	||  (positive && (result <= 0L))) {
+		error ("Invalid numeric value \"%s\" for %s.", val, name);
+		exit(1);
+	} else if (result > INT_MAX) {
+		error ("Numeric argument (%d) to big for %s.", result, name);
+		exit(1);
+	} else if (result < INT_MIN) {
+		error ("Numeric argument %d to small for %s.", result, name);
+		exit(1);
+	}
+
+	return (int) result;
 }
 
 /* print_db_notok() - Print an error message about slurmdbd
@@ -1355,13 +1672,13 @@ parse_resv_flags(const char *flagstr, const char *msg)
 				outflags |= RESERVE_FLAG_NO_WEEKLY;
 			else
 				outflags |= RESERVE_FLAG_WEEKLY;
-		} else if (strncasecmp(curr, "License_Only", MAX(taglen,1))
-			   == 0) {
+		} else if (!strncasecmp(curr, "Any_Nodes", MAX(taglen,1)) ||
+			   !strncasecmp(curr, "License_Only", MAX(taglen,1))) {
 			curr += taglen;
 			if (flip)
-				outflags |= RESERVE_FLAG_NO_LIC_ONLY;
+				outflags |= RESERVE_FLAG_NO_ANY_NODES;
 			else
-				outflags |= RESERVE_FLAG_LIC_ONLY;
+				outflags |= RESERVE_FLAG_ANY_NODES;
 		} else if (strncasecmp(curr, "Static_Alloc", MAX(taglen,1))
 			   == 0) {
 			curr += taglen;
@@ -1384,6 +1701,10 @@ parse_resv_flags(const char *flagstr, const char *msg)
 			   !flip) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_TIME_FLOAT;
+		} else if (!strncasecmp(curr, "Replace", MAX(taglen,1)) &&
+			   !flip) {
+			curr += taglen;
+			outflags |= RESERVE_FLAG_REPLACE;
 		} else {
 			error("Error parsing flags %s.  %s", flagstr, msg);
 			return 0xffffffff;

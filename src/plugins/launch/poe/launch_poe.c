@@ -76,15 +76,12 @@
  * of how this plugin satisfies that application.  SLURM will only load
  * a task plugin if the plugin_type string has a prefix of "task/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as this API matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "launch poe plugin";
 const char plugin_type[]        = "launch/poe";
-const uint32_t plugin_version   = 101;
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 static char *cmd_fname = NULL;
 static char *poe_cmd_line = NULL;
@@ -201,7 +198,7 @@ static void _propagate_srun_opts(uint32_t nnodes, uint32_t ntasks)
 	if (opt.dependency)
 		setenv("SLURM_DEPENDENCY", opt.dependency, 1);
 	if (opt.distribution != SLURM_DIST_UNKNOWN) {
-		snprintf(value, sizeof(value), "%d", opt.distribution);
+		snprintf(value, sizeof(value), "%u", opt.distribution);
 		setenv("SLURM_DISTRIBUTION", value, 1);
 	}
 	if (opt.exc_nodes)
@@ -600,7 +597,8 @@ extern int launch_p_create_job_step(srun_job_t *job, bool use_all_cpus,
 		}
 	}
 
-	if (opt.nodelist && (opt.distribution == SLURM_DIST_ARBITRARY)) {
+	if (opt.nodelist &&
+	    ((opt.distribution & SLURM_DIST_STATE_BASE)==SLURM_DIST_ARBITRARY)) {
 		bool destroy_hostfile = 0;
 		if (!opt.hostfile) {
 			char *host_name, *host_line;

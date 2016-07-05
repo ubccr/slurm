@@ -90,16 +90,12 @@
  * only load authentication plugins if the plugin_type string has a prefix
  * of "auth/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as the authentication API matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "Munge cryptographic signature plugin";
 const char plugin_type[]        = "crypto/munge";
-const uint32_t plugin_version   = 90;
-
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 /*
  *  Error codes local to this plugin:
@@ -113,9 +109,7 @@ enum local_error_code {
 
 static uid_t slurm_user = 0;
 
-/* Convert AuthInfo to a socket path. Accepts two input formats:
- * 1) <path>		(Old format)
- * 2) socket=<path>[,]	(New format)
+/* Convert AuthInfo to a socket path. Parses input format "socket=<path>[,]".
  * NOTE: Caller must xfree return value
  */
 static char *_auth_opts_to_socket(void)
@@ -123,19 +117,15 @@ static char *_auth_opts_to_socket(void)
 	char *socket = NULL, *sep, *tmp;
 	char *opts = slurm_get_auth_info();
 
-	if (!opts)
-		return NULL;
-
-	tmp = strstr(opts, "socket=");
-	if (tmp) {	/* New format */
-		socket = xstrdup(tmp + 7);
-		sep = strchr(socket, ',');
-		if (sep)
-			sep[0] = '\0';
-	} else if (strchr(opts, '=')) {
-		;	/* New format, but socket not specified */
-	} else {
-		socket = xstrdup(tmp);	/* Old format */
+	if (opts) {
+		tmp = strstr(opts, "socket=");
+		if (tmp) {	/* New format */
+			socket = xstrdup(tmp + 7);
+			sep = strchr(socket, ',');
+			if (sep)
+				sep[0] = '\0';
+		}
+		xfree(opts);
 	}
 
 	return socket;

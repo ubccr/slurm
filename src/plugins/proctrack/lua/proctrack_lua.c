@@ -63,12 +63,13 @@
 
 #include "src/common/log.h"
 #include "src/common/macros.h"
+#include "src/common/xlua.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 
 const char plugin_name[]            = "LUA proctrack module";
 const char plugin_type[]            = "proctrack/lua";
-const uint32_t plugin_version       = 91;
+const uint32_t plugin_version       = SLURM_VERSION_NUMBER;
 
 static const char lua_script_path[] = DEFAULT_SCRIPT_DIR "/proctrack.lua";
 static lua_State *L = NULL;
@@ -226,19 +227,11 @@ int init (void)
 	int rc = SLURM_SUCCESS;
 
 	/*
-	 *  Need to dlopen() liblua.so with RTLD_GLOBAL in order to
-	 *   ensure symbols from liblua are available to libs opened
-	 *   by any lua scripts.
+	 * Need to dlopen() the Lua library to ensure plugins see
+	 * appropriate symptoms
 	 */
-	if (!dlopen("liblua.so",      RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua-5.2.so",   RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua5.2.so",    RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua5.2.so.0",  RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua-5.1.so",   RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua5.1.so",    RTLD_NOW | RTLD_GLOBAL) &&
-	    !dlopen("liblua5.1.so.0",  RTLD_NOW | RTLD_GLOBAL)) {
-		return (error("Failed to open liblua.so: %s", dlerror()));
-	}
+	if ((rc = xlua_dlopen()) != SLURM_SUCCESS)
+		return rc;
 
 	/*
 	 *  Initilize lua
@@ -471,7 +464,7 @@ uint64_t proctrack_p_find (pid_t pid)
 	lua_pop (L, -1);
 
 out:
-	slurm_mutex_lock (&lua_lock);
+	slurm_mutex_unlock (&lua_lock);
 	return (id);
 }
 

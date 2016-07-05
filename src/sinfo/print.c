@@ -46,11 +46,13 @@
 #include <pwd.h>
 #include <sys/types.h>
 
-#include "src/common/list.h"
 #include "src/common/hostlist.h"
+#include "src/common/list.h"
+#include "src/common/parse_time.h"
+#include "src/common/slurm_time.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/parse_time.h"
+
 #include "src/sinfo/print.h"
 #include "src/sinfo/sinfo.h"
 
@@ -63,6 +65,9 @@ static int   _build_min_max_32_string(char *buffer, int buf_size,
 				uint32_t min, uint32_t max,
 				bool range, bool use_suffix);
 static int   _build_cpu_load_min_max_32(char *buffer, int buf_size,
+					uint32_t min, uint32_t max,
+					bool range);
+static int   _build_free_mem_min_max_32(char *buffer, int buf_size,
 					uint32_t min, uint32_t max,
 					bool range);
 static void  _print_reservation(reserve_info_t *resv_ptr, int width);
@@ -81,7 +86,7 @@ void print_date(void)
 	time_t now;
 
 	now = time(NULL);
-	printf("%s", ctime(&now));
+	printf("%s", slurm_ctime(&now));
 }
 
 int print_sinfo_list(List sinfo_list)
@@ -237,8 +242,10 @@ _build_min_max_16_string(char *buffer, int buf_size, uint16_t min, uint16_t max,
 {
 	char tmp_min[8];
 	char tmp_max[8];
-	convert_num_unit((float)min, tmp_min, sizeof(tmp_min), UNIT_NONE);
-	convert_num_unit((float)max, tmp_max, sizeof(tmp_max), UNIT_NONE);
+	convert_num_unit((float)min, tmp_min, sizeof(tmp_min), UNIT_NONE,
+			 params.convert_flags);
+	convert_num_unit((float)max, tmp_max, sizeof(tmp_max), UNIT_NONE,
+			 params.convert_flags);
 
 	if (max == min)
 		return snprintf(buffer, buf_size, "%s", tmp_max);
@@ -263,9 +270,9 @@ _build_min_max_32_string(char *buffer, int buf_size,
 
 	if (use_suffix) {
 		convert_num_unit((float)min, tmp_min, sizeof(tmp_min),
-				 UNIT_NONE);
+				 UNIT_NONE, params.convert_flags);
 		convert_num_unit((float)max, tmp_max, sizeof(tmp_max),
-				 UNIT_NONE);
+				 UNIT_NONE, params.convert_flags);
 	} else {
 		snprintf(tmp_min, sizeof(tmp_min), "%u", min);
 		snprintf(tmp_max, sizeof(tmp_max), "%u", max);
@@ -305,6 +312,35 @@ _build_cpu_load_min_max_32(char *buffer, int buf_size,
 		strcpy(tmp_max, "N/A");
 	} else {
 		snprintf(tmp_max, sizeof(tmp_max), "%.2f", (max/100.0));
+	}
+
+	if (max == min)
+		return snprintf(buffer, buf_size, "%s", tmp_max);
+	else if (range)
+		return snprintf(buffer, buf_size, "%s-%s", tmp_min, tmp_max);
+	else
+		return snprintf(buffer, buf_size, "%s+", tmp_min);
+}
+
+static int
+_build_free_mem_min_max_32(char *buffer, int buf_size,
+			    uint32_t min, uint32_t max,
+			    bool range)
+{
+
+	char tmp_min[16];
+	char tmp_max[16];
+
+	if (min == NO_VAL) {
+		strcpy(tmp_min, "N/A");
+	} else {
+		snprintf(tmp_min, sizeof(tmp_min), "%u", min);
+	}
+
+	if (max == NO_VAL) {
+		strcpy(tmp_max, "N/A");
+	} else {
+		snprintf(tmp_max, sizeof(tmp_max), "%u", max);
 	}
 
 	if (max == min)
@@ -442,13 +478,17 @@ int _print_cpus_aiot(sinfo_data_t * sinfo_data, int width,
 	if (sinfo_data) {
 		if (params.cluster_flags & CLUSTER_FLAG_BG) {
 			convert_num_unit((float)sinfo_data->cpus_alloc,
-					 tmpa, sizeof(tmpa), UNIT_NONE);
+					 tmpa, sizeof(tmpa), UNIT_NONE,
+					 params.convert_flags);
 			convert_num_unit((float)sinfo_data->cpus_idle,
-					 tmpi, sizeof(tmpi), UNIT_NONE);
+					 tmpi, sizeof(tmpi), UNIT_NONE,
+					 params.convert_flags);
 			convert_num_unit((float)sinfo_data->cpus_other,
-					 tmpo, sizeof(tmpo), UNIT_NONE);
+					 tmpo, sizeof(tmpo), UNIT_NONE,
+					 params.convert_flags);
 			convert_num_unit((float)sinfo_data->cpus_total,
-					 tmpt, sizeof(tmpt), UNIT_NONE);
+					 tmpt, sizeof(tmpt), UNIT_NONE,
+					 params.convert_flags);
 		} else {
 			snprintf(tmpa, sizeof(tmpa), "%u",
 				 sinfo_data->cpus_alloc);
@@ -730,7 +770,8 @@ int _print_nodes_t(sinfo_data_t * sinfo_data, int width,
 	if (sinfo_data) {
 		if (params.cluster_flags & CLUSTER_FLAG_BG)
 			convert_num_unit((float)sinfo_data->nodes_total,
-					 tmp, sizeof(tmp), UNIT_NONE);
+					 tmp, sizeof(tmp), UNIT_NONE,
+					 params.convert_flags);
 		else
 			snprintf(tmp, sizeof(tmp), "%d",
 				 sinfo_data->nodes_total);
@@ -753,9 +794,11 @@ int _print_nodes_ai(sinfo_data_t * sinfo_data, int width,
 	if (sinfo_data) {
 		if (params.cluster_flags & CLUSTER_FLAG_BG) {
 			convert_num_unit((float)sinfo_data->nodes_alloc,
-					 tmpa, sizeof(tmpa), UNIT_NONE);
+					 tmpa, sizeof(tmpa), UNIT_NONE,
+					 params.convert_flags);
 			convert_num_unit((float)sinfo_data->nodes_idle,
-					 tmpi, sizeof(tmpi), UNIT_NONE);
+					 tmpi, sizeof(tmpi), UNIT_NONE,
+					 params.convert_flags);
 		} else {
 			snprintf(tmpa, sizeof(tmpa), "%d",
 				 sinfo_data->nodes_alloc);
@@ -784,13 +827,17 @@ int _print_nodes_aiot(sinfo_data_t * sinfo_data, int width,
 	if (sinfo_data) {
 		if (params.cluster_flags & CLUSTER_FLAG_BG) {
 			convert_num_unit((float)sinfo_data->nodes_alloc,
-					 tmpa, sizeof(tmpa), UNIT_NONE);
+					 tmpa, sizeof(tmpa), UNIT_NONE,
+					 params.convert_flags);
 			convert_num_unit((float)sinfo_data->nodes_idle,
-					 tmpi, sizeof(tmpi), UNIT_NONE);
+					 tmpi, sizeof(tmpi), UNIT_NONE,
+					 params.convert_flags);
 			convert_num_unit((float)sinfo_data->nodes_other,
-					 tmpo, sizeof(tmpo), UNIT_NONE);
+					 tmpo, sizeof(tmpo), UNIT_NONE,
+					 params.convert_flags);
 			convert_num_unit((float)sinfo_data->nodes_total,
-					 tmpt, sizeof(tmpt), UNIT_NONE);
+					 tmpt, sizeof(tmpt), UNIT_NONE,
+					 params.convert_flags);
 		} else {
 			snprintf(tmpa, sizeof(tmpa), "%u",
 				 sinfo_data->nodes_alloc);
@@ -995,7 +1042,6 @@ int _print_state_compact(sinfo_data_t * sinfo_data, int width,
 
 	if (sinfo_data && sinfo_data->nodes_total) {
 		my_state = sinfo_data->node_state;
-
 		upper_state = node_state_string_compact(my_state);
 		lower_state = _str_tolower(upper_state);
 		_print_str(lower_state, width, right_justify, true);
@@ -1018,11 +1064,6 @@ int _print_state_long(sinfo_data_t * sinfo_data, int width,
 
 	if (sinfo_data && sinfo_data->nodes_total) {
 		my_state = sinfo_data->node_state;
-		if (sinfo_data->cpus_alloc &&
-		    (sinfo_data->cpus_alloc != sinfo_data->cpus_total)) {
-			my_state &= NODE_STATE_FLAGS;
-			my_state |= NODE_STATE_MIXED;
-		}
 		upper_state = node_state_string(my_state);
 		lower_state = _str_tolower(upper_state);
 		_print_str(lower_state, width, right_justify, true);
@@ -1188,6 +1229,26 @@ int _print_cpu_load(sinfo_data_t * sinfo_data, int width,
 	return SLURM_SUCCESS;
 }
 
+int _print_free_mem(sinfo_data_t * sinfo_data, int width,
+		    bool right_justify, char *suffix)
+{
+	char id[FORMAT_STRING_SIZE];
+
+	if (sinfo_data) {
+		_build_free_mem_min_max_32(id, FORMAT_STRING_SIZE,
+					 sinfo_data->min_free_mem,
+					 sinfo_data->max_free_mem,
+					 true);
+		_print_str(id, width, right_justify, true);
+	} else {
+		_print_str("FREE_MEM", width, right_justify, true);
+	}
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_max_cpus_per_node(sinfo_data_t * sinfo_data, int width,
 			     bool right_justify, char *suffix)
 {
@@ -1225,4 +1286,20 @@ int _print_version(sinfo_data_t * sinfo_data, int width,
 	}
 	return SLURM_SUCCESS;
 
+}
+
+int _print_alloc_mem(sinfo_data_t * sinfo_data, int width,
+		     bool right_justify, char *suffix)
+{
+	char tmp_line[32];
+	if (sinfo_data) {
+		sprintf(tmp_line, "%u", sinfo_data->alloc_memory);
+		_print_str(tmp_line, width, right_justify, true);
+	} else {
+		_print_str("ALLOCMEM", width, right_justify, true);
+	}
+	if (suffix) {
+		printf ("%s", suffix);
+	}
+	return SLURM_SUCCESS;
 }

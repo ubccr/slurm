@@ -43,14 +43,14 @@
 #include <glob.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <slurm/slurm_errno.h>
 #include <slurm/slurm.h>
-#include "src/slurmd/slurmstepd/slurmstepd_job.h"
-#include "src/slurmd/slurmd/slurmd.h"
-
+#include <slurm/slurm_errno.h>
 #include "src/common/xstring.h"
 #include "src/common/gres.h"
 #include "src/common/list.h"
+#include "src/slurmd/common/xcpuinfo.h"
+#include "src/slurmd/slurmd/slurmd.h"
+#include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 #include "task_cgroup.h"
 
@@ -95,7 +95,8 @@ extern int task_cgroup_devices_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		goto error;
 	}
 
-	(void) gres_plugin_node_config_load(cpunum, conf->node_name);
+	(void) gres_plugin_node_config_load(cpunum, conf->node_name, NULL);
+
 
 	strcpy(cgroup_allowed_devices_file,
 	       slurm_cgroup_conf->allowed_devices_file);
@@ -176,7 +177,7 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 	/* build job cgroup relative path if no set (should not be) */
 	if ( *job_cgroup_path == '\0' ) {
 		if ( snprintf(job_cgroup_path,PATH_MAX, "%s/job_%u",
-			      user_cgroup_path,jobid) >= PATH_MAX ) {
+			      user_cgroup_path, jobid) >= PATH_MAX ) {
 			error("task/cgroup: unable to build job %u devices "
 			      "cg relative path : %m", jobid);
 			return SLURM_ERROR;
@@ -186,23 +187,21 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 	/* build job step cgroup relative path (should not be) */
 	if ( *jobstep_cgroup_path == '\0' ) {
 		int cc;
-
 		if (stepid == SLURM_BATCH_SCRIPT) {
 			cc = snprintf(jobstep_cgroup_path, PATH_MAX,
 				      "%s/step_batch", job_cgroup_path);
-			if (cc >= PATH_MAX) {
-				error("task/cgroup: unable to build "
-				      "step batch devices cg path : %m");
-
-			}
+		} else if (stepid == SLURM_EXTERN_CONT) {
+			cc = snprintf(jobstep_cgroup_path, PATH_MAX,
+				      "%s/step_extern", job_cgroup_path);
 		} else {
-
-			if (snprintf(jobstep_cgroup_path,PATH_MAX, "%s/step_%u",
-				     job_cgroup_path,stepid) >= PATH_MAX ) {
-				error("task/cgroup: unable to build job step %u "
-				      "devices cg relative path : %m",stepid);
-				return SLURM_ERROR;
-			}
+			cc = snprintf(jobstep_cgroup_path, PATH_MAX,
+				     "%s/step_%u",
+				     job_cgroup_path, stepid);
+		}
+		if (cc >= PATH_MAX ) {
+			error("task/cgroup: unable to build job step %u.%u "
+			      "devices cg relative path : %m", jobid, stepid);
+			return SLURM_ERROR;
 		}
 	}
 
@@ -360,7 +359,8 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 	}
 
 
-	if (job->stepid != SLURM_BATCH_SCRIPT ) {
+	if (job->stepid != SLURM_BATCH_SCRIPT &&
+	    job->stepid != SLURM_EXTERN_CONT) {
 
 		gres_step_bit_alloc = xmalloc ( sizeof (int) * (gres_conf_lines + 1));
 
@@ -494,4 +494,10 @@ static int read_allowed_devices_file(char **allowed_devices)
 		perror (cgroup_allowed_devices_file);
 
 	return num_lines;
+}
+
+
+extern int task_cgroup_devices_add_pid(pid_t pid)
+{
+	return xcgroup_add_pids(&step_devices_cg, &pid, 1);
 }

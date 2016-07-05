@@ -80,7 +80,7 @@ static void _signal_while_allocating(int signo)
 	if (signo == SIGCONT)
 		return;
 
-	destroy_step = 1;
+	destroy_step = signo;
 }
 
 static void
@@ -101,6 +101,8 @@ _job_fake_cred(struct slurm_step_ctx_struct *ctx)
 	arg.step_hostlist  = ctx->step_req->node_list;
 	arg.step_mem_limit = 0;
 
+	arg.job_gres_list     = NULL;
+	arg.job_constraints   = NULL;
 	arg.job_core_bitmap   = bit_alloc(node_cnt);
 	bit_nset(arg.job_core_bitmap,  0, node_cnt-1);
 	arg.step_core_bitmap  = bit_alloc(node_cnt);
@@ -126,7 +128,9 @@ static job_step_create_request_msg_t *_create_step_request(
 	step_req->min_nodes = step_params->min_nodes;
 	step_req->max_nodes = step_params->max_nodes;
 	step_req->cpu_count = step_params->cpu_count;
-	step_req->cpu_freq  = step_params->cpu_freq;
+	step_req->cpu_freq_min = step_params->cpu_freq_min;
+	step_req->cpu_freq_max = step_params->cpu_freq_max;
+	step_req->cpu_freq_gov = step_params->cpu_freq_gov;
 	step_req->num_tasks = step_params->task_count;
 	step_req->relative = step_params->relative;
 	step_req->resv_port_cnt = step_params->resv_port_cnt;
@@ -249,6 +253,8 @@ slurm_step_ctx_create_timeout (const slurm_step_ctx_params_t *step_params,
 	rc = slurm_job_step_create(step_req, &step_resp);
 	if ((rc < 0) &&
 	    ((errno == ESLURM_NODES_BUSY) ||
+	     (errno == ESLURM_POWER_NOT_AVAIL) ||
+	     (errno == ESLURM_POWER_RESERVED) ||
 	     (errno == ESLURM_PORTS_BUSY) ||
 	     (errno == ESLURM_INTERCONNECT_BUSY))) {
 		struct pollfd fds;
@@ -266,7 +272,8 @@ slurm_step_ctx_create_timeout (const slurm_step_ctx_params_t *step_params,
 		}
 		xsignal_block(step_signals);
 		if (destroy_step) {
-			info("Cancelled pending job step");
+			info("Cancelled pending job step with signal %d",
+			     destroy_step);
 			errno = ESLURM_ALREADY_DONE;
 		} else
 			rc = slurm_job_step_create(step_req, &step_resp);

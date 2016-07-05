@@ -59,6 +59,8 @@
 <li><a href="#req">How can a job in complete or failed state be requeued?</a></li>
 <li><a href="#cpu_count">Slurm documentation refers to CPUs, cores and threads.
   What exactly is considered a CPU?</a></li>
+<li><a href="#sbatch_srun">What is the difference between the sbatch
+  and srun commands?</a></li>
 </ol>
 
 <h2>For Administrators</h2>
@@ -177,6 +179,11 @@ script for Slurm?</a></li>
 <li><a href="#delete_partition">How do I safely remove partitions?</a></li>
 <li><a href="#cpu_freq">Why is Slurm unable to set the CPU frequency for jobs?</a></li>
 <li><a href="#mic_config">How can Slurm be configured to support Intel Phi (MIC)?</a></li>
+<li><a href="#cluster_acct">When adding a new cluster, how can the Slurm cluster
+    configuration be copied from an existing cluster to the new cluster?</a></li>
+<li><a href="#cray_dvs">How can I update Slurm on a Cray DVS file system without
+rebooting the nodes?</a></li>
+<li><a href="#pam_exclude">How can I exclude some users from pam_slurm?</a></li>
 </ol>
 
 <h2>For Management</h2>
@@ -1004,7 +1011,32 @@ resource allocation with respect to base boards, sockets, cores and threads.</p>
 <p>(<b>NOTE:</b> An exception to this would be if the system administrator
 configured SelectTypeParameters=CR_CPU and each node's CPU count without its
 socket/core/thread specification. In that case, each thread would be
-independently scheduled as a CPU. This is not a typical configuration.)
+independently scheduled as a CPU. This is not a typical configuration.)</p>
+
+<p><a name="sbatch_srun"><b>31. What is the difference between the sbatch
+  and srun commands?</b></a><br>
+The srun command has two different modes of operation. First, if not run within
+an existing job (i.e. not within a Slurm job allocation created by salloc or
+sbatch), then it will create a job allocation and spawn an application.
+If run within an existing allocation, the srun command only spawns the
+application.
+For this question, we will only address the first mode of operation and compare
+creating a job allocation using the sbatch and srun commands.</p>
+
+<p>The srun command is designed for interactive use, with someone monitoring
+the output.
+The output of the application is seen as output of the srun command,
+typically at the user's terminal.
+The sbatch command is designed to submit a script for later execution and its
+output is written to a file.
+Command options used in the job allocation are almost identical.
+The most noticable difference in options is that the sbatch command supports
+the concept of <a href="job_array.html">job arrays</a>, while srun does not.
+Another significant difference is in fault tolerance.
+Failures involving sbatch jobs typically result in the job being requeued
+and executed again, while failures involving srun typically result in an
+error message being generated with the expectation that the user will respond
+in an appropriate fashion.</p> 
 
 <p class="footer"><a href="#top">top</a></p>
 
@@ -1607,14 +1639,20 @@ A value of -17 typically will disable killing.</p>
 <p><a name="ubuntu"><b>37. I see my host of my calling node as 127.0.1.1
     instead of the correct IB address.  Why is that?</b></a></br>
 Some systems by default will put your host in the /etc/hosts file as
-    something like
+something like</p>
 <pre>
 127.0.1.1	snowflake.llnl.gov	snowflake
 </pre>
-This will cause srun and other things to grab 127.0.1.1 as it's
-address instead of the correct address and make it so the
-communication doesn't work.  Solution is to either remove this line or
-set a different nodeaddr that is known by your other nodes.</p>
+<p>This will cause srun and Slurm commands to use the 127.0.1.1 address
+instead of the correct address and prevent communications between nodes.
+The solution is to either remove this line or configure a different NodeAddr
+that is known by your other nodes.</p>
+
+<p>The TopologyParam=NoInAddrAny configuration parameter is subject to this
+same problem, which can also be addressed by removing actual node
+name from the "127.0.1.1" as well as the "127.0.0.1"
+addresses in the /etc/hosts file.  It is ok if they point to
+localhost, but not the actual name of the node.</p>
 
 <p><a name="stop_sched"><b>38. How can I stop Slurm from scheduling jobs?</b></a></br>
 You can stop Slurm from scheduling jobs on a per partition basis by setting
@@ -1659,19 +1697,39 @@ simple first-login script that configures the virtual cluster for me.</p>
 
 <p><a name="core_dump"><b>41. If a Slurm daemon core dumps, where can I find the
 core file?</b></a></br>
-<p>For <i>slurmctld</i> the core file will be in the same directory as its
+<p>For <i>slurmctld</i>, the core file will be in the same directory as its
 log files (<i>SlurmctldLogFile</i>) if configured using an fully qualified
 pathname (starting with "/").
 Otherwise it will be found in directory used for saving state
 (<i>StateSaveLocation</i>).</p>
-<p>For <i>slurmd</i> the core file will be in the same directory as its
+<p>For <i>slurmd</i>, the core file will be in the same directory as its
 log files (<i>SlurmdLogFile</i>) if configured using an fully qualified
 pathname (starting with "/").
 Otherwise it will be found in directory used for saving state
 (<i>SlurmdSpoolDir</i>).</p>
-<p>For <i>slurmstepd</i> the core file will depend upon when the failure
+<p>For <i>slurmstepd</i>, the core file will depend upon when the failure
 occurs. It will either be in spawned job's working directory on the same
 location as that described above for the <i>slurmd</i> daemon.</p>
+<p><b>NOTE:</b> On some systems, the slurmstepd's will not generate core files
+without some system configuration changes due to its use of the setuid
+(set user ID) function.<br>
+Set /proc/sys/fs/suid_dumpable to 2.<br>
+This could be set in permently in sysctl.conf with:<br>
+fs.suid_dumpable = 2<br>
+or temporarily with:<br>
+sysctl fs.suid_dumpable=2<br>
+On Centos 6, also set "ProcessUnpackaged = yes" in the file
+/etc/abrt/abrt-action-save-package-data.conf.</p>
+<p>Once these configuration changes have been made and the slurmstepd aborts,
+you should see message of this type in the file /var/log/messages:</p>
+<pre>Oct 15 11:31:20 knc abrt[21489]: Saved core dump of pid 21477 (/localhome/adam/slurm/16.05/knc/sbin/slurmstepd) to /var/spool/abrt/ccpp-2015-10-15-11:31:20-21477 (6639616 bytes)
+Oct 15 11:31:20 knc abrtd: Directory 'ccpp-2015-10-15-11:31:20-21477' creation detected</pre>
+
+<p>There should be a core file inside the specified directory.</p>
+
+<p>On a 3.6 kernel (Ubuntu), fs.suid_dumpable requires a fully qualified path
+in the core_pattern. For example:<br>
+sysctl kernel.core_pattern=/tmp/core.%e.%p</p>
 
 <p><a name="totalview"><b>42. How can TotalView be configured to operate with
   Slurm?</b></a></br>
@@ -1737,7 +1795,7 @@ $ scontrol release &lt;jobid&gt;
 health check script for Slurm?</b></a></br>
 Probably the most comprehensive and lightweight health check tool out
 there is
-<a href="http://warewulf.lbl.gov/trac/wiki/Node%20Health%20Check">Node Health Check</a>.
+<a href="https://github.com/mej/nhc">Node Health Check</a>.
 It has integration with Slurm as well as Torque resource managers.</p>
 
 <p><a name="add_nodes"><b>47. What process should I follow to add nodes to Slurm?</b></a></br>
@@ -1779,6 +1837,13 @@ slurm.conf file as shown below.</p>
 <pre>
 SallocDefaultCommand="srun -n1 -N1 --mem-per-cpu=0 --pty --preserve-env --mpi=none $SHELL"
 </pre>
+
+<p>
+For cray systems, add --gres=craynetwork:0 to the options.
+<pre>
+SallocDefaultCommand="srun -n1 -N1 --mem-per-cpu=0 --gres=craynetwork:0 --pty --preserve-env --mpi=none $SHELL"
+</pre>
+</p>
 
 <p><a name="upgrade"><b>50. What should I be aware of when upgrading Slurm?</b></a></br>
 See the Quick Start Administrator Guide <a href="quickstart_admin.html#upgrade">Upgrade</a>
@@ -2015,8 +2080,86 @@ install the latest MPSS and Slurm packages from yum/zypper,
 add new MICs (via console utility or GUI),
 add MICs to Slurm queues if necessary, restart the host, use MICs via Slurm.</p>
 
+<p><a name="cluster_acct"><b>63. When adding a new cluster, how can the Slurm cluster
+    configuration be copied from an existing cluster to the new cluster?</b></a><br>
+Accounts need to be configured the cluster. An easy way to copy information from
+an existing cluster is to use the sacctmgr command to dump that cluster's information,
+modify it using some editor, the load the new information using the sacctmgr
+command. See the sacctmgr man page for details, including an example.</p>
+
+<p><a name="cray_dvs"><b>64. How can I update Slurm on a Cray DVS file system
+   without rebooting the nodes?</b></a><br>
+The problem with DVS caching is related to the fact that the dereferenced value
+of /opt/slurm/default symlink is cached in the DVS attribute cache, and that
+cache is not dropped when the rest of the VM caches are.</p>
+
+<p>The Cray Native SLURM installation manual indicates that slurm should
+have a "default" symlink run through /etc/alternatives.
+As an alternative to that:
+<ol>
+<li>Institute a policy that all changes to files which could be open
+persistently (i.e., .so files) are always modified by creating a new access
+path.  I.e., installations go to a new directory.</li>
+<li>Dump the /etc/alternatives stuff, just use a regular symlink, e.g., default
+points to 15.8.0-1.</li>
+<li>Add a new mountpoint on all the compute nodes for /dsl/opt/slurm where the
+attrcache_timeout attribute is reduced from 14440s to 60s (or 15s -- whatever):<br>
+mount -t dvs /opt/slurm /dsl/opt/slurm -o<br>
+path=/dsl/opt/slurm,nodename=c0-0c0s0n0,loadbalance,cache,ro,attrcache_timeout=15<br>
+In the example above, c0-0c0s0n0 is the single DVS server for the system.</li>
+</ol>
+<p>Using this strategy avoids the caching problems, making upgrades simple.
+One just has to wait for about 20 seconds after changing the default symlinks
+before starting the slurmds again.</p>
+<p>(Information courtesy of Douglas Jacobsen, NERSC,
+Lawrence Berkeley National Laboratory)</p>
+
+<p><a name="pam_exclude"><b>65.How can I exclude some users from pam_slurm?</b></a><br>
+<b>CAUTION:</b> Please test this on a test machine/VM before you actually do
+this on your Slurm computers.</p>
+
+<p><b>Step 1.</b> Make sure pam_listfile.so exists on your system.
+The following command is an example on Redhat 6:</p>
+<pre>
+ls -la /lib64/security/pam_listfile.so
+</pre>
+
+<p><b>Step 2.</b> Create user list (e.g. /etc/ssh/allowed_users):</p>
+<pre>
+# /etc/ssh/allowed_users
+root
+myadmin
+</pre>
+<p>And, change file mode to keep it secret from regular users(Optional):</p>
+<pre>
+chmod 600 /etc/ssh/allowed_users
+</pre>
+<p><b>NOTE:</b> root is not necessarily listed on the allowed_users, but I
+feel somewhat safe if it's on the list.</p>
+
+<p><b>Step 3.</b> On /etc/pam.d/sshd, add pam_listfile.so with sufficient flag 
+before pam_slurm.so (e.g. my /etc/pam.d/sshd looks like this):</p>
+<pre>
+#%PAM-1.0
+auth       required     pam_sepermit.so
+auth       include      password-auth
+account    sufficient   pam_listfile.so item=user sense=allow file=/etc/ssh/allowed_users onerr=fail
+account    required     pam_slurm.so
+account    required     pam_nologin.so
+account    include      password-auth
+password   include      password-auth
+# pam_selinux.so close should be the first session rule
+session    required     pam_selinux.so close
+session    required     pam_loginuid.so
+# pam_selinux.so open should only be followed by sessions to be executed in the user context
+session    required     pam_selinux.so open env_params
+session    optional     pam_keyinit.so force revoke
+session    include      password-auth
+</pre>
+<p>(Information courtesy of Koji Tanaka, Indiana University)</p>
+
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 16 June 2015</p>
+<p style="text-align:center;">Last modified 8 December 2015</p>
 
 <!--#include virtual="footer.txt"-->

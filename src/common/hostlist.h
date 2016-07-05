@@ -43,14 +43,11 @@
 
 #include <unistd.h>		/* load ssize_t definition */
 
-/* max size of internal hostrange buffer */
-#define MAXHOSTRANGELEN 8192
-
 /* Since users can specify a numeric range in the prefix, we need to prevent
  * expressions that can consume all of the memory on a system and crash the
  * daemons (e.g. "a[0-999999999].b[0-9]", which generates 1 billion distinct
  * prefix records in the hostlist) */
-#define MAX_PREFIX_CNT 1024
+#define MAX_PREFIX_CNT 64*1024
 
 #if (SYSTEM_DIMENSIONS > 1)
 #define HOSTLIST_BASE 36

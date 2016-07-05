@@ -98,8 +98,10 @@ static int	_delete_config_record (void);
 #if _DEBUG
 static void	_dump_hash (void);
 #endif
-static struct node_record *_find_alias_node_record (char *name);
-static struct node_record *_find_node_record (char *name, bool test_alias);
+static struct node_record *
+		_find_alias_node_record(char *name, bool log_missing);
+static struct node_record *
+		_find_node_record (char *name,bool test_alias,bool log_missing);
 static void	_list_delete_config (void *config_entry);
 static void	_list_delete_feature (void *feature_entry);
 static int	_list_find_config (void *config_entry, void *key);
@@ -354,18 +356,17 @@ static void _dump_hash (void)
 /*
  * _find_alias_node_record - find a record for node with the alias of
  * the specified name supplied
- * input: name - name to be aliased of the desired node
- * output: return pointer to node record or NULL if not found
- * global: node_record_table_ptr - pointer to global node table
- *         node_hash_table - xhash struct indexing node records per name
+ * IN: name - name to be aliased of the desired node
+ * IN: log_missing - if set, then print an error message if the node is not found
+ * OUT: return pointer to node record or NULL if not found
  */
-static struct node_record *_find_alias_node_record (char *name)
+static struct node_record *_find_alias_node_record(char *name, bool log_missing)
 {
 	int i;
 	char *alias = NULL;
 
 	if ((name == NULL) || (name[0] == '\0')) {
-		info("_find_alias_node_record: passed NULL name");
+		info("%s: passed NULL name", __func__);
 		return NULL;
 	}
 	/* Get the alias we have just to make sure the user isn't
@@ -388,7 +389,9 @@ static struct node_record *_find_alias_node_record (char *name)
 			xfree(alias);
 			return node_ptr;
 		}
-		error ("_find_alias_node_record: lookup failure for %s", name);
+
+		if (log_missing)
+			error("%s: lookup failure for %s", __func__, name);
 	}
 
 	/* revert to sequential search */
@@ -457,7 +460,8 @@ static int _list_find_config (void *config_entry, void *key)
  * globals: node_record_table_ptr - pointer to node table
  * NOTE: the caller must xfree the memory at node_list when no longer required
  */
-hostlist_t bitmap2hostlist (bitstr_t *bitmap) {
+hostlist_t bitmap2hostlist (bitstr_t *bitmap)
+{
 	int i, first, last;
 	hostlist_t hl;
 
@@ -789,6 +793,7 @@ extern struct node_record *create_node_record (
 	/* these values will be overwritten when the node actually registers */
 	node_ptr->cpus = config_ptr->cpus;
 	node_ptr->cpu_load = NO_VAL;
+	node_ptr->free_mem = NO_VAL;
 	node_ptr->cpu_spec_list = xstrdup(config_ptr->cpu_spec_list);
 	node_ptr->boards = config_ptr->boards;
 	node_ptr->sockets = config_ptr->sockets;
@@ -800,8 +805,10 @@ extern struct node_record *create_node_record (
 	node_ptr->node_spec_bitmap = NULL;
 	node_ptr->tmp_disk = config_ptr->tmp_disk;
 	node_ptr->select_nodeinfo = select_g_select_nodeinfo_alloc();
-	node_ptr->energy = acct_gather_energy_alloc();
+	node_ptr->energy = acct_gather_energy_alloc(1);
 	node_ptr->ext_sensors = ext_sensors_alloc();
+	node_ptr->owner = NO_VAL;
+	node_ptr->protocol_version = SLURM_MIN_PROTOCOL_VERSION;
 	xassert (node_ptr->magic = NODE_MAGIC)  /* set value */;
 	return node_ptr;
 }
@@ -810,19 +817,45 @@ extern struct node_record *create_node_record (
  * find_node_record - find a record for node with specified name
  * IN: name - name of the desired node
  * RET: pointer to node record or NULL if not found
+ * NOTE: Logs an error if the node name is NOT found
  */
 extern struct node_record *find_node_record (char *name)
 {
-	return _find_node_record(name, true);
+	return _find_node_record(name, true, true);
+}
+
+/*
+ * find_node_record2 - find a record for node with specified name
+ * IN: name - name of the desired node
+ * RET: pointer to node record or NULL if not found
+ * NOTE: Does not log an error if the node name is NOT found
+ */
+extern struct node_record *find_node_record2 (char *name)
+{
+	return _find_node_record(name, true, false);
+}
+
+/*
+ * find_node_record_no_alias - find a record for node with specified name
+ * without looking at the node's alias (NodeHostName).
+ * IN: name - name of the desired node
+ * RET: pointer to node record or NULL if not found
+ * NOTE: Does not log an error if the node name is NOT found
+ */
+extern struct node_record *find_node_record_no_alias (char *name)
+{
+	return _find_node_record(name, false, true);
 }
 
 /*
  * _find_node_record - find a record for node with specified name
  * IN: name - name of the desired node
  * IN: test_alias - if set, also test NodeHostName value
+ * IN: log_missing - if set, then print an error message if the node is not found
  * RET: pointer to node record or NULL if not found
  */
-static struct node_record *_find_node_record (char *name, bool test_alias)
+static struct node_record *_find_node_record (char *name, bool test_alias,
+					      bool log_missing)
 {
 	int i;
 	struct node_record *node_ptr;
@@ -845,7 +878,8 @@ static struct node_record *_find_node_record (char *name, bool test_alias)
 		    (strcmp(node_record_table_ptr[0].name, "localhost") == 0))
 			return (&node_record_table_ptr[0]);
 
-		error ("find_node_record: lookup failure for %s", name);
+		if (log_missing)
+			error ("find_node_record: lookup failure for %s", name);
 	}
 	/* revert to sequential search */
 	else {
@@ -859,7 +893,7 @@ static struct node_record *_find_node_record (char *name, bool test_alias)
 	if (test_alias) {
 		/* look for the alias node record if the user put this in
 	 	 * instead of what slurm sees the node name as */
-	 	return _find_alias_node_record (name);
+		return _find_alias_node_record(name, log_missing);
 	}
 	return NULL;
 }
@@ -886,7 +920,7 @@ extern int init_node_conf (void)
 	struct node_record *node_ptr;
 
 	node_ptr = node_record_table_ptr;
-	for (i=0; i< node_record_count; i++, node_ptr++)
+	for (i = 0; i < node_record_count; i++, node_ptr++)
 		purge_node_rec(node_ptr);
 
 	node_record_count = 0;
@@ -912,17 +946,14 @@ extern void node_fini2 (void)
 	struct node_record *node_ptr;
 
 	if (config_list) {
-		list_destroy(config_list);
-		config_list = NULL;
-		list_destroy(feature_list);
-		feature_list = NULL;
-		list_destroy(front_end_list);
-		front_end_list = NULL;
+		FREE_NULL_LIST(config_list);
+		FREE_NULL_LIST(feature_list);
+		FREE_NULL_LIST(front_end_list);
 	}
 
 	xhash_free(node_hash_table);
 	node_ptr = node_record_table_ptr;
-	for (i=0; i< node_record_count; i++, node_ptr++)
+	for (i = 0; i < node_record_count; i++, node_ptr++)
 		purge_node_rec(node_ptr);
 
 	xfree(node_record_table_ptr);
@@ -965,7 +996,7 @@ extern int node_name2bitmap (char *node_names, bool best_effort,
 
 	while ( (this_node_name = hostlist_shift (host_list)) ) {
 		struct node_record *node_ptr;
-		node_ptr = _find_node_record(this_node_name, best_effort);
+		node_ptr = _find_node_record(this_node_name, best_effort, true);
 		if (node_ptr) {
 			bit_set (my_bitmap, (bitoff_t) (node_ptr -
 							node_record_table_ptr));
@@ -1003,7 +1034,7 @@ extern int hostlist2bitmap (hostlist_t hl, bool best_effort, bitstr_t **bitmap)
 	hi = hostlist_iterator_create(hl);
 	while ((name = hostlist_next(hi)) != NULL) {
 		struct node_record *node_ptr;
-		node_ptr = _find_node_record(name, best_effort);
+		node_ptr = _find_node_record(name, best_effort, true);
 		if (node_ptr) {
 			bit_set (my_bitmap, (bitoff_t) (node_ptr -
 							node_record_table_ptr));
@@ -1029,18 +1060,21 @@ extern void purge_node_rec (struct node_record *node_ptr)
 	xfree(node_ptr->cpu_spec_list);
 	xfree(node_ptr->features);
 	xfree(node_ptr->gres);
-	if (node_ptr->gres_list)
-		list_destroy(node_ptr->gres_list);
+	FREE_NULL_LIST(node_ptr->gres_list);
 	xfree(node_ptr->name);
 	xfree(node_ptr->node_hostname);
 	FREE_NULL_BITMAP(node_ptr->node_spec_bitmap);
 	xfree(node_ptr->os);
 	xfree(node_ptr->part_pptr);
+	xfree(node_ptr->power);
 	xfree(node_ptr->reason);
 	xfree(node_ptr->version);
 	acct_gather_energy_destroy(node_ptr->energy);
 	ext_sensors_destroy(node_ptr->ext_sensors);
 	select_g_select_nodeinfo_free(node_ptr->select_nodeinfo);
+	xfree(node_ptr->tres_str);
+	xfree(node_ptr->tres_fmt_str);
+	xfree(node_ptr->tres_cnt);
 }
 
 /*

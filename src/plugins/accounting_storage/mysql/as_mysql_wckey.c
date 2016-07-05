@@ -327,7 +327,7 @@ static int _cluster_remove_wckeys(mysql_conn_t *mysql_conn,
 	xfree(assoc_char);
 
 	if (rc == SLURM_ERROR) {
-		list_destroy(ret_list);
+		FREE_NULL_LIST(ret_list);
 		return SLURM_ERROR;
 	}
 
@@ -481,7 +481,7 @@ static int _cluster_get_wckeys(mysql_conn_t *mysql_conn,
 				   wckey_cond->usage_start,
 				   wckey_cond->usage_end);
 	list_transfer(sent_list, wckey_list);
-	list_destroy(wckey_list);
+	FREE_NULL_LIST(wckey_list);
 	return SLURM_SUCCESS;
 }
 
@@ -504,14 +504,18 @@ extern int as_mysql_add_wckeys(mysql_conn_t *mysql_conn, uint32_t uid,
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return ESLURM_DB_CONNECTION;
 
+	if (!is_user_min_admin_level(mysql_conn, uid, SLURMDB_ADMIN_OPERATOR))
+		return ESLURM_ACCESS_DENIED;
+
 	user_name = uid_to_string((uid_t) uid);
 	itr = list_iterator_create(wckey_list);
 	while ((object = list_next(itr))) {
 		if (!object->cluster || !object->cluster[0]
 		    || !object->user || !object->user[0]
 		    || !object->name) {
-			error("We need a wckey name, cluster, "
-			      "and user to add.");
+			error("We need a wckey name (%s), cluster (%s), "
+			      "and user (%s) to add.",
+			      object->name, object->cluster, object->user);
 			rc = SLURM_ERROR;
 			continue;
 		}
@@ -626,8 +630,7 @@ extern int as_mysql_add_wckeys(mysql_conn_t *mysql_conn, uint32_t uid,
 end_it:
 	if (rc == SLURM_SUCCESS)
 		_make_sure_users_have_default(mysql_conn, added_user_list);
-	if (added_user_list)
-		list_destroy(added_user_list);
+	FREE_NULL_LIST(added_user_list);
 
 	return rc;
 }
@@ -711,7 +714,7 @@ is_same_user:
 		slurm_mutex_unlock(&as_mysql_cluster_list_lock);
 
 	if (rc == SLURM_ERROR) {
-		list_destroy(ret_list);
+		FREE_NULL_LIST(ret_list);
 		ret_list = NULL;
 	}
 
@@ -736,6 +739,11 @@ extern List as_mysql_remove_wckeys(mysql_conn_t *mysql_conn,
 
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return NULL;
+
+	if (!is_user_min_admin_level(mysql_conn, uid, SLURMDB_ADMIN_OPERATOR)) {
+		errno = ESLURM_ACCESS_DENIED;
+		return NULL;
+	}
 
 	(void) _setup_wckey_cond_limits(wckey_cond, &extra);
 
@@ -767,7 +775,7 @@ empty:
 		slurm_mutex_unlock(&as_mysql_cluster_list_lock);
 
 	if (rc == SLURM_ERROR) {
-		list_destroy(ret_list);
+		FREE_NULL_LIST(ret_list);
 		return NULL;
 	}
 
@@ -807,7 +815,7 @@ extern List as_mysql_get_wckeys(mysql_conn_t *mysql_conn, uid_t uid,
 				mysql_conn, &user, 1, NULL);
 		}
 		if (!is_admin && !user.name) {
-			debug("User %u has no assocations, and is not admin, "
+			debug("User %u has no associations, and is not admin, "
 			      "so not returning any wckeys.", user.uid);
 			return NULL;
 		}
@@ -841,7 +849,7 @@ empty:
 		if (_cluster_get_wckeys(mysql_conn, wckey_cond, tmp, extra,
 					cluster_name, wckey_list)
 		    != SLURM_SUCCESS) {
-			list_destroy(wckey_list);
+			FREE_NULL_LIST(wckey_list);
 			wckey_list = NULL;
 			break;
 		}

@@ -96,6 +96,13 @@ parameter in the slurm.conf file must be defined to a non-none option.
 .IP
 
 .TP
+\f3\-\-delimiter\f3=\fP\f2characters\fP
+ASCII characters used to separate the fields when specifying
+the \f3\-p\fP or \f3\-P\fP options. The default delimiter
+is a '|'. This options is ignored if \f3\-p\fP or \f3\-P\fP options
+are not specified.
+
+.TP
 \f3\-D\fP\f3,\fP \f3\-\-duplicates\fP
 If Slurm job ids are reset, some job numbers will probably appear more
 than once in the accounting log file but refer to different jobs.
@@ -119,24 +126,27 @@ Print a list of fields that can be specified with the \f3\-\-format\fP option.
 .ft 3
 Fields available:
 
-AllocCPUS        Account         AssocID      AveCPU
-AveCPUFreq       AveDiskRead     AveDiskWrite AvePages
-AveRSS           AveVMSize       BlockID      Cluster
-Comment          ConsumedEnergy  CPUTime      CPUTimeRAW
-DerivedExitCode  Elapsed         Eligible     End
-ExitCode         GID             Group        JobID
-JobIDRaw         JobName         Layout       MaxDiskRead
-MaxDiskReadNode  MaxDiskReadTask MaxDiskWrite MaxDiskWriteNode
-MaxDiskWriteTask MaxPages        MaxPagesNode MaxPagesTask
-MaxRSS           MaxRSSNode      MaxRSSTask   MaxVMSize
-MaxVMSizeNode    MaxVMSizeTask   MinCPU       MinCPUNode
-MinCPUTask       NCPUS           NNodes       NodeList
-NTasks           Priority        Partition    QOSRAW
-ReqCPUFreq       ReqCPUs         ReqMem       Reservation
-ReservationId    Reserved        ResvCPU      ResvCPURAW
-Start            State           Submit       Suspended
-SystemCPU        Timelimit       TotalCPU     UID
-User             UserCPU         WCKey        WCKeyID
+AllocCPUS         AllocGRES         AllocNodes        AllocTRES
+Account           AssocID           AveCPU            AveCPUFreq
+AveDiskRead       AveDiskWrite      AvePages          AveRSS
+AveVMSize         BlockID           Cluster           Comment
+ConsumedEnergy    ConsumedEnergyRaw CPUTime           CPUTimeRAW
+DerivedExitCode   Elapsed           Eligible          End
+ExitCode          GID               Group             JobID
+JobIDRaw          JobName           Layout            MaxDiskRead
+MaxDiskReadNode   MaxDiskReadTask   MaxDiskWrite      MaxDiskWriteNode
+MaxDiskWriteTask  MaxPages          MaxPagesNode      MaxPagesTask
+MaxRSS            MaxRSSNode        MaxRSSTask        MaxVMSize
+MaxVMSizeNode     MaxVMSizeTask     MinCPU            MinCPUNode
+MinCPUTask        NCPUS             NNodes            NodeList
+NTasks            Priority          Partition         QOS
+QOSRAW            ReqCPUFreq        ReqCPUFreqMin     ReqCPUFreqMax
+ReqCPUFreqGov     ReqCPUS           ReqGRES           ReqMem
+ReqNodes          ReqTRES           Reservation       ReservationId
+Reserved          ResvCPU           ResvCPURAW        Start
+State             Submit            Suspended         SystemCPU
+Timelimit         TotalCPU          UID               User
+UserCPU           WCKey             WCKeyID
 
 .ft 1
 .fi
@@ -179,6 +189,10 @@ Default is no restrictions.\&.
 Displays a general help message.
 
 .TP
+\f3\-i\fP\f3,\fP \f3\-\-nnodes\fP\f3=\fP\f2N\fP
+Return jobs which ran on this many nodes (N = min[\-max])
+
+.TP
 \f3\-j \fP\f2job(.step)\fP \f3,\fP  \f3\-\-jobs\fP\f3=\fP\f2job(.step)\fP
 Displays information about the specified job(.step) or list of job(.step)s.
 .IP
@@ -214,7 +228,7 @@ avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,
 maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks,
 alloccpus,elapsed,state,exitcode,maxdiskread,maxdiskreadnode,maxdiskreadtask,
 avediskread,maxdiskwrite,maxdiskwritenode,maxdiskwritetask,avediskwrite,
-allocgres,reqgres
+allocgres,reqgres,avecpufreq,reqcpufreqmin,reqcpufreqmax,reqcpufreqgov
 .ad
 
 .TP
@@ -234,6 +248,12 @@ current cluster you are executing the \f3sacct\fP command on\&.
 \f3\-n\fP\f3,\fP \f3\-\-noheader\fP
 No heading will be added to the output. The default action is to
 display a header.
+.IP
+
+.TP
+\f3\-\-noconvert\fP
+Don't convert units from their original type (e.g. 2048M won't be converted to
+2G).
 .IP
 
 .TP
@@ -304,7 +324,7 @@ Job was explicitly cancelled by the user or system administrator.
 The job may or may not have been initiated.
 .TP
 \f3CD  COMPLETED\fP
-Job has terminated all processes on all nodes.
+Job has terminated all processes on all nodes with an exit code of zero.
 .TP
 \f3CF  CONFIGURING\fP
 Job has been allocated resources, but are waiting for them to become ready for use
@@ -417,11 +437,21 @@ Print all fields listed below.
 
 .TP
 \f3AllocCPUs\fP
-Count of allocated CPUs. Equivalant to \f3NCPUS\fP.
+Count of allocated CPUs. Equivalent to \f3NCPUS\fP.
 
 .TP
 \f3AllocGRES\fP
 Names and counts of generic resources allocated.
+
+.TP
+\f3AllocNodes\fP
+Number of nodes allocated to the job/step.  0 if the job is pending.
+
+.TP
+\f3AllocTres\fP
+Trackable resources. These are the resources allocated to the job/step
+after the job started running.  For pending jobs this should be blank.
+For more details see AccountingStorageTRES in slurm.conf.
 
 .TP
 \f3Account\fP
@@ -505,7 +535,7 @@ The format of this fields output is as follows:
 .RS
 .PD "0"
 .HP
-\f2[DD\-[hh:]]mm:ss\fP
+\f2[DD\-[HH:]]MM:SS\fP
 .PD
 .RE
 .IP
@@ -557,8 +587,8 @@ It is in the form:
 
 .TP
 \f3JobIDRaw\fP
-In case of job array print the jobId instead of the ArrayJobId.
-For non job arrays the output is the jobId in the format \f2job.jobstep\fP\c
+In case of job array print the JobId instead of the ArrayJobId.
+For non job arrays the output is the JobId in the format \f2job.jobstep\fP\c
 \&.
 
 .TP
@@ -649,7 +679,7 @@ The task ID where the mincpu occurred.
 
 .TP
 \f3NCPUS\fP
-Count of allocated CPUs. Equivalant to \f3AllocCPUS\fP
+Count of allocated CPUs. Equivalent to \f3AllocCPUS\fP
 
 Total number of CPUs allocated to the job.
 
@@ -659,7 +689,8 @@ List of nodes in job/step.
 
 .TP
 \f3NNodes\fP
-Number of nodes in a job or step.
+Number of nodes in a job or step.  If the job is running, or ran, this count
+will be the number allocated, else the number will be the number requested.
 
 .TP
 \f3NTasks\fP
@@ -701,6 +732,17 @@ number represents Memory Per CPU, a 'n' represents Memory Per Node.
 Note: This value is only from the job allocation, not the step.
 
 .TP
+\f3ReqNodes\fP
+Requested minimum Node count for the job/step.
+
+.TP
+\f3ReqTres\fP
+Trackable resources. These are the minimum resource counts requested by the
+job/step at submission time.
+For more details see AccountingStorageTRES in slurm.conf.
+
+
+.TP
 \f3Reservation\fP
 Reservation Name.
 
@@ -736,6 +778,15 @@ If more information is available on the job state
 than will fit into the current field width (for example, the uid that CANCELLED
 a job) the state will be followed by a "+".  You can increase the size of
 the displayed state using the "%NUMBER" format modifier described earlier.
+
+NOTE: The RUNNING state will return suspended jobs as well.  In order
+to print suspended jobs you must request SUSPENDED at a different call
+from RUNNING.
+
+NOTE: The RUNNING state will return any jobs completed (cancelled or otherwise)
+in the time period requested as the job was also RUNNING durning that time.  If
+you are only looking for job that finished please choose the appropriate
+state(s) without the RUNNING state.
 
 .TP
 \f3Submit\fP
@@ -906,8 +957,8 @@ option if the job ends after the specified time, otherwise it will be
 the jobs end time.
 
 NOTE: If no \-s (\-\-state) option is given sacct will
-display jobs that ran durning the specified time, otherwise it returns
-jobs that were in the state requested durning that period of time.
+display jobs that ran during the specified time, otherwise it returns
+jobs that were in the state requested during that period of time.
 
 Without \-T (normal operation) sacct output would be like this.
 .RS
@@ -929,7 +980,7 @@ By adding the \-T option the job's start and end times are truncated
 to reflect only the time requested.  If a job started after the start
 time requested or finished before the end time requested those times
 are not altered.  The \-T option
-is useful when determining exact run times durning any given period.
+is useful when determining exact run times during any given period.
 .RS
 .PP
 .nf

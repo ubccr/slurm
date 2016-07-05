@@ -123,16 +123,12 @@
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobcomp/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as the job completion logging API
- * matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]       	= "Job completion logging script plugin";
 const char plugin_type[]       	= "jobcomp/script";
-const uint32_t plugin_version	= 100;
+const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 
 static char * script = NULL;
 static List comp_list = NULL;
@@ -178,6 +174,8 @@ static const char * _jobcomp_script_strerror (int errnum)
  */
 struct jobcomp_info {
 	uint32_t jobid;
+	uint32_t array_job_id;
+	uint32_t array_task_id;
 	uint32_t uid;
 	uint32_t gid;
 	uint32_t limit;
@@ -212,6 +210,8 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 	j->uid = job->user_id;
 	j->gid = job->group_id;
 	j->name = xstrdup (job->name);
+	j->array_job_id = job->array_job_id;
+	j->array_task_id = job->array_task_id;
 
 	if (IS_JOB_RESIZING(job)) {
 		state = JOB_RESIZING;
@@ -383,6 +383,8 @@ static char ** _create_environment (struct jobcomp_info *job)
 	env[0] = NULL;
 
 	_env_append_fmt (&env, "JOBID", "%u",  job->jobid);
+	_env_append_fmt (&env, "ARRAYJOBID", "%u", job->array_job_id);
+	_env_append_fmt (&env, "ARRAYTASKID", "%u", job->array_task_id);
 	_env_append_fmt (&env, "UID",   "%u",  job->uid);
 	_env_append_fmt (&env, "GID",   "%u",  job->gid);
 	_env_append_fmt (&env, "START", "%ld", (long)job->start);
@@ -660,8 +662,7 @@ extern int fini ( void )
 	xfree(script);
 	if (rc == SLURM_SUCCESS) {
 		pthread_mutex_lock(&comp_list_mutex);
-		list_destroy(comp_list);
-		comp_list = NULL;
+		FREE_NULL_LIST(comp_list);
 		pthread_mutex_unlock(&comp_list_mutex);
 	}
 

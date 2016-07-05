@@ -3,6 +3,7 @@
  *  mode of sview.
  *****************************************************************************
  *  Copyright (C) 2009-2011 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2012-2015 SchedMD LLC <http://www.schedmd.com>
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -53,6 +54,7 @@ enum {
 	SORTID_POS = POS_LOC,
 	SORTID_ACCOUNTS,
 	SORTID_ACTION,
+	SORTID_BURST_BUFFER,
 	SORTID_COLOR,
 	SORTID_COLOR_INX,
 	SORTID_CORE_CNT,
@@ -67,8 +69,10 @@ enum {
 	SORTID_PARTITION,
 	SORTID_TIME_END,
 	SORTID_TIME_START,
+	SORTID_TRES,
 	SORTID_UPDATED,
 	SORTID_USERS,
+	SORTID_WATTS,
 	SORTID_CNT
 };
 
@@ -77,9 +81,9 @@ enum {
  * known options) create it in function create_model_*.
  */
 
-/*these are the settings to apply for the user
+/* these are the settings to apply for the user
  * on the first startup after a fresh slurm install.
- * s/b a const probably*/
+ * s/b a const probably */
 static char *_initial_page_opts = "Name,Node_Count,Core_Count,NodeList,"
 	"Time_Start,Time_End";
 
@@ -121,6 +125,8 @@ static display_data_t display_data_resv[] = {
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_ACCOUNTS,   "Accounts", FALSE, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_BURST_BUFFER,  "BurstBuffer", FALSE,
+	 EDIT_TEXTBOX, refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_LICENSES,   "Licenses", TRUE, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_USERS,      "Users", FALSE, EDIT_TEXTBOX,
@@ -135,7 +141,11 @@ static display_data_t display_data_resv[] = {
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_INT, SORTID_COLOR_INX,  NULL, FALSE, EDIT_NONE,
 	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_TRES,   "TRES", FALSE, EDIT_NONE,
+	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_INT,    SORTID_UPDATED,    NULL, FALSE, EDIT_NONE,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_WATTS,    "Watts", FALSE, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
 };
@@ -176,6 +186,8 @@ static display_data_t create_data_resv[] = {
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_ACCOUNTS,   "Accounts", FALSE, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_BURST_BUFFER,  "BurstBuffer", FALSE,
+	 EDIT_TEXTBOX, refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_USERS,      "Users", FALSE, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_PARTITION,  "Partition", FALSE, EDIT_TEXTBOX,
@@ -183,6 +195,8 @@ static display_data_t create_data_resv[] = {
 	{G_TYPE_STRING, SORTID_FEATURES,   "Features", FALSE, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_FLAGS, "Flags", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_WATTS, "Watts", FALSE, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
 };
@@ -223,7 +237,7 @@ static void _set_active_combo_resv(GtkComboBox *combo,
 	gtk_tree_model_get(model, iter, type, &temp_char, -1);
 	if (!temp_char)
 		goto end_it;
-	switch(type) {
+	switch (type) {
 	case SORTID_ACTION:
 		if (!strcmp(temp_char, "none"))
 			action = 0;
@@ -242,6 +256,27 @@ end_it:
 
 }
 
+static uint32_t _parse_watts(char * watts_str)
+{
+	uint32_t watts_num = 0;
+	char *end_ptr = NULL;
+
+	if (!strcasecmp(watts_str, "n/a") || !strcasecmp(watts_str, "none"))
+		return watts_num;
+	if (!strcasecmp(watts_str, "INFINITE"))
+		return INFINITE;
+	watts_num = strtol(watts_str, &end_ptr, 10);
+	if ((end_ptr[0] == 'k') || (end_ptr[0] == 'K')) {
+		watts_num *= 1000;
+	} else if ((end_ptr[0] == 'm') || (end_ptr[0] == 'M')) {
+		watts_num *= 1000000;
+	} else if (end_ptr[0] != '\0') {
+		g_printerr("invalid watts value\n");
+		watts_num = NO_VAL;
+	}
+	return watts_num;
+}
+
 /* don't free this char */
 static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 				 const char *new_text,
@@ -258,7 +293,7 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 	if (!resv_msg)
 		return NULL;
 
-	switch(column) {
+	switch (column) {
 	case SORTID_ACCOUNTS:
 		resv_msg->accounts = xstrdup(new_text);
 		type = "accounts";
@@ -269,6 +304,10 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 			got_edit_signal = NULL;
 		else
 			got_edit_signal = xstrdup(new_text);
+		break;
+	case SORTID_BURST_BUFFER:
+		resv_msg->burst_buffer = xstrdup(new_text);
+		type = "burst_buffer";
 		break;
 	case SORTID_DURATION:
 		temp_int = time_str2mins((char *)new_text);
@@ -338,6 +377,10 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 	case SORTID_USERS:
 		resv_msg->users = xstrdup(new_text);
 		type = "users";
+		break;
+	case SORTID_WATTS:
+		resv_msg->resv_watts = _parse_watts((char *) new_text);
+		type = "watts";
 		break;
 	default:
 		type = "unknown";
@@ -447,7 +490,7 @@ static GtkWidget *_admin_full_edit_resv(resv_desc_msg_t *resv_msg,
 
 	gtk_table_set_homogeneous(table, FALSE);
 
-	for(i = 0; i < SORTID_CNT; i++) {
+	for (i = 0; i < SORTID_CNT; i++) {
 		while (display_data++) {
 			if (display_data->id == -1)
 				break;
@@ -475,7 +518,7 @@ static void _layout_resv_record(GtkTreeView *treeview,
 				int update)
 {
 	GtkTreeIter iter;
-	char time_buf[20];
+	char time_buf[20], power_buf[20];
 	reserve_info_t *resv_ptr = sview_resv_info->resv_ptr;
 	char *temp_char = NULL;
 
@@ -487,8 +530,14 @@ static void _layout_resv_record(GtkTreeView *treeview,
 						 SORTID_ACCOUNTS),
 				   resv_ptr->accounts);
 
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_resv,
+						 SORTID_BURST_BUFFER),
+				   resv_ptr->burst_buffer);
+
 	convert_num_unit((float)resv_ptr->core_cnt,
-			 time_buf, sizeof(time_buf), UNIT_NONE);
+			 time_buf, sizeof(time_buf), UNIT_NONE,
+			 working_sview_config.convert_flags);
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_resv,
 						 SORTID_CORE_CNT),
@@ -520,7 +569,8 @@ static void _layout_resv_record(GtkTreeView *treeview,
 
 	/* NOTE: node_cnt in reservation info from slurmctld ONE number */
 	convert_num_unit((float)resv_ptr->node_cnt,
-			 time_buf, sizeof(time_buf), UNIT_NONE);
+			 time_buf, sizeof(time_buf), UNIT_NONE,
+			 working_sview_config.convert_flags);
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_resv,
 						 SORTID_NODE_CNT),
@@ -551,15 +601,37 @@ static void _layout_resv_record(GtkTreeView *treeview,
 
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_resv,
+						 SORTID_TRES),
+				   resv_ptr->tres_str);
+
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_resv,
 						 SORTID_USERS),
 				   resv_ptr->users);
+
+	if ((resv_ptr->resv_watts == NO_VAL) || (resv_ptr->resv_watts == 0)) {
+		snprintf(power_buf, sizeof(power_buf), "0");
+	} else if ((resv_ptr->resv_watts % 1000000) == 0) {
+		snprintf(power_buf, sizeof(power_buf), "%uM",
+			 resv_ptr->resv_watts / 1000000);
+	} else if ((resv_ptr->resv_watts % 1000) == 0) {
+		snprintf(power_buf, sizeof(power_buf), "%uK",
+			 resv_ptr->resv_watts / 1000);
+	} else {
+		snprintf(power_buf, sizeof(power_buf), "%u",
+			 resv_ptr->resv_watts);
+	}
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_resv,
+						 SORTID_WATTS),
+				   power_buf);
 }
 
 static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 				GtkTreeStore *treestore)
 {
-	char tmp_duration[40], tmp_end[40], tmp_nodes[40], tmp_start[40],
-		tmp_cores[40];
+	char tmp_duration[40], tmp_end[40], tmp_nodes[40], tmp_start[40];
+	char tmp_cores[40], power_buf[40];
 	char *tmp_flags;
 	reserve_info_t *resv_ptr = sview_resv_info_ptr->resv_ptr;
 
@@ -573,17 +645,33 @@ static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 	tmp_flags = reservation_flags_string(resv_ptr->flags);
 
 	convert_num_unit((float)resv_ptr->core_cnt,
-			 tmp_cores, sizeof(tmp_cores), UNIT_NONE);
+			 tmp_cores, sizeof(tmp_cores), UNIT_NONE,
+			 working_sview_config.convert_flags);
 
 	convert_num_unit((float)resv_ptr->node_cnt,
-			 tmp_nodes, sizeof(tmp_nodes), UNIT_NONE);
+			 tmp_nodes, sizeof(tmp_nodes), UNIT_NONE,
+			 working_sview_config.convert_flags);
 
 	slurm_make_time_str((time_t *)&resv_ptr->start_time, tmp_start,
 			    sizeof(tmp_start));
 
+	if ((resv_ptr->resv_watts == NO_VAL) || (resv_ptr->resv_watts == 0)) {
+		snprintf(power_buf, sizeof(power_buf), "0");
+	} else if ((resv_ptr->resv_watts % 1000000) == 0) {
+		snprintf(power_buf, sizeof(power_buf), "%uM",
+			 resv_ptr->resv_watts / 1000000);
+	} else if ((resv_ptr->resv_watts % 1000) == 0) {
+		snprintf(power_buf, sizeof(power_buf), "%uK",
+			 resv_ptr->resv_watts / 1000);
+	} else {
+		snprintf(power_buf, sizeof(power_buf), "%u",
+			 resv_ptr->resv_watts);
+	}
+
 	/* Combining these records provides a slight performance improvement */
 	gtk_tree_store_set(treestore, &sview_resv_info_ptr->iter_ptr,
 			   SORTID_ACCOUNTS,   resv_ptr->accounts,
+			   SORTID_BURST_BUFFER, resv_ptr->burst_buffer,
 			   SORTID_COLOR,
 				sview_colors[sview_resv_info_ptr->color_inx],
 			   SORTID_COLOR_INX,  sview_resv_info_ptr->color_inx,
@@ -599,8 +687,10 @@ static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 			   SORTID_PARTITION,  resv_ptr->partition,
 			   SORTID_TIME_START, tmp_start,
 			   SORTID_TIME_END,   tmp_end,
+			   SORTID_TRES,       resv_ptr->tres_str,
 			   SORTID_UPDATED,    1,
 			   SORTID_USERS,      resv_ptr->users,
+			   SORTID_WATTS,      power_buf,
 			   -1);
 
 	xfree(tmp_flags);
@@ -744,7 +834,7 @@ static List _create_resv_info_list(reserve_info_msg_t *resv_info_ptr)
 
 	if (last_list) {
 		list_iterator_destroy(last_list_itr);
-		list_destroy(last_list);
+		FREE_NULL_LIST(last_list);
 	}
 
 update_color:
@@ -1317,7 +1407,7 @@ display_it:
 
 	_update_info_resv(send_resv_list,
 			  GTK_TREE_VIEW(spec_info->display_widget));
-	list_destroy(send_resv_list);
+	FREE_NULL_LIST(send_resv_list);
 end_it:
 	popup_win->toggled = 0;
 	popup_win->force_refresh = 0;

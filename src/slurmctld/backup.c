@@ -380,14 +380,13 @@ static void *_background_rpc_mgr(void *no_data)
 		    (slurmctld_config.shutdown_time == 0))
 			slurmctld_config.shutdown_time = time(NULL);
 
-		slurm_free_msg_data(msg->msg_type, msg->data);
 		slurm_free_msg(msg);
 
-		slurm_close_accepted_conn(newsockfd);	/* close new socket */
+		slurm_close(newsockfd);	/* close new socket */
 	}
 
 	debug3("_background_rpc_mgr shutting down");
-	slurm_close_accepted_conn(sockfd);	/* close the main socket */
+	slurm_close(sockfd);	/* close the main socket */
 	pthread_exit((void *) 0);
 	return NULL;
 }
@@ -399,7 +398,8 @@ static int _background_process_msg(slurm_msg_t * msg)
 
 	if (msg->msg_type != REQUEST_PING) {
 		bool super_user = false;
-		uid_t uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
+		uid_t uid = g_slurm_auth_get_uid(msg->auth_cred,
+						 slurm_get_auth_info());
 		if ((uid == 0) || (uid == getuid()))
 			super_user = true;
 

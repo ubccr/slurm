@@ -68,16 +68,12 @@
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
- * plugin_version - an unsigned 32-bit integer giving the version number
- * of the plugin.  If major and minor revisions are desired, the major
- * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum version for their plugins as the job accounting API
- * matures.
+ * plugin_version - an unsigned 32-bit integer containing the Slurm version
+ * (major.minor.micro combined into a single number).
  */
 const char plugin_name[] = "Job completion MYSQL plugin";
 const char plugin_type[] = "jobcomp/mysql";
-const uint32_t plugin_version = 100;
+const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
 mysql_conn_t *jobcomp_mysql_conn = NULL;
 
@@ -89,7 +85,7 @@ storage_field_t jobcomp_table_fields[] = {
 	{ "gid", "int unsigned not null" },
 	{ "group_name", "tinytext not null" },
 	{ "name", "tinytext not null" },
-	{ "state", "smallint not null" },
+	{ "state", "int unsigned not null" },
 	{ "partition", "tinytext not null" },
 	{ "timelimit", "tinytext not null" },
 	{ "starttime", "int unsigned default 0 not null" },
@@ -129,7 +125,9 @@ static pthread_mutex_t  jobcomp_lock = PTHREAD_MUTEX_INITIALIZER;
 static int _mysql_jobcomp_check_tables()
 {
 	if (mysql_db_create_table(jobcomp_mysql_conn, jobcomp_table,
-				 jobcomp_table_fields, ")") == SLURM_ERROR)
+				  jobcomp_table_fields,
+				  ", primary key (jobid, starttime, endtime))")
+	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
 	return SLURM_SUCCESS;
@@ -277,7 +275,7 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 	char *connect_type = NULL, *reboot = NULL, *rotate = NULL,
 		*geometry = NULL, *start = NULL,
 		*blockid = NULL;
-	enum job_states job_state;
+	uint32_t job_state;
 	char *query = NULL;
 	uint32_t time_limit, start_time, end_time;
 
@@ -371,7 +369,7 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 		xstrcat(query, ", start");
 	if (blockid)
 		xstrcat(query, ", blockid");
-	xstrfmtcat(query, ") values (%u, %u, '%s', %u, '%s', '%s', %d, %u, "
+	xstrfmtcat(query, ") values (%u, %u, '%s', %u, '%s', '%s', %u, %u, "
 		   "'%s', '%s', %u, %u, %u",
 		   job_ptr->job_id, job_ptr->user_id, usr_str,
 		   job_ptr->group_id, grp_str, jname,

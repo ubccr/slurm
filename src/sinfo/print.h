@@ -146,10 +146,14 @@ void print_sinfo_reservation(reserve_info_msg_t *resv_ptr);
 	format_add_function(list,wid,right,suffix,_print_com_invalid)
 #define format_add_cpu_load(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_cpu_load)
+#define format_add_free_mem(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_free_mem)
 #define format_add_max_cpus_per_node(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_max_cpus_per_node)
 #define format_add_version(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_version)
+#define format_add_alloc_mem(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_alloc_mem)
 
 /*****************************************************************************
  * Print Field Functions
@@ -231,8 +235,12 @@ int _print_com_invalid(sinfo_data_t * sinfo_data, int width,
 		       bool right_justify, char *suffix);
 int _print_cpu_load(sinfo_data_t * node_ptr, int width,
 		    bool right_justify, char *suffix);
+int _print_free_mem(sinfo_data_t * node_ptr, int width,
+		    bool right_justify, char *suffix);
 int _print_max_cpus_per_node(sinfo_data_t * sinfo_data, int width,
 			     bool right_justify, char *suffix);
 int _print_version(sinfo_data_t * sinfo_data, int width,
 		   bool right_justify, char *suffix);
+int _print_alloc_mem(sinfo_data_t * sinfo_data, int width,
+		     bool right_justify, char *suffix);
 #endif
