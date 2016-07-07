@@ -106,6 +106,7 @@
 #define OPT_DISTRIB     0x04
 #define OPT_NODES       0x05
 #define OPT_OVERCOMMIT  0x06
+#define OPT_COMPRESS	0x07
 #define OPT_CONN_TYPE	0x08
 #define OPT_RESV_PORTS	0x09
 #define OPT_NO_ROTATE	0x0a
@@ -125,7 +126,7 @@
 #define OPT_TIME_VAL    0x18
 #define OPT_CPU_FREQ    0x19
 #define OPT_CORE_SPEC   0x1a
-#define OPT_SICP        0x1b
+#define OPT_GRES_FLAGS	0x1b
 #define OPT_POWER       0x1c
 #define OPT_THREAD_SPEC 0x1d
 #define OPT_BCAST       0x1e
@@ -148,7 +149,7 @@
 #define LONG_OPT_GID         0x10b
 #define LONG_OPT_MPI         0x10c
 #define LONG_OPT_RESV_PORTS  0x10d
-#define LONG_OPT_SICP        0x10e
+#define LONG_OPT_COMPRESS    0x10e
 #define LONG_OPT_POWER       0x10f
 #define LONG_OPT_DEBUG_TS    0x110
 #define LONG_OPT_CONNTYPE    0x111
@@ -201,7 +202,7 @@
 #define LONG_OPT_DEBUG_SLURMD    0x14f
 #define LONG_OPT_TIME_MIN        0x150
 #define LONG_OPT_GRES            0x151
-
+#define LONG_OPT_GRES_FLAGS      0x152
 #define LONG_OPT_REQ_SWITCH      0x153
 #define LONG_OPT_LAUNCHER_OPTS   0x154
 #define LONG_OPT_CPU_FREQ        0x155
@@ -210,6 +211,8 @@
 #define LONG_OPT_EXPORT          0x158
 #define LONG_OPT_PRIORITY        0x160
 #define LONG_OPT_ACCEL_BIND      0x161
+#define LONG_OPT_MCS_LABEL       0x165
+#define LONG_OPT_DEADLINE        0x166
 
 extern char **environ;
 
@@ -274,7 +277,7 @@ int initialize_and_process_args(int argc, char *argv[])
 
 	if (opt.launch_cmd) {
 		char *launch_type = slurm_get_launch_type();
-		if (!strcmp(launch_type, "launch/slurm")) {
+		if (!xstrcmp(launch_type, "launch/slurm")) {
 			error("--launch-cmd option is invalid with %s",
 			      launch_type);
 			xfree(launch_type);
@@ -387,7 +390,7 @@ static void _opt_default(void)
 	uid_t uid = getuid();
 
 	opt.user = uid_to_string(uid);
-	if (strcmp(opt.user, "nobody") == 0)
+	if (xstrcmp(opt.user, "nobody") == 0)
 		fatal("Invalid user id: %u", uid);
 
 	opt.uid = uid;
@@ -511,6 +514,7 @@ static void _opt_default(void)
 	opt.linuximage = NULL;
 	opt.mloaderimage = NULL;
 	opt.ramdiskimage = NULL;
+	opt.job_flags = 0;
 
 	opt.euid	    = (uid_t) -1;
 	opt.egid	    = (gid_t) -1;
@@ -549,8 +553,8 @@ static void _opt_default(void)
 
 	opt.nice = NO_VAL;
 	opt.priority = 0;
-	opt.sicp_mode = 0;
 	opt.power_flags = 0;
+	opt.mcs_label = NULL;
 }
 
 /*---[ env var processing ]-----------------------------------------------*/
@@ -581,6 +585,7 @@ env_vars_t env_vars[] = {
 {"SLURM_CHECKPOINT",    OPT_STRING,     &opt.ckpt_interval_str, NULL         },
 {"SLURM_CHECKPOINT_DIR",OPT_STRING,     &opt.ckpt_dir,      NULL             },
 {"SLURM_CNLOAD_IMAGE",  OPT_STRING,     &opt.linuximage,    NULL             },
+{"SLURM_COMPRESS",      OPT_COMPRESS,   NULL,               NULL             },
 {"SLURM_CONN_TYPE",     OPT_CONN_TYPE,  NULL,               NULL             },
 {"SLURM_CORE_SPEC",     OPT_INT,        &opt.core_spec,     NULL             },
 {"SLURM_CPUS_PER_TASK", OPT_INT,        &opt.cpus_per_task, &opt.cpus_set    },
@@ -594,6 +599,7 @@ env_vars_t env_vars[] = {
 {"SLURM_EXPORT_ENV",    OPT_STRING,     &opt.export_env,    NULL             },
 {"SLURM_GEOMETRY",      OPT_GEOMETRY,   NULL,               NULL             },
 {"SLURM_GRES",          OPT_STRING,     &opt.gres,          NULL             },
+{"SLURM_GRES_FLAGS",    OPT_GRES_FLAGS, NULL,               NULL             },
 {"SLURM_HINT",          OPT_HINT,       NULL,               NULL             },
 {"SLURM_IMMEDIATE",     OPT_IMMEDIATE,  NULL,               NULL             },
 {"SLURM_IOLOAD_IMAGE",  OPT_STRING,     &opt.ramdiskimage,  NULL             },
@@ -632,7 +638,6 @@ env_vars_t env_vars[] = {
 {"SLURM_RESERVATION",   OPT_STRING,     &opt.reservation,   NULL             },
 {"SLURM_RESTART_DIR",   OPT_STRING,     &opt.restart_dir ,  NULL             },
 {"SLURM_RESV_PORTS",    OPT_RESV_PORTS, NULL,               NULL             },
-{"SLURM_SICP",          OPT_SICP,       NULL,               NULL             },
 {"SLURM_SIGNAL",        OPT_SIGNAL,     NULL,               NULL             },
 {"SLURM_SRUN_MULTI",    OPT_MULTI,      NULL,               NULL             },
 {"SLURM_STDERRMODE",    OPT_STRING,     &opt.efname,        NULL             },
@@ -704,8 +709,12 @@ _process_env_var(env_vars_t *e, const char *val)
 		}
 		break;
 
+	case OPT_COMPRESS:
+		opt.compress = parse_compress_type(val);
+		break;
+
 	case OPT_DISTRIB:
-		if (strcmp(val, "unknown") == 0)
+		if (xstrcmp(val, "unknown") == 0)
 			break;	/* ignore it, passed from salloc */
 		dt = verify_dist_type(val, &opt.plane_size);
 		if (dt == SLURM_DIST_UNKNOWN) {
@@ -762,9 +771,11 @@ _process_env_var(env_vars_t *e, const char *val)
 	case OPT_EXCLUSIVE:
 		if (val[0] == '\0') {
 			opt.exclusive = true;
-			opt.shared = 0;
-		} else if (!strcasecmp(val, "user")) {
-			opt.shared = 2;
+			opt.shared = JOB_SHARED_NONE;
+		} else if (!xstrcasecmp(val, "user")) {
+			opt.shared = JOB_SHARED_USER;
+		} else if (!xstrcasecmp(val, "mcs")) {
+			opt.shared = JOB_SHARED_MCS;
 		} else {
 			error("\"%s=%s\" -- invalid value, ignoring...",
 			      e->var, val);
@@ -815,6 +826,16 @@ _process_env_var(env_vars_t *e, const char *val)
 		}
 		break;
 
+	case OPT_GRES_FLAGS:
+		if (!xstrcasecmp(val, "enforce-binding")) {
+			opt.job_flags |= GRES_ENFORCE_BIND;
+		} else {
+			error("Invalid SLURM_GRES_FLAGS specification: %s",
+			      val);
+			exit(error_exit);
+		}
+		break;
+
 	case OPT_IMMEDIATE:
 		if (val)
 			opt.immediate = strtol(val, NULL, 10);
@@ -850,9 +871,6 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 	case OPT_POWER:
 		opt.power_flags = power_flags_id((char *)val);
-		break;
-	case OPT_SICP:
-		opt.sicp_mode = 1;
 		break;
 	case OPT_THREAD_SPEC:
 		opt.core_spec = _get_int(val, "thread_spec", true) |
@@ -905,6 +923,7 @@ static void _set_options(const int argc, char **argv)
 		{"nodes",         required_argument, 0, 'N'},
 		{"output",        required_argument, 0, 'o'},
 		{"overcommit",    no_argument,       0, 'O'},
+		{"oversubscribe", no_argument,       0, 's'},
 		{"partition",     required_argument, 0, 'p'},
 		{"quit-on-interrupt", no_argument,   0, 'q'},
 		{"quiet",            no_argument,    0, 'Q'},
@@ -932,12 +951,14 @@ static void _set_options(const int argc, char **argv)
 		{"checkpoint",       required_argument, 0, LONG_OPT_CHECKPOINT},
 		{"checkpoint-dir",   required_argument, 0, LONG_OPT_CHECKPOINT_DIR},
 		{"cnload-image",     required_argument, 0, LONG_OPT_LINUX_IMAGE},
+		{"compress",         optional_argument, 0, LONG_OPT_COMPRESS},
 		{"comment",          required_argument, 0, LONG_OPT_COMMENT},
 		{"conn-type",        required_argument, 0, LONG_OPT_CONNTYPE},
 		{"contiguous",       no_argument,       0, LONG_OPT_CONT},
 		{"cores-per-socket", required_argument, 0, LONG_OPT_CORESPERSOCKET},
 		{"cpu_bind",         required_argument, 0, LONG_OPT_CPU_BIND},
 		{"cpu-freq",         required_argument, 0, LONG_OPT_CPU_FREQ},
+		{"deadline",         required_argument, 0, LONG_OPT_DEADLINE},
 		{"debugger-test",    no_argument,       0, LONG_OPT_DEBUG_TS},
 		{"epilog",           required_argument, 0, LONG_OPT_EPILOG},
 		{"exclusive",        optional_argument, 0, LONG_OPT_EXCLUSIVE},
@@ -945,6 +966,7 @@ static void _set_options(const int argc, char **argv)
 		{"get-user-env",     optional_argument, 0, LONG_OPT_GET_USER_ENV},
 		{"gid",              required_argument, 0, LONG_OPT_GID},
 		{"gres",             required_argument, 0, LONG_OPT_GRES},
+		{"gres-flags",       required_argument, 0, LONG_OPT_GRES_FLAGS},
 		{"help",             no_argument,       0, LONG_OPT_HELP},
 		{"hint",             required_argument, 0, LONG_OPT_HINT},
 		{"ioload-image",     required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
@@ -955,6 +977,7 @@ static void _set_options(const int argc, char **argv)
 		{"mail-type",        required_argument, 0, LONG_OPT_MAIL_TYPE},
 		{"mail-user",        required_argument, 0, LONG_OPT_MAIL_USER},
 		{"max-exit-timeout", required_argument, 0, LONG_OPT_XTO},
+		{"mcs-label",        required_argument, 0, LONG_OPT_MCS_LABEL},
 		{"mem",              required_argument, 0, LONG_OPT_MEM},
 		{"mem-per-cpu",      required_argument, 0, LONG_OPT_MEM_PER_CPU},
 		{"mem_bind",         required_argument, 0, LONG_OPT_MEM_BIND},
@@ -985,7 +1008,6 @@ static void _set_options(const int argc, char **argv)
 		{"restart-dir",      required_argument, 0, LONG_OPT_RESTART_DIR},
 		{"resv-ports",       optional_argument, 0, LONG_OPT_RESV_PORTS},
 		{"runjob-opts",      required_argument, 0, LONG_OPT_LAUNCHER_OPTS},
-		{"sicp",             optional_argument, 0, LONG_OPT_SICP},
 		{"signal",	     required_argument, 0, LONG_OPT_SIGNAL},
 		{"slurmd-debug",     required_argument, 0, LONG_OPT_DEBUG_SLURMD},
 		{"sockets-per-node", required_argument, 0, LONG_OPT_SOCKETSPERNODE},
@@ -1085,7 +1107,7 @@ static void _set_options(const int argc, char **argv)
 				exit(error_exit);
 			}
 			xfree(opt.efname);
-			if (strcasecmp(optarg, "none") == 0)
+			if (xstrcasecmp(optarg, "none") == 0)
 				opt.efname = xstrdup("/dev/null");
 			else
 				opt.efname = xstrdup(optarg);
@@ -1107,7 +1129,7 @@ static void _set_options(const int argc, char **argv)
 				exit(error_exit);
 			}
 			xfree(opt.ifname);
-			if (strcasecmp(optarg, "none") == 0)
+			if (xstrcasecmp(optarg, "none") == 0)
 				opt.ifname = xstrdup("/dev/null");
 			else
 				opt.ifname = xstrdup(optarg);
@@ -1179,7 +1201,7 @@ static void _set_options(const int argc, char **argv)
 				exit(error_exit);
 			}
 			xfree(opt.ofname);
-			if (strcasecmp(optarg, "none") == 0)
+			if (xstrcasecmp(optarg, "none") == 0)
 				opt.ofname = xstrdup("/dev/null");
 			else
 				opt.ofname = xstrdup(optarg);
@@ -1254,18 +1276,28 @@ static void _set_options(const int argc, char **argv)
 		case (int)'Z':
 			opt.no_alloc = true;
 			uname(&name);
-			if (strcasecmp(name.sysname, "AIX") == 0)
+			if (xstrcasecmp(name.sysname, "AIX") == 0)
 				opt.network = xstrdup("ip");
 			break;
 		case LONG_OPT_CONT:
 			opt.contiguous = true;
 			break;
+		case LONG_OPT_DEADLINE:
+			opt.deadline = parse_time(optarg, 0);
+			if (errno == ESLURM_INVALID_TIME_VALUE) {
+				error("Invalid deadline specification %s",
+				       optarg);
+				exit(error_exit);
+			}
+			break;
                 case LONG_OPT_EXCLUSIVE:
 			if (optarg == NULL) {
 				opt.exclusive = true;
-				opt.shared = 0;
-			} else if (!strcasecmp(optarg, "user")) {
-				opt.shared = 2;
+				opt.shared = JOB_SHARED_NONE;
+			} else if (!xstrcasecmp(optarg, "user")) {
+				opt.shared = JOB_SHARED_USER;
+			} else if (!xstrcasecmp(optarg, "mcs")) {
+				opt.shared = JOB_SHARED_MCS;
 			} else {
 				error("invalid exclusive option %s", optarg);
 				exit(error_exit);
@@ -1483,6 +1515,11 @@ static void _set_options(const int argc, char **argv)
 			xfree(opt.mail_user);
 			opt.mail_user = xstrdup(optarg);
 			break;
+		case LONG_OPT_MCS_LABEL: {
+			xfree(opt.mcs_label);
+			opt.mcs_label = xstrdup(optarg);
+			break;
+		}
 		case LONG_OPT_TASK_PROLOG:
 			xfree(opt.task_prolog);
 			opt.task_prolog = xstrdup(optarg);
@@ -1496,11 +1533,6 @@ static void _set_options(const int argc, char **argv)
 				opt.nice = strtol(optarg, NULL, 10);
 			else
 				opt.nice = 100;
-			if (abs(opt.nice) > NICE_OFFSET) {
-				error("Invalid nice value, must be between "
-				      "-%d and %d", NICE_OFFSET, NICE_OFFSET);
-				exit(error_exit);
-			}
 			if (opt.nice < 0) {
 				uid_t my_uid = getuid();
 				if ((my_uid != 0) &&
@@ -1685,13 +1717,22 @@ static void _set_options(const int argc, char **argv)
 			opt.time_min_str = xstrdup(optarg);
 			break;
 		case LONG_OPT_GRES:
-			if (!strcasecmp(optarg, "help") ||
-			    !strcasecmp(optarg, "list")) {
+			if (!xstrcasecmp(optarg, "help") ||
+			    !xstrcasecmp(optarg, "list")) {
 				print_gres_help();
 				exit(0);
 			}
 			xfree(opt.gres);
 			opt.gres = xstrdup(optarg);
+			break;
+		case LONG_OPT_GRES_FLAGS:
+			if (!xstrcasecmp(optarg, "enforce-binding")) {
+				opt.job_flags |= GRES_ENFORCE_BIND;
+			} else {
+				error("Invalid gres-flags specification: %s",
+				      optarg);
+				exit(error_exit);
+			}
 			break;
 		case LONG_OPT_CPU_FREQ:
 		        if (cpu_freq_verify_cmdline(optarg, &opt.cpu_freq_min,
@@ -1711,9 +1752,6 @@ static void _set_options(const int argc, char **argv)
 		case LONG_OPT_POWER:
 			opt.power_flags = power_flags_id(optarg);
 			break;
-		case LONG_OPT_SICP:
-			opt.sicp_mode = 1;
-			break;
 		case LONG_OPT_THREAD_SPEC:
 			opt.core_spec = _get_int(optarg, "thread_spec", true) |
 				CORE_SPEC_THREAD;
@@ -1727,6 +1765,9 @@ static void _set_options(const int argc, char **argv)
 				opt.accel_bind_type |= ACCEL_BIND_CLOSEST_MIC;
 			if (strchr(optarg, 'n'))
 				opt.accel_bind_type |= ACCEL_BIND_CLOSEST_NIC;
+			break;
+		case LONG_OPT_COMPRESS:
+			opt.compress = parse_compress_type(optarg);
 			break;
 		default:
 			if (spank_process_option (opt_char, optarg) < 0) {
@@ -1771,7 +1812,7 @@ static void _opt_args(int argc, char **argv)
 
 	if (opt.pty) {
 		char *launch_type = slurm_get_launch_type();
-		if (strcmp(launch_type, "launch/slurm")) {
+		if (xstrcmp(launch_type, "launch/slurm")) {
 			error("--pty not currently supported with %s "
 			      "configuration, ignoring option", launch_type);
 			opt.pty = false;
@@ -2205,6 +2246,17 @@ static bool _opt_verify(void)
 					hostlist_ranged_string_xmalloc(hl);
 			}
 		}
+
+		if ((opt.ntasks_per_node != NO_VAL) &&
+		    (opt.ntasks_per_node != (opt.ntasks / opt.min_nodes))) {
+			info("Warning: can't honor --ntasks-per-node set to %u "
+			     "which doesn't match the requested tasks %u with "
+			     "the number of requested nodes %u.  "
+			     "Ignoring --ntasks-per-node.",
+			      opt.ntasks_per_node, opt.ntasks, opt.min_nodes);
+			opt.ntasks_per_node = NO_VAL;
+		}
+
 	} /* else if (opt.ntasks_set && !opt.nodes_set) */
 
 	if (hl)
@@ -2243,7 +2295,10 @@ static bool _opt_verify(void)
 		if (opt.time_min == 0)
 			opt.time_min = INFINITE;
 	}
-
+	if ((opt.deadline) && (opt.begin) && (opt.deadline < opt.begin)) {
+		error("Incompatible begin and deadline time specification");
+		exit(error_exit);
+	}
 	if (opt.ckpt_interval_str) {
 		opt.ckpt_interval = time_str2mins(opt.ckpt_interval_str);
 		if ((opt.ckpt_interval < 0) &&
@@ -2286,7 +2341,7 @@ extern void init_spank_env(void)
 		return;
 
 	for (i = 0; environ[i]; i++) {
-		if (strncmp(environ[i], "SLURM_SPANK_", 12))
+		if (xstrncmp(environ[i], "SLURM_SPANK_", 12))
 			continue;
 		name = xstrdup(environ[i] + 12);
 		eq = strchr(name, (int)'=');
@@ -2320,7 +2375,7 @@ extern char *spank_get_job_env(const char *name)
 	len = strlen(tmp_str);
 
 	for (i = 0; i < opt.spank_job_env_size; i++) {
-		if (strncmp(opt.spank_job_env[i], tmp_str, len))
+		if (xstrncmp(opt.spank_job_env[i], tmp_str, len))
 			continue;
 		xfree(tmp_str);
 		return (opt.spank_job_env[i] + len);
@@ -2347,7 +2402,7 @@ extern int   spank_set_job_env(const char *name, const char *value,
 	xstrcat(tmp_str, value);
 
 	for (i = 0; i < opt.spank_job_env_size; i++) {
-		if (strncmp(opt.spank_job_env[i], tmp_str, len))
+		if (xstrncmp(opt.spank_job_env[i], tmp_str, len))
 			continue;
 		if (overwrite) {
 			xfree(opt.spank_job_env[i]);
@@ -2380,7 +2435,7 @@ extern int   spank_unset_job_env(const char *name)
 	len = strlen(tmp_str);
 
 	for (i = 0; i < opt.spank_job_env_size; i++) {
-		if (strncmp(opt.spank_job_env[i], tmp_str, len))
+		if (xstrncmp(opt.spank_job_env[i], tmp_str, len))
 			continue;
 		xfree(opt.spank_job_env[i]);
 		for (j = (i+1); j < opt.spank_job_env_size; i++, j++)
@@ -2511,7 +2566,7 @@ static void _opt_list(void)
 		info("bcast          : %s", tf_(opt.bcast_flag));
 	info("qos            : %s", opt.qos);
 	if (opt.shared != (uint16_t) NO_VAL)
-		info("shared         : %u", opt.shared);
+		info("oversubscribe  : %u", opt.shared);
 	str = print_constraints();
 	info("constraints    : %s", str);
 	xfree(str);
@@ -2554,6 +2609,11 @@ static void _opt_list(void)
 		slurm_make_time_str(&opt.begin, time_str, sizeof(time_str));
 		info("begin          : %s", time_str);
 	}
+	if (opt.deadline) {
+		char time_str[32];
+		slurm_make_time_str(&opt.deadline, time_str, sizeof(time_str));
+		info("deadline       : %s", time_str);
+	}
 	info("prolog         : %s", opt.prolog);
 	info("epilog         : %s", opt.epilog);
 	info("mail_type      : %s", print_mail_type(opt.mail_type));
@@ -2578,9 +2638,10 @@ static void _opt_list(void)
 	if (opt.resv_port_cnt != NO_VAL)
 		info("resv_port_cnt     : %d", opt.resv_port_cnt);
 	info("power             : %s", power_flags_str(opt.power_flags));
-	info("sicp              : %u", opt.sicp_mode);
 	str = print_commandline(opt.argc, opt.argv);
 	info("remote command    : `%s'", str);
+	if (opt.mcs_label)
+		info("mcs-label         : %s",opt.mcs_label);
 	xfree(str);
 
 }
@@ -2638,9 +2699,9 @@ static void _usage(void)
 "Usage: srun [-N nnodes] [-n ntasks] [-i in] [-o out] [-e err]\n"
 "            [-c ncpus] [-r n] [-p partition] [--hold] [-t minutes]\n"
 "            [-D path] [--immediate[=secs]] [--overcommit] [--no-kill]\n"
-"            [--share] [--label] [--unbuffered] [-m dist] [-J jobname]\n"
+"            [--oversubscribe] [--label] [--unbuffered] [-m dist] [-J jobname]\n"
 "            [--jobid=id] [--verbose] [--slurmd_debug=#] [--gres=list]\n"
-"            [-T threads] [-W sec] [--checkpoint=time]\n"
+"            [-T threads] [-W sec] [--checkpoint=time] [--gres-flags=opts]\n"
 "            [--checkpoint-dir=dir]  [--licenses=names]\n"
 "            [--restart-dir=dir] [--qos=qos] [--time-min=minutes]\n"
 "            [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
@@ -2669,12 +2730,13 @@ static void _usage(void)
 "            [--mail-type=type] [--mail-user=user] [--nice[=value]]\n"
 "            [--prolog=fname] [--epilog=fname]\n"
 "            [--task-prolog=fname] [--task-epilog=fname]\n"
-"            [--ctrl-comm-ifhn=addr] [--multi-prog]\n"
-"            [--cpu-freq=min[-max[:gov]] [--sicp] [--power=flags]\n"
+"            [--ctrl-comm-ifhn=addr] [--multi-prog] [--mcs-label=mcs]\n"
+"            [--cpu-freq=min[-max[:gov]] [--power=flags]\n"
 "            [--switches=max-switches{@max-time-to-wait}] [--reboot]\n"
 "            [--core-spec=cores] [--thread-spec=threads]\n"
 "            [--bb=burst_buffer_spec] [--bbf=burst_buffer_file]\n"
-"            [--acctg-freq=<datatype>=<interval>} [--bcast=<dest_path>]\n"
+"            [--bcast=<dest_path>] [--compress[=library]]\n"
+"            [--acctg-freq=<datatype>=<interval>]\n"
 "            [-w hosts...] [-x hosts...] executable [args...]\n");
 
 }
@@ -2701,8 +2763,11 @@ static void _help(void)
 "      --checkpoint-dir=dir    directory to store job step checkpoint image \n"
 "                              files\n"
 "      --comment=name          arbitrary comment\n"
+"      --compress[=library]    data compression library used with --bcast\n"
 "      --cpu-freq=min[-max[:gov]] requested cpu frequency (and governor)\n"
 "  -d, --dependency=type:jobid defer job until condition on jobid is satisfied\n"
+"      --deadline=time         remove the job if no ending possible before\n"
+"                              this deadline (start > (deadline - time[-min]))\n"
 "  -D, --chdir=path            change remote current working directory\n"
 "      --export=env_vars|NONE  environment variables passed to launcher with\n"
 "                              optional values or NONE (pass no variables)\n"
@@ -2712,6 +2777,7 @@ static void _help(void)
 "                              command-line flags\n"
 "      --get-user-env          used by Moab.  See srun man page.\n"
 "      --gres=list             required generic resources\n"
+"      --gres-flags=opts       flags related to GRES management\n"
 "  -H, --hold                  submit job in held state\n"
 "  -i, --input=in              location of stdin redirection\n"
 "  -I, --immediate[=secs]      exit if resources not available in \"secs\"\n"
@@ -2730,6 +2796,7 @@ static void _help(void)
 "      --mail-type=type        notify on state change: BEGIN, END, FAIL or ALL\n"
 "      --mail-user=user        who to send email notification for job state\n"
 "                              changes\n"
+"      --mcs-label=mcs         mcs label if mcs plugin mcs/group is used\n"
 "      --mpi=type              type of MPI being used\n"
 "      --multi-prog            if set the program name specified is the\n"
 "                              configuration specification for multiple programs\n"
@@ -2757,9 +2824,7 @@ static void _help(void)
 "  -r, --relative=n            run job step relative to node n of allocation\n"
 "      --restart-dir=dir       directory of checkpoint image files to restart\n"
 "                              from\n"
-"  -s, --share                 share nodes with other jobs\n"
-"      --sicp                  If specified, signifies job is to receive\n"
-"                              job id from the incluster reserve range.\n"
+"  -s, --oversubscribe         over-subscribe resources with other jobs\n"
 "  -S, --core-spec=cores       count of reserved cores\n"
 "      --signal=[B:]num[@time] send signal when time limit within time seconds\n"
 "      --slurmd-debug=level    slurmd debug level\n"
@@ -2794,6 +2859,10 @@ static void _help(void)
 "      --exclusive[=user]      allocate nodes in exclusive mode when\n"
 "                              cpu consumable resource is enabled\n"
 "                              or don't share CPUs for job steps\n"
+"      --exclusive[=mcs]       allocate nodes in exclusive mode when\n"
+"                              cpu consumable resource is enabled\n"
+"                              and mcs plugin is enabled\n"
+"                              or don't share CPUs for job steps\n"
 "      --mem-per-cpu=MB        maximum amount of real memory per allocated\n"
 "                              cpu required by the job.\n"
 "                              --mem >= --mem-per-cpu if --mem is specified.\n"
@@ -2811,7 +2880,7 @@ static void _help(void)
 "      --ntasks-per-socket=n   number of tasks to invoke on each socket\n");
 	conf = slurm_conf_lock();
 	if (conf->task_plugin != NULL
-	    && strcasecmp(conf->task_plugin, "task/affinity") == 0) {
+	    && xstrcasecmp(conf->task_plugin, "task/affinity") == 0) {
 		printf(
 "      --cpu_bind=             Bind tasks to CPUs\n"
 "                              (see \"--cpu_bind=help\" for options)\n"

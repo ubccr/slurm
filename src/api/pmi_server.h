@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  pmi.h - Global PMI data as maintained within srun
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -33,7 +32,7 @@
 #include "src/common/slurm_protocol_defs.h"
 
 /* Put the supplied kvs values into the common store */
-extern int pmi_kvs_put(struct kvs_comm_set *kvs_set_ptr);
+extern int pmi_kvs_put(kvs_comm_set_t *kvs_set_ptr);
 
 /* Note that a task has reached a barrier,
  * transmit the kvs values to the task */

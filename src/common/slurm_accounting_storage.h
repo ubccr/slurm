@@ -470,6 +470,14 @@ extern int acct_storage_g_get_usage(
 extern int acct_storage_g_roll_usage(void *db_conn,
 				     time_t sent_start, time_t sent_end,
 				     uint16_t archive_data);
+
+/*
+ * Fix lost jobs
+ * IN: jobs, a list of all the lost jobs
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int acct_storage_g_fix_lost_jobs(void *db_conn, uint32_t uid, List jobs);
+
 /*
  * record shares used information for backup in case slurmctld restarts
  * IN:  account_list List of shares_used_object_t *
@@ -491,6 +499,13 @@ extern int acct_storage_g_flush_jobs_on_cluster(
  /* Reconfig the plugin, if dbd is true forward reconfig to the DBD */
 
 extern int acct_storage_g_reconfig(void *db_conn, bool dbd);
+
+/*
+ * Reset the lft and rights of an association table.
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int acct_storage_g_reset_lft_rgt(void *db_conn, uid_t uid,
+					List cluster_list);
 
 /*********************** CLUSTER ACCOUNTING STORAGE **************************/
 

@@ -136,28 +136,6 @@ sw_gen_libstate_t *libstate = NULL;
 extern int switch_p_free_node_info(switch_node_info_t **switch_node);
 extern int switch_p_alloc_node_info(switch_node_info_t **switch_node);
 
-/* The _lock() and _unlock() functions are used to lock/unlock a
- * global mutex.  Used to serialize access to the global library
- * state variable nrt_state.
- */
-static void _lock(void)
-{
-	int err = 1;
-
-	while (err) {
-		err = pthread_mutex_lock(&global_lock);
-	}
-}
-
-static void _unlock(void)
-{
-	int err = 1;
-
-	while (err) {
-		err = pthread_mutex_unlock(&global_lock);
-	}
-}
-
 static void
 _alloc_libstate(void)
 {
@@ -243,7 +221,7 @@ _find_node(char *node_name)
 		n = libstate->hash_table[i];
 		while (n) {
 			xassert(n->magic == SW_GEN_NODE_INFO_MAGIC);
-			if (!strcmp(n->node_name, node_name))
+			if (!xstrcmp(n->node_name, node_name))
 				return n;
 			n = n->next;
 		}
@@ -256,7 +234,7 @@ _find_node(char *node_name)
 		n = libstate->hash_table[i];
 		while (n) {
 			xassert(n->magic == SW_GEN_NODE_INFO_MAGIC);
-			if (!strcmp(n->node_name, node_name))
+			if (!xstrcmp(n->node_name, node_name))
 				return n;
 			n = n->next;
 		}
@@ -294,7 +272,7 @@ static void _cache_node_info(sw_gen_node_info_t *new_node_info)
 	struct sw_gen_node_info *next;
 	bool new_alloc;      /* True if this is new node to be added to cache */
 
-	_lock();
+	slurm_mutex_lock(&global_lock);
 	old_node_info = _find_node(new_node_info->node_name);
 	new_alloc = (old_node_info == NULL);
 	if (new_alloc) {
@@ -316,7 +294,7 @@ static void _cache_node_info(sw_gen_node_info_t *new_node_info)
 
 	if (new_alloc)
 		_hash_add_nodeinfo(old_node_info);
-	_unlock();
+	slurm_mutex_unlock(&global_lock);
 }
 
 /*
@@ -332,9 +310,9 @@ int init(void)
 
 int fini(void)
 {
-	_lock();
+	slurm_mutex_lock(&global_lock);
 	_free_libstate();
-	_unlock();
+	slurm_mutex_unlock(&global_lock);
 	return SLURM_SUCCESS;
 }
 
@@ -360,9 +338,9 @@ int switch_p_libstate_restore(char * dir_name, bool recover)
 	if (debug_flags & DEBUG_FLAG_SWITCH)
 		info("switch_p_libstate_restore() starting");
 	/* No state saved or restored for this plugin, just initialize */
-	_lock();
+	slurm_mutex_lock(&global_lock);
 	_alloc_libstate();
-	_unlock();
+	slurm_mutex_unlock(&global_lock);
 
 	return SLURM_SUCCESS;
 }

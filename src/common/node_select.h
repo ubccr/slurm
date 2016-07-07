@@ -157,6 +157,7 @@ typedef struct slurm_select_ops {
 						 struct node_record *node_ptr);
 	int		(*job_signal)		(struct job_record *job_ptr,
 						 int signal);
+	int		(*job_mem_confirm)	(struct job_record *job_ptr);
 	int		(*job_fini)		(struct job_record *job_ptr);
 	int		(*job_suspend)		(struct job_record *job_ptr,
 						 bool indf_susp);
@@ -167,7 +168,8 @@ typedef struct slurm_select_ops {
 						 uint32_t node_count,
 						 bitstr_t **avail_nodes);
 	int             (*step_start)           (struct step_record *step_ptr);
-	int             (*step_finish)          (struct step_record *step_ptr);
+	int             (*step_finish)          (struct step_record *step_ptr,
+						 bool killing_step);
 	int		(*pack_select_info)	(time_t last_query_time,
 						 uint16_t show_flags,
 						 Buf *buffer_ptr,
@@ -606,6 +608,15 @@ extern int select_g_job_fini(struct job_record *job_ptr);
 extern int select_g_job_signal(struct job_record *job_ptr, int signal);
 
 /*
+ * Confirm that a job's memory allocation is still valid after a node is
+ * restarted. This is an issue if the job is allocated all of the memory on a
+ * node and that node is restarted with a different memory size than at the time
+ * it is allocated to the job. This would mostly be an issue on an Intel KNL
+ * node where the memory size would vary with the MCDRAM cache mode.
+ */
+extern int select_g_job_mem_confirm(struct job_record *job_ptr);
+
+/*
  * Suspend a job. Executed from slurmctld.
  * IN job_ptr - pointer to job being suspended
  * IN indf_susp - set if job is being suspended indefinitely by user
@@ -679,8 +690,10 @@ extern int select_g_step_start(struct step_record *step_ptr);
 /*
  * clear what happened in select_g_step_pick_nodes and/or select_g_step_start
  * IN/OUT step_ptr - step pointer to operate on.
+ * IN killing_step - if true then we are just starting to kill the step
+ *                   if false, the step is completely terminated
  */
-extern int select_g_step_finish(struct step_record *step_ptr);
+extern int select_g_step_finish(struct step_record *step_ptr, bool killing_step);
 
 /*********************************\
  * ADVANCE RESERVATION FUNCTIONS *

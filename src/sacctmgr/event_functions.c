@@ -121,7 +121,8 @@ static int _addto_state_char_list(List char_list, char *names)
 					name = xstrdup_printf("%u", c);
 
 					while((tmp_char = list_next(itr))) {
-						if (!strcasecmp(tmp_char, name))
+						if (!xstrcasecmp(tmp_char,
+								 name))
 							break;
 					}
 
@@ -153,7 +154,7 @@ static int _addto_state_char_list(List char_list, char *names)
 			name = xstrdup_printf("%u", c);
 
 			while((tmp_char = list_next(itr))) {
-				if (!strcasecmp(tmp_char, name))
+				if (!xstrcasecmp(tmp_char, name))
 					break;
 			}
 
@@ -227,7 +228,8 @@ static int _addto_id_char_list(List char_list, char *names, bool gid)
 					name = _convert_to_id( name, gid );
 
 					while((tmp_char = list_next(itr))) {
-						if (!strcasecmp(tmp_char, name))
+						if (!xstrcasecmp(tmp_char,
+								 name))
 							break;
 					}
 
@@ -255,7 +257,7 @@ static int _addto_id_char_list(List char_list, char *names, bool gid)
 			name = _convert_to_id(name, gid);
 
 			while((tmp_char = list_next(itr))) {
-				if (!strcasecmp(tmp_char, name))
+				if (!xstrcasecmp(tmp_char, name))
 					break;
 			}
 
@@ -468,26 +470,26 @@ extern int sacctmgr_list_event(int argc, char *argv[])
 	   time correctly for just the past day.
 	*/
 	if (argc == 0) {
-                struct tm start_tm;
+		struct tm start_tm;
 		event_cond->period_start = time(NULL);
 
-                if (!slurm_localtime_r(&event_cond->period_start,
+		if (!slurm_localtime_r(&event_cond->period_start,
 				       &start_tm)) {
-                        fprintf(stderr,
-                                " Couldn't get localtime from %ld",
-                                (long)event_cond->period_start);
-                        exit_code = 1;
-                        return 0;
-                }
-                start_tm.tm_sec = 0;
-                start_tm.tm_min = 0;
-                start_tm.tm_hour = 0;
-                start_tm.tm_mday--;
-                start_tm.tm_isdst = -1;
-                event_cond->period_start = slurm_mktime(&start_tm);
-        }
+			fprintf(stderr,
+				" Couldn't get localtime from %ld",
+				(long)event_cond->period_start);
+			exit_code = 1;
+			return 0;
+		}
+		start_tm.tm_sec = 0;
+		start_tm.tm_min = 0;
+		start_tm.tm_hour = 0;
+		start_tm.tm_mday--;
+		start_tm.tm_isdst = -1;
+		event_cond->period_start = slurm_mktime(&start_tm);
+	}
 
-	for (i=0; i<argc; i++) {
+	for (i = 0; i < argc; i++) {
 		int command_len = strlen(argv[i]);
 		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
 		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3)))
@@ -557,8 +559,8 @@ extern int sacctmgr_list_event(int argc, char *argv[])
 				convert_num_unit(
 					(float)slurmdb_find_tres_count_in_string(
 						event->tres_str, TRES_CPU),
-					tmp, sizeof(tmp),
-					UNIT_NONE, CONVERT_NUM_UNIT_EXACT);
+					tmp, sizeof(tmp), UNIT_NONE, NO_VAL,
+					CONVERT_NUM_UNIT_EXACT);
 
 				field->print_routine(
 					field,
@@ -628,7 +630,8 @@ extern int sacctmgr_list_event(int argc, char *argv[])
 				sacctmgr_initialize_g_tres_list();
 
 				tmp_char = slurmdb_make_tres_string_from_simple(
-					event->tres_str, g_tres_list);
+					event->tres_str, g_tres_list, NO_VAL,
+					CONVERT_NUM_UNIT_EXACT);
 
 				field->print_routine(
 					field,

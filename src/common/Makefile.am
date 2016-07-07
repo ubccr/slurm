@@ -31,9 +31,9 @@ noinst_LTLIBRARIES = 			\
 	libspank.la
 
 libcommon_la_SOURCES = 			\
-	cpu_frequency.c cpu_frequency.h \
 	assoc_mgr.c assoc_mgr.h 	\
-	file_bcast.c file_bcast.h	\
+	cpu_frequency.c cpu_frequency.h \
+	node_features.c node_features.h	\
 	xmalloc.c xmalloc.h 		\
 	xassert.c xassert.h		\
 	xstring.c xstring.h		\
@@ -67,6 +67,8 @@ libcommon_la_SOURCES = 			\
 	slurm_cred.c			\
 	slurm_errno.c			\
 	slurm_ext_sensors.c slurm_ext_sensors.h \
+	slurm_mcs.c			\
+	slurm_mcs.h			\
 	slurm_priority.c		\
 	slurm_priority.h		\
 	slurm_protocol_api.c		\
@@ -133,7 +135,8 @@ libcommon_la_SOURCES = 			\
 	mapping.c mapping.h		\
 	xcgroup_read_config.c xcgroup_read_config.h \
 	xlua.c xlua.h			\
-	callerid.c callerid.h
+	callerid.c callerid.h		\
+	siphash24.c siphash_slurm.c siphash.h
 
 EXTRA_libcommon_la_SOURCES = 		\
 	$(extra_unsetenv_src)		\

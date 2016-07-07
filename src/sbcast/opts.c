@@ -55,7 +55,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "src/common/file_bcast.h"
 #include "src/common/proc_args.h"
 #include "src/common/xstring.h"
 
@@ -81,7 +80,7 @@ extern void parse_command_line(int argc, char *argv[])
 	int opt_char;
 	int option_index;
 	static struct option long_options[] = {
-		{"compress",  no_argument,       0, 'C'},
+		{"compress",  optional_argument, 0, 'C'},
 		{"fanout",    required_argument, 0, 'F'},
 		{"force",     no_argument,       0, 'f'},
 		{"jobid",     required_argument, 0, 'j'},
@@ -96,7 +95,7 @@ extern void parse_command_line(int argc, char *argv[])
 	};
 
 	if (getenv("SBCAST_COMPRESS"))
-		params.compress = true;
+		params.compress = parse_compress_type(env_val);
 	if ( ( env_val = getenv("SBCAST_FANOUT") ) )
 		params.fanout = atoi(env_val);
 	if (getenv("SBCAST_FORCE"))
@@ -109,6 +108,8 @@ extern void parse_command_line(int argc, char *argv[])
 		params.preserve = true;
 	if ( ( env_val = getenv("SBCAST_SIZE") ) )
 		params.block_size = _map_size(env_val);
+	else
+		params.block_size = 8 * 1024 * 1024;
 	if ( ( env_val = getenv("SBCAST_TIMEOUT") ) )
 		params.timeout = (atoi(env_val) * 1000);
 
@@ -122,7 +123,7 @@ extern void parse_command_line(int argc, char *argv[])
 			exit(1);
 			break;
 		case (int)'C':
-			params.compress = true;
+			params.compress = parse_compress_type(optarg);
 			break;
 		case (int)'f':
 			params.force = true;
@@ -219,7 +220,7 @@ static void _print_options( void )
 {
 	info("-----------------------------");
 	info("block_size = %u", params.block_size);
-	info("compress   = %s", params.compress ? "true" : "false");
+	info("compress   = %u", params.compress);
 	info("force      = %s", params.force ? "true" : "false");
 	info("fanout     = %d", params.fanout);
 	if (params.step_id == NO_VAL)
@@ -244,17 +245,17 @@ static void _help( void )
 {
 	printf ("\
 Usage: sbcast [OPTIONS] SOURCE DEST\n\
-  -C, --compress      compress the file being transmitted\n\
-  -f, --force         replace destination file as required\n\
-  -F, --fanout=num    specify message fanout\n\
-  -j, --jobid=#[.#]   specify job ID and optional step ID, unneeded if run\n\
-                      inside allocation\n\
-  -p, --preserve      preserve modes and times of source file\n\
-  -s, --size=num      block size in bytes (rounded off)\n\
-  -t, --timeout=secs  specify message timeout (seconds)\n\
-  -v, --verbose       provide detailed event logging\n\
-  -V, --version       print version information and exit\n\
+  -C, --compress[=lib] compress the file being transmitted\n\
+  -f, --force          replace destination file as required\n\
+  -F, --fanout=num     specify message fanout\n\
+  -j, --jobid=#[.#]    specify job ID and optional step ID, unneeded if run\n\
+                       inside allocation\n\
+  -p, --preserve       preserve modes and times of source file\n\
+  -s, --size=num       block size in bytes (rounded off)\n\
+  -t, --timeout=secs   specify message timeout (seconds)\n\
+  -v, --verbose        provide detailed event logging\n\
+  -V, --version        print version information and exit\n\
 \nHelp options:\n\
-  --help              show this help message\n\
-  --usage             display brief usage message\n");
+  --help               show this help message\n\
+  --usage              display brief usage message\n");
 }

@@ -272,7 +272,7 @@ static bg_record_t * _translate_object_to_block(const Block::Ptr &block_ptr)
 		 node_char);
 
 	xfree(node_char);
-	if (strcmp(mp_str, bg_record->mp_str)) {
+	if (xstrcmp(mp_str, bg_record->mp_str)) {
 		fatal("Couldn't make unknown block %s in our wiring.  "
 		      "Something is wrong with our algo.  Remove this block "
 		      "to continue (found %s, but allocated %s) "
@@ -1197,7 +1197,7 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 		const char *bg_block_id = block_ptr->getName().c_str();
 		uint16_t state;
 
-		if (strncmp("RMP", bg_block_id, 3))
+		if (xstrncmp("RMP", bg_block_id, 3))
 			continue;
 
 		/* find BG Block record */

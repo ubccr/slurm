@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id$
+ *  fd.h - common file descriptor functions
  *****************************************************************************
  *  Copyright (C) 2001-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -44,6 +44,8 @@
 #  include "config.h"
 #endif /* HAVE_CONFIG_H */
 
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 

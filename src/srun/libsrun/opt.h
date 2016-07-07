@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -113,6 +112,7 @@ typedef struct srun_options {
 	char *ckpt_interval_str;/* --checkpoint (string)	*/
 	char *ckpt_dir;  	/* --checkpoint-dir (string)   */
 	bool exclusive;		/* --exclusive			*/
+	uint16_t compress;	/* --compress (for --bcast option) */
 	char *bcast_file;	/* --bcast, copy executable to compute nodes */
 	bool bcast_flag;	/* --bcast, copy executable to compute nodes */
 	int  resv_port_cnt;	/* --resv_ports			*/
@@ -238,7 +238,9 @@ typedef struct srun_options {
 	uint32_t cpu_freq_max;  /* Maximum cpu frequency  */
 	uint32_t cpu_freq_gov;  /* cpu frequency governor */
 	uint8_t power_flags;	/* Power management options	*/
-	uint8_t sicp_mode;	/* Inter-cluster job ID		*/
+	char *mcs_label;	/* mcs label if mcs plugin in use */
+	time_t deadline; 	/* --deadline                   */
+	uint32_t job_flags;	/* --gres-flags */
 } opt_t;
 
 extern opt_t opt;

@@ -146,12 +146,13 @@
 \*****************************************************************************/
 
 typedef struct slurmctld_config {
+	char *	auth_info;
+	time_t	boot_time;
 	int	daemonize;
 	bool	resume_backup;
-	time_t	boot_time;
-	time_t	shutdown_time;
+	bool    scheduling_disabled;
 	int	server_thread_count;
-	bool scheduling_disabled;
+	time_t	shutdown_time;
 
 	slurm_cred_ctx_t cred_ctx;
 #ifdef WITH_PTHREADS
@@ -243,6 +244,15 @@ extern int   slurmctld_tres_cnt;
 extern uint32_t total_cpus;		/* count of CPUs in the entire cluster */
 extern bool ping_nodes_now;		/* if set, ping nodes immediately */
 extern bool want_nodes_reboot;		/* if set, check for idle nodes */
+
+typedef struct node_features {
+	uint32_t magic;		/* magic cookie to test data integrity */
+	char *name;		/* name of a feature */
+	bitstr_t *node_bitmap;	/* bitmap of nodes with this feature */
+} node_feature_t;
+
+extern List active_feature_list;/* list of currently active node features */
+extern List avail_feature_list;	/* list of available node features */
 
 /*****************************************************************************\
  *  NODE states and bitmaps
@@ -358,7 +368,8 @@ struct part_record {
 	double   norm_priority;	/* normalized scheduling priority for
 				 * jobs (DON'T PACK) */
 	uint16_t preempt_mode;	/* See PREEMPT_MODE_* in slurm/slurm.h */
-	uint16_t priority;	/* scheduling priority for jobs */
+	uint16_t priority_job_factor;	/* job priority weight factor */
+	uint16_t priority_tier;	/* tier for scheduling and preemption */
 	char *qos_char;         /* requested QOS from slurm.conf */
 	void *qos_ptr;          /* pointer to the quality of
 				 * service record attached to this
@@ -380,7 +391,7 @@ extern time_t last_part_update;		/* time of last part_list update */
 extern struct part_record default_part;	/* default configuration values */
 extern char *default_part_name;		/* name of default partition */
 extern struct part_record *default_part_loc;	/* default partition ptr */
-extern uint16_t part_max_priority;      /* max priority in all partitions */
+extern uint16_t part_max_priority;      /* max priority_job_factor in all parts */
 
 /*****************************************************************************\
  *  RESERVATION parameters and data structures
@@ -392,9 +403,10 @@ typedef struct slurmctld_resv {
 	char **account_list;	/* list of accounts permitted to use	*/
 	bool account_not;	/* account_list users NOT permitted to use */
 	char *assoc_list;	/* list of associations			*/
-	uint32_t core_cnt;	/* number of reserved cores		*/
 	char *burst_buffer;	/* burst buffer resources		*/
 	bitstr_t *core_bitmap;	/* bitmap of reserved cores		*/
+	uint32_t core_cnt;	/* number of reserved cores		*/
+	job_resources_t *core_resrcs;	/* details of allocated cores	*/
 	uint32_t duration;	/* time in seconds for this
 				 * reservation to last                  */
 	time_t end_time;	/* end time of reservation		*/
@@ -448,11 +460,11 @@ extern time_t last_job_update;	/* time of last update to job records */
 #define FEATURE_OP_XOR  2
 #define FEATURE_OP_XAND 3
 #define FEATURE_OP_END  4		/* last entry lacks separator */
-struct feature_record {
+typedef struct job_feature {
 	char *name;			/* name of feature */
 	uint16_t count;			/* count of nodes with this feature */
 	uint8_t op_code;		/* separator, see FEATURE_OP_ above */
-};
+} job_feature_t;
 
 /* job_details - specification of a job's constraints,
  * can be purged after initiation */
@@ -501,7 +513,7 @@ struct job_details {
 	uint16_t mem_bind_type;		/* see mem_bind_type_t */
 	uint32_t min_cpus;		/* minimum number of cpus */
 	uint32_t min_nodes;		/* minimum number of nodes */
-	uint16_t nice;			/* requested priority change,
+	uint32_t nice;			/* requested priority change,
 					 * NICE_OFFSET == no change */
 	uint16_t ntasks_per_node;	/* number of tasks on each node */
 	uint32_t num_tasks;		/* number of tasks to start */
@@ -538,7 +550,8 @@ struct job_details {
 					 * is enabled */
 	uint32_t usable_nodes;		/* node count needed by preemption */
 	uint8_t whole_node;		/* 1: --exclusive
-					 * 2: --exclusive=user */
+					 * 2: --exclusive=user
+					 * 3: --exclusive=mcs */
 	char *work_dir;			/* pathname of working directory */
 };
 
@@ -609,6 +622,7 @@ struct job_record {
 					 * bluegene and the linear plugins
 					 * 0 if cr is NOT enabled,
 					 * 1 if cr is enabled */
+	time_t deadline;		/* deadline */
 	uint32_t db_index;              /* used only for database
 					 * plugins */
 	uint32_t derived_ec;		/* highest exit code of all job steps */
@@ -653,6 +667,7 @@ struct job_record {
 	uint16_t mail_type;		/* see MAIL_JOB_* in slurm.h */
 	char *mail_user;		/* user to get e-mail notification */
 	uint32_t magic;			/* magic cookie for data integrity */
+	char *mcs_label;		/* mcs_label if mcs plugin in use */
 	char *name;			/* name of the job */
 	char *network;			/* network/switch requirement spec */
 	uint32_t next_step_id;		/* next step id to be used */
@@ -711,7 +726,6 @@ struct job_record {
 	char *resp_host;		/* host for srun communications */
 	char *sched_nodes;		/* list of nodes scheduled for job */
 	dynamic_plugin_data_t *select_jobinfo;/* opaque data, BlueGene */
-	uint8_t sicp_mode;		/* set for inter-cluster jobs */
 	char **spank_job_env;		/* environment variables for job prolog
 					 * and epilog scripts as set by SPANK
 					 * plugins */
@@ -780,6 +794,8 @@ struct job_record {
 #define SLURM_DEPEND_SINGLETON		5	/* Only one job for this
 						 * user/name at a time */
 #define SLURM_DEPEND_EXPAND		6	/* Expand running job */
+#define SLURM_DEPEND_AFTER_CORRESPOND	7	/* After corresponding job array
+						 * elements completes */
 
 #define SLURM_FLAGS_OR			1	/* OR job dependencies */
 
@@ -1222,6 +1238,9 @@ extern void job_array_start(struct job_record *job_ptr);
 /* Return true if a job array task can be started */
 extern bool job_array_start_test(struct job_record *job_ptr);
 
+/* Clear job's CONFIGURING flag and advance end time as needed */
+extern void job_config_fini(struct job_record *job_ptr);
+
 /* Reset a job's end_time based upon it's start_time and time_limit.
  * NOTE: Do not reset the end_time if already being preempted */
 extern void job_end_time_reset(struct job_record  *job_ptr);
@@ -1430,14 +1449,16 @@ extern bool job_independent(struct job_record *job_ptr, int will_run);
 
 /*
  * job_req_node_filter - job reqeust node filter.
- * clear from a bitmap the nodes which can not be used for a job
- * test memory size, required features, processor count, etc.
+ *	clear from a bitmap the nodes which can not be used for a job
+ *	test memory size, required features, processor count, etc.
+ * NOTE: Does not support exclusive OR of features.
+ *	It just matches first element of XOR and ignores count.
  * IN job_ptr - pointer to node to be scheduled
  * IN/OUT bitmap - set of nodes being considered for use
  * RET SLURM_SUCCESS or EINVAL if can't filter (exclusive OR of features)
  */
 extern int job_req_node_filter(struct job_record *job_ptr,
-			       bitstr_t *avail_bitmap);
+			       bitstr_t *avail_bitmap, bool test_only);
 
 /*
  * job_requeue - Requeue a running or pending batch job
@@ -1465,6 +1486,20 @@ extern int job_requeue(uid_t uid, uint32_t job_id,
 extern int job_requeue2(uid_t uid, requeue_msg_t *req_ptr,
                        slurm_fd_t conn_fd, uint16_t protocol_version,
                        bool preempt);
+
+/*
+ * job_set_top - Move the specified job to the top of the queue (at least
+ *	for that user ID, partition, account, and QOS).
+ *
+ * IN top_ptr - user request
+ * IN uid - user id of the user issuing the RPC
+ * IN conn_fd - file descriptor on which to send reply,
+ *              -1 if none
+ * IN protocol_version - slurm protocol version of client
+ * RET 0 on success, otherwise ESLURM error code
+ */
+extern int job_set_top(top_job_msg_t *top_ptr, uid_t uid, slurm_fd_t conn_fd,
+		       uint16_t protocol_version);
 
 /*
  * job_step_complete - note normal completion the specified job step
@@ -1520,6 +1555,12 @@ extern void job_set_alloc_tres(
  * RET SLURM_SUCCES on success SLURM_ERROR on cpu_cnt underflow
  */
 extern int job_update_tres_cnt(struct job_record *job_ptr, int node_inx);
+
+/*
+ * Modify a job's memory limit if allocated all memory on a node and that node
+ * reboots, possibly with a different memory size (e.g. KNL MCDRAM mode changed)
+ */
+extern void job_validate_mem(struct job_record *job_ptr);
 
 /*
  * check_job_step_time_limit - terminate jobsteps which have exceeded
@@ -1733,18 +1774,6 @@ extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
 extern void pack_all_node (char **buffer_ptr, int *buffer_size,
 			   uint16_t show_flags, uid_t uid,
 			   uint16_t protocol_version);
-
-/*
- * pack_all_sicp - dump inter-cluster job state information
- * OUT buffer_ptr - the pointer is set to the allocated buffer.
- * OUT buffer_size - set to size of the buffer in bytes
- * IN uid - uid of user making request (for job/partition filtering)
- * NOTE: the buffer at *buffer_ptr must be xfreed by the caller
- * NOTE: change _unpack_sicp_msg() in common/slurm_protocol_pack.c
- *	whenever the data format changes
- */
-extern void pack_all_sicp(char **buffer_ptr, int *buffer_size,
-			  uid_t uid, uint16_t protocol_version);
 
 /* Pack all scheduling statistics */
 extern void pack_all_stat(int resp, char **buffer_ptr, int *buffer_size,
@@ -2109,12 +2138,6 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
  * IN job_ptr - pointer to job table entry to have step records removed
  */
 extern void step_list_purge(struct job_record *job_ptr);
-
-/* start_power_mgr - Start power management thread as needed. The thread
- *	terminates automatically at slurmctld shutdown time.
- * IN thread_id - pointer to thread ID of the started pthread.
- */
-extern void start_power_mgr(pthread_t *thread_id);
 
 /*
  * step_epilog_complete - note completion of epilog on some node and

@@ -1,6 +1,5 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/ulimits.c - set user limits for job
- * $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -192,7 +191,6 @@ set_umask(stepd_step_rec_t *job)
 	}
 
 	mask = strtol(val, (char **)NULL, 8);
-	unsetenvp(job->env, "SLURM_UMASK");
 	umask(mask);
 	return SLURM_SUCCESS;
 }

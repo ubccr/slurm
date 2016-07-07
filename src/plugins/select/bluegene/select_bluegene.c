@@ -117,7 +117,7 @@ List assoc_mgr_qos_list = NULL;
  */
 const char plugin_name[]       	= "BlueGene node selection plugin";
 const char plugin_type[]       	= "select/bluegene";
-const uint32_t plugin_id	= 100;
+const uint32_t plugin_id	= SELECT_PLUGIN_BLUEGENE;
 const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 
 /* Global variables */
@@ -220,8 +220,8 @@ static int _delete_old_blocks(List curr_block_list, List found_block_list)
 		while ((init_record = list_next(itr_curr))) {
 			itr_found = list_iterator_create(found_block_list);
 			while ((found_record = list_next(itr_found))) {
-				if (!strcmp(init_record->bg_block_id,
-					    found_record->bg_block_id)) {
+				if (!xstrcmp(init_record->bg_block_id,
+					     found_record->bg_block_id)) {
 					/* don't delete this one */
 					break;
 				}
@@ -340,7 +340,7 @@ static bg_record_t *_translate_info_2_record(block_info_t *block_info)
 	if (block_info->ionode_str) {
 		ba_set_ionode_str(bg_record);
 		if (!bg_record->ionode_str
-		    || strcmp(block_info->ionode_str, bg_record->ionode_str)) {
+		    || xstrcmp(block_info->ionode_str, bg_record->ionode_str)) {
 			error("block %s didn't compute with the correct "
 			      "ionode_str.  Stored as '%s' and "
 			      "came back as '%s'",
@@ -652,7 +652,7 @@ static int _load_state_file(List curr_block_list, char *dir_name)
 	buffer = create_buf(data, data_size);
 	safe_unpackstr_xmalloc(&ver_str, &ver_str_len, buffer);
 	debug3("Version string in block_state header is %s", ver_str);
-	if (ver_str && !strcmp(ver_str, BLOCK_STATE_VERSION))
+	if (ver_str && !xstrcmp(ver_str, BLOCK_STATE_VERSION))
 		safe_unpack16(&protocol_version, buffer);
 
 	if (protocol_version == (uint16_t)NO_VAL) {
@@ -778,7 +778,7 @@ static int _load_state_file(List curr_block_list, char *dir_name)
 				 name);
 
 			xfree(name);
-			if (strcmp(temp, bg_record->mp_str)) {
+			if (xstrcmp(temp, bg_record->mp_str)) {
 				fatal("bad wiring in preserved state "
 				      "(found %s, but allocated %s) "
 				      "YOU MUST COLDSTART",
@@ -1752,6 +1752,11 @@ extern int select_p_job_signal(struct job_record *job_ptr, int signal)
 	return SLURM_SUCCESS;
 }
 
+extern int select_p_job_mem_confirm(struct job_record *job_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
 extern int select_p_job_fini(struct job_record *job_ptr)
 {
 	int	rc = SLURM_ERROR;
@@ -2029,7 +2034,7 @@ extern int select_p_step_start(struct step_record *step_ptr)
 	return SLURM_SUCCESS;
 }
 
-extern int select_p_step_finish(struct step_record *step_ptr)
+extern int select_p_step_finish(struct step_record *step_ptr, bool killing_step)
 {
 	bg_record_t *bg_record = NULL;
 	select_jobinfo_t *jobinfo = NULL, *step_jobinfo = NULL;
@@ -2038,6 +2043,8 @@ extern int select_p_step_finish(struct step_record *step_ptr)
 
 	xassert(step_ptr);
 
+	if (killing_step)	/* Do not care if SIGKILL being sent to step */
+		return SLURM_SUCCESS;
 
 	if (IS_JOB_COMPLETING(step_ptr->job_ptr) ||
 	    IS_JOB_FINISHED(step_ptr->job_ptr)) {
@@ -3299,14 +3306,15 @@ extern int select_p_reconfigure(void)
 #ifdef HAVE_BG
 	slurm_conf_lock();
 	if (!slurmctld_conf.slurm_user_name
-	    || strcmp(bg_conf->slurm_user_name, slurmctld_conf.slurm_user_name))
+	    || xstrcmp(bg_conf->slurm_user_name,
+		       slurmctld_conf.slurm_user_name))
 		error("The slurm user has changed from '%s' to '%s'.  "
 		      "If this is really what you "
 		      "want you will need to restart slurm for this "
 		      "change to be enforced in the bluegene plugin.",
 		      bg_conf->slurm_user_name, slurmctld_conf.slurm_user_name);
 	if (!slurmctld_conf.node_prefix
-	    || strcmp(bg_conf->slurm_node_prefix, slurmctld_conf.node_prefix))
+	    || xstrcmp(bg_conf->slurm_node_prefix, slurmctld_conf.node_prefix))
 		error("Node Prefix has changed from '%s' to '%s'.  "
 		      "If this is really what you "
 		      "want you will need to restart slurm for this "
@@ -3385,8 +3393,10 @@ extern bitstr_t *select_p_resv_test(resv_desc_msg_t *resv_desc_ptr,
 		cores = 16;
 #endif
 		job_rec.details->min_cpus *= cores;
-	} else
+	} else {
+		jobinfo->cnode_cnt = node_cnt * cnodes_per_mp;
 		job_rec.details->min_cpus = node_cnt * bg_conf->cpus_per_mp;
+	}
 
 	job_rec.details->max_cpus = job_rec.details->min_cpus;
 	job_rec.details->core_spec = (uint16_t)NO_VAL;
@@ -3431,6 +3441,7 @@ end_it:
 	xfree(job_rec.details);
 
 	if (rc == SLURM_SUCCESS && job_rec.start_time != INFINITE) {
+		xfree(resv_desc_ptr->node_list);
 		resv_desc_ptr->node_list = xstrdup_select_jobinfo(
 			jobinfo, SELECT_PRINT_NODES);
 		if (jobinfo->ionode_str) {
@@ -3448,6 +3459,12 @@ end_it:
 					continue;
 				bit_set(*core_bitmap, i+offset);
 			}
+		} else {
+			/* This means we ended up doing full nodes, so clear out
+			 * anything vestigal that would say otherwise.
+			 */
+			FREE_NULL_BITMAP(*core_bitmap);
+			xfree(resv_desc_ptr->core_cnt);
 		}
 
 		info("Reservation request for %u nodes satisfied with %s",

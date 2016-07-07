@@ -1,7 +1,7 @@
 
 AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I auxdir
-SUBDIRS    = auxdir src testsuite doc
+SUBDIRS    = auxdir src testsuite doc etc
 
 EXTRA_DIST =			\
 	etc/bluegene.conf.example \
@@ -11,6 +11,7 @@ EXTRA_DIST =			\
 	etc/init.d.slurm.in	\
 	etc/init.d.slurmdbd.in	\
 	etc/layouts.d.power.conf.example \
+	etc/layouts.d.unit.conf.example \
 	etc/slurm.conf.example	\
 	etc/slurm.epilog.clean	\
 	etc/slurmctld.service.in \
@@ -28,8 +29,7 @@ EXTRA_DIST =			\
 	LICENSE.OpenSSL		\
 	NEWS			\
 	ChangeLog		\
-	META			\
-	config.xml
+	META
 
 pkginclude_HEADERS =		\
 	slurm/pmi.h		\
@@ -40,7 +40,7 @@ pkginclude_HEADERS =		\
 	slurm/spank.h
 
 MAINTAINERCLEANFILES = 					\
-	aclocal.m4 config.guess config.xml		\
+	aclocal.m4 config.guess				\
 	config.h.in config.sub configure install-sh 	\
 	ltconfig ltmain.sh missing mkinstalldirs 	\
 	slurm/slurm.h					\

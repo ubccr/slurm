@@ -77,6 +77,7 @@ const char *node_select_syms[] = {
 	"select_p_job_expand",
 	"select_p_job_resized",
 	"select_p_job_signal",
+	"select_p_job_mem_confirm",
 	"select_p_job_fini",
 	"select_p_job_suspend",
 	"select_p_job_resume",
@@ -356,9 +357,21 @@ extern int other_job_resized(struct job_record *job_ptr,
 extern int other_job_signal(struct job_record *job_ptr, int signal)
 {
 	if (other_select_init() < 0)
-		return -1;
+		return SLURM_ERROR;
 
 	return (*(ops.job_signal))(job_ptr, signal);
+}
+
+/*
+ * Pass job memory allocation confirmation request to other plugin.
+ * IN job_ptr - job to be signalled
+ */
+extern int other_job_mem_confirm(struct job_record *job_ptr)
+{
+	if (other_select_init() < 0)
+		return SLURM_ERROR;
+
+	return (*(ops.job_mem_confirm))(job_ptr);
 }
 
 /*
@@ -441,14 +454,16 @@ extern int other_step_start(struct step_record *step_ptr)
 /*
  * clear what happened in select_g_step_pick_nodes
  * IN/OUT step_ptr - Flush the resources from the job and step.
+ * IN killing_step - if true then we are just starting to kill the step
+ *                   if false, the step is completely terminated
  */
-extern int other_step_finish(struct step_record *step_ptr)
+extern int other_step_finish(struct step_record *step_ptr, bool killing_step)
 {
 	if (other_select_init() < 0)
 		return SLURM_ERROR;
 
 	return (*(ops.step_finish))
-		(step_ptr);
+		(step_ptr, killing_step);
 }
 
 extern int other_pack_select_info(time_t last_query_time, uint16_t show_flags,

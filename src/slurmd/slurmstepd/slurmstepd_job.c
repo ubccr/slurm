@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.c - stepd_step_rec_t routines
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -70,6 +69,7 @@
 #include "src/slurmd/slurmstepd/fname.h"
 #include "src/slurmd/slurmstepd/multi_prog.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
+#include "src/slurmd/slurmstepd/task.h"
 
 #ifdef HAVE_NATIVE_CRAY
 static bool already_validated_uid = true;
@@ -161,6 +161,12 @@ _job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
 	job->task = (stepd_step_task_info_t **)
 		xmalloc(job->node_tasks * sizeof(stepd_step_task_info_t *));
 
+	if (!job->multi_prog && job->argv) {
+		char *new_path = build_path(job->argv[0], job->env, job->cwd);
+		xfree(job->argv[0]);
+		job->argv[0] = new_path;
+	}
+
 	for (i = 0; i < job->node_tasks; i++) {
 		in = _expand_stdio_filename(ifname, gtid[node_id][i], job);
 		out = _expand_stdio_filename(ofname, gtid[node_id][i], job);
@@ -175,7 +181,7 @@ _job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
 
 	if (job->multi_prog) {
 		char *switch_type = slurm_get_switch_type();
-		if (!strcmp(switch_type, "switch/cray"))
+		if (!xstrcmp(switch_type, "switch/cray"))
 			multi_prog_parse(job, gtid);
 		xfree(switch_type);
 		for (i = 0; i < job->node_tasks; i++){
@@ -302,15 +308,20 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg, uint16_t protocol_version
 	job->array_task_id = NO_VAL;
 	for (i = 0; i < msg->envc; i++) {
 		/*                         1234567890123456789 */
-		if (!strncmp(msg->env[i], "SLURM_ARRAY_JOB_ID=", 19))
+		if (!xstrncmp(msg->env[i], "SLURM_ARRAY_JOB_ID=", 19))
 			job->array_job_id = atoi(msg->env[i] + 19);
 		/*                         12345678901234567890 */
-		if (!strncmp(msg->env[i], "SLURM_ARRAY_TASK_ID=", 20))
+		if (!xstrncmp(msg->env[i], "SLURM_ARRAY_TASK_ID=", 20))
 			job->array_task_id = atoi(msg->env[i] + 20);
 	}
 
 	job->eio     = eio_handle_create(0);
 	job->sruns   = list_create((ListDelF) _srun_info_destructor);
+
+	/* Based on my testing the next 3 lists here could use the
+	 * eio_obj_destroy, but if you do you can get an invalid read.  Since
+	 * these stay until the end of the job it isn't that big of a deal.
+	 */
 	job->clients = list_create(NULL); /* FIXME! Needs destructor */
 	job->stdout_eio_objs = list_create(NULL); /* FIXME! Needs destructor */
 	job->stderr_eio_objs = list_create(NULL); /* FIXME! Needs destructor */
@@ -342,6 +353,8 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg, uint16_t protocol_version
 		slurm_set_addr(&resp_addr,
 			       msg->resp_port[nodeid % msg->num_resp_port],
 			       NULL);
+	} else {
+		memset(&resp_addr, 0, sizeof(slurm_addr_t));
 	}
 	job->user_managed_io = msg->user_managed_io;
 	if (!msg->io_port)
@@ -351,6 +364,8 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg, uint16_t protocol_version
 		slurm_set_addr(&io_addr,
 			       msg->io_port[nodeid % msg->num_io_port],
 			       NULL);
+	} else {
+		memset(&io_addr, 0, sizeof(slurm_addr_t));
 	}
 
 	srun = srun_info_create(msg->cred, &resp_addr, &io_addr,
@@ -461,6 +476,15 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 
 	job->batch   = true;
 	job->node_name  = xstrdup(conf->node_name);
+	job->user_name  = xstrdup(msg->user_name);
+	job->uid        = (uid_t) msg->uid;
+	job->gid        = (gid_t) msg->gid;
+
+	job->profile    = msg->profile;
+
+	/* give them all to the 1 task */
+	job->cpus_per_task = job->cpus;
+
 	/* This needs to happen before acct_gather_profile_startpoll
 	   and only really looks at the profile in the job.
 	*/
@@ -473,9 +497,6 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	job->open_mode  = msg->open_mode;
 	job->overcommit = (bool) msg->overcommit;
 
-	job->uid     = (uid_t) msg->uid;
-	job->user_name  = xstrdup(msg->user_name);
-	job->gid     = (gid_t) msg->gid;
 	job->cwd     = xstrdup(msg->work_dir);
 
 	job->ckpt_dir = xstrdup(msg->ckpt_dir);
@@ -564,7 +585,14 @@ stepd_step_rec_destroy(stepd_step_rec_t *job)
 
 	for (i = 0; i < job->node_tasks; i++)
 		_task_info_destroy(job->task[i], job->multi_prog);
+	eio_handle_destroy(job->eio);
 	FREE_NULL_LIST(job->sruns);
+	FREE_NULL_LIST(job->clients);
+	FREE_NULL_LIST(job->stdout_eio_objs);
+	FREE_NULL_LIST(job->stderr_eio_objs);
+	FREE_NULL_LIST(job->free_incoming);
+	FREE_NULL_LIST(job->free_outgoing);
+	FREE_NULL_LIST(job->outgoing_cache);
 	xfree(job->envtp);
 	xfree(job->node_name);
 	mpmd_free(job);

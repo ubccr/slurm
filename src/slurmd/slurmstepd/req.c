@@ -290,12 +290,12 @@ static void _wait_for_connections(void)
 	struct timespec ts = {0, 0};
 	int rc = 0;
 
-	pthread_mutex_lock(&message_lock);
+	slurm_mutex_lock(&message_lock);
 	ts.tv_sec = time(NULL) + STEPD_MESSAGE_COMP_WAIT;
 	while (message_connections > 0 && rc == 0)
 		rc = pthread_cond_timedwait(&message_cond, &message_lock, &ts);
 
-	pthread_mutex_unlock(&message_lock);
+	slurm_mutex_unlock(&message_lock);
 }
 
 static bool
@@ -353,9 +353,9 @@ _msg_socket_accept(eio_obj_t *obj, List objs)
 		return SLURM_SUCCESS;
 	}
 
-	pthread_mutex_lock(&message_lock);
+	slurm_mutex_lock(&message_lock);
 	message_connections++;
-	pthread_mutex_unlock(&message_lock);
+	slurm_mutex_unlock(&message_lock);
 
 	fd_set_close_on_exec(fd);
 	fd_set_blocking(fd);
@@ -404,6 +404,7 @@ _handle_accept(void *arg)
 	int rc;
 	uid_t uid;
 	gid_t gid;
+	char *auth_info;
 
 	debug3("Entering _handle_accept (new thread)");
 	xfree(arg);
@@ -426,18 +427,21 @@ _handle_accept(void *arg)
 		free_buf(buffer);
 		goto fail;
 	}
-	rc = g_slurm_auth_verify(auth_cred, NULL, 2, slurm_get_auth_info());
+	auth_info = slurm_get_auth_info();
+	rc = g_slurm_auth_verify(auth_cred, NULL, 2, auth_info);
 	if (rc != SLURM_SUCCESS) {
 		error("Verifying authentication credential: %s",
 		      g_slurm_auth_errstr(g_slurm_auth_errno(auth_cred)));
+		xfree(auth_info);
 		(void) g_slurm_auth_destroy(auth_cred);
 		free_buf(buffer);
 		goto fail;
 	}
 
 	/* Get the uid & gid from the credential, then destroy it. */
-	uid = g_slurm_auth_get_uid(auth_cred, slurm_get_auth_info());
-	gid = g_slurm_auth_get_gid(auth_cred, slurm_get_auth_info());
+	uid = g_slurm_auth_get_uid(auth_cred, auth_info);
+	gid = g_slurm_auth_get_gid(auth_cred, auth_info);
+	xfree(auth_info);
 	debug3("  Identity: uid=%d, gid=%d", uid, gid);
 	g_slurm_auth_destroy(auth_cred);
 	free_buf(buffer);
@@ -454,10 +458,10 @@ _handle_accept(void *arg)
 	if (close(fd) == -1)
 		error("Closing accepted fd: %m");
 
-	pthread_mutex_lock(&message_lock);
+	slurm_mutex_lock(&message_lock);
 	message_connections--;
 	pthread_cond_signal(&message_cond);
-	pthread_mutex_unlock(&message_lock);
+	slurm_mutex_unlock(&message_lock);
 
 	debug3("Leaving  _handle_accept");
 	return NULL;
@@ -701,10 +705,10 @@ _handle_signal_task_local(int fd, stepd_step_rec_t *job, uid_t uid)
 	/*
 	 * Signal the task
 	 */
-	pthread_mutex_lock(&suspend_mutex);
+	slurm_mutex_lock(&suspend_mutex);
 	if (suspended) {
 		rc = ESLURMD_STEP_SUSPENDED;
-		pthread_mutex_unlock(&suspend_mutex);
+		slurm_mutex_unlock(&suspend_mutex);
 		goto done;
 	}
 
@@ -718,7 +722,7 @@ _handle_signal_task_local(int fd, stepd_step_rec_t *job, uid_t uid)
 			signal, job->jobid, job->stepid,
 			job->task[ltaskid]->pid);
 	}
-	pthread_mutex_unlock(&suspend_mutex);
+	slurm_mutex_unlock(&suspend_mutex);
 
 done:
 	/* Send the return code */
@@ -791,7 +795,8 @@ _handle_signal_container(int fd, stepd_step_rec_t *job, uid_t uid)
 	ptr = getenvp(job->env, "SLURM_STEP_KILLED_MSG_NODE_ID");
 	if (ptr)
 		target_node_id = atoi(ptr);
-	if ((job->nodeid == target_node_id) && (msg_sent == 0) &&
+	if ((job->stepid != SLURM_EXTERN_CONT) &&
+	    (job->nodeid == target_node_id) && (msg_sent == 0) &&
 	    (job->state < SLURMSTEPD_STEP_ENDING)) {
 		time_t now = time(NULL);
 		char entity[24], time_str[24];
@@ -844,11 +849,11 @@ _handle_signal_container(int fd, stepd_step_rec_t *job, uid_t uid)
 		job->aborted = true;
 	}
 
-	pthread_mutex_lock(&suspend_mutex);
+	slurm_mutex_lock(&suspend_mutex);
 	if (suspended && (sig != SIGKILL)) {
 		rc = -1;
 		errnum = ESLURMD_STEP_SUSPENDED;
-		pthread_mutex_unlock(&suspend_mutex);
+		slurm_mutex_unlock(&suspend_mutex);
 		goto done;
 	}
 
@@ -856,7 +861,7 @@ _handle_signal_container(int fd, stepd_step_rec_t *job, uid_t uid)
 		int i;
 		for (i = 0; i < job->node_tasks; i++)
 			pdebug_wake_process(job, job->task[i]->pid);
-		pthread_mutex_unlock(&suspend_mutex);
+		slurm_mutex_unlock(&suspend_mutex);
 		goto done;
 	}
 
@@ -873,7 +878,7 @@ _handle_signal_container(int fd, stepd_step_rec_t *job, uid_t uid)
 			      job->jobid, job->stepid);
 			rc = SLURM_ERROR;
 			errnum = errno;
-			pthread_mutex_unlock(&suspend_mutex);
+			slurm_mutex_unlock(&suspend_mutex);
 			goto done;
 		}
 		rc = SLURM_SUCCESS;
@@ -881,7 +886,7 @@ _handle_signal_container(int fd, stepd_step_rec_t *job, uid_t uid)
 		verbose("%s: sent signal %d to container pid %u job %u.%u",
 			__func__, sig, job->pgid,
 			job->jobid, job->stepid);
-		pthread_mutex_unlock(&suspend_mutex);
+		slurm_mutex_unlock(&suspend_mutex);
 		goto done;
 	}
 
@@ -897,7 +902,7 @@ _handle_signal_container(int fd, stepd_step_rec_t *job, uid_t uid)
 		verbose("Sent signal %d to %u.%u",
 			sig, job->jobid, job->stepid);
 	}
-	pthread_mutex_unlock(&suspend_mutex);
+	slurm_mutex_unlock(&suspend_mutex);
 
 done:
 	/* Send the return code and errnum */
@@ -954,10 +959,10 @@ _handle_checkpoint_tasks(int fd, stepd_step_rec_t *job, uid_t uid)
 		goto done;
 	}
 
-	pthread_mutex_lock(&suspend_mutex);
+	slurm_mutex_lock(&suspend_mutex);
 	if (suspended) {
 		rc = ESLURMD_STEP_SUSPENDED;
-		pthread_mutex_unlock(&suspend_mutex);
+		slurm_mutex_unlock(&suspend_mutex);
 		goto done;
 	}
 
@@ -980,7 +985,7 @@ _handle_checkpoint_tasks(int fd, stepd_step_rec_t *job, uid_t uid)
 			job->jobid, job->stepid);
 	}
 
-	pthread_mutex_unlock(&suspend_mutex);
+	slurm_mutex_unlock(&suspend_mutex);
 
 done:
 	/* Send the return code */
@@ -1080,7 +1085,7 @@ _handle_terminate(int fd, stepd_step_rec_t *job, uid_t uid)
 	/*
 	 * Signal the container with SIGKILL
 	 */
-	pthread_mutex_lock(&suspend_mutex);
+	slurm_mutex_lock(&suspend_mutex);
 	if (suspended) {
 		debug("Terminating suspended job step %u.%u",
 		      job->jobid, job->stepid);
@@ -1088,15 +1093,17 @@ _handle_terminate(int fd, stepd_step_rec_t *job, uid_t uid)
 	}
 
 	if (proctrack_g_signal(job->cont_id, SIGKILL) < 0) {
-		rc = -1;
-		errnum = errno;
+		if (errno != ESRCH) {	/* No error if process already gone */
+			rc = -1;
+			errnum = errno;
+		}
 		verbose("Error sending SIGKILL signal to %u.%u: %m",
 			job->jobid, job->stepid);
 	} else {
 		verbose("Sent SIGKILL signal to %u.%u",
 			job->jobid, job->stepid);
 	}
-	pthread_mutex_unlock(&suspend_mutex);
+	slurm_mutex_unlock(&suspend_mutex);
 
 done:
 	/* Send the return code and errnum */
@@ -1321,9 +1328,20 @@ static int _handle_add_extern_pid_internal(stepd_step_rec_t *job, pid_t pid)
 	jobacct_id.nodeid = job->nodeid;
 	jobacct_id.job = job;
 
-	proctrack_g_add(job, pid);
-	task_g_add_pid(pid);
-	jobacct_gather_add_task(pid, &jobacct_id, 1);
+	if (proctrack_g_add(job, pid) != SLURM_SUCCESS) {
+		error("%s: Job %u can't add pid %d to proctrack plugin in the extern_step.", __func__, job->jobid, pid);
+		return SLURM_FAILURE;
+	}
+
+	if (task_g_add_pid(pid) != SLURM_SUCCESS) {
+		error("%s: Job %u can't add pid %d to task plugin in the extern_step.", __func__, job->jobid, pid);
+		return SLURM_FAILURE;
+	}
+
+	if (jobacct_gather_add_task(pid, &jobacct_id, 1) != SLURM_SUCCESS) {
+		error("%s: Job %u can't add pid %d to jobacct_gather plugin in the extern_step.", __func__, job->jobid, pid);
+		return SLURM_FAILURE;
+	}
 
 	/* spawn a thread that will wait on the pid given */
 	slurm_attr_init(&attr);
@@ -1419,7 +1437,7 @@ _handle_suspend(int fd, stepd_step_rec_t *job, uid_t uid)
 	acct_gather_suspend_poll();
 	if (launch_poe == -1) {
 		char *launch_type = slurm_get_launch_type();
-		if (!strcmp(launch_type, "launch/poe"))
+		if (!xstrcmp(launch_type, "launch/poe"))
 			launch_poe = 1;
 		else
 			launch_poe = 0;
@@ -1429,11 +1447,11 @@ _handle_suspend(int fd, stepd_step_rec_t *job, uid_t uid)
 	/*
 	 * Signal the container
 	 */
-	pthread_mutex_lock(&suspend_mutex);
+	slurm_mutex_lock(&suspend_mutex);
 	if (suspended) {
 		rc = -1;
 		errnum = ESLURMD_STEP_SUSPENDED;
-		pthread_mutex_unlock(&suspend_mutex);
+		slurm_mutex_unlock(&suspend_mutex);
 		goto done;
 	} else {
 		if (!job->batch && switch_g_job_step_pre_suspend(job))
@@ -1471,7 +1489,7 @@ _handle_suspend(int fd, stepd_step_rec_t *job, uid_t uid)
 	if (!job->batch && core_spec_g_suspend(job->cont_id, job_core_spec))
 		error("core_spec_g_suspend: %m");
 
-	pthread_mutex_unlock(&suspend_mutex);
+	slurm_mutex_unlock(&suspend_mutex);
 
 done:
 	/* Send the return code and errno */
@@ -1514,11 +1532,11 @@ _handle_resume(int fd, stepd_step_rec_t *job, uid_t uid)
 	/*
 	 * Signal the container
 	 */
-	pthread_mutex_lock(&suspend_mutex);
+	slurm_mutex_lock(&suspend_mutex);
 	if (!suspended) {
 		rc = -1;
 		errnum = ESLURMD_STEP_NOTSUSPENDED;
-		pthread_mutex_unlock(&suspend_mutex);
+		slurm_mutex_unlock(&suspend_mutex);
 		goto done;
 	} else {
 		if (!job->batch && switch_g_job_step_pre_resume(job))
@@ -1542,7 +1560,7 @@ _handle_resume(int fd, stepd_step_rec_t *job, uid_t uid)
 		cpu_freq_set(job);
 	}
 
-	pthread_mutex_unlock(&suspend_mutex);
+	slurm_mutex_unlock(&suspend_mutex);
 
 done:
 	/* Send the return code and errno */
@@ -1606,7 +1624,7 @@ _handle_completion(int fd, stepd_step_rec_t *job, uid_t uid)
 	/*
 	 * Record the completed nodes
 	 */
-	pthread_mutex_lock(&step_complete.lock);
+	slurm_mutex_lock(&step_complete.lock);
 	lock_set = true;
 	if (! step_complete.wait_children) {
 		rc = -1;
@@ -1648,14 +1666,14 @@ timeout:
 	safe_write(fd, &rc, sizeof(int));
 	safe_write(fd, &errnum, sizeof(int));
 	pthread_cond_signal(&step_complete.cond);
-	pthread_mutex_unlock(&step_complete.lock);
+	slurm_mutex_unlock(&step_complete.lock);
 
 	return SLURM_SUCCESS;
 
 
 rwfail:	if (lock_set) {
 		pthread_cond_signal(&step_complete.cond);
-		pthread_mutex_unlock(&step_complete.lock);
+		slurm_mutex_unlock(&step_complete.lock);
 	}
 	return SLURM_FAILURE;
 }

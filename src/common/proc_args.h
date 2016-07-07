@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  proc_args.h - helper functions for command argument processing
- *  $Id: opt.h 11996 2007-08-10 20:36:26Z jette $
  *****************************************************************************
  *  Copyright (C) 2007 Hewlett-Packard Development Company, L.P.
  *  Written by Christopher Holmes <cholmes@hp.com>, who borrowed heavily
@@ -196,5 +195,7 @@ extern void bg_figure_nodes_tasks(int *min_nodes, int *max_nodes,
  */
 
 extern uint32_t parse_resv_flags(const char *flagstr, const char *msg);
+
+extern uint16_t parse_compress_type(const char *arg);
 
 #endif /* !_PROC_ARGS_H */

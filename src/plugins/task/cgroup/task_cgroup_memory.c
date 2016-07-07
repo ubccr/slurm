@@ -94,7 +94,10 @@ extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	/* initialize memory cgroup namespace */
 	if (xcgroup_ns_create(slurm_cgroup_conf, &memory_ns, "", "memory")
 	    != XCGROUP_SUCCESS) {
-		error("task/cgroup: unable to create memory namespace");
+		error("task/cgroup: unable to create memory namespace. "
+			"You may need to set the Linux kernel option "
+			"cgroup_enable=memory (and reboot), or disable "
+			"ConstrainRAMSpace in cgroup.conf.");
 		return SLURM_ERROR;
 	}
 
@@ -273,7 +276,7 @@ static int memcg_initialize (xcgroup_ns_t *ns, xcgroup_t *cg,
 
 	cg->notify = notify;
 
-	if (xcgroup_instanciate (cg) != XCGROUP_SUCCESS) {
+	if (xcgroup_instantiate (cg) != XCGROUP_SUCCESS) {
 		xcgroup_destroy (cg);
 		return -1;
 	}
@@ -408,7 +411,7 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 			    getuid(),getgid()) != XCGROUP_SUCCESS) {
 		goto error;
 	}
-	if (xcgroup_instanciate(&user_memory_cg) != XCGROUP_SUCCESS) {
+	if (xcgroup_instantiate(&user_memory_cg) != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&user_memory_cg);
 		goto error;
 	}

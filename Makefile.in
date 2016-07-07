@@ -91,7 +91,8 @@ host_triplet = @host@
 target_triplet = @target@
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
+am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
+	$(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/ax_pthread.m4 \
 	$(top_srcdir)/auxdir/libtool.m4 \
 	$(top_srcdir)/auxdir/ltoptions.m4 \
@@ -104,7 +105,6 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/x_ac_aix.m4 \
 	$(top_srcdir)/auxdir/x_ac_blcr.m4 \
 	$(top_srcdir)/auxdir/x_ac_bluegene.m4 \
-	$(top_srcdir)/auxdir/x_ac_cflags.m4 \
 	$(top_srcdir)/auxdir/x_ac_cray.m4 \
 	$(top_srcdir)/auxdir/x_ac_curl.m4 \
 	$(top_srcdir)/auxdir/x_ac_databases.m4 \
@@ -117,6 +117,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/x_ac_iso.m4 \
 	$(top_srcdir)/auxdir/x_ac_json.m4 \
 	$(top_srcdir)/auxdir/x_ac_lua.m4 \
+	$(top_srcdir)/auxdir/x_ac_lz4.m4 \
 	$(top_srcdir)/auxdir/x_ac_man2html.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
 	$(top_srcdir)/auxdir/x_ac_ncurses.m4 \
@@ -124,6 +125,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/x_ac_nrt.m4 \
 	$(top_srcdir)/auxdir/x_ac_ofed.m4 \
 	$(top_srcdir)/auxdir/x_ac_pam.m4 \
+	$(top_srcdir)/auxdir/x_ac_pmix.m4 \
 	$(top_srcdir)/auxdir/x_ac_printf_null.m4 \
 	$(top_srcdir)/auxdir/x_ac_ptrace.m4 \
 	$(top_srcdir)/auxdir/x_ac_readline.m4 \
@@ -132,7 +134,6 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
 	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
 	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
-	$(top_srcdir)/auxdir/x_ac_sun_const.m4 \
 	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
@@ -142,13 +143,9 @@ am__CONFIG_DISTCLEAN_FILES = config.status config.cache config.log \
  configure.lineno config.status.lineno
 mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = config.h $(top_builddir)/slurm/slurm.h
-CONFIG_CLEAN_FILES = config.xml \
-	contribs/perlapi/libslurm/perl/Makefile.PL \
+CONFIG_CLEAN_FILES = contribs/perlapi/libslurm/perl/Makefile.PL \
 	contribs/perlapi/libslurmdb/perl/Makefile.PL \
-	contribs/phpext/slurm_php/config.m4 \
-	etc/cgroup.release_common.example etc/init.d.slurm \
-	etc/init.d.slurmdbd etc/slurmctld.service etc/slurmd.service \
-	etc/slurmdbd.service
+	contribs/phpext/slurm_php/config.m4
 CONFIG_CLEAN_VPATH_FILES =
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
@@ -237,22 +234,14 @@ CTAGS = ctags
 CSCOPE = cscope
 DIST_SUBDIRS = $(SUBDIRS)
 am__DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/config.h.in \
-	$(srcdir)/config.xml.in $(top_srcdir)/auxdir/compile \
-	$(top_srcdir)/auxdir/config.guess \
+	$(top_srcdir)/auxdir/compile $(top_srcdir)/auxdir/config.guess \
 	$(top_srcdir)/auxdir/config.sub \
 	$(top_srcdir)/auxdir/install-sh $(top_srcdir)/auxdir/ltmain.sh \
 	$(top_srcdir)/auxdir/missing \
 	$(top_srcdir)/contribs/perlapi/libslurm/perl/Makefile.PL.in \
 	$(top_srcdir)/contribs/perlapi/libslurmdb/perl/Makefile.PL.in \
 	$(top_srcdir)/contribs/phpext/slurm_php/config.m4.in \
-	$(top_srcdir)/etc/cgroup.release_common.example.in \
-	$(top_srcdir)/etc/init.d.slurm.in \
-	$(top_srcdir)/etc/init.d.slurmdbd.in \
-	$(top_srcdir)/etc/slurmctld.service.in \
-	$(top_srcdir)/etc/slurmd.service.in \
-	$(top_srcdir)/etc/slurmdbd.service.in \
-	$(top_srcdir)/slurm/slurm.h.in AUTHORS COPYING ChangeLog \
-	INSTALL NEWS
+	$(top_srcdir)/slurm/slurm.h.in AUTHORS COPYING INSTALL NEWS
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 distdir = $(PACKAGE)-$(VERSION)
 top_distdir = $(distdir)
@@ -299,8 +288,6 @@ ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AR = @AR@
-AUTHD_CFLAGS = @AUTHD_CFLAGS@
-AUTHD_LIBS = @AUTHD_LIBS@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
@@ -401,6 +388,9 @@ LIPO = @LIPO@
 LN_S = @LN_S@
 LTLIBOBJS = @LTLIBOBJS@
 LT_SYS_LIBRARY_PATH = @LT_SYS_LIBRARY_PATH@
+LZ4_CPPFLAGS = @LZ4_CPPFLAGS@
+LZ4_LDFLAGS = @LZ4_LDFLAGS@
+LZ4_LIBS = @LZ4_LIBS@
 MAINT = @MAINT@
 MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
@@ -439,6 +429,9 @@ PATH_SEPARATOR = @PATH_SEPARATOR@
 PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
+PMIX_CPPFLAGS = @PMIX_CPPFLAGS@
+PMIX_LDFLAGS = @PMIX_LDFLAGS@
+PMIX_LIBS = @PMIX_LIBS@
 PROCTRACKDIR = @PROCTRACKDIR@
 PROJECT = @PROJECT@
 PTHREAD_CC = @PTHREAD_CC@
@@ -482,6 +475,9 @@ STRIP = @STRIP@
 SUCMD = @SUCMD@
 UTIL_LIBS = @UTIL_LIBS@
 VERSION = @VERSION@
+ZLIB_CPPFLAGS = @ZLIB_CPPFLAGS@
+ZLIB_LDFLAGS = @ZLIB_LDFLAGS@
+ZLIB_LIBS = @ZLIB_LIBS@
 _libcurl_config = @_libcurl_config@
 abs_builddir = @abs_builddir@
 abs_srcdir = @abs_srcdir@
@@ -547,7 +543,7 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I auxdir
-SUBDIRS = auxdir src testsuite doc
+SUBDIRS = auxdir src testsuite doc etc
 EXTRA_DIST = \
 	etc/bluegene.conf.example \
 	etc/cgroup.conf.example \
@@ -556,6 +552,7 @@ EXTRA_DIST = \
 	etc/init.d.slurm.in	\
 	etc/init.d.slurmdbd.in	\
 	etc/layouts.d.power.conf.example \
+	etc/layouts.d.unit.conf.example \
 	etc/slurm.conf.example	\
 	etc/slurm.epilog.clean	\
 	etc/slurmctld.service.in \
@@ -573,8 +570,7 @@ EXTRA_DIST = \
 	LICENSE.OpenSSL		\
 	NEWS			\
 	ChangeLog		\
-	META			\
-	config.xml
+	META
 
 pkginclude_HEADERS = \
 	slurm/pmi.h		\
@@ -585,7 +581,7 @@ pkginclude_HEADERS = \
 	slurm/spank.h
 
 MAINTAINERCLEANFILES = \
-	aclocal.m4 config.guess config.xml		\
+	aclocal.m4 config.guess				\
 	config.h.in config.sub configure install-sh 	\
 	ltconfig ltmain.sh missing mkinstalldirs 	\
 	slurm/slurm.h					\
@@ -651,25 +647,11 @@ slurm/stamp-h2: $(top_srcdir)/slurm/slurm.h.in $(top_builddir)/config.status
 
 distclean-hdr:
 	-rm -f config.h stamp-h1 slurm/slurm.h slurm/stamp-h2
-config.xml: $(top_builddir)/config.status $(srcdir)/config.xml.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
 contribs/perlapi/libslurm/perl/Makefile.PL: $(top_builddir)/config.status $(top_srcdir)/contribs/perlapi/libslurm/perl/Makefile.PL.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 contribs/perlapi/libslurmdb/perl/Makefile.PL: $(top_builddir)/config.status $(top_srcdir)/contribs/perlapi/libslurmdb/perl/Makefile.PL.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 contribs/phpext/slurm_php/config.m4: $(top_builddir)/config.status $(top_srcdir)/contribs/phpext/slurm_php/config.m4.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-etc/cgroup.release_common.example: $(top_builddir)/config.status $(top_srcdir)/etc/cgroup.release_common.example.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-etc/init.d.slurm: $(top_builddir)/config.status $(top_srcdir)/etc/init.d.slurm.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-etc/init.d.slurmdbd: $(top_builddir)/config.status $(top_srcdir)/etc/init.d.slurmdbd.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-etc/slurmctld.service: $(top_builddir)/config.status $(top_srcdir)/etc/slurmctld.service.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-etc/slurmd.service: $(top_builddir)/config.status $(top_srcdir)/etc/slurmd.service.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-etc/slurmdbd.service: $(top_builddir)/config.status $(top_srcdir)/etc/slurmdbd.service.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 
 mostlyclean-libtool:

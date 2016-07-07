@@ -206,7 +206,7 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 	xfree(query);
 	while ((row = mysql_fetch_row(result))) {
 		// row[2] is the key name
-		if (!strcasecmp(row[2], "PRIMARY"))
+		if (!xstrcasecmp(row[2], "PRIMARY"))
 			old_primary = 1;
 		else if (!old_index)
 			old_index = xstrdup(row[2]);
@@ -230,7 +230,7 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 		else
 			list_iterator_reset(itr);
 		while ((db_key = list_next(itr))) {
-			if (!strcmp(db_key->name, row[2]))
+			if (!xstrcmp(db_key->name, row[2]))
 				break;
 		}
 
@@ -286,7 +286,7 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 
 		list_iterator_reset(itr);
 		while ((col = list_next(itr))) {
-			if (!strcmp(col, fields[i].name)) {
+			if (!xstrcmp(col, fields[i].name)) {
 				xstrfmtcat(query, " modify `%s` %s,",
 					   fields[i].name,
 					   fields[i].options);
@@ -421,7 +421,7 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 			new_key_name = xstrndup(temp+6, name_end-6);
 			new_key = xstrndup(temp+2, end-2); // skip ', '
 			while ((db_key = list_next(itr))) {
-				if (!strcmp(db_key->name, new_key_name)) {
+				if (!xstrcmp(db_key->name, new_key_name)) {
 					list_remove(itr);
 					break;
 				}
@@ -794,7 +794,7 @@ extern int mysql_db_delete_affected_rows(mysql_conn_t *mysql_conn, char *query)
 	}
 	slurm_mutex_lock(&mysql_conn->lock);
 	if (!(rc = _mysql_query_internal(mysql_conn->db_conn, query)))
-			rc = mysql_affected_rows(mysql_conn->db_conn);
+		rc = mysql_affected_rows(mysql_conn->db_conn);
 	slurm_mutex_unlock(&mysql_conn->lock);
 	return rc;
 }

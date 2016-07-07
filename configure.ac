@@ -1,4 +1,3 @@
-# $Id$
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -231,10 +230,8 @@ LDFLAGS="$LDFLAGS "
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 LIBS="$PTHREAD_LIBS $LIBS"
 
-X_AC_SUN_CONST
 X_AC_DIMENSIONS
 
-X_AC_CFLAGS
 X_AC_OFED
 
 AX_LIB_HDF5()
@@ -245,7 +242,10 @@ AM_CONDITIONAL(BUILD_HDF5, test "$with_hdf5" = "yes")
 # the 1.8 API.
 AC_DEFINE([H5_NO_DEPRECATED_SYMBOLS], [1], [Make sure we get the 1.8 HDF5 API])
 
+AX_CHECK_ZLIB([], [])
+X_AC_LZ4
 X_AC_HWLOC
+X_AC_PMIX
 X_AC_FREEIPMI
 X_AC_SLURM_SEMAPHORE
 X_AC_RRDTOOL
@@ -399,15 +399,10 @@ else
 fi
 
 
-AUTHD_LIBS="-lauth -le"
 savedLIBS="$LIBS"
 savedCFLAGS="$CFLAGS"
-LIBS="$SSL_LIBS $AUTHD_LIBS $LIBS"
+LIBS="$SSL_LIBS $LIBS"
 CFLAGS="$SSL_CPPFLAGS $CFLAGS"
-AC_CHECK_LIB(auth, auth_init_credentials, [have_authd=yes], [have_authd=no])
-AC_SUBST(AUTHD_LIBS)
-AC_SUBST(AUTHD_CFLAGS)
-AM_CONDITIONAL(WITH_AUTHD, test "x$have_authd" = "xyes")
 LIBS="$savedLIBS"
 CFLAGS="$savedCFLAGS"
 
@@ -439,7 +434,6 @@ AM_CONDITIONAL(BUILD_SMAP, test "x$ac_build_smap" = "xyes")
 dnl All slurm Makefiles:
 
 AC_CONFIG_FILES([Makefile
-		 config.xml
 		 auxdir/Makefile
 		 contribs/Makefile
 		 contribs/cray/Makefile
@@ -453,7 +447,9 @@ AC_CONFIG_FILES([Makefile
 		 contribs/perlapi/libslurm/perl/Makefile.PL
 		 contribs/perlapi/libslurmdb/Makefile
 		 contribs/perlapi/libslurmdb/perl/Makefile.PL
+		 contribs/seff/Makefile
 		 contribs/torque/Makefile
+		 contribs/openlava/Makefile
 		 contribs/phpext/Makefile
 		 contribs/phpext/slurm_php/config.m4
 		 contribs/sgather/Makefile
@@ -470,14 +466,10 @@ AC_CONFIG_FILES([Makefile
 		 doc/html/Makefile
 		 doc/html/configurator.html
 		 doc/html/configurator.easy.html
-		 etc/cgroup.release_common.example
-		 etc/init.d.slurm
-		 etc/init.d.slurmdbd
-		 etc/slurmctld.service
-		 etc/slurmd.service
-		 etc/slurmdbd.service
+		 etc/Makefile
 		 src/Makefile
 		 src/api/Makefile
+		 src/bcast/Makefile
 		 src/common/Makefile
 		 src/db_api/Makefile
 		 src/layouts/Makefile
@@ -537,7 +529,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/acct_gather_profile/hdf5/sh5util/libsh5util_old/Makefile
 		 src/plugins/acct_gather_profile/none/Makefile
 		 src/plugins/auth/Makefile
-		 src/plugins/auth/authd/Makefile
 		 src/plugins/auth/munge/Makefile
 		 src/plugins/auth/none/Makefile
 		 src/plugins/burst_buffer/Makefile
@@ -582,7 +573,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/job_container/none/Makefile
 		 src/plugins/job_submit/Makefile
 		 src/plugins/job_submit/all_partitions/Makefile
-		 src/plugins/job_submit/cnode/Makefile
 		 src/plugins/job_submit/cray/Makefile
 		 src/plugins/job_submit/defaults/Makefile
 		 src/plugins/job_submit/logging/Makefile
@@ -597,6 +587,12 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/launch/poe/Makefile
 		 src/plugins/launch/runjob/Makefile
 		 src/plugins/launch/slurm/Makefile
+		 src/plugins/mcs/Makefile
+		 src/plugins/mcs/none/Makefile
+		 src/plugins/mcs/group/Makefile
+		 src/plugins/mcs/user/Makefile
+		 src/plugins/node_features/Makefile
+		 src/plugins/node_features/knl_cray/Makefile
 		 src/plugins/power/Makefile
 		 src/plugins/power/common/Makefile
 		 src/plugins/power/cray/Makefile
@@ -660,6 +656,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/mpi/none/Makefile
 		 src/plugins/mpi/openmpi/Makefile
 		 src/plugins/mpi/pmi2/Makefile
+		 src/plugins/mpi/pmix/Makefile
 		 src/plugins/task/Makefile
 		 src/plugins/task/affinity/Makefile
 		 src/plugins/task/cgroup/Makefile

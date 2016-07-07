@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd.c - SLURM job-step manager.
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -60,6 +59,7 @@
 #include "src/common/switch.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
+#include "src/common/xstring.h"
 
 #include "src/slurmd/common/core_spec_plugin.h"
 #include "src/slurmd/common/slurmstepd_init.h"
@@ -78,6 +78,7 @@ static int _init_from_slurmd(int sock, char **argv, slurm_addr_t **_cli,
 static void _dump_user_env(void);
 static void _send_ok_to_slurmd(int sock);
 static void _send_fail_to_slurmd(int sock);
+static void _got_ack_from_slurmd(int);
 static stepd_step_rec_t *_step_setup(slurm_addr_t *cli, slurm_addr_t *self,
 				     slurm_msg_t *msg);
 #ifdef MEMORY_LEAK_DEBUG
@@ -121,11 +122,6 @@ main (int argc, char *argv[])
 	_init_from_slurmd(STDIN_FILENO, argv, &cli, &self, &msg,
 			  &ngids, &gids);
 
-	/* Fancy way of closing stdin that keeps STDIN_FILENO from being
-	 * allocated to any random file.  The slurmd already opened /dev/null
-	 * on STDERR_FILENO for us. */
-	dup2(STDERR_FILENO, STDIN_FILENO);
-
 	/* Create the stepd_step_rec_t, mostly from info in a
 	 * launch_tasks_request_msg_t or a batch_job_launch_msg_t */
 	if (!(job = _step_setup(cli, self, msg))) {
@@ -149,6 +145,12 @@ main (int argc, char *argv[])
 	}
 
 	_send_ok_to_slurmd(STDOUT_FILENO);
+	_got_ack_from_slurmd(STDIN_FILENO);
+
+	/* Fancy way of closing stdin that keeps STDIN_FILENO from being
+	 * allocated to any random file.  The slurmd already opened /dev/null
+	 * on STDERR_FILENO for us. */
+	dup2(STDERR_FILENO, STDIN_FILENO);
 
 	/* Fancy way of closing stdout that keeps STDOUT_FILENO from being
 	 * allocated to any random file.  The slurmd already opened /dev/null
@@ -216,6 +218,7 @@ static slurmd_conf_t * read_slurmd_conf_lite (int fd)
 
 	free_buf(buffer);
 
+	confl->log_opts.prefix_level = 1;
 	confl->log_opts.stderr_level = confl->debug_level;
 	confl->log_opts.logfile_level = confl->debug_level;
 	confl->log_opts.syslog_level = confl->debug_level;
@@ -305,11 +308,11 @@ static int _handle_spank_mode (int argc, char *argv[])
 
 	debug("Running spank/%s for jobid [%u] uid [%u]", mode, jobid, uid);
 
-	if (strcmp (mode, "prolog") == 0) {
+	if (xstrcmp (mode, "prolog") == 0) {
 		if (spank_job_prolog (jobid, uid) < 0)
 			return (-1);
 	}
-	else if (strcmp (mode, "epilog") == 0) {
+	else if (xstrcmp (mode, "epilog") == 0) {
 		if (spank_job_epilog (jobid, uid) < 0)
 			return (-1);
 	}
@@ -325,12 +328,12 @@ static int _handle_spank_mode (int argc, char *argv[])
  */
 static int _process_cmdline (int argc, char *argv[])
 {
-	if ((argc == 2) && (strcmp(argv[1], "getenv") == 0)) {
+	if ((argc == 2) && (xstrcmp(argv[1], "getenv") == 0)) {
 		print_rlimits();
 		_dump_user_env();
 		exit(0);
 	}
-	if ((argc == 3) && (strcmp(argv[1], "spank") == 0)) {
+	if ((argc == 3) && (xstrcmp(argv[1], "spank") == 0)) {
 		if (_handle_spank_mode(argc, argv) < 0)
 			exit (1);
 		exit (0);
@@ -371,6 +374,20 @@ rwfail:
 #endif
 }
 
+static void
+_got_ack_from_slurmd(int sock)
+{
+	/* If running under valgrind/memcheck, this pipe doesn't work correctly
+	 * so just skip it. */
+#if (SLURMSTEPD_MEMCHECK == 0)
+	int ok;
+	safe_read(sock, &ok, sizeof(int));
+	return;
+rwfail:
+	error("Unable to receive \"ok ack\" to slurmd");
+#endif
+}
+
 /*
  *  This function handles the initialization information from slurmd
  *  sent by _send_slurmstepd_init() in src/slurmd/slurmd/req.c.
@@ -400,7 +417,7 @@ _init_from_slurmd(int sock, char **argv,
 	debug3("step_type = %d", step_type);
 
 	/* receive reverse-tree info from slurmd */
-	pthread_mutex_lock(&step_complete.lock);
+	slurm_mutex_lock(&step_complete.lock);
 	safe_read(sock, &step_complete.rank, sizeof(int));
 	safe_read(sock, &step_complete.parent_rank, sizeof(int));
 	safe_read(sock, &step_complete.children, sizeof(int));
@@ -409,7 +426,7 @@ _init_from_slurmd(int sock, char **argv,
 	safe_read(sock, &step_complete.parent_addr, sizeof(slurm_addr_t));
 	step_complete.bits = bit_alloc(step_complete.children);
 	step_complete.jobacct = jobacctinfo_create(NULL);
-	pthread_mutex_unlock(&step_complete.lock);
+	slurm_mutex_unlock(&step_complete.lock);
 
 	/* receive conf from slurmd */
 	if ((conf = read_slurmd_conf_lite (sock)) == NULL)

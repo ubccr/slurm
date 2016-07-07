@@ -242,8 +242,11 @@ void *_forward_thread(void *arg)
 			if (message_timeout < 0)
 				message_timeout =
 					slurm_get_msg_timeout() * 1000;
+			if (!fwd_msg->header.forward.tree_width)
+				fwd_msg->header.forward.tree_width =
+					slurm_get_tree_width();
 			steps = (fwd_msg->header.forward.cnt+1) /
-				slurm_get_tree_width();
+					fwd_msg->header.forward.tree_width;
 			fwd_msg->timeout = (message_timeout*steps);
 			/* info("got %d * %d = %d", message_timeout, */
 			/*      steps, fwd_msg->timeout); */
@@ -298,7 +301,7 @@ void *_forward_thread(void *arg)
 						ret_data_info->node_name =
 							xstrdup(name);
 					}
-					if (!strcmp(tmp,
+					if (!xstrcmp(tmp,
 						   ret_data_info->node_name)) {
 						node_found = 1;
 						break;
@@ -415,8 +418,8 @@ void *_fwd_tree_thread(void *arg)
 						list_iterator_create(ret_list);
 					while ((ret_data_info =
 						list_next(itr))) {
-						if (strcmp(ret_data_info->
-							   node_name, name))
+						if (xstrcmp(ret_data_info->
+							    node_name, name))
 							hostlist_delete_host(
 								fwd_tree->
 								tree_hl,
@@ -617,14 +620,9 @@ static void _forward_msg_internal(hostlist_t hl, hostlist_t* sp_hl,
 extern void forward_init(forward_t *forward, forward_t *from)
 {
 	if (from && from->init == FORWARD_INIT) {
-		forward->cnt = from->cnt;
-		forward->timeout = from->timeout;
-		forward->nodelist = from->nodelist;
-		forward->init = from->init;
+		memcpy(forward, from, sizeof(forward_t));
 	} else {
-		forward->cnt = 0;
-		forward->timeout = 0;
-		forward->nodelist = NULL;
+		memset(forward, 0, sizeof(forward_t));
 		forward->init = FORWARD_INIT;
 	}
 }
@@ -654,7 +652,8 @@ extern int forward_msg(forward_struct_t *forward_struct, header_t *header)
 	hl = hostlist_create(header->forward.nodelist);
 	hostlist_uniq(hl);
 
-	if ( route_g_split_hostlist(hl, &sp_hl, &hl_count) ) {
+	if (route_g_split_hostlist(
+		    hl, &sp_hl, &hl_count, header->forward.tree_width)) {
 		error("unable to split forward hostlist");
 		hostlist_destroy(hl);
 		return SLURM_ERROR;
@@ -698,7 +697,8 @@ extern List start_msg_tree(hostlist_t hl, slurm_msg_t *msg, int timeout)
 	hostlist_uniq(hl);
 	host_count = hostlist_count(hl);
 
-	if ( route_g_split_hostlist(hl, &sp_hl, &hl_count) ) {
+	if (route_g_split_hostlist(hl, &sp_hl, &hl_count,
+				   msg->forward.tree_width)) {
 		error("unable to split forward hostlist");
 		return NULL;
 	}

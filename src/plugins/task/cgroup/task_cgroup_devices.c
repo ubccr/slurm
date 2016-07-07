@@ -262,10 +262,10 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 	gres_count[f] = 1;
 	for (k = 0; k < gres_conf_lines; k++) {
 		if ((k+1 < gres_conf_lines) &&
-		    (strcmp(gres_name[k],gres_name[k+1]) == 0))
+		    (xstrcmp(gres_name[k],gres_name[k+1]) == 0))
 			gres_count[f]++;
 		if ((k+1 < gres_conf_lines) &&
-		    (strcmp(gres_name[k],gres_name[k+1]) != 0)) {
+		    (xstrcmp(gres_name[k],gres_name[k+1]) != 0)) {
 			f++;
 			gres_count[f] = 1;
 		}
@@ -279,7 +279,7 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 			    getuid(),getgid()) != XCGROUP_SUCCESS ) {
 		goto error;
 	}
-	if ( xcgroup_instanciate(&user_devices_cg) != XCGROUP_SUCCESS ) {
+	if ( xcgroup_instantiate(&user_devices_cg) != XCGROUP_SUCCESS ) {
 		xcgroup_destroy(&user_devices_cg);
 		goto error;
 	}
@@ -300,7 +300,7 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 		xcgroup_destroy(&user_devices_cg);
 		goto error;
 	}
-	if ( xcgroup_instanciate(&job_devices_cg) != XCGROUP_SUCCESS ) {
+	if ( xcgroup_instantiate(&job_devices_cg) != XCGROUP_SUCCESS ) {
 		xcgroup_destroy(&user_devices_cg);
 		xcgroup_destroy(&job_devices_cg);
 		goto error;
@@ -351,7 +351,7 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 		xcgroup_destroy(&job_devices_cg);
 		goto error;
 	}
-	if ( xcgroup_instanciate(&step_devices_cg) != XCGROUP_SUCCESS ) {
+	if ( xcgroup_instantiate(&step_devices_cg) != XCGROUP_SUCCESS ) {
 		xcgroup_destroy(&user_devices_cg);
 		xcgroup_destroy(&job_devices_cg);
 		xcgroup_destroy(&step_devices_cg);
@@ -447,6 +447,7 @@ static void _calc_device_major(char *dev_path[PATH_MAX],
 		minor = (int)minor(fs.st_rdev);
 		debug3("device : %s major %d, minor %d\n",
 			dev_path[k], major, minor);
+		memset(str1, 0, sizeof(str1));
 		if (S_ISBLK(fs.st_mode)) {
 			sprintf(str1, "b %d:", major);
 			//info("device is block ");

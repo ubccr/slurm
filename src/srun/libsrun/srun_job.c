@@ -93,6 +93,10 @@ typedef struct allocation_info {
 	uint32_t                jobid;
 	uint32_t                nnodes;
 	char                   *nodelist;
+	uint16_t ntasks_per_board;/* number of tasks to invoke on each board */
+	uint16_t ntasks_per_core; /* number of tasks to invoke on each core */
+	uint16_t ntasks_per_socket;/* number of tasks to invoke on
+				    * each socket */
 	uint32_t                num_cpu_groups;
 	char                   *partition;
 	dynamic_plugin_data_t  *select_jobinfo;
@@ -369,6 +373,10 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 	ai->num_cpu_groups = resp->num_cpu_groups;
 	ai->cpus_per_node  = resp->cpus_per_node;
 	ai->cpu_count_reps = resp->cpu_count_reps;
+	ai->ntasks_per_board = resp->ntasks_per_board;
+	ai->ntasks_per_core = resp->ntasks_per_core;
+	ai->ntasks_per_socket = resp->ntasks_per_socket;
+
 	ai->partition = resp->partition;
 
 /* 	info("looking for %d nodes out of %s with a must list of %s", */
@@ -401,6 +409,10 @@ job_create_allocation(resource_allocation_response_msg_t *resp)
 	i->num_cpu_groups = resp->num_cpu_groups;
 	i->cpus_per_node  = resp->cpus_per_node;
 	i->cpu_count_reps = resp->cpu_count_reps;
+	i->ntasks_per_board = resp->ntasks_per_board;
+	i->ntasks_per_core = resp->ntasks_per_core;
+	i->ntasks_per_socket = resp->ntasks_per_socket;
+
 	i->select_jobinfo = select_g_select_jobinfo_copy(resp->select_jobinfo);
 
 	job = _job_create_structure(i);
@@ -711,13 +723,13 @@ cleanup:
 void
 update_job_state(srun_job_t *job, srun_job_state_t state)
 {
-	pthread_mutex_lock(&job->state_mutex);
+	slurm_mutex_lock(&job->state_mutex);
 	if (job->state < state) {
 		job->state = state;
 		pthread_cond_signal(&job->state_cond);
 
 	}
-	pthread_mutex_unlock(&job->state_mutex);
+	slurm_mutex_unlock(&job->state_mutex);
 	return;
 }
 
@@ -828,13 +840,13 @@ _job_create_structure(allocation_info_t *ainfo)
 		/* Replace the runjob line with correct information. */
 		int i, matches = 0;
 		for (i = 0; i < opt.argc; i++) {
-			if (!strcmp(opt.argv[i], "-p")) {
+			if (!xstrcmp(opt.argv[i], "-p")) {
 				i++;
 				xfree(opt.argv[i]);
 				opt.argv[i]  = xstrdup_printf(
 					"%d", opt.ntasks_per_node);
 				matches++;
-			} else if (!strcmp(opt.argv[i], "--np")) {
+			} else if (!xstrcmp(opt.argv[i], "--np")) {
 				i++;
 				xfree(opt.argv[i]);
 				opt.argv[i]  = xstrdup_printf(
@@ -880,6 +892,9 @@ _job_create_structure(allocation_info_t *ainfo)
 	job->jobid   = ainfo->jobid;
 
 	job->ntasks  = opt.ntasks;
+	job->ntasks_per_board = ainfo->ntasks_per_board;
+	job->ntasks_per_core = ainfo->ntasks_per_core;
+	job->ntasks_per_socket = ainfo->ntasks_per_socket;
 
 	/* If cpus_per_task is set then get the exact count of cpus
 	   for the requested step (we might very well use less,
@@ -931,7 +946,7 @@ static int _become_user (void)
 	char *user = uid_to_string(opt.uid);
 	gid_t gid = gid_from_uid(opt.uid);
 
-	if (strcmp(user, "nobody") == 0) {
+	if (xstrcmp(user, "nobody") == 0) {
 		xfree(user);
 		return (error ("Invalid user id %u: %m", opt.uid));
 	}
@@ -1075,7 +1090,7 @@ static void _run_srun_epilog (srun_job_t *job)
 {
 	int rc;
 
-	if (opt.epilog && strcasecmp(opt.epilog, "none") != 0) {
+	if (opt.epilog && xstrcasecmp(opt.epilog, "none") != 0) {
 		rc = _run_srun_script(job, opt.epilog);
 		debug("srun epilog rc = %d", rc);
 	}
@@ -1085,7 +1100,7 @@ static void _run_srun_prolog (srun_job_t *job)
 {
 	int rc;
 
-	if (opt.prolog && strcasecmp(opt.prolog, "none") != 0) {
+	if (opt.prolog && xstrcasecmp(opt.prolog, "none") != 0) {
 		rc = _run_srun_script(job, opt.prolog);
 		debug("srun prolog rc = %d", rc);
 	}

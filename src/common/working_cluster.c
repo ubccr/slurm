@@ -119,9 +119,6 @@ extern uint32_t slurmdb_setup_cluster_flags(void)
 #ifdef HAVE_BGQ
 	cluster_flags |= CLUSTER_FLAG_BGQ;
 #endif
-#ifdef HAVE_SUN_CONST
-	cluster_flags |= CLUSTER_FLAG_SC;
-#endif
 #ifdef HAVE_AIX
 	cluster_flags |= CLUSTER_FLAG_AIX;
 #endif
@@ -166,9 +163,6 @@ static uint32_t _str_2_cluster_flags(char *flags_in)
 
 	if (slurm_strcasestr(flags_in, "MultipleSlurmd"))
 		return CLUSTER_FLAG_MULTSD;
-
-	if (slurm_strcasestr(flags_in, "SunConstellation"))
-		return CLUSTER_FLAG_SC;
 
 	if (slurm_strcasestr(flags_in, "Cray"))
 		return CLUSTER_FLAG_CRAY_N;
@@ -246,12 +240,6 @@ extern char *slurmdb_cluster_flags_2_str(uint32_t flags_in)
 		xstrcat(cluster_flags, "MultipleSlurmd");
 	}
 
-	if (flags_in & CLUSTER_FLAG_SC) {
-		if (cluster_flags)
-			xstrcat(cluster_flags, ",");
-		xstrcat(cluster_flags, "SunConstellation");
-	}
-
 	if (flags_in & CLUSTER_FLAG_CRAY_N) {
 		if (cluster_flags)
 			xstrcat(cluster_flags, ",");
@@ -262,4 +250,11 @@ extern char *slurmdb_cluster_flags_2_str(uint32_t flags_in)
 		cluster_flags = xstrdup("None");
 
 	return cluster_flags;
+}
+
+extern uint32_t slurmdb_setup_plugin_id_select(void)
+{
+	if (working_cluster_rec)
+		return working_cluster_rec->plugin_id_select;
+	return select_get_plugin_id();
 }

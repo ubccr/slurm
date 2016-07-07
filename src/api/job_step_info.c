@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  job_step_info.c - get/print the job step state information of slurm
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -72,7 +71,7 @@ static int _sort_pids_by_name(void *x, void *y)
 	if (!rec_a->node_name || !rec_b->node_name)
 		return 0;
 
-	diff = strcmp(rec_a->node_name, rec_b->node_name);
+	diff = xstrcmp(rec_a->node_name, rec_b->node_name);
 	if (diff > 0)
 		return 1;
 	else if (diff < 0)
@@ -237,12 +236,12 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 					    SELECT_JOBDATA_NODE_CNT,
 					    &nodes);
 		convert_num_unit((float)nodes, tmp_node_cnt,
-				 sizeof(tmp_node_cnt), UNIT_NONE,
+				 sizeof(tmp_node_cnt), UNIT_NONE, NO_VAL,
 				 CONVERT_NUM_UNIT_EXACT);
 	} else {
 		convert_num_unit((float)_nodes_in_list(job_step_ptr->nodes),
-				 tmp_node_cnt, sizeof(tmp_node_cnt),
-				 UNIT_NONE, CONVERT_NUM_UNIT_EXACT);
+				 tmp_node_cnt, sizeof(tmp_node_cnt), UNIT_NONE,
+				 NO_VAL, CONVERT_NUM_UNIT_EXACT);
 	}
 
 	snprintf(tmp_line, sizeof(tmp_line),
@@ -385,11 +384,13 @@ slurm_job_step_layout_get(uint32_t job_id, uint32_t step_id)
  * IN job_id
  * IN step_id
  * IN node_list, optional, if NULL then all nodes in step are returned.
+ * IN use_protocol_ver protocol version to use.
  * OUT resp
  * RET SLURM_SUCCESS on success SLURM_ERROR else
  */
 extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
 			       char *node_list,
+			       uint16_t use_protocol_ver,
 			       job_step_stat_response_msg_t **resp)
 {
 	slurm_msg_t req_msg;
@@ -414,6 +415,7 @@ extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
 			return rc;
 		}
 		node_list = step_layout->node_list;
+		use_protocol_ver = step_layout->start_protocol_ver;
 	}
 
  	if (!*resp) {
@@ -433,6 +435,7 @@ extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
 	resp_out->job_id = req.job_id = job_id;
 	resp_out->step_id = req.step_id = step_id;
 
+	req_msg.protocol_version = use_protocol_ver;
 	req_msg.msg_type = REQUEST_JOB_STEP_STAT;
         req_msg.data = &req;
 

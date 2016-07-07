@@ -282,7 +282,7 @@ extern int sacctmgr_add_cluster(int argc, char *argv[])
 
 			list_iterator_reset(itr);
 			while((cluster_rec = list_next(itr))) {
-				if (!strcasecmp(cluster_rec->name, name))
+				if (!xstrcasecmp(cluster_rec->name, name))
 					break;
 			}
 			if (cluster_rec) {
@@ -483,7 +483,8 @@ extern int sacctmgr_list_cluster(int argc, char *argv[])
 				sacctmgr_initialize_g_tres_list();
 
 				tmp_char = slurmdb_make_tres_string_from_simple(
-					cluster->tres_str, g_tres_list);
+					cluster->tres_str, g_tres_list, NO_VAL,
+					CONVERT_NUM_UNIT_EXACT);
 				field->print_routine(field,
 						     tmp_char,
 						     (curr_inx == field_count));
@@ -1045,7 +1046,7 @@ extern int sacctmgr_dump_cluster (int argc, char *argv[])
 
 	slurmdb_hierarchical_rec = list_peek(slurmdb_hierarchical_rec_list);
 	assoc = slurmdb_hierarchical_rec->assoc;
-	if (strcmp(assoc->acct, "root")) {
+	if (xstrcmp(assoc->acct, "root")) {
 		fprintf(stderr, "Root association not on the top it was %s\n",
 			assoc->acct);
 	} else

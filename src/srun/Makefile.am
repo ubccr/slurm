@@ -10,7 +10,9 @@ AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/src/srun/libsrun
 bin_PROGRAMS = srun
 
 convenience_libs = $(top_builddir)/src/srun/libsrun/libsrun.la \
+	$(top_builddir)/src/bcast/libfile_bcast.la \
 	$(top_builddir)/src/api/libslurm.o
+
 
 srun_SOURCES = \
 	srun.c \

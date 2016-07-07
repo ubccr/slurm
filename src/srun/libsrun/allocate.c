@@ -401,7 +401,7 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 		char *tmp_str;
 		if (i > 0)
      			verbose("Nodes %s are ready for job", alloc->node_list);
-		if (alloc->alias_list && !strcmp(alloc->alias_list, "TBD") &&
+		if (alloc->alias_list && !xstrcmp(alloc->alias_list, "TBD") &&
 		    (slurm_allocation_lookup_lite(pending_job_id, &resp)
 		     == SLURM_SUCCESS)) {
 			tmp_str = alloc->alias_list;
@@ -667,7 +667,7 @@ job_desc_msg_create_from_opts (void)
 	if (opt.core_spec != (uint16_t) NO_VAL)
 		j->core_spec      = opt.core_spec;
 	j->features       = opt.constraints;
-	if (opt.gres && strcasecmp(opt.gres, "NONE"))
+	if (opt.gres && xstrcasecmp(opt.gres, "NONE"))
 		j->gres   = opt.gres;
 	if (opt.immediate == 1)
 		j->immediate = opt.immediate;
@@ -754,6 +754,8 @@ job_desc_msg_create_from_opts (void)
 		j->burst_buffer = opt.burst_buffer;
 	if (opt.begin)
 		j->begin_time = opt.begin;
+	if (opt.deadline)
+		j->deadline = opt.deadline;
 	if (opt.licenses)
 		j->licenses = opt.licenses;
 	if (opt.network)
@@ -839,6 +841,8 @@ job_desc_msg_create_from_opts (void)
 		j->warn_signal = opt.warn_signal;
 	if (opt.warn_time)
 		j->warn_time = opt.warn_time;
+	if (opt.job_flags)
+		j->bitflags = opt.job_flags;
 
 	if (opt.cpu_freq_min != NO_VAL)
 		j->cpu_freq_min = opt.cpu_freq_min;
@@ -864,8 +868,8 @@ job_desc_msg_create_from_opts (void)
 
 	if (opt.power_flags)
 		j->power_flags = opt.power_flags;
-	if (opt.sicp_mode)
-		j->sicp_mode = opt.sicp_mode;
+	if (opt.mcs_label)
+		j->mcs_label = opt.mcs_label;
 
 	return j;
 }

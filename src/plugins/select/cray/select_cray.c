@@ -37,19 +37,6 @@
 
 #define _GNU_SOURCE 1
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_STDINT_H
-#    include <stdint.h>
-#  endif
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  endif
-#  if WITH_PTHREADS
-#    include <pthread.h>
-#  endif
-#endif
-
 #include <stdio.h>
 #include <poll.h>
 #include <sys/types.h>
@@ -60,9 +47,11 @@
 
 #include "src/common/slurm_xlator.h"	/* Must be first */
 #include "src/common/pack.h"
+#include "src/common/slurm_accounting_storage.h"
 #include "src/slurmctld/burst_buffer.h"
 #include "src/slurmctld/locks.h"
 #include "other_select.h"
+#include "ccm.h"
 
 #ifdef HAVE_NATIVE_CRAY
 #include "alpscomm_sn.h"
@@ -72,8 +61,9 @@
 #define CLEANING_STARTED	0x0001
 #define CLEANING_COMPLETE	0x0002
 
-#define IS_CLEANING(_X) (_X->cleaning & CLEANING_STARTED)
-#define IS_CLEANED(_X)  (_X->cleaning & CLEANING_COMPLETE)
+#define IS_CLEANING_INIT(_X)		(_X->cleaning == CLEANING_INIT)
+#define IS_CLEANING_STARTED(_X)		(_X->cleaning & CLEANING_STARTED)
+#define IS_CLEANING_COMPLETE(_X)	(_X->cleaning & CLEANING_COMPLETE)
 
 /**
  * struct select_jobinfo - data specific to Cray node selection plugin
@@ -105,9 +95,9 @@ struct select_nodeinfo {
 typedef struct {
 	uint64_t apid;
 	uint32_t exit_code;
+	bool is_step;	/* true if step, false if job */
 	uint32_t jobid;
 	char *nodelist;
-	bool step;
 	uint32_t user_id;
 } nhc_info_t;
 
@@ -146,6 +136,7 @@ struct node_record *node_record_table_ptr __attribute__((weak_import));
 int node_record_count __attribute__((weak_import));
 time_t last_node_update __attribute__((weak_import));
 int slurmctld_primary __attribute__((weak_import));
+void *acct_db_conn  __attribute__((weak_import)) = NULL;
 #else
 slurmctld_config_t slurmctld_config;
 slurm_ctl_conf_t slurmctld_conf;
@@ -155,6 +146,7 @@ struct node_record *node_record_table_ptr;
 int node_record_count;
 time_t last_node_update;
 int slurmctld_primary;
+void *acct_db_conn = NULL;
 #endif
 
 static blade_info_t *blade_array = NULL;
@@ -245,7 +237,7 @@ static uint64_t debug_flags = 0;
  */
 const char plugin_name[]	= "Cray node selection plugin";
 const char plugin_type[]	= "select/cray";
-uint32_t plugin_id		= 107;
+uint32_t plugin_id		= SELECT_PLUGIN_CRAY_LINEAR;
 const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 
 extern int select_p_select_jobinfo_free(select_jobinfo_t *jobinfo);
@@ -259,8 +251,8 @@ static int _run_nhc(nhc_info_t *nhc_info)
 	int argc = 13, status = 1, wait_rc, i = 0;
 	char *argv[argc];
 	pid_t cpid;
-	char *jobid_char = NULL, *apid_char = NULL, *nodelist_nids = NULL,
-		*exit_char = NULL, *user_char = NULL;
+	char *jobid_char = NULL, *apid_char = NULL, *nodelist_nids = NULL;
+	char *exit_char = NULL, *user_char = NULL;
 	DEF_TIMERS;
 
 	START_TIMER;
@@ -281,12 +273,12 @@ static int _run_nhc(nhc_info_t *nhc_info)
 	argv[i++] = "-u";
 	argv[i++] = user_char;
 	argv[i++] = "-m";
-	argv[i++] = nhc_info->step ? "application" : "reservation";
+	argv[i++] = nhc_info->is_step ? "application" : "reservation";
 	argv[i++] = nodelist_nids;
 	argv[i++] = NULL;
 
 	if (debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-		if (nhc_info->step)
+		if (nhc_info->is_step)
 			info("Calling NHC for jobid %u and apid %"PRIu64" "
 			     "on nodes %s(%s) exit code %u",
 			     nhc_info->jobid, nhc_info->apid,
@@ -336,7 +328,8 @@ static int _run_nhc(nhc_info_t *nhc_info)
 		      "status %u:%u took: %s",
 		      nhc_info->jobid, nhc_info->apid, WEXITSTATUS(status),
 		      WTERMSIG(status), TIME_STR);
-	} else if ((debug_flags & DEBUG_FLAG_SELECT_TYPE) ||
+	} else if ((debug_flags &
+		    (DEBUG_FLAG_SELECT_TYPE | DEBUG_FLAG_TIME_CRAY)) ||
 		   (DELTA_TIMER > 60000000)) {	/* log if over one minute */
 		info("_run_nhc jobid %u and apid %"PRIu64" completion took: %s",
 		     nhc_info->jobid, nhc_info->apid, TIME_STR);
@@ -355,16 +348,33 @@ fini:
 	return 0;
 
 #else
-	if (debug_flags & DEBUG_FLAG_SELECT_TYPE)
-		info("simluating calling NHC for jobid %u "
-		     "and apid %"PRIu64" on nodes %s",
-		     nhc_info->jobid, nhc_info->apid, nhc_info->nodelist);
+	if (debug_flags & DEBUG_FLAG_SELECT_TYPE) {
+		if (nhc_info->is_step) {
+			info("simulating call to NHC for step %u.%u "
+			     "and apid %"PRIu64" on nodes %s",
+			     nhc_info->jobid,
+			     SLURM_ID_HASH_STEP_ID(nhc_info->apid),
+			     nhc_info->apid, nhc_info->nodelist);
+		} else {
+			info("simulating call to NHC for job %u "
+			     "and apid %"PRIu64" on nodes %s",
+			     nhc_info->jobid, nhc_info->apid,
+			     nhc_info->nodelist);
+		}
+	}
 
 	/* simulate sleeping */
 	sleep(1);
 	if (debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-		info("_run_nhc jobid %u and apid %"PRIu64" completed",
-		     nhc_info->jobid, nhc_info->apid);
+		if (nhc_info->is_step) {
+			info("NHC for step %u.%u and apid %"PRIu64" completed",
+			     nhc_info->jobid,
+			     SLURM_ID_HASH_STEP_ID(nhc_info->apid),
+			     nhc_info->apid);
+		} else {
+			info("NHC for job %u and apid %"PRIu64" completed",
+			     nhc_info->jobid, nhc_info->apid);
+		}
 	}
 
 	return 0;
@@ -378,14 +388,14 @@ fini:
 static void _aeld_cleanup(void)
 {
 	// Free any used memory
-	pthread_mutex_lock(&aeld_mutex);
+	slurm_mutex_lock(&aeld_mutex);
 	_clear_event_list(app_list, &app_list_size);
 	app_list_capacity = 0;
 	xfree(app_list);
 	_clear_event_list(event_list, &event_list_size);
 	event_list_capacity = 0;
 	xfree(event_list);
-	pthread_mutex_unlock(&aeld_mutex);
+	slurm_mutex_unlock(&aeld_mutex);
 
 	aeld_running = 0;
 }
@@ -437,13 +447,13 @@ static void _start_session(alpsc_ev_session_t **session, int *sessionfd)
 	char *errmsg;
 
 	while (1) {
-		pthread_mutex_lock(&aeld_mutex);
+		slurm_mutex_lock(&aeld_mutex);
 
 		// Create the session
 		rv = alpsc_ev_create_session(&errmsg, session, app_list,
 					     app_list_size);
 
-		pthread_mutex_unlock(&aeld_mutex);
+		slurm_mutex_unlock(&aeld_mutex);
 
 		if (rv) {
 			_handle_aeld_error("alpsc_ev_create_session",
@@ -488,6 +498,7 @@ static void *_aeld_event_loop(void *args)
 	alpsc_ev_session_t *session = NULL;
 	struct pollfd fds[1];
 	char *errmsg;
+	DEF_TIMERS;
 
 	debug("cray: %s", __func__);
 
@@ -504,6 +515,8 @@ static void *_aeld_event_loop(void *args)
 	fds[0].events = POLLIN | POLLPRI | POLLRDHUP;
 	while ((rv = TEMP_FAILURE_RETRY(poll(fds, 1, AELD_EVENT_INTERVAL)))
 	       != -1) {
+		START_TIMER;
+
 		// There was activity on the file descriptor, get state
 		if (rv > 0) {
 			rv = alpsc_ev_get_session_state(&errmsg, session);
@@ -525,7 +538,7 @@ static void *_aeld_event_loop(void *args)
 		}
 
 		// Process the event list
-		pthread_mutex_lock(&aeld_mutex);
+		slurm_mutex_lock(&aeld_mutex);
 		if (event_list_size > 0) {
 			// Send event list to aeld
 			rv = alpsc_ev_set_application_info(&errmsg, session,
@@ -534,7 +547,7 @@ static void *_aeld_event_loop(void *args)
 
 			// Clear the event list
 			_clear_event_list(event_list, &event_list_size);
-			pthread_mutex_unlock(&aeld_mutex);
+			slurm_mutex_unlock(&aeld_mutex);
 			/*
 			 * For this application info call, some errors do
 			 * not require exiting the current session and
@@ -551,8 +564,10 @@ static void *_aeld_event_loop(void *args)
 				      rv, errmsg);
 			}
 		} else {
-			pthread_mutex_unlock(&aeld_mutex);
+			slurm_mutex_unlock(&aeld_mutex);
 		}
+		if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+			END_TIMER3("_aeld_event_loop: took", 20000);
 	}
 
 	error("%s: poll failed: %m", __func__);
@@ -573,6 +588,9 @@ static void _initialize_event(alpsc_ev_app_t *event,
 	hostlist_iterator_t hlit;
 	char *node;
 	int rv;
+	DEF_TIMERS;
+
+	START_TIMER;
 
 	event->apid = SLURM_ID_HASH(job_ptr->job_id, step_ptr->step_id);
 	event->uid = job_ptr->user_id;
@@ -613,6 +631,11 @@ static void _initialize_event(alpsc_ev_app_t *event,
 		hostlist_iterator_destroy(hlit);
 		hostlist_destroy(hl);
 	}
+
+	END_TIMER;
+	if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+		INFO_LINE("call took: %s", TIME_STR);
+
 	return;
 }
 
@@ -621,21 +644,21 @@ static void _initialize_event(alpsc_ev_app_t *event,
  */
 static void _copy_event(alpsc_ev_app_t *dest, alpsc_ev_app_t *src)
 {
-        dest->apid = src->apid;
-        dest->uid = src->uid;
-        dest->app_name = xstrdup(src->app_name);
-        dest->batch_id = xstrdup(src->batch_id);
-        dest->state = src->state;
-        if (src->num_nodes > 0 && src->nodes != NULL) {
-                dest->nodes = xmalloc(src->num_nodes * sizeof(int32_t));
-                memcpy(dest->nodes, src->nodes,
+	dest->apid = src->apid;
+	dest->uid = src->uid;
+	dest->app_name = xstrdup(src->app_name);
+	dest->batch_id = xstrdup(src->batch_id);
+	dest->state = src->state;
+	if (src->num_nodes > 0 && src->nodes != NULL) {
+		dest->nodes = xmalloc(src->num_nodes * sizeof(int32_t));
+		memcpy(dest->nodes, src->nodes,
 		       src->num_nodes * sizeof(int32_t));
-                dest->num_nodes = src->num_nodes;
-        } else {
-                dest->nodes = NULL;
-                dest->num_nodes = 0;
-        }
-        return;
+		dest->num_nodes = src->num_nodes;
+	} else {
+		dest->nodes = NULL;
+		dest->num_nodes = 0;
+	}
+	return;
 }
 
 /*
@@ -687,6 +710,9 @@ static void _update_app(struct job_record *job_ptr,
 	int32_t i;
 	alpsc_ev_app_t app;
 	int found;
+	DEF_TIMERS;
+
+	START_TIMER;
 
 	// If aeld thread isn't running, do nothing
 	if (aeld_running == 0) {
@@ -705,7 +731,7 @@ static void _update_app(struct job_record *job_ptr,
 		return;
 	}
 
-	pthread_mutex_lock(&aeld_mutex);
+	slurm_mutex_lock(&aeld_mutex);
 
 	// Add it to the event list, only if aeld is up
 	if (aeld_running) {
@@ -775,9 +801,14 @@ static void _update_app(struct job_record *job_ptr,
 		break;
 	}
 
-	pthread_mutex_unlock(&aeld_mutex);
+	slurm_mutex_unlock(&aeld_mutex);
 
 	_free_event(&app);
+
+	END_TIMER;
+	if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+		INFO_LINE("call took: %s", TIME_STR);
+
 	return;
 }
 
@@ -908,7 +939,7 @@ static void _set_job_running(struct job_record *job_ptr)
 	select_jobinfo_t *jobinfo = job_ptr->select_jobinfo->data;
 	select_nodeinfo_t *nodeinfo;
 
-	for (i=0; i<node_record_count; i++) {
+	for (i = 0; i < node_record_count; i++) {
 		if (!bit_test(job_ptr->node_bitmap, i))
 			continue;
 
@@ -1011,11 +1042,9 @@ static void *_job_fini(void *args)
 
 	/* Locks: Write job, write node */
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK
-	};
+		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
 	slurmctld_lock_t job_read_lock = {
 		NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
-
 
 	if (!job_ptr) {
 		error("_job_fini: no job ptr given, this should never happen");
@@ -1047,7 +1076,7 @@ static void *_job_fini(void *args)
 		jobinfo = job_ptr->select_jobinfo->data;
 
 		_remove_job_from_blades(jobinfo);
-		jobinfo->cleaning = CLEANING_COMPLETE;
+		jobinfo->cleaning |= CLEANING_COMPLETE;
 	} else
 		error("_job_fini: job %u had a bad magic, "
 		      "this should never happen", nhc_info.jobid);
@@ -1070,26 +1099,110 @@ static void *_step_fini(void *args)
 	slurmctld_lock_t job_read_lock = {
 		NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 
+	if (!step_ptr) {
+		error("%s: no step_ptr given, this should never happen",
+		      __func__);
+		return NULL;
+	}
+
+	lock_slurmctld(job_read_lock);
+	memset(&nhc_info, 0, sizeof(nhc_info_t));
+	nhc_info.jobid = step_ptr->job_ptr->job_id;
+	jobinfo = step_ptr->select_jobinfo->data;
+	if (IS_CLEANING_COMPLETE(jobinfo)) {
+		debug("%s: NHC previously run for step %u.%u",
+		      __func__, step_ptr->job_ptr->job_id, step_ptr->step_id);
+	} else {
+		/* Run application NHC */
+		nhc_info.is_step = true;
+		nhc_info.apid = SLURM_ID_HASH(step_ptr->job_ptr->job_id,
+					      step_ptr->step_id);
+		nhc_info.exit_code = step_ptr->exit_code;
+		nhc_info.user_id = step_ptr->job_ptr->user_id;
+
+		if (!step_ptr->step_layout ||
+		    !step_ptr->step_layout->node_list) {
+			if (step_ptr->job_ptr)
+				nhc_info.nodelist =
+					xstrdup(step_ptr->job_ptr->nodes);
+		} else {
+			nhc_info.nodelist =
+				xstrdup(step_ptr->step_layout->node_list);
+		}
+		unlock_slurmctld(job_read_lock);
+
+		_run_nhc(&nhc_info);
+		xfree(nhc_info.nodelist);
+	}
+
+	/* NHC has completed, release the step's resources */
+	_throttle_start();
+	lock_slurmctld(job_write_lock);
+	if (!step_ptr->job_ptr ||
+	    (step_ptr->job_ptr->job_id != nhc_info.jobid)) {
+		error("%s: For some reason we don't have a valid job_ptr for "
+		      "job %u APID %"PRIu64".  This should never happen.",
+		      __func__, nhc_info.jobid, nhc_info.apid);
+	} else if (!step_ptr->step_node_bitmap) {
+		error("%s: For some reason we don't have a step_node_bitmap "
+		      "for job %u APID %"PRIu64".  "
+		      "If this is at startup and the step's nodes changed "
+		      "this is expected.  Otherwise this should never happen.",
+		      __func__, nhc_info.jobid, nhc_info.apid);
+
+		/* This should be the only cleanup needed */
+		jobinfo = step_ptr->select_jobinfo->data;
+
+		_remove_step_from_blades(step_ptr);
+		jobinfo->cleaning |= CLEANING_COMPLETE;
+
+		delete_step_record(step_ptr->job_ptr, step_ptr->step_id);
+	} else {
+		other_step_finish(step_ptr, false);
+
+		jobinfo = step_ptr->select_jobinfo->data;
+
+		_remove_step_from_blades(step_ptr);
+		jobinfo->cleaning |= CLEANING_COMPLETE;
+		/* free resources on the job */
+		post_job_step(step_ptr);
+	}
+	unlock_slurmctld(job_write_lock);
+	_throttle_fini();
+
+	return NULL;
+}
+
+static void *_step_kill(void *args)
+{
+	struct step_record *step_ptr = (struct step_record *)args;
+	select_jobinfo_t *jobinfo = NULL;
+	nhc_info_t nhc_info;
+
+	/* Locks: Write job, write node */
+	slurmctld_lock_t job_write_lock = {
+		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
+	slurmctld_lock_t job_read_lock = {
+		NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 
 	if (!step_ptr) {
-		error("_step_fini: no step ptr given, "
-		      "this should never happen");
+		error("%s: no step_ptr given, this should never happen",
+		      __func__);
 		return NULL;
 	}
 
 	memset(&nhc_info, 0, sizeof(nhc_info_t));
-	nhc_info.step = 1;
+	nhc_info.is_step = true;
 	lock_slurmctld(job_read_lock);
 	nhc_info.jobid = step_ptr->job_ptr->job_id;
 	nhc_info.apid = SLURM_ID_HASH(step_ptr->job_ptr->job_id,
 				      step_ptr->step_id);
-	nhc_info.exit_code = step_ptr->exit_code;
+	nhc_info.exit_code = SIGKILL;
 	nhc_info.user_id = step_ptr->job_ptr->user_id;
 
-	if (!step_ptr->step_layout || !step_ptr->step_layout->node_list) {
-		if (step_ptr->job_ptr)
-			nhc_info.nodelist = xstrdup(step_ptr->job_ptr->nodes);
-	} else
+	if (!step_ptr->step_layout || !step_ptr->step_layout->node_list)
+		nhc_info.nodelist = xstrdup(step_ptr->job_ptr->nodes);
+	else
 		nhc_info.nodelist = xstrdup(step_ptr->step_layout->node_list);
 	unlock_slurmctld(job_read_lock);
 
@@ -1101,35 +1214,8 @@ static void *_step_fini(void *args)
 
 	_throttle_start();
 	lock_slurmctld(job_write_lock);
-	if (!step_ptr->job_ptr) {
-		error("For some reason we don't have a job_ptr for "
-		      "APID %"PRIu64".  This should never happen.",
-		      nhc_info.apid);
-	} else if (!step_ptr->step_node_bitmap) {
-		error("For some reason we don't have a step_node_bitmap "
-		      "for APID %"PRIu64".  "
-		      "If this is at startup and the step's nodes changed "
-		      "this is expected.  Otherwise this should never happen.",
-		      nhc_info.apid);
-
-		/* This should be the only cleanup needed */
-		jobinfo = step_ptr->select_jobinfo->data;
-
-		_remove_step_from_blades(step_ptr);
-		jobinfo->cleaning = CLEANING_COMPLETE;
-
-		delete_step_record(step_ptr->job_ptr, step_ptr->step_id);
-	} else {
-		other_step_finish(step_ptr);
-
-		jobinfo = step_ptr->select_jobinfo->data;
-
-		_remove_step_from_blades(step_ptr);
-		jobinfo->cleaning = CLEANING_COMPLETE;
-
-		/* free resources on the job */
-		post_job_step(step_ptr);
-	}
+	jobinfo = step_ptr->select_jobinfo->data;
+	jobinfo->cleaning |= CLEANING_COMPLETE;
 	unlock_slurmctld(job_write_lock);
 	_throttle_fini();
 
@@ -1227,6 +1313,7 @@ unpack_error:
  */
 extern int init ( void )
 {
+	DEF_TIMERS;
 #if defined(HAVE_NATIVE_CRAY_GA) && !defined(HAVE_CRAY_NETWORK)
 	char *err_msg = NULL;
 #endif
@@ -1236,10 +1323,18 @@ extern int init ( void )
 	 */
 	uint16_t select_type_param = slurm_get_select_type_param();
 	if (select_type_param & CR_OTHER_CONS_RES)
-		plugin_id = 108;
+		plugin_id = SELECT_PLUGIN_CRAY_CONS_RES;
 	debug_flags = slurm_get_debug_flags();
 
+#if defined(HAVE_NATIVE_CRAY) && !defined(HAVE_CRAY_NETWORK)
+	/* Read and store the CCM configured partition name(s). */
+	if (run_in_daemon("slurmctld")) {
+		/* Get any CCM configuration information */
+		ccm_get_config();
+	}
+#endif
 	if (!slurmctld_primary && run_in_daemon("slurmctld")) {
+		START_TIMER;
 		if (slurmctld_config.scheduling_disabled) {
 			info("Scheduling disabled on backup");
 			scheduling_disabled = true;
@@ -1252,6 +1347,9 @@ extern int init ( void )
 			      "the \"no_backup_scheduling\" "
 			      "SchedulerParameter.");
 #endif
+		END_TIMER;
+		if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+			info("alpsc_get_topology call took: %s", TIME_STR);
 	}
 
 	verbose("%s loaded", plugin_name);
@@ -1480,7 +1578,7 @@ extern int select_p_state_restore(char *dir_name)
 			for (j=0; j<blade_cnt; j++) {
 				if (blade_info.id == blade_array[j].id) {
 					/* blade_array[j].job_cnt = */
-					/* 	blade_info.job_cnt; */
+					/*	blade_info.job_cnt; */
 					if (!bit_equal(blade_array[j].
 						       node_bitmap,
 						       blade_info.node_bitmap))
@@ -1550,9 +1648,10 @@ extern int select_p_job_init(List job_list)
 			info("select_p_job_init: syncing jobs");
 
 		while ((job_ptr = list_next(itr))) {
-
 			jobinfo = job_ptr->select_jobinfo->data;
-			if (IS_CLEANING(jobinfo) || IS_JOB_RUNNING(job_ptr))
+			if ((IS_CLEANING_STARTED(jobinfo) &&
+			     !IS_CLEANING_COMPLETE(jobinfo)) ||
+			    IS_JOB_RUNNING(job_ptr))
 				_set_job_running_restore(jobinfo);
 
 			/* We need to resize bitmaps if the
@@ -1577,7 +1676,11 @@ extern int select_p_job_init(List job_list)
 				struct step_record *step_ptr;
 				while ((step_ptr = list_next(itr_step))) {
 					jobinfo =step_ptr->select_jobinfo->data;
-					if (jobinfo && IS_CLEANING(jobinfo)) {
+					if (jobinfo &&
+					    IS_CLEANING_STARTED(jobinfo) &&
+					    !IS_CLEANING_COMPLETE(jobinfo)) {
+						jobinfo->cleaning |=
+							CLEANING_STARTED;
 						_spawn_cleanup_thread(
 							step_ptr, _step_fini);
 					}
@@ -1587,11 +1690,27 @@ extern int select_p_job_init(List job_list)
 
 			if (!(slurmctld_conf.select_type_param & CR_NHC_NO)) {
 				jobinfo = job_ptr->select_jobinfo->data;
-				if (jobinfo && IS_CLEANING(jobinfo)) {
+				if (jobinfo &&
+				    IS_CLEANING_STARTED(jobinfo) &&
+				    !IS_CLEANING_COMPLETE(jobinfo)) {
 					_spawn_cleanup_thread(
 						job_ptr, _job_fini);
 				}
 			}
+#if defined(HAVE_NATIVE_CRAY) && !defined(HAVE_CRAY_NETWORK)
+			/* As applicable, rerun CCM prologue during recovery */
+			if ((ccm_config.ccm_enabled) &&
+			    ccm_check_partitions(job_ptr)) {
+				if ((job_ptr->details) &&
+				    ((job_ptr->details->prolog_running) ||
+				     IS_JOB_CONFIGURING(job_ptr))) {
+					debug("CCM job %u recovery rerun "
+					      "prologue", job_ptr->job_id);
+					job_ptr->job_state |= JOB_CONFIGURING;
+					spawn_ccm_thread(job_ptr, ccm_begin);
+				}
+			}
+#endif
 		}
 		list_iterator_destroy(itr);
 	}
@@ -1615,9 +1734,12 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 	struct node_record *node_rec;
 	int i, j;
 	uint64_t blade_id = 0;
+	DEF_TIMERS;
 
 	if (scheduling_disabled)
 		return other_node_init(node_ptr, node_cnt);
+
+	START_TIMER;
 
 #if defined(HAVE_NATIVE_CRAY_GA) && !defined(HAVE_CRAY_NETWORK)
 	int nn, end_nn, last_nn = 0;
@@ -1627,17 +1749,21 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 	if (!topology) {
 		if (alpsc_get_topology(&err_msg, &topology,
 				       &topology_num_nodes)) {
+			END_TIMER;
+			if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+				INFO_LINE("call took: %s", TIME_STR);
+
 			if (err_msg) {
 				error("(%s: %d: %s) Could not get system "
 				      "topology info: %s",
 				      THIS_FILE, __LINE__,
-				      __FUNCTION__, err_msg);
+				      __func__, err_msg);
 				free(err_msg);
 			} else {
 				error("(%s: %d: %s) Could not get system "
 				      "topology info: No error "
 				      "message present.",
-				      THIS_FILE, __LINE__, __FUNCTION__);
+				      THIS_FILE, __LINE__, __func__);
 			}
 			return SLURM_ERROR;
 		}
@@ -1666,7 +1792,7 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 						 "0123456789"))) {
 				error("(%s: %d: %s) Error: Node was not "
 				      "recognizable: %s",
-				      THIS_FILE, __LINE__, __FUNCTION__,
+				      THIS_FILE, __LINE__, __func__,
 				      node_rec->name);
 				slurm_mutex_unlock(&blade_mutex);
 				return SLURM_ERROR;
@@ -1732,6 +1858,9 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 	xrealloc(blade_array, sizeof(blade_info_t) * blade_cnt);
 
 	slurm_mutex_unlock(&blade_mutex);
+	END_TIMER;
+	if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+		INFO_LINE("call took: %s", TIME_STR);
 
 	return other_node_init(node_ptr, node_cnt);
 }
@@ -1855,13 +1984,52 @@ extern int select_p_job_begin(struct job_record *job_ptr)
 	/* xfree(tmp3); */
 	slurm_mutex_unlock(&blade_mutex);
 
+#if defined(HAVE_NATIVE_CRAY) && !defined(HAVE_CRAY_NETWORK)
+	if (ccm_config.ccm_enabled) {
+		/*
+		 * Create a thread to do setup activity before running the
+		 * CCM prolog for a CCM partition.
+		 */
+		if (ccm_check_partitions(job_ptr)) {
+			if (job_ptr->details == NULL) {
+				/* This info is required; abort the launch */
+				CRAY_ERR("CCM prolog missing job details, "
+					"job %u killed", job_ptr->job_id);
+				srun_user_message(job_ptr,
+				      "CCM prolog missing job details, killed");
+				(void) job_signal(job_ptr->job_id, SIGKILL, 0,
+					0, false);
+			} else {
+				/* Delay job launch until CCM prolog is done */
+				debug("CCM job %u increment prolog_running, "
+					"current %d", job_ptr->job_id,
+					job_ptr->details->prolog_running);
+				job_ptr->details->prolog_running++;
+				/* Cleared in prolog_running_decr() */
+				debug("CCM job %u setting JOB_CONFIGURING",
+					job_ptr->job_id);
+				job_ptr->job_state |= JOB_CONFIGURING;
+				spawn_ccm_thread(job_ptr, ccm_begin);
+			}
+		}
+	}
+#endif
 	return other_job_begin(job_ptr);
 }
 
 extern int select_p_job_ready(struct job_record *job_ptr)
 {
 	xassert(job_ptr);
-
+#if defined(HAVE_NATIVE_CRAY) && !defined(HAVE_CRAY_NETWORK)
+	if (ccm_check_partitions(job_ptr)) {
+		/* Delay CCM job launch until CCM prolog is done */
+		if (IS_JOB_CONFIGURING(job_ptr)) {
+			debug("CCM job %u job configuring set; job not ready",
+				job_ptr->job_id);
+			return READY_JOB_ERROR;
+		}
+	}
+#endif
 	return other_job_ready(job_ptr);
 }
 
@@ -1889,25 +2057,39 @@ extern int select_p_job_signal(struct job_record *job_ptr, int signal)
 	return other_job_signal(job_ptr, signal);
 }
 
+extern int select_p_job_mem_confirm(struct job_record *job_ptr)
+{
+	xassert(job_ptr);
+
+	return other_job_mem_confirm(job_ptr);
+}
+
 extern int select_p_job_fini(struct job_record *job_ptr)
 {
 	select_jobinfo_t *jobinfo = job_ptr->select_jobinfo->data;
 
-
+#if defined(HAVE_NATIVE_CRAY) && !defined(HAVE_CRAY_NETWORK)
+	/* Create a thread to run the CCM epilog for a CCM partition */
+	if (ccm_config.ccm_enabled) {
+		if (ccm_check_partitions(job_ptr)) {
+			spawn_ccm_thread(job_ptr, ccm_fini);
+		}
+	}
+#endif
 	if (slurmctld_conf.select_type_param & CR_NHC_NO) {
 		debug3("NHC_No set, not running NHC after allocations");
 		other_job_fini(job_ptr);
 		return SLURM_SUCCESS;
 	}
 
-	if (IS_CLEANING(jobinfo)) {
+	if (IS_CLEANING_STARTED(jobinfo)) {
 		error("%s: Cleaning flag already set for job %u, "
 		      "this should never happen", __func__, job_ptr->job_id);
-	} else if (IS_CLEANED(jobinfo)) {
+	} else if (IS_CLEANING_COMPLETE(jobinfo)) {
 		error("%s: Cleaned flag already set for job %u, "
 		      "this should never happen", __func__, job_ptr->job_id);
 	} else {
-		jobinfo->cleaning = CLEANING_STARTED;
+		jobinfo->cleaning |= CLEANING_STARTED;
 		_spawn_cleanup_thread(job_ptr, _job_fini);
 	}
 
@@ -1919,15 +2101,19 @@ extern int select_p_job_suspend(struct job_record *job_ptr, bool indf_susp)
 #ifdef HAVE_NATIVE_CRAY
 	ListIterator i;
 	struct step_record *step_ptr = NULL;
+	DEF_TIMERS;
 
 	// Make an event for each job step
 	if (aeld_running) {
+		START_TIMER;
 		i = list_iterator_create(job_ptr->step_list);
-		while ((step_ptr = (struct step_record *)list_next(i))
-		       != NULL) {
+		while ((step_ptr = (struct step_record *)list_next(i))) {
 			_update_app(job_ptr, step_ptr, ALPSC_EV_SUSPEND);
 		}
 		list_iterator_destroy(i);
+		END_TIMER;
+		if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+			INFO_LINE("call took: %s", TIME_STR);
 	}
 #endif
 
@@ -1939,15 +2125,19 @@ extern int select_p_job_resume(struct job_record *job_ptr, bool indf_susp)
 #ifdef HAVE_NATIVE_CRAY
 	ListIterator i;
 	struct step_record *step_ptr = NULL;
+	DEF_TIMERS;
 
 	// Make an event for each job step
 	if (aeld_running) {
+		START_TIMER;
 		i = list_iterator_create(job_ptr->step_list);
-		while ((step_ptr = (struct step_record *)list_next(i))
-		       != NULL) {
+		while ((step_ptr = (struct step_record *)list_next(i))) {
 			_update_app(job_ptr, step_ptr, ALPSC_EV_RESUME);
 		}
 		list_iterator_destroy(i);
+		END_TIMER;
+		if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+			INFO_LINE("call took: %s", TIME_STR);
 	}
 #endif
 
@@ -1960,7 +2150,9 @@ extern bitstr_t *select_p_step_pick_nodes(struct job_record *job_ptr,
 					  bitstr_t **avail_nodes)
 {
 	select_jobinfo_t *jobinfo;
+	DEF_TIMERS;
 
+	START_TIMER;
 	xassert(avail_nodes);
 	xassert(!*avail_nodes);
 
@@ -1984,6 +2176,9 @@ extern bitstr_t *select_p_step_pick_nodes(struct job_record *job_ptr,
 
 		bit_not(*avail_nodes);
 	}
+	END_TIMER;
+	if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+		INFO_LINE("call took: %s", TIME_STR);
 
 	return other_step_pick_nodes(job_ptr, jobinfo, node_count, avail_nodes);
 }
@@ -1991,6 +2186,9 @@ extern bitstr_t *select_p_step_pick_nodes(struct job_record *job_ptr,
 extern int select_p_step_start(struct step_record *step_ptr)
 {
 	select_jobinfo_t *jobinfo;
+	DEF_TIMERS;
+
+	START_TIMER;
 
 #ifdef HAVE_NATIVE_CRAY
 	if (aeld_running) {
@@ -1999,7 +2197,7 @@ extern int select_p_step_start(struct step_record *step_ptr)
 #endif
 
 	jobinfo = step_ptr->job_ptr->select_jobinfo->data;
-	if (jobinfo->npc) {
+	if (jobinfo->npc && (step_ptr->step_id != SLURM_EXTERN_CONT)) {
 		int i;
 		select_jobinfo_t *step_jobinfo = step_ptr->select_jobinfo->data;
 		select_nodeinfo_t *nodeinfo;
@@ -2025,25 +2223,66 @@ extern int select_p_step_start(struct step_record *step_ptr)
 		}
 		bit_or(jobinfo->used_blades, step_jobinfo->blade_map);
 	}
+	END_TIMER;
+	if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+		INFO_LINE("call took: %s", TIME_STR);
+
 	return other_step_start(step_ptr);
 }
 
-
-extern int select_p_step_finish(struct step_record *step_ptr)
+static void _start_killing_step(struct step_record *step_ptr)
 {
-	select_jobinfo_t *jobinfo = step_ptr->select_jobinfo->data;
+	select_jobinfo_t *jobinfo;
 
+	if (slurmctld_conf.select_type_param & CR_NHC_STEP_NO) {
+		debug3("NHC_No_Steps set not running NHC on steps.");
+		return;
+	}
+
+	if (!step_ptr->select_jobinfo) {
+		debug3("step never got an allocation.");
+		return;
+	}
+
+	jobinfo = step_ptr->select_jobinfo->data;
+	if (jobinfo && !IS_CLEANING_STARTED(jobinfo)) {
+		jobinfo->cleaning |= CLEANING_STARTED;
+		_spawn_cleanup_thread(step_ptr, _step_kill);
+	}
+}
+
+extern int select_p_step_finish(struct step_record *step_ptr, bool killing_step)
+{
+	select_jobinfo_t *jobinfo;
+	DEF_TIMERS;
+
+	START_TIMER;
 #ifdef HAVE_NATIVE_CRAY
 	if (aeld_running) {
 		_update_app(step_ptr->job_ptr, step_ptr, ALPSC_EV_END);
 	}
 #endif
+	/* Send step to db since the step could be deleted by post_job_step()
+	 * before the step is completed and sent to the db (handled in
+	 * _internal_step_complete() in step_mgr.c). post_job_step is called
+	 * after the NHC is run (or immediately with NHC_NO). */
+	jobacct_storage_g_step_complete(acct_db_conn, step_ptr);
 
 	if (slurmctld_conf.select_type_param & CR_NHC_STEP_NO) {
 		debug3("NHC_No_Steps set not running NHC on steps.");
-		other_step_finish(step_ptr);
+		other_step_finish(step_ptr, killing_step);
 		/* free resources on the job */
 		post_job_step(step_ptr);
+		if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+			INFO_LINE("call took: %s", TIME_STR);
+		return SLURM_SUCCESS;
+	}
+
+	if (killing_step) {
+		_start_killing_step(step_ptr);
+		other_step_finish(step_ptr, killing_step);
+		if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+			INFO_LINE("call took: %s", TIME_STR);
 		return SLURM_SUCCESS;
 	}
 
@@ -2056,28 +2295,31 @@ extern int select_p_step_finish(struct step_record *step_ptr)
 		debug3("step completion %u.%u was received after job "
 		      "allocation is already completing, no extra NHC needed.",
 		      step_ptr->job_ptr->job_id, step_ptr->step_id);
-		other_step_finish(step_ptr);
+		other_step_finish(step_ptr, killing_step);
 		/* free resources on the job */
 		post_job_step(step_ptr);
 		return SLURM_SUCCESS;
 	}
 #endif
 
+	jobinfo = step_ptr->select_jobinfo->data;
 	if (!jobinfo) {
 		error("%s: job step %u.%u lacks jobinfo",
 		      __func__, step_ptr->job_ptr->job_id, step_ptr->step_id);
-	} else if (IS_CLEANING(jobinfo)) {
-		error("%s: Cleaning flag already set for job step %u.%u, "
-		      "this should never happen.",
-		      __func__, step_ptr->job_ptr->job_id, step_ptr->step_id);
-	} else if (IS_CLEANED(jobinfo)) {
-		error("%s: Cleaned flag already set for job step %u.%u, "
-		      "this should never happen.",
-		      __func__, step_ptr->job_ptr->job_id, step_ptr->step_id);
+	} else if (IS_CLEANING_STARTED(jobinfo)) {
+		verbose("%s: Cleaning flag already set for step %u.%u",
+			__func__, step_ptr->job_ptr->job_id, step_ptr->step_id);
+	} else if (IS_CLEANING_COMPLETE(jobinfo)) {
+		verbose("%s: Cleaned flag already set for step %u.%u",
+			__func__, step_ptr->job_ptr->job_id, step_ptr->step_id);
 	} else {
-		jobinfo->cleaning = CLEANING_STARTED;
+		jobinfo->cleaning |= CLEANING_STARTED;
 		_spawn_cleanup_thread(step_ptr, _step_fini);
 	}
+
+	END_TIMER;
+	if (debug_flags & DEBUG_FLAG_TIME_CRAY)
+		INFO_LINE("call took: %s", TIME_STR);
 
 	return SLURM_SUCCESS;
 }
@@ -2253,11 +2495,11 @@ extern int select_p_select_jobinfo_set(select_jobinfo_t *jobinfo,
 		break;
 	case SELECT_JOBDATA_NETWORK:
 		if (!in_char || !strlen(in_char)
-		    || !strcmp(in_char, "none"))
+		    || !xstrcmp(in_char, "none"))
 			jobinfo->npc = NPC_NONE;
-		else if (!strcmp(in_char, "system"))
+		else if (!xstrcmp(in_char, "system"))
 			jobinfo->npc = NPC_SYS;
-		else if (!strcmp(in_char, "blade"))
+		else if (!xstrcmp(in_char, "blade"))
 			jobinfo->npc = NPC_BLADE;
 		break;
 	default:
@@ -2291,7 +2533,11 @@ extern int select_p_select_jobinfo_get(select_jobinfo_t *jobinfo,
 		*select_jobinfo = jobinfo->other_jobinfo;
 		break;
 	case SELECT_JOBDATA_CLEANING:
-		*uint16 = (jobinfo->cleaning & CLEANING_STARTED);
+		if (IS_CLEANING_STARTED(jobinfo) &&
+		    !IS_CLEANING_COMPLETE(jobinfo))
+			*uint16 = 1;
+		else
+			*uint16 = 0;
 		break;
 	case SELECT_JOBDATA_NETWORK:
 		xassert(in_char);

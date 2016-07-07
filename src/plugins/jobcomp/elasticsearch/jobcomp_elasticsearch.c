@@ -107,11 +107,11 @@ const char plugin_type[] = "jobcomp/elasticsearch";
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
 #define INDEX_RETRY_INTERVAL 30
-#define JOBCOMP_DATA_FORMAT "{\"jobid\":%lu,\"username\":\"%s\","\
-	"\"user_id\":%lu,\"groupname\":\"%s\",\"group_id\":%lu,"\
-	"\"@start\":\"%s\",\"@end\":\"%s\",\"elapsed\":%ld,"\
-	"\"partition\":\"%s\",\"alloc_node\":\"%s\","\
-	"\"nodes\":\"%s\",\"total_cpus\":%lu,\"total_nodes\":%lu,"\
+#define JOBCOMP_DATA_FORMAT "{\"jobid\":%lu,\"username\":\"%s\","	\
+	"\"user_id\":%lu,\"groupname\":\"%s\",\"group_id\":%lu,"	\
+	"\"@start\":\"%s\",\"@end\":\"%s\",\"elapsed\":%ld,"		\
+	"\"partition\":\"%s\",\"alloc_node\":\"%s\","			\
+	"\"nodes\":\"%s\",\"total_cpus\":%lu,\"total_nodes\":%lu,"	\
 	"\"derived_exitcode\":%lu,\"exitcode\":%lu,\"state\":\"%s\""
 
 /* These are defined here so when we link with something other than
@@ -306,7 +306,7 @@ static int _load_pending_jobs(void)
 
 	return rc;
 
-      unpack_error:
+unpack_error:
 	error("%s: Error unpacking file %s", plugin_type, state_file);
 	free_buf(buffer);
 	xfree(state_file);
@@ -762,7 +762,7 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 
 	if (job_ptr->qos_ptr != NULL) {
 		slurmdb_qos_rec_t *assoc =
-		    (slurmdb_qos_rec_t *) job_ptr->qos_ptr;
+			(slurmdb_qos_rec_t *) job_ptr->qos_ptr;
 		qos = assoc->name;
 		xstrfmtcat(buffer, ",\"qos\":\"%s\"", qos);
 	}
@@ -772,12 +772,14 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 			   job_ptr->details->num_tasks);
 	}
 
-	if (job_ptr->details && (job_ptr->details->ntasks_per_node != NO_VAL)) {
+	if (job_ptr->details
+	    && (job_ptr->details->ntasks_per_node != (uint16_t) NO_VAL)) {
 		ntasks_per_node = job_ptr->details->ntasks_per_node;
 		xstrfmtcat(buffer, ",\"ntasks_per_node\":%hu", ntasks_per_node);
 	}
 
-	if (job_ptr->details && (job_ptr->details->cpus_per_task != NO_VAL)) {
+	if (job_ptr->details
+	    && (job_ptr->details->cpus_per_task != (uint16_t) NO_VAL)) {
 		xstrfmtcat(buffer, ",\"cpus_per_task\":%hu",
 			   job_ptr->details->cpus_per_task);
 	}
@@ -798,7 +800,7 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 
 	if (time_limit != INFINITE) {
 		xstrfmtcat(buffer, ",\"time_limit\":%lu",
-			(unsigned long) time_limit * 60);
+			   (unsigned long) time_limit * 60);
 	}
 
 	if (job_ptr->resv_name && job_ptr->resv_name[0]) {
@@ -809,7 +811,6 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 	if (job_ptr->gres_req && job_ptr->gres_req[0]) {
 		xstrfmtcat(buffer, ",\"gres_req\":\"%s\"", job_ptr->gres_req);
 	}
-
 
 	if (job_ptr->gres_alloc && job_ptr->gres_alloc[0]) {
 		xstrfmtcat(buffer, ",\"gres_alloc\":\"%s\"",

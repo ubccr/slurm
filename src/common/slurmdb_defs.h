@@ -62,6 +62,7 @@ typedef enum {
 	TRES_MEM,
 	TRES_ENERGY,
 	TRES_NODE,
+	TRES_STATIC_CNT
 } tres_types_t;
 
 /* These #defines are for the tres_str functions below and should be
@@ -91,6 +92,7 @@ typedef enum {
 #define TRES_STR_FLAG_COMMA1      0x00000020 /* make a first char a comma */
 #define TRES_STR_FLAG_NO_NULL     0x00000040 /* return blank string
 					      * instead of NULL */
+#define TRES_STR_CONVERT_UNITS    0x00000080 /* Convert number units */
 
 typedef struct {
 	slurmdb_cluster_rec_t *cluster_rec;
@@ -114,16 +116,18 @@ extern char *slurmdb_res_type_str(slurmdb_resource_type_t type);
 extern char *slurmdb_admin_level_str(slurmdb_admin_level_t level);
 extern slurmdb_admin_level_t str_2_slurmdb_admin_level(char *level);
 
-/* The next two functions have pointers to assoc_list so do not
+/* The next three functions have pointers to assoc_list so do not
  * destroy assoc_list before using the list returned from this function.
  */
-extern List slurmdb_get_hierarchical_sorted_assoc_list(List assoc_list);
+extern List slurmdb_get_hierarchical_sorted_assoc_list(List assoc_list,
+						       bool use_lft);
 extern List slurmdb_get_acct_hierarchical_rec_list(List assoc_list);
+extern List slurmdb_get_acct_hierarchical_rec_list_no_lft(List assoc_list);
 
 /* This reorders the list into a alphabetical hierarchy.
    IN/OUT: assoc_list
  */
-extern void slurmdb_sort_hierarchical_assoc_list(List assoc_list);
+extern void slurmdb_sort_hierarchical_assoc_list(List assoc_list, bool use_lft);
 
 /* IN/OUT: tree_list a list of slurmdb_print_tree_t's */
 extern char *slurmdb_tree_name_get(char *name, char *parent, List tree_list);
@@ -210,7 +214,8 @@ extern char *slurmdb_make_tres_string_from_arrays(char **tres_names,
 						  uint32_t flags);
 
 extern char *slurmdb_make_tres_string_from_simple(
-	char *tres_in, List full_tres_list);
+	char *tres_in, List full_tres_list, int spec_unit,
+	uint32_t convert_flags);
 /* Used to combine 2 different TRES strings together
  *
  * IN/OUT: tres_str_old - original simple tres string
@@ -232,6 +237,8 @@ extern slurmdb_tres_rec_t *slurmdb_find_tres_in_string(
 extern uint64_t slurmdb_find_tres_count_in_string(char *tres_str_in, int id);
 extern int slurmdb_find_qos_in_list_by_name(void *x, void *key);
 extern int slurmdb_find_selected_step_in_list(void *x, void *key);
+extern int slurmdb_find_assoc_in_list(void *x, void *key);
+extern int slurmdb_find_update_object_in_list(void *x, void *key);
 extern int slurmdb_find_tres_in_list(void *x, void *key);
 extern int slurmdb_find_tres_in_list_by_count(void *x, void *key);
 extern int slurmdb_find_tres_in_list_by_type(void *x, void *key);
@@ -258,9 +265,7 @@ extern void slurmdb_transfer_tres_time(
 extern int slurmdb_get_old_tres_pos(slurmdb_tres_rec_t **new_array,
 				    slurmdb_tres_rec_t **old_array,
 				    int cur_pos, int old_cnt);
-extern void slurmdb_set_new_tres_cnt(uint64_t **tres_cnt_in,
-				     slurmdb_tres_rec_t **new_array,
-				     slurmdb_tres_rec_t **old_array,
-				     int cur_cnt, int max_cnt);
+
+extern int slurmdb_get_tres_base_unit(char *tres_type);
 
 #endif

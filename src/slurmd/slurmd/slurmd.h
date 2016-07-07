@@ -1,6 +1,5 @@
 /*****************************************************************************\
  * src/slurmd/slurmd/slurmd.h - header for slurmd
- * $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -83,6 +82,7 @@ typedef struct slurmd_config {
 	char         *prog;		/* Program basename		   */
 	char         ***argv;           /* pointer to argument vector      */
 	int          *argc;             /* pointer to argument count       */
+	char         *auth_info;	/* AuthInfo for msg authentication */ 
 	char         *chos_loc;		/* Chroot OS wrapper path          */
 	char         *cluster_name; 	/* conf ClusterName		   */
 	char         *hostname;	 	/* local hostname		   */
@@ -125,7 +125,8 @@ typedef struct slurmd_config {
 	char         *logfile;		/* slurmd logfile, if any          */
 	char         *spooldir;		/* SlurmdSpoolDir		   */
 	char         *pidfile;		/* PidFile location		   */
-	char         *health_check_program;	/* run on RPC request      */
+	char         *health_check_program; /* run on RPC request or at start */
+	uint64_t     health_check_interval; /* Interval between runs       */
 	char         *tmpfs;		/* directory of tmp FS             */
 	char         *pubkey;		/* location of job cred public key */
 	char         *epilog;		/* Path to Epilog script	   */
@@ -142,7 +143,8 @@ typedef struct slurmd_config {
 	int           debug_level;	/* logging detail level            */
 	uint16_t      debug_level_set;	/* debug_level set on command line */
 	uint64_t      debug_flags;	/* DebugFlags configured           */
-	int           daemonize:1;	/* daemonize flag		   */
+	int	      boot_time:1;      /* Report node boot time now (-b)  */
+	int           daemonize:1;	/* daemonize flag (-D)		   */
 	int	      cleanstart:1;     /* clean start requested (-c)      */
 	int           mlock_pages:1;	/* mlock() slurmd  */
 
@@ -194,5 +196,7 @@ int send_registration_msg(uint32_t status, bool startup);
  */
 int save_cred_state(slurm_cred_ctx_t vctx);
 
+/* Run the health check program if configured */
+int run_script_health_check(void);
 
 #endif /* !_SLURMD_H */

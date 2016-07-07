@@ -580,7 +580,7 @@ _getopt_internal (argc, argv, optstring, longopts, longind, long_only)
 	 then exchange with previous non-options as if it were an option,
 	 then skip everything else like a non-option.  */
 
-      if (optind != argc && !strcmp (argv[optind], "--"))
+      if (optind != argc && !xstrcmp (argv[optind], "--"))
 	{
 	  optind++;
 
@@ -656,7 +656,7 @@ _getopt_internal (argc, argv, optstring, longopts, longind, long_only)
       /* Test all long options for either exact match
 	 or abbreviated matches.  */
       for (p = longopts, option_index = 0; p->name; p++, option_index++)
-	if (!strncmp (p->name, nextchar, nameend - nextchar))
+	if (!xstrncmp (p->name, nextchar, nameend - nextchar))
 	  {
 	    if ((unsigned int) (nameend - nextchar)
 		== (unsigned int) strlen (p->name))
@@ -848,7 +848,7 @@ _getopt_internal (argc, argv, optstring, longopts, longind, long_only)
 	/* Test all long options for either exact match
 	   or abbreviated matches.  */
 	for (p = longopts, option_index = 0; p->name; p++, option_index++)
-	  if (!strncmp (p->name, nextchar, nameend - nextchar))
+	  if (!xstrncmp (p->name, nextchar, nameend - nextchar))
 	    {
 	      if ((unsigned int) (nameend - nextchar) == strlen (p->name))
 		{

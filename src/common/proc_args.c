@@ -282,21 +282,21 @@ task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size)
 			buf[j][i] = '\0';
 			cur_ptr++;
 		}
-		if (strcmp(buf[0], "*") == 0)
+		if (xstrcmp(buf[0], "*") == 0)
 			/* default node distribution is block */
 			strcpy(buf[0], "block");
 		strcat(outstr, buf[0]);
-		if (strcmp(buf[1], "\0") != 0) {
+		if (xstrcmp(buf[1], "\0") != 0) {
 			strcat(outstr, ":");
-			if (!strcmp(buf[1], "*") || !strcmp(buf[1], "\0")) {
+			if (!xstrcmp(buf[1], "*") || !xstrcmp(buf[1], "\0")) {
 				/* default socket distribution is cyclic */
 				strcpy(buf[1], "cyclic");
 			}
 			strcat(outstr, buf[1]);
 		}
-		if (strcmp(buf[2], "\0") != 0) {
+		if (xstrcmp(buf[2], "\0") != 0) {
 			strcat(outstr, ":");
-			if (!strcmp(buf[2], "*") || !strcmp(buf[2], "\0")) {
+			if (!xstrcmp(buf[2], "*") || !xstrcmp(buf[2], "\0")) {
 				/* default core dist is inherited socket dist */
 				strcpy(buf[2], buf[1]);
 			}
@@ -304,70 +304,70 @@ task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size)
 		}
 
 		if (lllp_dist) {
-			if (strcasecmp(outstr, "cyclic:cyclic") == 0) {
+			if (xstrcasecmp(outstr, "cyclic:cyclic") == 0) {
 				result = SLURM_DIST_CYCLIC_CYCLIC;
-			} else if (strcasecmp(outstr, "cyclic:block") == 0) {
+			} else if (xstrcasecmp(outstr, "cyclic:block") == 0) {
 				result = SLURM_DIST_CYCLIC_BLOCK;
-			} else if (strcasecmp(outstr, "block:block") == 0) {
+			} else if (xstrcasecmp(outstr, "block:block") == 0) {
 				result = SLURM_DIST_BLOCK_BLOCK;
-			} else if (strcasecmp(outstr, "block:cyclic") == 0) {
+			} else if (xstrcasecmp(outstr, "block:cyclic") == 0) {
 				result = SLURM_DIST_BLOCK_CYCLIC;
-			} else if (strcasecmp(outstr, "block:fcyclic") == 0) {
+			} else if (xstrcasecmp(outstr, "block:fcyclic") == 0) {
 				result = SLURM_DIST_BLOCK_CFULL;
-			} else if (strcasecmp(outstr, "cyclic:fcyclic") == 0) {
+			} else if (xstrcasecmp(outstr, "cyclic:fcyclic") == 0) {
 				result = SLURM_DIST_CYCLIC_CFULL;
-			} else if (strcasecmp(outstr, "cyclic:cyclic:cyclic")
+			} else if (xstrcasecmp(outstr, "cyclic:cyclic:cyclic")
 				   == 0) {
 				result = SLURM_DIST_CYCLIC_CYCLIC_CYCLIC;
-			} else if (strcasecmp(outstr, "cyclic:cyclic:block")
+			} else if (xstrcasecmp(outstr, "cyclic:cyclic:block")
 				   == 0) {
 				result = SLURM_DIST_CYCLIC_CYCLIC_BLOCK;
-			} else if (strcasecmp(outstr, "cyclic:cyclic:fcyclic")
+			} else if (xstrcasecmp(outstr, "cyclic:cyclic:fcyclic")
 				== 0) {
 				result = SLURM_DIST_CYCLIC_CYCLIC_CFULL;
-			} else if (strcasecmp(outstr, "cyclic:block:cyclic")
+			} else if (xstrcasecmp(outstr, "cyclic:block:cyclic")
 				== 0) {
 				result = SLURM_DIST_CYCLIC_BLOCK_CYCLIC;
-			} else if (strcasecmp(outstr, "cyclic:block:block")
+			} else if (xstrcasecmp(outstr, "cyclic:block:block")
 				== 0) {
 				result = SLURM_DIST_CYCLIC_BLOCK_BLOCK;
-			} else if (strcasecmp(outstr, "cyclic:block:fcyclic")
+			} else if (xstrcasecmp(outstr, "cyclic:block:fcyclic")
 				== 0) {
 				result = SLURM_DIST_CYCLIC_BLOCK_CFULL;
-			} else if (strcasecmp(outstr, "cyclic:fcyclic:cyclic")
+			} else if (xstrcasecmp(outstr, "cyclic:fcyclic:cyclic")
 				== 0) {
 				result = SLURM_DIST_CYCLIC_CFULL_CYCLIC;
-			} else if (strcasecmp(outstr, "cyclic:fcyclic:block")
+			} else if (xstrcasecmp(outstr, "cyclic:fcyclic:block")
 				== 0) {
 				result = SLURM_DIST_CYCLIC_CFULL_BLOCK;
-			} else if (strcasecmp(outstr, "cyclic:fcyclic:fcyclic")
+			} else if (xstrcasecmp(outstr, "cyclic:fcyclic:fcyclic")
 				== 0) {
 				result = SLURM_DIST_CYCLIC_CFULL_CFULL;
-			} else if (strcasecmp(outstr, "block:cyclic:cyclic")
+			} else if (xstrcasecmp(outstr, "block:cyclic:cyclic")
 				== 0) {
 				result = SLURM_DIST_BLOCK_CYCLIC_CYCLIC;
-			} else if (strcasecmp(outstr, "block:cyclic:block")
+			} else if (xstrcasecmp(outstr, "block:cyclic:block")
 				== 0) {
 				result = SLURM_DIST_BLOCK_CYCLIC_BLOCK;
-			} else if (strcasecmp(outstr, "block:cyclic:fcyclic")
+			} else if (xstrcasecmp(outstr, "block:cyclic:fcyclic")
 				== 0) {
 				result = SLURM_DIST_BLOCK_CYCLIC_CFULL;
-			} else if (strcasecmp(outstr, "block:block:cyclic")
+			} else if (xstrcasecmp(outstr, "block:block:cyclic")
 				== 0) {
 				result = SLURM_DIST_BLOCK_BLOCK_CYCLIC;
-			} else if (strcasecmp(outstr, "block:block:block")
+			} else if (xstrcasecmp(outstr, "block:block:block")
 				== 0) {
 				result = SLURM_DIST_BLOCK_BLOCK_BLOCK;
-			} else if (strcasecmp(outstr, "block:block:fcyclic")
+			} else if (xstrcasecmp(outstr, "block:block:fcyclic")
 				== 0) {
 				result = SLURM_DIST_BLOCK_BLOCK_CFULL;
-			} else if (strcasecmp(outstr, "block:fcyclic:cyclic")
+			} else if (xstrcasecmp(outstr, "block:fcyclic:cyclic")
 				== 0) {
 				result = SLURM_DIST_BLOCK_CFULL_CYCLIC;
-			} else if (strcasecmp(outstr, "block:fcyclic:block")
+			} else if (xstrcasecmp(outstr, "block:fcyclic:block")
 				== 0) {
 				result = SLURM_DIST_BLOCK_CFULL_BLOCK;
-			} else if (strcasecmp(outstr, "block:fcyclic:fcyclic")
+			} else if (xstrcasecmp(outstr, "block:fcyclic:fcyclic")
 				== 0) {
 				result = SLURM_DIST_BLOCK_CFULL_CFULL;
 			}
@@ -843,16 +843,14 @@ bool verify_socket_core_thread_count(const char *arg, int *min_sockets,
 				     cpu_bind_type_t *cpu_bind_type)
 {
 	bool tmp_val,ret_val;
-	int i,j;
+	int i, j;
 	int max_sockets = 0, max_cores = 0, max_threads = 0;
 	const char *cur_ptr = arg;
 	char buf[3][48]; /* each can hold INT64_MAX - INT64_MAX */
-	buf[0][0] = '\0';
-	buf[1][0] = '\0';
-	buf[2][0] = '\0';
 
- 	for (j=0;j<3;j++) {
-		for (i=0;i<47;i++) {
+	memset(buf, 0, sizeof(buf));
+	for (j = 0; j < 3; j++) {
+		for (i = 0; i < 47; i++) {
 			if (*cur_ptr == '\0' || *cur_ptr ==':')
 				break;
 			buf[j][i] = *cur_ptr++;
@@ -860,7 +858,6 @@ bool verify_socket_core_thread_count(const char *arg, int *min_sockets,
 		if (*cur_ptr == '\0')
 			break;
 		xassert(*cur_ptr == ':');
-		buf[j][i] = '\0';
 		cur_ptr++;
 	}
 	/* if cpu_bind_type doesn't already have a auto preference, choose
@@ -878,7 +875,6 @@ bool verify_socket_core_thread_count(const char *arg, int *min_sockets,
 			*cpu_bind_type |= CPU_BIND_TO_THREADS;
 		}
 	}
-	buf[j][i] = '\0';
 
 	ret_val = true;
 	tmp_val = get_resource_arg_range(&buf[0][0], "first arg of -B",
@@ -928,7 +924,7 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 
 	p = buf;
 	while ((tok = strsep(&p, ";"))) {
-		if (strcasecmp(tok, "help") == 0) {
+		if (xstrcasecmp(tok, "help") == 0) {
 			printf(
 "Application hint options:\n"
 "    --hint=             Bind tasks according to application hints\n"
@@ -937,18 +933,18 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 "        [no]multithread [don't] use extra threads with in-core multi-threading\n"
 "        help            show this help message\n");
 			return 1;
-		} else if (strcasecmp(tok, "compute_bound") == 0) {
+		} else if (xstrcasecmp(tok, "compute_bound") == 0) {
 			*min_sockets = NO_VAL;
 			*min_cores   = NO_VAL;
 			*min_threads = 1;
 			if (cpu_bind_type)
 				*cpu_bind_type |= CPU_BIND_TO_CORES;
-		} else if (strcasecmp(tok, "memory_bound") == 0) {
+		} else if (xstrcasecmp(tok, "memory_bound") == 0) {
 			*min_cores   = 1;
 			*min_threads = 1;
 			if (cpu_bind_type)
 				*cpu_bind_type |= CPU_BIND_TO_CORES;
-		} else if (strcasecmp(tok, "multithread") == 0) {
+		} else if (xstrcasecmp(tok, "multithread") == 0) {
 			*min_threads = NO_VAL;
 			if (cpu_bind_type) {
 				*cpu_bind_type |= CPU_BIND_TO_THREADS;
@@ -957,7 +953,7 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 			}
 			if (*ntasks_per_core == NO_VAL)
 				*ntasks_per_core = INFINITE;
-		} else if (strcasecmp(tok, "nomultithread") == 0) {
+		} else if (xstrcasecmp(tok, "nomultithread") == 0) {
 			*min_threads = 1;
 			if (cpu_bind_type) {
 				*cpu_bind_type |= CPU_BIND_TO_THREADS;
@@ -990,30 +986,33 @@ uint16_t parse_mail_type(const char *arg)
 	buf = xstrdup(arg);
 	tok = strtok_r(buf, ",", &save_ptr);
 	while (tok) {
-		if (strcasecmp(tok, "NONE") == 0) {
+		if (xstrcasecmp(tok, "NONE") == 0) {
 			rc = 0;
 			none_set = true;
 			break;
-		} else if (strcasecmp(tok, "BEGIN") == 0)
+		}
+		else if (xstrcasecmp(tok, "ARRAY_TASKS") == 0)
+			rc |= MAIL_ARRAY_TASKS;
+		else if (xstrcasecmp(tok, "BEGIN") == 0)
 			rc |= MAIL_JOB_BEGIN;
-		else if  (strcasecmp(tok, "END") == 0)
+		else if  (xstrcasecmp(tok, "END") == 0)
 			rc |= MAIL_JOB_END;
-		else if (strcasecmp(tok, "FAIL") == 0)
+		else if (xstrcasecmp(tok, "FAIL") == 0)
 			rc |= MAIL_JOB_FAIL;
-		else if (strcasecmp(tok, "REQUEUE") == 0)
+		else if (xstrcasecmp(tok, "REQUEUE") == 0)
 			rc |= MAIL_JOB_REQUEUE;
-		else if (strcasecmp(tok, "ALL") == 0)
+		else if (xstrcasecmp(tok, "ALL") == 0)
 			rc |= MAIL_JOB_BEGIN |  MAIL_JOB_END |  MAIL_JOB_FAIL |
 			      MAIL_JOB_REQUEUE | MAIL_JOB_STAGE_OUT;
-		else if (!strcasecmp(tok, "STAGE_OUT"))
+		else if (!xstrcasecmp(tok, "STAGE_OUT"))
 			rc |= MAIL_JOB_STAGE_OUT;
-		else if (strcasecmp(tok, "TIME_LIMIT") == 0)
+		else if (xstrcasecmp(tok, "TIME_LIMIT") == 0)
 			rc |= MAIL_JOB_TIME100;
-		else if (strcasecmp(tok, "TIME_LIMIT_90") == 0)
+		else if (xstrcasecmp(tok, "TIME_LIMIT_90") == 0)
 			rc |= MAIL_JOB_TIME90;
-		else if (strcasecmp(tok, "TIME_LIMIT_80") == 0)
+		else if (xstrcasecmp(tok, "TIME_LIMIT_80") == 0)
 			rc |= MAIL_JOB_TIME80;
-		else if (strcasecmp(tok, "TIME_LIMIT_50") == 0)
+		else if (xstrcasecmp(tok, "TIME_LIMIT_50") == 0)
 			rc |= MAIL_JOB_TIME50;
 		tok = strtok_r(NULL, ",", &save_ptr);
 	}
@@ -1032,6 +1031,11 @@ char *print_mail_type(const uint16_t type)
 	if (type == 0)
 		return "NONE";
 
+	if (type & MAIL_ARRAY_TASKS) {
+		if (buf[0])
+			strcat(buf, ",");
+		strcat(buf, "ARRAY_TASKS");
+	}
 	if (type & MAIL_JOB_BEGIN) {
 		if (buf[0])
 			strcat(buf, ",");
@@ -1406,7 +1410,7 @@ void print_db_notok(const char *cname, bool isenv)
 		      "%s or contact your admin to resolve the problem.",
 		      isenv ? "SLURM_CLUSTERS from your environment" :
 		      "--cluster from your command line");
-	else if (!strcasecmp("all", cname))
+	else if (!xstrcasecmp("all", cname))
 		error("No clusters can be reached now. "
 		      "Contact your admin to resolve the problem.");
 	else
@@ -1686,13 +1690,17 @@ parse_resv_flags(const char *flagstr, const char *msg)
 				outflags |= RESERVE_FLAG_NO_STATIC;
 			else
 				outflags |= RESERVE_FLAG_STATIC;
-		} else if (strncasecmp(curr, "Part_Nodes", MAX(taglen,1))
+		} else if (strncasecmp(curr, "Part_Nodes", MAX(taglen, 2))
 			   == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_PART_NODES;
 			else
 				outflags |= RESERVE_FLAG_PART_NODES;
+		} else if (strncasecmp(curr, "PURGE_COMP", MAX(taglen, 2))
+			   == 0) {
+			curr += taglen;
+			outflags |= RESERVE_FLAG_PURGE_COMP;
 		} else if (!strncasecmp(curr, "First_Cores", MAX(taglen,1)) &&
 			   !flip) {
 			curr += taglen;
@@ -1715,4 +1723,30 @@ parse_resv_flags(const char *flagstr, const char *msg)
 		}
 	}
 	return outflags;
+}
+
+/* parse --compress for a compression type, set to default type if not found */
+uint16_t parse_compress_type(const char *arg)
+{
+	/* if called with null string return default compression type */
+	if (!arg) {
+#if HAVE_LZ4
+		return COMPRESS_LZ4;
+#elif HAVE_LIBZ
+		return COMPRESS_ZLIB;
+#else
+		error("No compression library available,"
+		      " compression disabled.");
+		return COMPRESS_OFF;
+#endif
+	}
+
+	if (!strcasecmp(arg, "zlib"))
+		return COMPRESS_ZLIB;
+	else if (!strcasecmp(arg, "lz4"))
+		return COMPRESS_LZ4;
+
+	error("Compression type '%s' unknown, disabling compression support.",
+	      arg);
+	return COMPRESS_OFF;
 }

@@ -64,7 +64,7 @@ static int	_filter_job(job_info_t * job);
 static int	_filter_job_part(char *part_name);
 static int	_filter_step(job_step_info_t * step);
 static void	_job_list_del(void *x);
-static uint32_t	_part_get_prio(char *part_name);
+static uint32_t	_part_get_prio_tier(char *part_name);
 static void	_part_state_free(void);
 static void	_part_state_load(void);
 static int	_print_str(char *str, int width, bool right, bool cut_output);
@@ -117,7 +117,7 @@ int print_jobs_array(job_info_t * jobs, int size, List format)
 					job_rec_ptr->job_ptr = jobs + i;
 					job_rec_ptr->part_name = xstrdup(tok);
 					job_rec_ptr->part_prio =
-						_part_get_prio(tok);
+						_part_get_prio_tier(tok);
 					list_append(l, (void *) job_rec_ptr);
 				}
 				tok = strtok_r(NULL, ",", &save_ptr);
@@ -268,7 +268,7 @@ static void _job_list_del(void *x)
 	xfree(job_rec_ptr);
 }
 
-static uint32_t _part_get_prio(char *part_name)
+static uint32_t _part_get_prio_tier(char *part_name)
 {
 	partition_info_t *part_ptr;
 	uint32_t part_prio = 1;	/* Default partition priority */
@@ -276,8 +276,8 @@ static uint32_t _part_get_prio(char *part_name)
 
 	for (i = 0, part_ptr = part_info_msg->partition_array;
 	     i < part_info_msg->record_count; i++, part_ptr++) {
-		if (!strcmp(part_ptr->name, part_name)) {
-			part_prio = part_ptr->priority;
+		if (!xstrcmp(part_ptr->name, part_name)) {
+			part_prio = part_ptr->priority_tier;
 			break;
 		}
 	}
@@ -876,7 +876,16 @@ int _print_job_time_start(job_info_t * job, int width, bool right,
 		printf("%s", suffix);
 	return SLURM_SUCCESS;
 }
-
+int _print_job_deadline(job_info_t * job, int width, bool right, char* suffix)
+{
+	if (job == NULL)        /* Print the Header instead */
+		_print_str("DEADLINE", width, right, true);
+	else
+		_print_time(job->deadline, 0, width, right);
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
 int _print_job_time_end(job_info_t * job, int width, bool right, char* suffix)
 {
 	if (job == NULL)	/* Print the Header instead */
@@ -979,6 +988,7 @@ int _print_job_reason_list(job_info_t * job, int width, bool right,
 	} else if (!IS_JOB_COMPLETING(job)
 		   && (IS_JOB_PENDING(job)
 		       || IS_JOB_TIMEOUT(job)
+		       || IS_JOB_DEADLINE(job)
 		       || IS_JOB_FAILED(job))) {
 		char *reason_fmt = NULL, *reason = NULL;
 		if (job->state_desc)
@@ -1037,7 +1047,7 @@ int _print_job_num_cpus(job_info_t * job, int width, bool right, char* suffix)
 	else {
 		if (params.cluster_flags & CLUSTER_FLAG_BG)
 			convert_num_unit((float)job->num_cpus, tmp_char,
-					 sizeof(tmp_char), UNIT_NONE,
+					 sizeof(tmp_char), UNIT_NONE, NO_VAL,
 					 params.convert_flags);
 		else
 			snprintf(tmp_char, sizeof(tmp_char),
@@ -1068,7 +1078,7 @@ int _print_job_num_nodes(job_info_t * job, int width, bool right_justify,
 
 		if (params.cluster_flags & CLUSTER_FLAG_BG)
 			convert_num_unit((float)node_cnt, tmp_char,
-					 sizeof(tmp_char), UNIT_NONE,
+					 sizeof(tmp_char), UNIT_NONE, NO_VAL,
 					 params.convert_flags);
 		else
 			snprintf(tmp_char, sizeof(tmp_char), "%d", node_cnt);
@@ -1086,33 +1096,29 @@ int _print_job_num_sct(job_info_t * job, int width, bool right_justify,
 	char sockets[10];
 	char cores[10];
 	char threads[10];
-	char sct[(10+1)*3];
+	char *sct = NULL;
 	if (job) {
 		if (job->sockets_per_node == (uint16_t) NO_VAL)
 			strcpy(sockets, "*");
 		else
 			convert_num_unit((float)job->sockets_per_node, sockets,
-					sizeof(sockets), UNIT_NONE,
+					sizeof(sockets), UNIT_NONE, NO_VAL,
 					params.convert_flags);
 		if (job->cores_per_socket == (uint16_t) NO_VAL)
 			strcpy(cores, "*");
 		else
 			convert_num_unit((float)job->cores_per_socket, cores,
-					sizeof(cores), UNIT_NONE,
+					sizeof(cores), UNIT_NONE, NO_VAL,
 					params.convert_flags);
 		if (job->threads_per_core == (uint16_t) NO_VAL)
 			strcpy(threads, "*");
 		else
 			convert_num_unit((float)job->threads_per_core, threads,
-					sizeof(threads), UNIT_NONE,
+					sizeof(threads), UNIT_NONE, NO_VAL,
 					params.convert_flags);
-		sct[0] = '\0';
-		strcat(sct, sockets);
-		strcat(sct, ":");
-		strcat(sct, cores);
-		strcat(sct, ":");
-		strcat(sct, threads);
+		xstrfmtcat(sct, "%s:%s:%s", sockets, cores, threads);
 		_print_str(sct, width, right_justify, true);
+		xfree(sct);
 	} else {
 		_print_str("S:C:T", width, right_justify, true);
 	}
@@ -1122,27 +1128,28 @@ int _print_job_num_sct(job_info_t * job, int width, bool right_justify,
 	return SLURM_SUCCESS;
 }
 
-int _print_job_shared(job_info_t * job, int width, bool right_justify,
-		      char* suffix)
+int _print_job_num_tasks(job_info_t * job, int width, bool right, char* suffix)
 {
-	if (job == NULL)	/* Print the Header instead */
-		_print_str("SHARED", width, right_justify, true);
-	else {
-		switch (job->shared) {
-		case 0:
-			_print_str("no", width, right_justify, true);
-			break;
-		case 1:
-			_print_str("yes", width, right_justify, true);
-			break;
-		case 2:
-			_print_str("user", width, right_justify, true);
-			break;
-		case (uint16_t)NO_VAL:
-		default:
-			_print_str("unknwn", width, right_justify, true);
-			break;
-		}
+	char tmp_char[18];
+	if (job == NULL) {	/* Print the Header instead */
+		_print_str("TASKS", width, right, true);
+	} else {
+		snprintf(tmp_char, sizeof(tmp_char), "%u", job->num_tasks);
+       		_print_str(tmp_char, width, right, true);
+	}
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_job_over_subscribe(job_info_t * job, int width, bool right_justify,
+			      char* suffix)
+{
+	if (job == NULL) {	/* Print the Header instead */
+		_print_str("OVER_SUBSCRIBE", width, right_justify, true);
+	} else {
+		_print_str(job_share_string(job->shared),
+			   width, right_justify, true);
 	}
 	if (suffix)
 		printf("%s", suffix);
@@ -1172,7 +1179,7 @@ int _print_pn_min_cpus(job_info_t * job, int width, bool right_justify,
 		_print_str("MIN_CPUS", width, right_justify, true);
 	else {
 		convert_num_unit((float)job->pn_min_cpus, tmp_char,
-				 sizeof(tmp_char), UNIT_NONE,
+				 sizeof(tmp_char), UNIT_NONE, NO_VAL,
 				 params.convert_flags);
 		_print_str(tmp_char, width, right_justify, true);
 	}
@@ -1193,7 +1200,7 @@ int _print_sockets(job_info_t * job, int width, bool right_justify,
 			strcpy(tmp_char, "*");
 		else
 			convert_num_unit((float)job->sockets_per_node, tmp_char,
-				 sizeof(tmp_char), UNIT_NONE,
+				 sizeof(tmp_char), UNIT_NONE, NO_VAL,
 				 params.convert_flags);
 		_print_str(tmp_char, width, right_justify, true);
 	}
@@ -1214,7 +1221,7 @@ int _print_cores(job_info_t * job, int width, bool right_justify,
 			strcpy(tmp_char, "*");
 		else
 			convert_num_unit((float)job->cores_per_socket, tmp_char,
-					sizeof(tmp_char), UNIT_NONE,
+					sizeof(tmp_char), UNIT_NONE, NO_VAL,
 					params.convert_flags);
 		_print_str(tmp_char, width, right_justify, true);
 	}
@@ -1235,7 +1242,7 @@ int _print_threads(job_info_t * job, int width, bool right_justify,
 			strcpy(tmp_char, "*");
 		else
 			convert_num_unit((float)job->threads_per_core, tmp_char,
-					sizeof(tmp_char), UNIT_NONE,
+					sizeof(tmp_char), UNIT_NONE, NO_VAL,
 					params.convert_flags);
 		_print_str(tmp_char, width, right_justify, true);
 	}
@@ -1248,18 +1255,15 @@ int _print_pn_min_memory(job_info_t * job, int width, bool right_justify,
 			  char* suffix)
 {
 	char min_mem[10];
-	char tmp_char[21];
 
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("MIN_MEMORY", width, right_justify, true);
 	else {
-	    	tmp_char[0] = '\0';
 		job->pn_min_memory &= (~MEM_PER_CPU);
 		convert_num_unit((float)job->pn_min_memory, min_mem,
-				 sizeof(min_mem), UNIT_MEGA,
+				 sizeof(min_mem), UNIT_MEGA, NO_VAL,
 				 params.convert_flags);
-		strcat(tmp_char, min_mem);
-		_print_str(tmp_char, width, right_justify, true);
+		_print_str(min_mem, width, right_justify, true);
 	}
 
 	if (suffix)
@@ -1276,8 +1280,8 @@ _print_pn_min_tmp_disk(job_info_t * job, int width, bool right_justify,
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("MIN_TMP_DISK", width, right_justify, true);
 	else {
-		convert_num_unit((float)job->pn_min_tmp_disk,
-				 tmp_char, sizeof(tmp_char), UNIT_MEGA,
+		convert_num_unit((float)job->pn_min_tmp_disk, tmp_char,
+				 sizeof(tmp_char), UNIT_MEGA, NO_VAL,
 				 params.convert_flags);
 		_print_str(tmp_char, width, right_justify, true);
 	}
@@ -1940,6 +1944,18 @@ int _print_job_tres(job_info_t *job, int width,
 	return SLURM_SUCCESS;
 }
 
+int _print_job_mcs_label(job_info_t * job, int width,
+			bool right, char* suffix)
+{
+	if (job == NULL)
+		_print_str("MCSLABEL", width, right, true);
+	else
+		_print_str(job->mcs_label, width, right, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
 
 /*****************************************************************************
  * Job Step Print Functions
@@ -2408,7 +2424,7 @@ static int _filter_job(job_info_t * job)
 		iterator = list_iterator_create(params.account_list);
 		while ((account = list_next(iterator))) {
 			 if ((job->account != NULL) &&
-			     (strcasecmp(account, job->account) == 0)) {
+			     (xstrcasecmp(account, job->account) == 0)) {
 				filter = 0;
 				break;
 			}
@@ -2423,7 +2439,7 @@ static int _filter_job(job_info_t * job)
 		iterator = list_iterator_create(params.qos_list);
 		while ((qos = list_next(iterator))) {
 			 if ((job->qos != NULL) &&
-			     (strcasecmp(qos, job->qos) == 0)) {
+			     (xstrcasecmp(qos, job->qos) == 0)) {
 				filter = 0;
 				break;
 			}
@@ -2481,7 +2497,7 @@ static int _filter_job(job_info_t * job)
 
 	if (params.reservation) {
 		if ((job->resv_name == NULL) ||
-		    (strcmp(job->resv_name, params.reservation))) {
+		    (xstrcmp(job->resv_name, params.reservation))) {
 			return 7;
 		}
 	}
@@ -2491,7 +2507,7 @@ static int _filter_job(job_info_t * job)
 		iterator = list_iterator_create(params.name_list);
 		while ((name = list_next(iterator))) {
 			if ((job->name != NULL) &&
-			     (strcasecmp(name, job->name) == 0)) {
+			     (xstrcasecmp(name, job->name) == 0)) {
 				filter = 0;
 				break;
 			}
@@ -2521,7 +2537,7 @@ static int _filter_job_part(char *part_name)
 	while (token && (rc != 0)) {
 		iterator = list_iterator_create(params.part_list);
 		while ((part = list_next(iterator))) {
-			if (strcmp(part, token) == 0) {
+			if (xstrcmp(part, token) == 0) {
 				rc = 0;
 				break;
 			}
@@ -2569,7 +2585,7 @@ static int _filter_step(job_step_info_t * step)
 		filter = 1;
 		iterator = list_iterator_create(params.part_list);
 		while ((part = list_next(iterator))) {
-			if (strcmp(part, step->partition) == 0) {
+			if (xstrcmp(part, step->partition) == 0) {
 				filter = 0;
 				break;
 			}

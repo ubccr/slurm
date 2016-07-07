@@ -252,9 +252,8 @@ static void *_set_db_inx_thread(void *no_data)
 	/* DEF_TIMERS; */
 
 #if HAVE_SYS_PRCTL_H
-	if (prctl(PR_SET_NAME, "slurmctld_dbinx", NULL, NULL, NULL) < 0) {
-		error("%s: cannot set my name to %s %m",
-		      __func__, "slurmctld_dbinx");
+	if (prctl(PR_SET_NAME, "dbinx", NULL, NULL, NULL) < 0) {
+		error("%s: cannot set my name to %s %m", __func__, "dbinx");
 	}
 #endif
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -1657,7 +1656,7 @@ extern List acct_storage_p_get_accts(void *db_conn, uid_t uid,
 }
 
 extern List acct_storage_p_get_clusters(void *db_conn, uid_t uid,
-					slurmdb_account_cond_t *cluster_cond)
+					slurmdb_cluster_cond_t *cluster_cond)
 {
 	slurmdbd_msg_t req, resp;
 	dbd_cond_msg_t get_msg;
@@ -2242,6 +2241,28 @@ extern int acct_storage_p_roll_usage(void *db_conn,
 		rc = resp_code;
 	else
 		info("SUCCESS");
+	return rc;
+}
+
+extern int acct_storage_p_fix_lost_jobs(void *db_conn, uint32_t uid,
+					List jobs)
+{
+	slurmdbd_msg_t req;
+	dbd_list_msg_t get_msg;
+	int rc, resp_code = SLURM_SUCCESS;
+
+	memset(&get_msg, 0, sizeof(dbd_list_msg_t));
+	get_msg.my_list = jobs;
+
+	req.msg_type = DBD_FIX_LOST_JOB;
+	req.data = &get_msg;
+
+	rc = slurm_send_slurmdbd_recv_rc_msg(SLURM_PROTOCOL_VERSION,
+					     &req, &resp_code);
+
+	if (resp_code != SLURM_SUCCESS)
+		rc = resp_code;
+
 	return rc;
 }
 
@@ -2862,4 +2883,10 @@ extern int acct_storage_p_reconfig(void *db_conn, bool dbd)
 	slurm_send_slurmdbd_recv_rc_msg(SLURM_PROTOCOL_VERSION, &msg, &rc);
 
 	return rc;
+}
+
+extern int acct_storage_p_reset_lft_rgt(void *db_conn, uid_t uid,
+					List cluster_list)
+{
+	return SLURM_SUCCESS;
 }

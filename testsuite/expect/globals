@@ -112,6 +112,11 @@ cset qsub        "${slurm_dir}/bin/qsub"
 cset qalter      "${slurm_dir}/bin/qalter"
 cset qrerun      "${slurm_dir}/bin/qrerun"
 
+cset lsid      	 "${slurm_dir}/bin/lsid"
+cset bjobs     	 "${slurm_dir}/bin/bjobs"
+cset bkill     	 "${slurm_dir}/bin/bkill"
+cset bsub     	 "${slurm_dir}/bin/bsub"
+
 # If length of string partition is zero, use output of function
 #	default_partition, otherwise use the partition explicitly
 #	named in your globals.local file (or below) for poe commands
@@ -232,6 +237,7 @@ set number_with_suffix   "\[0-9\]+\[KM\]*"
 set slash                "/"
 set whitespace		 "\[ \t\n\r\f\v\]+"
 set alpha_numeric_nodelist "$alpha_numeric_under\\\[?\[$alpha_numeric_comma\]?\\\]?"
+set controlmachine_regex "\[a-zA-Z0-9,\-\.\]+"
 #
 # Cache SlurmUser to check for SuperUser requests
 #
@@ -598,6 +604,7 @@ proc wait_for_job { job_id desired_state } {
 		switch $state {
 			"NOT_FOUND" -
 			"CANCELLED" -
+			"DEADLINE" -
 			"FAILED" -
 			"TIMEOUT" -
 			"NODE_FAIL" -
@@ -872,6 +879,35 @@ proc test_limits_enforced { } {
 	expect {
 		-re "AccountingStorageEnforce *= (\[a-z]+),limits" {
 			set enforced 1
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+
+	log_user 1
+	return $enforced
+}
+
+################################################################
+#
+# Proc: test_enforce_part_limits
+#
+# Purpose: Return value of EnforcePartLimits
+#
+# Returns EnforcePartLimits value (ALL, ANY, or NO)
+#
+################################################################
+proc test_enforce_part_limits { } {
+	global alpha scontrol
+
+	log_user 0
+	set enforced "UNKNOWN"
+	spawn $scontrol show config
+	expect {
+		-re "EnforcePartLimits *= ($alpha)" {
+			set enforced $expect_out(1,string)
 			exp_continue
 		}
 		eof {
@@ -1852,6 +1888,36 @@ proc test_launch_type { } {
 
 ################################################################
 #
+# Proc: test_node_features_plugin
+#
+# Purpose: Determine NodeFeaturesPlugin type.
+#
+# Returns the NodeFeaturesPlugin type
+#
+################################################################
+
+proc test_node_features_plugin { } {
+	global scontrol bin_bash bin_grep alpha_numeric_under
+
+	log_user 0
+	set type ""
+	spawn -noecho $bin_bash -c "exec $scontrol show config | $bin_grep NodeFeaturesPlugins"
+	expect {
+		-re "node_features/($alpha_numeric_under)" {
+			set type $expect_out(1,string)
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+
+	return $type
+}
+
+################################################################
+#
 # Proc: test_emulated
 #
 # Purpose: Determine if the system is emulated (not running on
@@ -2206,12 +2272,12 @@ proc available_nodes { partition state } {
 
 ################################################################
 #
-# Proc: partition_shared
+# Proc: partition_oversubscribe
 #
-# Purpose: Determine the shared configuration of the specified
+# Purpose: Determine the oversubscribe configuration of the specified
 #          partition
 #
-# Returns: Return the shared configuration of the specified
+# Returns: Return the oversubscribe configuration of the specified
 #          partition
 #
 #
@@ -2219,16 +2285,16 @@ proc available_nodes { partition state } {
 #
 ################################################################
 
-proc partition_shared { partition } {
+proc partition_oversubscribe { partition } {
 	global sinfo
 
-	set shared "No"
+	set oversubscribe "NO"
 	send_user "$sinfo --noheader --partition $partition --format %h\n"
 	set fd [open "|$sinfo --noheader --partition $partition --format %h"]
 	gets $fd line
 	catch {close $fd}
-	regexp {[a-zA-Z]+} $line shared
-	return $shared
+	regexp {[a-zA-Z]+} $line oversubscribe
+	return $oversubscribe
 }
 
 ################################################################
@@ -2274,8 +2340,8 @@ proc default_partition {} {
 
 proc default_part_exclusive {} {
 	set def_part [default_partition]
-	set shared [partition_shared $def_part]
-	if {[string compare $shared "EXCLUSIVE"] == 0} {
+	set oversubscribe [partition_oversubscribe $def_part]
+	if {[string compare $oversubscribe "EXCLUSIVE"] == 0} {
 		return 1
 	} else {
 		return 0
@@ -2348,13 +2414,19 @@ proc make_bash_script { script_name script_contents } {
 #
 # Purpose: Given a hostname, return it's numeric suffix
 #
-# Returns: numerical suffix for input 'hostname'
+# Returns: numerical suffix for input 'hostname' or -1 if not a number
 #
 # Input: hostname -- hostname for which to return suffix
 #
 ################################################################
 proc get_suffix { hostname } {
 	set host_len [string length $hostname]
+	set host_inx [expr $host_len-1]
+	set host_char [string index $hostname $host_inx]
+	if {[string compare $host_char "0"] < 0 || [string compare $host_char "9"] > 0} {
+		return -1
+	}
+
 	for {set host_inx [expr $host_len-1]} {$host_inx >= 0} {incr host_inx -1} {
 		set host_char [string index $hostname $host_inx]
 		if {[string compare $host_char "0"] < 0} { break }
@@ -2663,6 +2735,42 @@ proc get_cluster_name { } {
 
 	log_user 1
 	return $cluster_name
+}
+
+################################################################
+#
+# Proc: get_control_machine
+#
+# Purpose: get ControlMachine parameter
+#
+# Returns: ControlMachine value
+#
+################################################################
+proc get_control_machine { } {
+	global scontrol controlmachine_regex exit_code
+	#
+	# Use scontrol to find the ControlMachine
+	#
+	log_user 0
+	set control_machine ""
+	set scon_pid [spawn -noecho $scontrol show config]
+	expect {
+		-re "ControlMachine *= ($controlmachine_regex)" {
+			set control_machine $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+			slow_kill $scon_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	log_user 1
+	return $control_machine
 }
 
 ################################################################
@@ -3538,6 +3646,7 @@ proc available_nodes_hostnames { partition } {
 
 	log_user 0
 	set idle_nodelist ""
+	set sep ""
 	if {[string compare $partition ""] == 0} {
 		spawn $sinfo -tidle -h -o%N
 	} else {
@@ -3545,7 +3654,9 @@ proc available_nodes_hostnames { partition } {
 	}
 	expect {
 		-re "($alpha_numeric_nodelist)" {
-			set idle_nodelist $expect_out(1,string)
+			append idle_nodelist $sep
+			append idle_nodelist $expect_out(1,string)
+			set sep ","
 			exp_continue
 		}
 		timeout {
@@ -3605,3 +3716,225 @@ proc get_curr_line_num {frame_info} {
 	# returned by 'info frame'
 	set result [dict get [info frame $frame_info] line]
 }
+
+#####################################################################
+#
+# Proc: get_partition_nodes
+#
+# Purpose: Get the list of node names in a given partition/states
+#
+# Input:	partition - partition to get nodes off
+#		states - states to filter on nodes
+#
+# Returns: node names list, -1 on sinfo error
+#
+#####################################################################
+
+proc get_partition_nodes {partition states} {
+
+	global sinfo alpha_numeric_under
+	log_user 0
+	set node_list ""
+
+	if {[string length $partition] == 0} {
+		set partition [default_partition]
+	}
+
+	if {[string length $states] == 0} {
+		set sinfo_pid [spawn -noecho $sinfo -h -N -p $partition -o %N -e]
+	} else {
+		set sinfo_pid [spawn -noecho $sinfo -h -N -p $partition -o %N -t $states -e]
+	}
+
+	expect {
+		-re "($alpha_numeric_under)" {
+			lappend node_list $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sinfo not responding\n"
+			slow_kill $sinfo_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	log_user 1
+	return $node_list
+}
+
+#####################################################################
+#
+# Proc: get_partition_default_time_limit
+#
+# Purpose: Get the default time limit in a given partition
+#
+# Input:   partition - partition to default time limit of
+#
+# Returns: time limit in seconds, -1 if undefined or error
+#
+#####################################################################
+
+proc get_partition_default_time_limit {partition} {
+
+	global sinfo number
+
+	if {[string length $partition] == 0} {
+		set partition [default_partition]
+	}
+
+	set secs 0
+	log_user 0
+	set sinfo_pid [spawn -noecho $sinfo -h -p $partition -O defaulttime -e]
+	expect {
+		-re "n/a" {
+			set secs -1
+			exp_continue
+		}
+		-re "($number)-($number):($number):($number)" {
+			set days  [expr $expect_out(1,string) * 24 * 60 * 60]
+			set hours [expr $expect_out(2,string) * 60 * 60]
+			set mins  [expr $expect_out(3,string) * 60]
+			set secs  [expr $days + $hours + $mins + $expect_out(4,string)]
+			exp_continue
+		}
+		-re "($number):($number):($number)" {
+			set hours [expr $expect_out(1,string) * 60 * 60]
+			set mins  [expr $expect_out(2,string) * 60]
+			set secs  [expr $hours + $mins + $expect_out(3,string)]
+			exp_continue
+		}
+		-re "($number):($number)" {
+			set mins  [expr $expect_out(1,string) * 60]
+			set secs  [expr $mins + $expect_out(2,string)]
+			exp_continue
+		}
+		-re "($number)" {
+			set secs  [expr $expect_out(1,string) * 60]
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sinfo not responding\n"
+			slow_kill $sinfo_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	log_user 1
+	return $secs
+}
+
+#####################################################################
+#
+# Proc: get_node_cores
+#
+# Purpose:	Given a node, return its total number of cores
+#		(not the CoresPerSocket, but the total cores)
+#
+# Input: node - node to get cores from
+#
+# Returns: node cores if retrieved, -1 otherwise
+#
+#####################################################################
+
+proc get_node_cores {node} {
+
+	global sinfo number
+	set cores -1
+	set sockets_per_node 0
+	set cores_per_socket 0
+
+	if {[string length $node] == 0} {
+		return $cores
+	}
+
+	log_user 0
+	set sinfo_pid [spawn -noecho $sinfo -o "%X %Y" -h -n $node]
+
+	expect {
+		-re "($number)" {
+			if {$sockets_per_node == 0} {
+				set sockets_per_node $expect_out(1,string)
+			} else {
+				set cores_per_socket $expect_out(1,string)
+			}
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sinfo not responding\n"
+			slow_kill $sinfo_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	log_user 1
+
+	set cores [expr $sockets_per_node * $cores_per_socket]
+
+	return $cores
+}
+
+#####################################################################
+#
+# Proc: get_part_total_cores
+#
+# Purpose: Given a partition and/or states, return its total cores
+#
+# Input part - partition to check cores
+#	states - states to filter on partition cores
+#
+# Returns: partition cores
+#
+#####################################################################
+
+proc get_part_total_cores {part states} {
+	global sinfo number
+	log_user 0
+	set cores 0
+	set tmp 0
+	set i 0
+
+	if {[string length $part] == 0} {
+		set part [default_partition]
+	}
+
+	if {[string length $states] == 0} {
+		set sinfo_pid [spawn -noecho $sinfo -h -N -p $part -o "%X %Y"]
+	} else {
+		set sinfo_pid [spawn -noecho $sinfo -h -N -p $part -t $states -o "%X %Y"]
+	}
+
+	expect {
+		-re "($number)" {
+			set is_even [expr {($i % 2) == 0}]
+			if {$is_even == 1} {
+				set tmp $expect_out(1,string)
+			} else {
+				set tmp [expr $tmp * $expect_out(1,string)]
+				set cores [expr $cores + $tmp]
+			}
+			incr i
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sinfo not responding\n"
+			slow_kill $sinfo_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	log_user 1
+	return $cores
+}
+

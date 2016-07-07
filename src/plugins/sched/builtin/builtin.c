@@ -87,10 +87,10 @@ static void _my_sleep(int secs);
 /* Terminate builtin_agent */
 extern void stop_builtin_agent(void)
 {
-	pthread_mutex_lock(&term_lock);
+	slurm_mutex_lock(&term_lock);
 	stop_builtin = true;
 	pthread_cond_signal(&term_cond);
-	pthread_mutex_unlock(&term_lock);
+	slurm_mutex_unlock(&term_lock);
 }
 
 static void _my_sleep(int secs)
@@ -101,10 +101,10 @@ static void _my_sleep(int secs)
 	gettimeofday(&now, NULL);
 	ts.tv_sec = now.tv_sec + secs;
 	ts.tv_nsec = now.tv_usec * 1000;
-	pthread_mutex_lock(&term_lock);
+	slurm_mutex_lock(&term_lock);
 	if (!stop_builtin)
 		pthread_cond_timedwait(&term_cond, &term_lock, &ts);
-	pthread_mutex_unlock(&term_lock);
+	slurm_mutex_unlock(&term_lock);
 }
 
 static void _load_config(void)
@@ -137,7 +137,7 @@ static void _load_config(void)
 	xfree(sched_params);
 
 	select_type = slurm_get_select_type();
-	if (!strcmp(select_type, "select/serial")) {
+	if (!xstrcmp(select_type, "select/serial")) {
 		/* Do not spend time computing expected start time for
 		 * pending jobs */
 		max_sched_job_cnt = 0;

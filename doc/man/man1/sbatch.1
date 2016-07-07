@@ -1,4 +1,4 @@
-.TH sbatch "1" "Slurm Commands" "April 2015" "Slurm Commands"
+.TH sbatch "1" "Slurm Commands" "March 2016" "Slurm Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to Slurm.
@@ -216,7 +216,7 @@ using the constraint option.
 Only nodes having features matching the job constraints will be used to
 satisfy the request.
 Multiple constraints may be specified with AND, OR, matching OR,
-resource counts, etc.
+resource counts, etc. (some operators are not supported on all system types).
 Supported \fbconstraint\fR options include:
 .PD 1
 .RS
@@ -362,8 +362,7 @@ TaskPlugin=task/cgroup with the "ConstrainCores" option) is not
 configured, this parameter is ignored.
 
 \fBNOTE\fR: When the step completes, the frequency and governor of each
-selected CPU is reset to the configured \fBCpuFreqDef\fR value with a
-default value of the OnDemand CPU governor.
+selected CPU is reset to the previous values.
 
 \fBNOTE\fR: When submitting jobs with  the \fB\-\-cpu\-freq\fR option
 with linuxproc as the ProctrackType can cause jobs to run too quickly before
@@ -384,6 +383,20 @@ cluster is comprised of quad\-processors nodes and we simply ask for
 the \-\-cpus\-per\-task=3 options, the controller knows that each task requires
 3 processors on the same node, and the controller will grant an allocation
 of 4 nodes, one for each of the 4 tasks.
+
+.TP
+\fB\-\-deadline\fR=<\fIOPT\fR>
+remove the job if no ending is possible before
+this deadline (start > (deadline \- time[\-min])).
+Default is no deadline.  Valid time formats are:
+.br
+HH:MM[:SS] [AM|PM]
+.br
+MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]
+.br
+MM/DD[/YY]\-HH:MM[:SS]
+.br
+YYYY\-MM\-DD[THH:MM[:SS]]]
 
 .TP
 \fB\-d\fR, \fB\-\-dependency\fR=<\fIdependency_list\fR>
@@ -409,6 +422,11 @@ execution.
 .TP
 \fBafterany:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have terminated.
+.TP
+\fBaftercorr:job_id[:jobid...]\fR
+A task of this job array can begin execution after the corresponding task ID
+in the specified job has completed successfully (ran to completion with an
+exit code of zero).
 .TP
 \fBafternotok:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have terminated
@@ -446,11 +464,11 @@ replaced by the job ID.
 See the \fB\-\-input\fR option for filename specification options.
 
 .TP
-\fB\-\-exclusive[=user]\fR
+\fB\-\-exclusive[=user|mcs]\fR
 The job allocation can not share nodes with other running jobs (or just other
-users with the "=user" option).
+users with the "=user" option or with the "=mcs" option).
 The default shared/exclusive behavior depends on system configuration and the
-partition's \fBShared\fR option takes precedence over the job's option.
+partition's \fBOverSubscribe\fR option takes precedence over the job's option.
 
 .TP
 \fB\-\-export\fR=<\fIenvironment variables | ALL | NONE\fR>
@@ -528,6 +546,18 @@ Examples of use include "\-\-gres=gpu:2,mic=1", "\-\-gres=gpu:kepler:2", and
 "\-\-gres=help".
 
 .TP
+\fB\-\-gres\-flags\fR=enforce\-binding
+If set, the only CPUs available to the job will be those bound to the selected
+GRES (i.e. the CPUs identifed in the gres.conf file will be strictly enforced
+rather than advisory). This option may result in delayed initiation of a job.
+For example a job requiring two GPUs and one CPU will be delayed until both
+GPUs on a single socket are available rather than using GPUs bound to separate
+sockets, however the application performance may be improved due to improved
+communication speed.
+Requires the node to be configured with more than one socket and resource
+filtering will be performed on a per\-socket basis.
+
+.TP
 \fB\-H, \-\-hold\fR
 Specify the job is to be submitted in a held state (priority of zero).
 A held job can now be released using scontrol to reset its priority
@@ -587,6 +617,12 @@ a percent sign "%" followed by a letter (e.g. %j).
 Supported replacement symbols are:
 .PD
 .RS
+.TP
+\fB\\\\\fR
+Do not process any of the replacement symbols.
+.TP
+\fB%%\fR
+The character "%".
 .TP
 \fB%A\fR
 Job array's master job allocation number.
@@ -760,19 +796,26 @@ fashion across sockets.
 Notify user by email when certain event types occur.
 Valid \fItype\fR values are NONE, BEGIN, END, FAIL, REQUEUE, ALL (equivalent to
 BEGIN, END, FAIL, REQUEUE, and STAGE_OUT), STAGE_OUT (burst buffer stage out
-and teardown completed), TIME_LIMIT, TIME_LIMIT_90 (reached 90 percent of time limit),
-TIME_LIMIT_80 (reached 80 percent of time limit), and TIME_LIMIT_50
-(reached 50 percent of time limit).
-Multiple \fItype\fR values may be specified in a comma separated list.
+and teardown completed), TIME_LIMIT, TIME_LIMIT_90 (reached 90 percent of time
+limit), TIME_LIMIT_80 (reached 80 percent of time limit), TIME_LIMIT_50
+(reached 50 percent of time limit) and ARRAY_TASKS (send emails for each array
+task). Multiple \fItype\fR values may be specified in a comma separated list.
 The user to be notified is indicated with \fB\-\-mail\-user\fR.
-Mail notifications on job BEGIN, END and FAIL apply to a job array as a whole
-rather than generating individual email messages for each task in the job array.
+Unless the ARRAY_TASKS option is specified, mail notifications on job BEGIN, END
+and FAIL apply to a job array as a whole rather than generating individual email
+messages for each task in the job array.
 
 .TP
 \fB\-\-mail\-user\fR=<\fIuser\fR>
 User to receive email notification of state changes as defined by
 \fB\-\-mail\-type\fR.
 The default value is the submitting user.
+
+.TP
+\fB\-\-mcs\-label\fR=<\fImcs\fR>
+Used only when the mcs/group plugin is enabled.
+This parameter is a group among the groups of the user.
+Default value is calculated by the Plugin mcs if it's enabled.
 
 .TP
 \fB\-\-mem\fR=<\fIMB\fR>
@@ -784,8 +827,13 @@ This parameter would generally be used if whole nodes
 are allocated to jobs (\fBSelectType=select/linear\fR).
 Also see \fB\-\-mem\-per\-cpu\fR.
 \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
-NOTE: A memory size specification is treated as a special case and grants
-the job access to all of the memory on each node.
+
+NOTE: A memory size specification of zero is treated as a special case and
+grants the job access to all of the memory on each node.
+If the job is allocated multiple nodes in a heterogeneous cluster, the memory
+limit on each node will be that of the node in the allocation with the smallest
+memory size (same limit will apply to every node in the job's allocation).
+
 NOTE: Enforcement of memory limits currently relies upon the task/cgroup plugin
 or enabling of accounting, which samples memory use on a periodic basis (data
 need not be stored, just collected). In both cases memory use is based upon
@@ -1291,15 +1339,19 @@ behavior on the cluster.
 \fB\-\-reservation\fR=<\fIname\fR>
 Allocate resources for the job from the named reservation.
 
+\fB\-\-share\fR
+The \fB\-\-share\fR option has been replaced by the \fB\-\-oversubscribe\fR
+option described below.
+
 .TP
-\fB\-s\fR, \fB\-\-share\fR
-The job allocation can share resources with other running jobs.
-The resources to be shared can be nodes, sockets, cores, or hyperthreads
-depending upon configuration.
-The default shared behavior depends on system configuration and the partition's
-\fBShared\fR option takes precedence over the job's option.
+\fB\-s\fR, \fB\-\-oversubscribe\fR
+The job allocation can over\-subscribe resources with other running jobs.
+The resources to be over\-subscribed can be nodes, sockets, cores, and/or
+hyperthreads depending upon configuration.
+The default over\-subscribe behavior depends on system configuration and the
+partition's \fBOverSubscribe\fR option takes precedence over the job's option.
 This option may result in the allocation being granted sooner than if the
-\-\-share option was not set and allow higher system utilization, but
+\-\-oversubscribe option was not set and allow higher system utilization, but
 application performance will likely suffer due to competition for resources.
 Also see the \-\-exclusive option.
 
@@ -1313,11 +1365,6 @@ If a value of zero is designated and the Slurm configuration option
 AllowSpecResourcesUsage is enabled, the job will be allowed to override
 CoreSpecCount and use the specialized resources on nodes it is allocated.
 This option can not be used with the \fB\-\-thread\-spec\fR option.
-
-.TP
-\fB\-\-sicp\fR
-Identify a job as one which jobs submitted to other clusters can be dependent
-upon.
 
 .TP
 \fB\-\-signal\fR=[B:]<\fIsig_num\fR>[@<\fIsig_time\fR>]
@@ -1453,6 +1500,15 @@ nodes as needed.
 Duplicate node names in the list will be ignored.
 The order of the node names in the list is not important; the node names
 will be sorted by Slurm.
+
+.TP
+\fB\-W\fR, \fB\-\-wait\fR
+Do not exit until the submitted job terminates.
+The exit code of the sbatch command will be the same as the exit code
+of the submitted job. If the job terminated due to a signal rather than a
+normal exit, the exit code will be set to 1.
+In the case of a job array, the exit code recorded will be the highest value
+for any task in the job array.
 
 .TP
 \fB\-\-wait\-all\-nodes\fR=<\fIvalue\fR>
@@ -1608,6 +1664,9 @@ Same as \fB\-g, \-\-geometry\fR
 \fBSBATCH_GET_USER_ENV\fR
 Same as \fB\-\-get\-user\-env\fR
 .TP
+\fBSBATCH_GRES_FLAGS\fR
+Same as \-\-gres\-flags\fR
+.TP
 \fBSBATCH_HINT\fR or \fBSLURM_HINT\fR
 Same as \fB\-\-hint\fR
 .TP
@@ -1676,9 +1735,6 @@ for that number of switches. See \fB\-\-switches\fR
 \fBSBATCH_REQUEUE\fR
 Same as \fB\-\-requeue\fR
 .TP
-\fBSBATCH_SICP\fR
-Same as \fB\-\-sicp\fR
-.TP
 \fBSBATCH_SIGNAL\fR
 Same as \fB\-\-signal\fR
 .TP
@@ -1687,6 +1743,9 @@ Same as \fB\-\-thread\-spec\fR
 .TP
 \fBSBATCH_TIMELIMIT\fR
 Same as \fB\-t, \-\-time\fR
+.TP
+\fBSBATCH_WAIT\fR
+Same as \fB\-W\fR, \fB\-\-wait\fR
 .TP
 \fBSBATCH_WAIT_ALL_NODES\fR
 Same as \fB\-\-wait\-all\-nodes\fR
@@ -1894,6 +1953,9 @@ configured. The value will be set  component  types  listed   in
 SLURM_TOPOLOGY_ADDR.   Each  component will be identified as
 either "switch" or "node".  A period is  used  to separate each
 hardware component type.
+.TP
+\fBSLURM_UMASK\fR
+The \fIumask\fR in effect when the job was submitted.
 .TP
 \fBSLURMD_NODENAME\fR
 Name of the node running the job script.

@@ -180,6 +180,8 @@ static int   _step_complete(slurmdbd_conn_t *slurmdbd_conn,
 			    Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _step_start(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
+static int   _fix_lost_jobs(slurmdbd_conn_t *slurmdbd_conn, Buf in_buffer,
+			    Buf *out_buffer, uint32_t *uid);
 
 /* Process an incoming RPC
  * slurmdbd_conn IN/OUT - in will that the newsockfd set before
@@ -464,6 +466,10 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 			rc = _step_start(slurmdbd_conn,
 					 in_buffer, out_buffer, uid);
 			break;
+		case DBD_FIX_LOST_JOB:
+			rc = _fix_lost_jobs(slurmdbd_conn,
+					    in_buffer, out_buffer, uid);
+			break;
 		default:
 			comment = "Invalid RPC";
 			error("CONN:%u %s msg_type=%d",
@@ -562,6 +568,34 @@ end_it:
 				      rc, comment, DBD_ADD_ACCOUNTS);
 	return rc;
 }
+
+static int _fix_lost_jobs(slurmdbd_conn_t *slurmdbd_conn, Buf in_buffer,
+			  Buf *out_buffer, uint32_t *uid)
+{
+	int rc = SLURM_SUCCESS;
+	dbd_list_msg_t *get_msg = NULL;
+	char *comment = NULL;
+
+	if (slurmdbd_unpack_list_msg(&get_msg, slurmdbd_conn->rpc_version,
+				     DBD_FIX_LOST_JOB, in_buffer) !=
+	    SLURM_SUCCESS) {
+		comment = "Failed to unpack DBD_LOST_JOBS message";
+		error("CONN:%u %s", slurmdbd_conn->newsockfd, comment);
+		rc = SLURM_ERROR;
+		goto end_it;
+	}
+
+	rc = acct_storage_g_fix_lost_jobs(slurmdbd_conn->db_conn, *uid,
+					  get_msg->my_list);
+
+end_it:
+	slurmdbd_free_list_msg(get_msg);
+	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
+				      rc, comment, DBD_FIX_LOST_JOB);
+
+	return rc;
+}
+
 static int _add_account_coords(slurmdbd_conn_t *slurmdbd_conn,
 			       Buf in_buffer, Buf *out_buffer, uint32_t *uid)
 {
@@ -681,7 +715,7 @@ static int _add_assocs(slurmdbd_conn_t *slurmdbd_conn,
 				account = object->parent_acct;
 			list_iterator_reset(itr2);
 			while ((coord = list_next(itr2))) {
-				if (!strcasecmp(coord->name, account))
+				if (!xstrcasecmp(coord->name, account))
 					break;
 			}
 			if (!coord)
@@ -1252,7 +1286,7 @@ static int _get_config(slurmdbd_conn_t *slurmdbd_conn,
 	}
 
 	if (config_name == NULL ||
-	    strcmp(config_name, "slurmdbd.conf") == 0)
+	    xstrcmp(config_name, "slurmdbd.conf") == 0)
 		list_msg.my_list = dump_config();
 	else if ((list_msg.my_list = acct_storage_g_get_config(
 			slurmdbd_conn->db_conn, config_name)) == NULL) {

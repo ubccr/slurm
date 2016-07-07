@@ -34,7 +34,7 @@ source ./globals
 
 set test_id     "12.4"
 set exit_code   0
-set test_acct   "test_acct"
+set test_acct   "test$test_id\_acct"
 set timeout 60
 print_header $test_id
 
@@ -522,49 +522,6 @@ proc sacct_vargs { soption vargs job_id} {
 set using_slurmdbd [test_using_slurmdbd]
 
 set cluster [get_cluster_name]
-#
-# Identify the user and his current default account
-#
-set acct_name ""
-set user_name ""
-set user_gid ""
-spawn $bin_id -u -n
-expect {
-	 -re "($alpha_numeric_under)" {
-		set user_name $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
-
-spawn $bin_id -u
-expect {
-	 -re "($alpha_numeric_under)" {
-		set user_gid $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
-
-set s_pid [spawn $sacctmgr show user $user_name]
-expect {
-	-re "$user_name *($alpha_numeric_under)" {
-		set acct_name $expect_out(1,string)
-		exp_continue
-	}
-	timeout {
-		send_user "FAILURE: sacctmgr add not responding\n"
-		slow_kill $s_pid
-		exit 1
-	}
-	eof {
-		wait
-	}
-}
 
 #
 # Use sacctmgr to add an account

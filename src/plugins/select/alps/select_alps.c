@@ -48,6 +48,8 @@
 #  endif
 #endif
 
+#include "slurm/slurm.h"
+
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -155,7 +157,7 @@ static int select_cray_dim_size[3] = {-1};
  */
 const char plugin_name[]	= "Cray node selection plugin";
 const char plugin_type[]	= "select/alps";
-uint32_t plugin_id		= 104;
+uint32_t plugin_id		= SELECT_PLUGIN_ALPS;
 const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 
 static bool _zero_size_job ( struct job_record *job_ptr )
@@ -435,6 +437,11 @@ extern int select_p_job_signal(struct job_record *job_ptr, int signal)
 	return other_job_signal(job_ptr, signal);
 }
 
+extern int select_p_job_mem_confirm(struct job_record *job_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
 extern int select_p_job_fini(struct job_record *job_ptr)
 {
 	if (job_ptr == NULL)
@@ -495,9 +502,9 @@ extern int select_p_step_start(struct step_record *step_ptr)
 	return other_step_start(step_ptr);
 }
 
-extern int select_p_step_finish(struct step_record *step_ptr)
+extern int select_p_step_finish(struct step_record *step_ptr, bool killing_step)
 {
-	return other_step_finish(step_ptr);
+	return other_step_finish(step_ptr, killing_step);
 }
 
 extern int select_p_pack_select_info(time_t last_query_time,

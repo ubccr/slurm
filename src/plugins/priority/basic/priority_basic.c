@@ -181,16 +181,11 @@ extern void priority_p_job_end(struct job_record *job_ptr)
 	assoc_mgr_lock_t locks = { NO_LOCK, WRITE_LOCK, NO_LOCK,
 				   WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
-	/* No unused cpu_run_secs if job ran past its time limit */
-	if (job_ptr->end_time >= job_ptr->start_time + time_limit_secs)
-		return;
-
+	/* No decaying in basic priority. Just remove the total secs. */
 	unused_tres_run_secs = xmalloc(sizeof(uint64_t) * slurmctld_tres_cnt);
 	for (i=0; i<slurmctld_tres_cnt; i++) {
 		unused_tres_run_secs[i] =
-			(uint64_t)(job_ptr->start_time +
-				   time_limit_secs - job_ptr->end_time) *
-			job_ptr->tres_req_cnt[i];
+			job_ptr->tres_alloc_cnt[i] * time_limit_secs;
 	}
 
 	assoc_mgr_lock(&locks);
@@ -200,12 +195,12 @@ extern void priority_p_job_end(struct job_record *job_ptr)
 		for (i=0; i<slurmctld_tres_cnt; i++) {
 			if (unused_tres_run_secs[i] >
 			    qos_ptr->usage->grp_used_tres_run_secs[i]) {
-			qos_ptr->usage->grp_used_tres_run_secs[i] = 0;
-			debug2("acct_policy_job_fini: "
-			       "grp_used_tres_run_secs "
-			       "underflow for qos %s tres %s",
-			       qos_ptr->name,
-			       assoc_mgr_tres_name_array[i]);
+				qos_ptr->usage->grp_used_tres_run_secs[i] = 0;
+				debug2("acct_policy_job_fini: "
+				       "grp_used_tres_run_secs "
+				       "underflow for qos %s tres %s",
+				       qos_ptr->name,
+				       assoc_mgr_tres_name_array[i]);
 			} else
 				qos_ptr->usage->grp_used_tres_run_secs[i] -=
 					unused_tres_run_secs[i];
