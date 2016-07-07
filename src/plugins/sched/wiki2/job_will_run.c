@@ -87,7 +87,7 @@ extern int	job_will_run(char *cmd_ptr, int *err_code, char **err_msg)
 	}
 	arg_ptr += 4;
 
-	if (strncmp(arg_ptr, "JOBID=", 6)) {
+	if (xstrncmp(arg_ptr, "JOBID=", 6)) {
 		*err_code = -300;
 		*err_msg = "Invalid ARG value";
 		error("wiki: JOBWILLRUN has invalid ARG value");
@@ -204,7 +204,7 @@ static char *	_will_run_test(uint32_t jobid, time_t start_time,
 		return NULL;
 	}
 
-	if (job_req_node_filter(job_ptr, avail_bitmap) != SLURM_SUCCESS) {
+	if (job_req_node_filter(job_ptr, avail_bitmap, true) != SLURM_SUCCESS) {
 		/* Job probably has invalid feature list */
 		*err_code = -730;
 		*err_msg = "Job's required features not available "
@@ -493,7 +493,7 @@ static char *	_will_run_test2(uint32_t jobid, time_t start_time,
 		return NULL;
 	}
 
-	if (job_req_node_filter(job_ptr, avail_bitmap) != SLURM_SUCCESS) {
+	if (job_req_node_filter(job_ptr, avail_bitmap, true) != SLURM_SUCCESS) {
 		/* Job probably has invalid feature list */
 		*err_code = -730;
 		*err_msg = "Job's required features not available "

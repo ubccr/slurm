@@ -56,6 +56,7 @@
 #include "src/common/plugin.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/strlcpy.h"
 #include "src/common/timers.h"
 #include "src/common/xstring.h"
 #include "src/common/xtree.h"
@@ -268,17 +269,6 @@ static char* _cat(char* dest, const char* src, size_t n)
 	return r;
 }
 
-/* safer behavior than plain strncpy */
-static char* _cpy(char* dest, const char* src, size_t n)
-{
-	char* r;
-	if (n == 0)
-		return dest;
-	r = strncpy(dest, src, n - 1);
-	dest[n - 1] = 0;
-	return r;
-}
-
 static char* trim(char* str)
 {
 	char* str_modifier;
@@ -300,7 +290,7 @@ static int _string_in_array(const char* str, const char** strings)
 	xassert(strings); /* if etypes no specified in plugin, no new entity
 			     should be created */
 	for (; *strings; ++strings) {
-		if (!strcmp(str, *strings))
+		if (!xstrcmp(str, *strings))
 			return 1;
 	}
 	return 0;
@@ -320,7 +310,7 @@ static void _normalize_keydef_keycore(char* buffer, uint32_t size,
 	if (cat) {
 		_cat(buffer, keytmp, size);
 	} else {
-		_cpy(buffer, keytmp, size);
+		strlcpy(buffer, keytmp, size);
 	}
 	_cat(buffer, ".", size);
 	for (i = 0; key[i] && i < PATHLEN - 1; ++i) {
@@ -339,7 +329,7 @@ static void _normalize_keydef_key(char* buffer, uint32_t size,
 static void _normalize_keydef_mgrkey(char* buffer, uint32_t size,
 				     const char* key, const char* plugtype)
 {
-	_cpy(buffer, "mgr.", size);
+	strlcpy(buffer, "mgr.", size);
 	_normalize_keydef_keycore(buffer, size, key, plugtype, true);
 }
 
@@ -630,10 +620,7 @@ int _layouts_entity_get_kv(layout_t* l, entity_t* e, char* key, void* value,
 		return SLURM_ERROR;
 	case L_T_STRING:
 		pstr = (char**) value;
-		if (data)
-			*pstr = xstrdup(data);
-		else
-			*pstr = NULL;
+		*pstr = xstrdup(data);
 		return SLURM_SUCCESS;
 	case L_T_CUSTOM:
 		/* TBD : add a custom_get call */
@@ -849,6 +836,15 @@ static void _layouts_init_keydef(xhash_t* keydefs,
 	}
 }
 
+static void _debug_output_keydefs (void* item, void* args)
+{
+	layouts_keydef_t* keydef = (layouts_keydef_t*) item;
+	debug3("layouts/keydefs: loaded: %s flags=0x%08lx refkey=%s",
+	       keydef->key, (long unsigned int) keydef->flags,
+	       (keydef->ref_key == NULL) ? "-":keydef->ref_key);
+
+}
+
 static int _layouts_init_layouts_walk_helper(void* x, void* arg)
 {
 	layouts_conf_spec_t* spec = (layouts_conf_spec_t*)x;
@@ -888,6 +884,7 @@ static int _layouts_init_layouts_walk_helper(void* x, void* arg)
 	_layouts_init_keydef(mgr->keydefs,
 			     plugin->ops->spec->keyspec,
 			     plugin);
+	xhash_walk(mgr->keydefs, _debug_output_keydefs, NULL);
 	++*i;
 	return SLURM_SUCCESS;
 }
@@ -955,7 +952,7 @@ static char* _conf_get_filename(const char* type)
 {
 	char path[PATHLEN];
 	char* final_path;
-	_cpy(path, "layouts.d/", PATHLEN);
+	strlcpy(path, "layouts.d/", PATHLEN);
 	_cat(path, type, PATHLEN);
 	_cat(path, ".conf", PATHLEN);
 	final_path = get_extra_conf_path(path);
@@ -991,7 +988,7 @@ static s_p_hashtbl_t* _conf_make_hashtbl(int struct_type,
 
 	/* available for constructing a tree */
 	static s_p_options_t tree_options_entity[] = {
-		{"Enclosed", S_P_PLAIN_STRING},
+		{"Enclosed", S_P_STRING},
 		{NULL}
 	};
 	static s_p_options_t tree_options[] = {
@@ -1058,7 +1055,7 @@ static void _layouts_load_automerge(layout_plugin_t* plugin, entity_t* e,
 	char* option_key;
 
 	for (layout_option = plugin->ops->spec->options;
-	     layout_option && strcasecmp("Entity", layout_option->key);
+	     layout_option && xstrcasecmp("Entity", layout_option->key);
 	     ++layout_option);
 	xassert(layout_option);
 
@@ -1292,7 +1289,7 @@ static int _layouts_load_config_common(layout_plugin_t* plugin,
 				rc = SLURM_ERROR;
 				continue;
 			}
-			if (!e->type || strcmp(e_type, e->type)) {
+			if (!e->type || xstrcmp(e_type, e->type)) {
 				info("layouts: entity '%s' type (%s) differs "
 				     "from already registered entity type (%s)"
 				     " skipping", e_name, e_type, e->type);
@@ -1594,7 +1591,7 @@ typedef struct _pack_args {
 	hostlist_t list_entities;
 	char       *type;
 	uint32_t   all;
-	uint32_t   no_relation;
+	uint32_t   flags;
 	uint32_t   record_count;
 } _pack_args_t;
 
@@ -1676,7 +1673,8 @@ static void _pack_entity_layout_data(void* item, void* arg)
 	xassert(keydef);
 
 	/* only dump keys related to the targeted layout */
-	if (!strncmp(keydef->plugin->layout->type, pargs->layout->type, PATHLEN)) {
+	if (!xstrncmp(keydef->plugin->layout->type, pargs->layout->type,
+		      PATHLEN)) {
 		data_dump = _pack_data_key(keydef, data->value);
 		/* avoid printing any error in case of NULL pointer returned */
 		if (data_dump) {
@@ -1750,7 +1748,8 @@ static uint8_t _pack_layout_tree(xtree_node_t* node, uint8_t which,
 	}
 
 	/* print this entity as root if necessary */
-	if (level == 0 && pargs->no_relation != 1 && pargs->type == NULL) {
+	if (level == 0 && !(pargs->flags & LAYOUTS_DUMP_NOLAYOUT)
+	    && pargs->type == NULL) {
 		if (pargs->all != 0 ||
 		    pargs->list_entities == NULL ||
 		    hostlist_find(pargs->list_entities, e_name) != -1) {
@@ -1781,7 +1780,7 @@ static uint8_t _pack_layout_tree(xtree_node_t* node, uint8_t which,
 	pargs->current_line = NULL;
 
 	/* don't print enclosed if no_relation option */
-	if (pargs->no_relation == 1
+	if ((pargs->flags & LAYOUTS_DUMP_NOLAYOUT)
 	    && enclosed_str != NULL
 	    && pargs->list_entities == NULL) {
 		xfree(enclosed_str);
@@ -1807,7 +1806,7 @@ static uint8_t _pack_layout_tree(xtree_node_t* node, uint8_t which,
 
 	/* don't print entities if not type of "type char*" */
 	if (pargs->type != NULL
-	    && (e_type == NULL || strcasecmp(e_type, pargs->type)!=0)) {
+	    && (e_type == NULL || xstrcasecmp(e_type, pargs->type)!=0)) {
 		xfree(str);
 		return 1;
 	}
@@ -1929,8 +1928,8 @@ static void _tree_update_node_entity_data(void* item, void* arg) {
 		return;
 
 	/* only work on keys related to the targeted layout */
-	if (strncmp(keydef->plugin->layout->type, pargs->enode->layout->type,
-		    PATHLEN)) {
+	if (xstrncmp(keydef->plugin->layout->type, pargs->enode->layout->type,
+		     PATHLEN)) {
 		return;
 	}
 
@@ -2535,7 +2534,7 @@ entity_t* layouts_get_entity(const char* name)
 
 
 int layouts_pack_layout(char *l_type, char *char_entities, char *type,
-			uint32_t no_relation, Buf buffer)
+			uint32_t flags, Buf buffer)
 {
 	_pack_args_t pargs;
 	layout_t* layout;
@@ -2557,21 +2556,19 @@ int layouts_pack_layout(char *l_type, char *char_entities, char *type,
 	pargs.all = 0;
 	pargs.list_entities = NULL;
 	if (char_entities != NULL) {
-		if (strcmp(char_entities, "*") == 0)
+		if (xstrcmp(char_entities, "*") == 0)
 			pargs.all = 1;
 		else
 			pargs.list_entities = hostlist_create(char_entities);
 	}
 	pargs.type = type;
-	pargs.no_relation = no_relation;
+	pargs.flags = flags;
 	pargs.record_count = 0;
 	orig_offset = get_buf_offset(buffer);
 	pack32(pargs.record_count, buffer);
 
-	if ( pargs.no_relation == 0
-	     && pargs.list_entities == NULL
-	     && pargs.type == NULL ) {
-		/* start by packing the layout priority */
+	/* start by packing the layout priority in case we are dumping state */
+	if (pargs.flags & LAYOUTS_DUMP_STATE) {
 		str = xstrdup_printf("Priority=%u\n", layout->priority);
 		packstr(str, buffer);
 		pargs.record_count++;
@@ -2604,7 +2601,7 @@ int layouts_update_layout(char *l_type, Buf buffer)
 	int i, rc;
 	slurm_mutex_lock(&mgr->lock);
 	for (i = 0; i < mgr->plugins_count; i++) {
-		if (!strcmp(mgr->plugins[i].name, l_type)) {
+		if (!xstrcmp(mgr->plugins[i].name, l_type)) {
 			rc = _layouts_update_state((layout_plugin_t*)
 						   &mgr->plugins[i],
 						   buffer);
@@ -2648,8 +2645,8 @@ int layouts_state_save_layout(char* l_type)
 	START_TIMER;
 
 	/* pack the targeted layout into a tmp buffer */
-	error_code = layouts_pack_layout(l_type, "*", NULL, 0, buffer);
-
+	error_code = layouts_pack_layout(l_type, "*", NULL,
+					 LAYOUTS_DUMP_STATE, buffer);
 	if (error_code != SLURM_SUCCESS) {
 		error("unable to save layout[%s] state", l_type);
 		return error_code;

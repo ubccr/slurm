@@ -110,8 +110,7 @@
 #define OPT_EXCLUSIVE   0x0d
 #define OPT_OVERCOMMIT  0x0e
 #define OPT_ACCTG_FREQ  0x0f
-
-#define OPT_SICP        0x10
+#define OPT_GRES_FLAGS  0x10
 #define OPT_MEM_BIND    0x11
 #define OPT_IMMEDIATE   0x12
 #define OPT_POWER       0x13
@@ -177,10 +176,12 @@
 #define LONG_OPT_REQ_SWITCH      0x143
 #define LONG_OPT_PROFILE         0x144
 #define LONG_OPT_CPU_FREQ        0x145
+#define LONG_OPT_GRES_FLAGS      0x146
 #define LONG_OPT_PRIORITY        0x160
-#define LONG_OPT_SICP            0x161
 #define LONG_OPT_POWER           0x162
 #define LONG_OPT_THREAD_SPEC     0x163
+#define LONG_OPT_MCS_LABEL       0x165
+#define LONG_OPT_DEADLINE        0x166
 
 
 /*---- global variables, defined in opt.h ----*/
@@ -290,7 +291,7 @@ static void _opt_default()
 	uid_t uid = getuid();
 
 	opt.user = uid_to_string(uid);
-	if (strcmp(opt.user, "nobody") == 0)
+	if (xstrcmp(opt.user, "nobody") == 0)
 		fatal("Invalid user id: %u", uid);
 
 	opt.uid = uid;
@@ -328,7 +329,6 @@ static void _opt_default()
 	opt.account  = NULL;
 	opt.comment  = NULL;
 	opt.qos      = NULL;
-	opt.sicp_mode = 0;
 	opt.power_flags = 0;
 
 	opt.distribution = SLURM_DIST_UNKNOWN;
@@ -367,6 +367,7 @@ static void _opt_default()
 	}
 	opt.reboot          = false;
 	opt.no_rotate	    = false;
+	opt.job_flags       = 0;
 
 	opt.euid	    = (uid_t) -1;
 	opt.egid	    = (gid_t) -1;
@@ -384,6 +385,7 @@ static void _opt_default()
 	opt.wckey           = NULL;
 	opt.req_switch      = -1;
 	opt.wait4switch     = -1;
+	opt.mcs_label	    = NULL;
 
 	opt.nice = NO_VAL;
 	opt.priority = 0;
@@ -418,6 +420,7 @@ env_vars_t env_vars[] = {
   {"SALLOC_DEBUG",         OPT_DEBUG,      NULL,               NULL          },
   {"SALLOC_EXCLUSIVE",     OPT_EXCLUSIVE,  NULL,               NULL          },
   {"SALLOC_GEOMETRY",      OPT_GEOMETRY,   NULL,               NULL          },
+  {"SALLOC_GRES_FLAGS",    OPT_GRES_FLAGS, NULL,               NULL          },
   {"SALLOC_IMMEDIATE",     OPT_IMMEDIATE,  NULL,               NULL          },
   {"SALLOC_HINT",          OPT_HINT,       NULL,               NULL          },
   {"SLURM_HINT",           OPT_HINT,       NULL,               NULL          },
@@ -433,7 +436,6 @@ env_vars_t env_vars[] = {
   {"SALLOC_PROFILE",       OPT_PROFILE,    NULL,               NULL          },
   {"SALLOC_QOS",           OPT_STRING,     &opt.qos,           NULL          },
   {"SALLOC_RESERVATION",   OPT_STRING,     &opt.reservation,   NULL          },
-  {"SALLOC_SICP",          OPT_SICP,       NULL,               NULL          },
   {"SALLOC_SIGNAL",        OPT_SIGNAL,     NULL,               NULL          },
   {"SALLOC_THREAD_SPEC",   OPT_THREAD_SPEC,NULL,               NULL          },
   {"SALLOC_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL          },
@@ -497,7 +499,7 @@ _process_env_var(env_vars_t *e, const char *val)
 		 */
 		if (val[0] == '\0') {
 			*((bool *)e->arg) = true;
-		} else if (strcasecmp(val, "yes") == 0) {
+		} else if (xstrcasecmp(val, "yes") == 0) {
 			*((bool *)e->arg) = true;
 		} else if ((strtol(val, &end, 10) != 0)
 			   && end != val) {
@@ -538,7 +540,15 @@ _process_env_var(env_vars_t *e, const char *val)
 			      e->var, val);
 		}
 		break;
-
+	case OPT_GRES_FLAGS:
+		if (!xstrcasecmp(val, "enforce-binding")) {
+			opt.job_flags |= GRES_ENFORCE_BIND;
+		} else {
+			error("Invalid SALLOC_GRES_FLAGS specification: %s",
+			      val);
+			exit(error_exit);
+		}
+		break;
 	case OPT_IMMEDIATE:
 		if (val)
 			opt.immediate = strtol(val, NULL, 10);
@@ -559,9 +569,11 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 	case OPT_EXCLUSIVE:
 		if (val[0] == '\0') {
-			opt.shared = 0;
-		} else if (!strcasecmp(val, "user")) {
-			opt.shared = 2;
+			opt.shared = JOB_SHARED_NONE;
+		} else if (!xstrcasecmp(val, "user")) {
+			opt.shared = JOB_SHARED_USER;
+		} else if (!xstrcasecmp(val, "mcs")) {
+			opt.shared = JOB_SHARED_MCS;
 		} else {
 			error("\"%s=%s\" -- invalid value, ignoring...",
 			      e->var, val);
@@ -593,10 +605,6 @@ _process_env_var(env_vars_t *e, const char *val)
 
 	case OPT_POWER:
 		opt.power_flags = power_flags_id((char *)val);
-		break;
-
-	case OPT_SICP:
-		opt.sicp_mode = 1;
 		break;
 
 	case OPT_SIGNAL:
@@ -663,6 +671,7 @@ void set_options(const int argc, char **argv)
 		{"ntasks",        required_argument, 0, 'n'},
 		{"nodes",         required_argument, 0, 'N'},
 		{"overcommit",    no_argument,       0, 'O'},
+		{"oversubscribe", no_argument,       0, 's'},
 		{"partition",     required_argument, 0, 'p'},
 		{"quiet",         no_argument,       0, 'Q'},
 		{"no-rotate",     no_argument,       0, 'R'},
@@ -687,16 +696,19 @@ void set_options(const int argc, char **argv)
 		{"contiguous",    no_argument,       0, LONG_OPT_CONT},
 		{"cores-per-socket", required_argument, 0, LONG_OPT_CORESPERSOCKET},
 		{"cpu-freq",         required_argument, 0, LONG_OPT_CPU_FREQ},
+		{"deadline",      required_argument, 0, LONG_OPT_DEADLINE},
 		{"exclusive",     optional_argument, 0, LONG_OPT_EXCLUSIVE},
 		{"get-user-env",  optional_argument, 0, LONG_OPT_GET_USER_ENV},
 		{"gid",           required_argument, 0, LONG_OPT_GID},
 		{"gres",          required_argument, 0, LONG_OPT_GRES},
+		{"gres-flags",    required_argument, 0, LONG_OPT_GRES_FLAGS},
 		{"hint",          required_argument, 0, LONG_OPT_HINT},
 		{"ioload-image",  required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
 		{"jobid",         required_argument, 0, LONG_OPT_JOBID},
 		{"linux-image",   required_argument, 0, LONG_OPT_LINUX_IMAGE},
 		{"mail-type",     required_argument, 0, LONG_OPT_MAIL_TYPE},
 		{"mail-user",     required_argument, 0, LONG_OPT_MAIL_USER},
+		{"mcs-label",     required_argument, 0, LONG_OPT_MCS_LABEL},
 		{"mem",           required_argument, 0, LONG_OPT_MEM},
 		{"mem-per-cpu",   required_argument, 0, LONG_OPT_MEM_PER_CPU},
 		{"mem_bind",      required_argument, 0, LONG_OPT_MEM_BIND},
@@ -719,7 +731,6 @@ void set_options(const int argc, char **argv)
 		{"ramdisk-image", required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
 		{"reboot",	  no_argument,       0, LONG_OPT_REBOOT},
 		{"reservation",   required_argument, 0, LONG_OPT_RESERVATION},
-		{"sicp",          optional_argument, 0, LONG_OPT_SICP},
 		{"signal",        required_argument, 0, LONG_OPT_SIGNAL},
 		{"sockets-per-node", required_argument, 0, LONG_OPT_SOCKETSPERNODE},
 		{"switches",      required_argument, 0, LONG_OPT_REQ_SWITCH},
@@ -931,11 +942,21 @@ void set_options(const int argc, char **argv)
 		case LONG_OPT_CONT:
 			opt.contiguous = true;
 			break;
+		case LONG_OPT_DEADLINE:
+			opt.deadline = parse_time(optarg, 0);
+			if (errno == ESLURM_INVALID_TIME_VALUE) {
+				error("Invalid deadline specification %s",
+				       optarg);
+				exit(error_exit);
+			}
+			break;
                 case LONG_OPT_EXCLUSIVE:
 			if (optarg == NULL) {
-				opt.shared = 0;
-			} else if (!strcasecmp(optarg, "user")) {
-				opt.shared = 2;
+				opt.shared = JOB_SHARED_NONE;
+			} else if (!xstrcasecmp(optarg, "user")) {
+				opt.shared = JOB_SHARED_USER;
+			} else if (!xstrcasecmp(optarg, "mcs")) {
+				opt.shared = JOB_SHARED_MCS;
 			} else {
 				error("invalid exclusive option %s", optarg);
 				exit(error_exit);
@@ -1044,16 +1065,16 @@ void set_options(const int argc, char **argv)
 			xfree(opt.mail_user);
 			opt.mail_user = xstrdup(optarg);
 			break;
+		case LONG_OPT_MCS_LABEL: {
+			xfree(opt.mcs_label);
+			opt.mcs_label = xstrdup(optarg);
+			break;
+		}
 		case LONG_OPT_NICE:
 			if (optarg)
 				opt.nice = strtol(optarg, NULL, 10);
 			else
 				opt.nice = 100;
-			if (abs(opt.nice) > NICE_OFFSET) {
-				error("Invalid nice value, must be between "
-				       "-%d and %d", NICE_OFFSET, NICE_OFFSET);
-				exit(error_exit);
-			}
 			if (opt.nice < 0) {
 				uid_t my_uid = getuid();
 				if ((my_uid != 0) &&
@@ -1206,9 +1227,6 @@ void set_options(const int argc, char **argv)
 		case LONG_OPT_POWER:
 			opt.power_flags = power_flags_id(optarg);
 			break;
-		case LONG_OPT_SICP:
-			opt.sicp_mode = 1;
-			break;
 		case LONG_OPT_SIGNAL:
 			if (get_signal_opts(optarg, &opt.warn_signal,
 					    &opt.warn_time, &opt.warn_flags)) {
@@ -1222,13 +1240,22 @@ void set_options(const int argc, char **argv)
 			opt.time_min_str = xstrdup(optarg);
 			break;
 		case LONG_OPT_GRES:
-			if (!strcasecmp(optarg, "help") ||
-			    !strcasecmp(optarg, "list")) {
+			if (!xstrcasecmp(optarg, "help") ||
+			    !xstrcasecmp(optarg, "list")) {
 				print_gres_help();
 				exit(0);
 			}
 			xfree(opt.gres);
 			opt.gres = xstrdup(optarg);
+			break;
+		case LONG_OPT_GRES_FLAGS:
+			if (!xstrcasecmp(optarg, "enforce-binding")) {
+				opt.job_flags |= GRES_ENFORCE_BIND;
+			} else {
+				error("Invalid gres-flags specification: %s",
+				      optarg);
+				exit(error_exit);
+			}
 			break;
 		case LONG_OPT_WAIT_ALL_NODES:
 			opt.wait_all_nodes = strtol(optarg, NULL, 10);
@@ -1477,7 +1504,7 @@ static bool _opt_verify(void)
 		return false;
 	}
 	if (opt.shared && opt.shared != (uint16_t)NO_VAL) {
-		info("Space sharing nodes is not supported on Cray systems");
+		info("Oversubscribing resources is not supported on Cray/ALPS systems");
 		opt.shared = false;
 	}
 	if (opt.overcommit) {
@@ -1635,6 +1662,10 @@ static bool _opt_verify(void)
 		if (opt.time_min == 0)
 			opt.time_min = INFINITE;
 	}
+	if ((opt.deadline) && (opt.begin) && (opt.deadline < opt.begin)) {
+		error("Incompatible begin and deadline time specification");
+		exit(error_exit);
+	}
 
 #ifdef HAVE_AIX
 	if (opt.network == NULL)
@@ -1692,7 +1723,7 @@ extern char *spank_get_job_env(const char *name)
 	len = strlen(tmp_str);
 
 	for (i=0; i<opt.spank_job_env_size; i++) {
-		if (strncmp(opt.spank_job_env[i], tmp_str, len))
+		if (xstrncmp(opt.spank_job_env[i], tmp_str, len))
 			continue;
 		xfree(tmp_str);
 		return (opt.spank_job_env[i] + len);
@@ -1719,7 +1750,7 @@ extern int   spank_set_job_env(const char *name, const char *value,
 	xstrcat(tmp_str, value);
 
 	for (i=0; i<opt.spank_job_env_size; i++) {
-		if (strncmp(opt.spank_job_env[i], tmp_str, len))
+		if (xstrncmp(opt.spank_job_env[i], tmp_str, len))
 			continue;
 		if (overwrite) {
 			xfree(opt.spank_job_env[i]);
@@ -1752,7 +1783,7 @@ extern int   spank_unset_job_env(const char *name)
 	len = strlen(tmp_str);
 
 	for (i=0; i<opt.spank_job_env_size; i++) {
-		if (strncmp(opt.spank_job_env[i], tmp_str, len))
+		if (xstrncmp(opt.spank_job_env[i], tmp_str, len))
 			continue;
 		xfree(opt.spank_job_env[i]);
 		for (j=(i+1); j<opt.spank_job_env_size; i++, j++)
@@ -1888,7 +1919,6 @@ static void _opt_list(void)
 		info("gres           : %s", opt.gres);
 	info("network        : %s", opt.network);
 	info("power          : %s", power_flags_str(opt.power_flags));
-	info("sicp           : %u", opt.sicp_mode);
 	info("profile        : `%s'",
 	     acct_gather_profile_to_string(opt.profile));
 	info("qos            : %s", opt.qos);
@@ -1929,6 +1959,11 @@ static void _opt_list(void)
 		slurm_make_time_str(&opt.begin, time_str, sizeof(time_str));
 		info("begin          : %s", time_str);
 	}
+	if (opt.deadline) {
+		char time_str[32];
+		slurm_make_time_str(&opt.deadline, time_str, sizeof(time_str));
+		info("deadline       : %s", time_str);
+	}
 	info("mail_type      : %s", print_mail_type(opt.mail_type));
 	info("mail_user      : %s", opt.mail_user);
 	info("sockets-per-node  : %d", opt.sockets_per_node);
@@ -1955,6 +1990,8 @@ static void _opt_list(void)
 	} else
 		info("core-spec         : %d", opt.core_spec);
 	info("burst_buffer      : `%s'", opt.burst_buffer);
+	if (opt.mcs_label)
+		info("mcs-label         : %s",opt.mcs_label);
 	xfree(str);
 
 }
@@ -1965,7 +2002,7 @@ static void _usage(void)
 "Usage: salloc [-N numnodes|[min nodes]-[max nodes]] [-n num-processors]\n"
 "              [[-c cpus-per-node] [-r n] [-p partition] [--hold] [-t minutes]\n"
 "              [--immediate[=secs]] [--no-kill] [--overcommit] [-D path]\n"
-"              [--share] [-J jobname] [--jobid=id]\n"
+"              [--oversubscribe] [-J jobname] [--jobid=id]\n"
 "              [--verbose] [--gid=group] [--uid=user] [--licenses=names]\n"
 "              [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "              [--account=name] [--dependency=type:jobid] [--comment=name]\n"
@@ -1984,13 +2021,13 @@ static void _usage(void)
 "              [--mloader-image=path] [--ioload-image=path]\n"
 #endif
 #endif
-"              [--mail-type=type] [--mail-user=user][--nice[=value]]\n"
+"              [--mail-type=type] [--mail-user=user] [--nice[=value]]\n"
 "              [--bell] [--no-bell] [--kill-command[=signal]]\n"
 "              [--nodefile=file] [--nodelist=hosts] [--exclude=hosts]\n"
 "              [--network=type] [--mem-per-cpu=MB] [--qos=qos]\n"
-"              [--mem_bind=...] [--reservation=name]\n"
-"              [--time-min=minutes] [--gres=list] [--profile=...]\n"
-"              [--cpu-freq=min[-max[:gov]] [--sicp] [--power=flags]\n"
+"              [--mem_bind=...] [--reservation=name] [--mcs-label=mcs]\n"
+"              [--time-min=minutes] [--gres=list] [--gres-flags=opts]\n"
+"              [--cpu-freq=min[-max[:gov]] [--power=flags] [--profile=...]\n"
 "              [--switches=max-switches[@max-time-to-wait]]\n"
 "              [--core-spec=cores] [--thread-spec=threads] [--reboot]\n"
 "              [--bb=burst_buffer_spec] [--bbf=burst_buffer_file]\n"
@@ -2014,10 +2051,13 @@ static void _help(void)
 "      --comment=name          arbitrary comment\n"
 "      --cpu-freq=min[-max[:gov]] requested cpu frequency (and governor)\n"
 "  -d, --dependency=type:jobid defer job until condition on jobid is satisfied\n"
+"      --deadline=time         remove the job if no ending possible before\n"
+"                              this deadline (start > (deadline - time[-min]))\n"
 "  -D, --chdir=path            change working directory\n"
 "      --get-user-env          used by Moab.  See srun man page.\n"
 "      --gid=group_id          group ID to run job as (user root only)\n"
 "      --gres=list             required generic resources\n"
+"      --gres-flags=opts       flags related to GRES management\n"
 "  -H, --hold                  submit job in held state\n"
 "  -I, --immediate[=secs]      exit if resources not available in \"secs\"\n"
 "      --jobid=id              specify jobid to use\n"
@@ -2030,6 +2070,7 @@ static void _help(void)
 "      --mail-type=type        notify on state change: BEGIN, END, FAIL or ALL\n"
 "      --mail-user=user        who to send email notification for job state\n"
 "                              changes\n"
+"      --mcs-label=mcs         mcs label if mcs plugin mcs/group is used\n"
 "  -n, --tasks=N               number of processors required\n"
 "      --nice[=value]          decrease scheduling priority by value\n"
 "      --no-bell               do NOT ring the terminal bell\n"
@@ -2045,9 +2086,7 @@ static void _help(void)
 "      --qos=qos               quality of service\n"
 "  -Q, --quiet                 quiet mode (suppress informational messages)\n"
 "      --reboot                reboot compute nodes before starting job\n"
-"  -s, --share                 share nodes with other jobs\n"
-"      --sicp                  If specified, signifies job is to receive\n"
-"                              job id from the incluster reserve range.\n"
+"  -s, --oversubscribe         oversubscribe resources with other jobs\n"
 "      --signal=[B:]num[@time] send signal when time limit within time seconds\n"
 "      --switches=max-switches{@max-time-to-wait}\n"
 "                              Optimum switches and max time to wait for optimum\n"
@@ -2074,6 +2113,9 @@ static void _help(void)
 "Consumable resources related options:\n"
 "      --exclusive[=user]      allocate nodes in exclusive mode when\n"
 "                              cpu consumable resource is enabled\n"
+"      --exclusive[=mcs]       allocate nodes in exclusive mode when\n"
+"                              cpu consumable resource is enabled\n"
+"                              and mcs plugin is enabled\n"
 "      --mem-per-cpu=MB        maximum amount of real memory per allocated\n"
 "                              cpu required by the job.\n"
 "                              --mem >= --mem-per-cpu if --mem is specified.\n"
@@ -2090,7 +2132,7 @@ static void _help(void)
 "      --ntasks-per-socket=n   number of tasks to invoke on each socket\n");
 	conf = slurm_conf_lock();
 	if (conf->task_plugin != NULL
-	    && strcasecmp(conf->task_plugin, "task/affinity") == 0) {
+	    && xstrcasecmp(conf->task_plugin, "task/affinity") == 0) {
 		printf(
 "      --hint=                 Bind tasks according to application hints\n"
 "                              (see \"--hint=help\" for options)\n"

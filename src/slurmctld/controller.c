@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2015 SchedMD LLC.
+ *  Portions Copyright (C) 2010-2016 SchedMD LLC.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, Kevin Tew <tew1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -71,6 +71,7 @@
 #include "src/common/layouts_mgr.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"
+#include "src/common/node_features.h"
 #include "src/common/node_select.h"
 #include "src/common/pack.h"
 #include "src/common/power.h"
@@ -82,6 +83,7 @@
 #include "src/common/slurm_ext_sensors.h"
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_jobcomp.h"
+#include "src/common/slurm_mcs.h"
 #include "src/common/slurm_priority.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_interface.h"
@@ -103,12 +105,12 @@
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/ping_nodes.h"
 #include "src/slurmctld/port_mgr.h"
+#include "src/slurmctld/power_save.h"
 #include "src/slurmctld/powercapping.h"
 #include "src/slurmctld/preempt.h"
 #include "src/slurmctld/proc_req.h"
 #include "src/slurmctld/read_config.h"
 #include "src/slurmctld/reservation.h"
-#include "src/slurmctld/sicp.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/slurmctld_plugstack.h"
 #include "src/slurmctld/sched_plugin.h"
@@ -145,8 +147,6 @@
  *
  * The OpenSSL code produces a bunch of errors related to use of
  *    non-initialized memory use.
- * The switch/elan functions will report one block "possibly lost"
- *    (640 bytes), it is really not lost.
  * The _keyvalue_regex_init() function will generate two blocks "definitely
  *    lost", both of size zero. We haven't bothered to address this.
  * On some systems dlopen() will generate a small number of "definitely
@@ -190,7 +190,8 @@ static int      job_sched_cnt = 0;
 static uint32_t max_server_threads = MAX_SERVER_THREADS;
 static time_t	next_stats_reset = 0;
 static int	new_nice = 0;
-static char	node_name[MAX_SLURM_NAME];
+static char	node_name_short[MAX_SLURM_NAME];
+static char	node_name_long[MAX_SLURM_NAME];
 static int	recover   = DEFAULT_RECOVER;
 static pthread_mutex_t sched_cnt_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t server_thread_cond = PTHREAD_COND_INITIALIZER;
@@ -320,15 +321,15 @@ int main(int argc, char *argv[])
 	if (stat(slurmctld_conf.mail_prog, &stat_buf) != 0)
 		error("Configured MailProg is invalid");
 
-	if (!strcmp(slurmctld_conf.accounting_storage_type,
-		    "accounting_storage/none")) {
-		if (strcmp(slurmctld_conf.job_acct_gather_type,
-			   "jobacct_gather/none"))
+	if (!xstrcmp(slurmctld_conf.accounting_storage_type,
+		     "accounting_storage/none")) {
+		if (xstrcmp(slurmctld_conf.job_acct_gather_type,
+			    "jobacct_gather/none"))
 			error("Job accounting information gathered, "
 			      "but not stored");
 	} else {
-		if (!strcmp(slurmctld_conf.job_acct_gather_type,
-			    "jobacct_gather/none"))
+		if (!xstrcmp(slurmctld_conf.job_acct_gather_type,
+			     "jobacct_gather/none"))
 			info("Job accounting information stored, "
 			     "but details not gathered");
 	}
@@ -361,8 +362,8 @@ int main(int argc, char *argv[])
 	association_based_accounting =
 		slurm_get_is_association_based_accounting();
 	accounting_enforce = slurmctld_conf.accounting_storage_enforce;
-	if (!strcasecmp(slurmctld_conf.accounting_storage_type,
-		       "accounting_storage/slurmdbd")) {
+	if (!xstrcasecmp(slurmctld_conf.accounting_storage_type,
+			 "accounting_storage/slurmdbd")) {
 		with_slurmdbd = 1;
 		/* we need job_list not to be NULL */
 		init_job_conf();
@@ -392,7 +393,9 @@ int main(int argc, char *argv[])
 	info("%s version %s started on cluster %s",
 	     slurm_prog_name, SLURM_VERSION_STRING, slurmctld_cluster_name);
 
-	if ((error_code = gethostname_short(node_name, MAX_SLURM_NAME)))
+	if ((error_code = gethostname_short(node_name_short, MAX_SLURM_NAME)))
+		fatal("getnodename_short error %s", slurm_strerror(error_code));
+	if ((error_code = gethostname(node_name_long, MAX_SLURM_NAME)))
 		fatal("getnodename error %s", slurm_strerror(error_code));
 
 	/* init job credential stuff */
@@ -405,7 +408,8 @@ int main(int argc, char *argv[])
 
 	/* Must set before plugins are loaded. */
 	if (slurmctld_conf.backup_controller &&
-	    (strcmp(node_name, slurmctld_conf.backup_controller) == 0)) {
+	    ((xstrcmp(node_name_short,slurmctld_conf.backup_controller) == 0) ||
+	     (xstrcmp(node_name_long, slurmctld_conf.backup_controller) == 0))) {
 #ifndef HAVE_ALPS_CRAY
 		char *sched_params = NULL;
 #endif
@@ -448,11 +452,21 @@ int main(int argc, char *argv[])
 		fatal( "failed to initialize job_submit plugin");
 	if (ext_sensors_init() != SLURM_SUCCESS )
 		fatal( "failed to initialize ext_sensors plugin");
+	if (node_features_g_init() != SLURM_SUCCESS )
+		fatal( "failed to initialize node_features plugin");	
 	if (switch_g_slurmctld_init() != SLURM_SUCCESS )
 		fatal( "failed to initialize switch plugin");
+	config_power_mgr();
+	if (node_features_g_node_power() && !power_save_test()) {
+		fatal("PowerSave required with NodeFeatures plugin, "
+		      "but not fully configured (SuspendProgram, "
+		      "ResumeProgram and SuspendTime all required)");
+	}
 
 	while (1) {
 		/* initialization for each primary<->backup switch */
+		xfree(slurmctld_config.auth_info);
+		slurmctld_config.auth_info = slurm_get_auth_info();
 		slurmctld_config.shutdown_time = (time_t) 0;
 		slurmctld_config.resume_backup = false;
 
@@ -493,9 +507,10 @@ int main(int argc, char *argv[])
 				_accounting_mark_all_nodes_down("cold-start");
 			}
 		} else {
-			error("this host (%s) not valid controller (%s or %s)",
-				node_name, slurmctld_conf.control_machine,
-				slurmctld_conf.backup_controller);
+			error("this host (%s/%s) not a valid controller "
+			      "(%s or %s)", node_name_short, node_name_long,
+			      slurmctld_conf.control_machine,
+			      slurmctld_conf.backup_controller);
 			exit(0);
 		}
 
@@ -539,8 +554,8 @@ int main(int argc, char *argv[])
 			fatal( "failed to initialize burst buffer plugin");
 		if (power_g_init() != SLURM_SUCCESS )
 			fatal( "failed to initialize power management plugin");
-		sicp_init();
-
+		if (slurm_mcs_init() != SLURM_SUCCESS)
+			fatal("failed to initialize mcs plugin");
 
 		/*
 		 * create attached thread to process RPCs
@@ -604,7 +619,7 @@ int main(int argc, char *argv[])
 		slurmctld_config.thread_id_save = (pthread_t) 0;
 		bb_g_fini();
 		power_g_fini();
-		sicp_fini();
+		slurm_mcs_fini();
 
 		if (running_cache) {
 			/* break out and end the association cache
@@ -673,6 +688,7 @@ int main(int argc, char *argv[])
 	job_fini();
 	part_fini();	/* part_fini() must precede node_fini() */
 	node_fini();
+	node_features_g_fini();
 	purge_front_end_state();
 	resv_fini();
 	trigger_fini();
@@ -726,6 +742,7 @@ int main(int argc, char *argv[])
 
 #endif
 
+	xfree(slurmctld_config.auth_info);
 	xfree(slurmctld_cluster_name);
 	if (cnt) {
 		info("Slurmctld shutdown completing with %d active agent "
@@ -775,7 +792,7 @@ static void  _init_config(void)
 	slurmctld_config.thread_id_main = pthread_self();
 	slurmctld_config.scheduling_disabled = false;
 #ifdef WITH_PTHREADS
-	pthread_mutex_init(&slurmctld_config.thread_count_lock, NULL);
+	slurm_mutex_init(&slurmctld_config.thread_count_lock);
 	slurmctld_config.thread_id_main    = (pthread_t) 0;
 	slurmctld_config.thread_id_sig     = (pthread_t) 0;
 	slurmctld_config.thread_id_rpc     = (pthread_t) 0;
@@ -844,9 +861,8 @@ static void *_slurmctld_signal_hand(void *no_data)
 	sigset_t set;
 
 #if HAVE_SYS_PRCTL_H
-	if (prctl(PR_SET_NAME, "slurmctld_sigmgr", NULL, NULL, NULL) < 0) {
-		error("%s: cannot set my name to %s %m",
-		      __func__, "slurmctld_sigmgr");
+	if (prctl(PR_SET_NAME, "sigmgr", NULL, NULL, NULL) < 0) {
+		error("%s: cannot set my name to %s %m", __func__, "sigmgr");
 	}
 #endif
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -925,9 +941,8 @@ static void *_slurmctld_rpc_mgr(void *no_data)
 	char* node_addr = NULL;
 
 #if HAVE_SYS_PRCTL_H
-	if (prctl(PR_SET_NAME, "slurmctld_rpcmgr", NULL, NULL, NULL) < 0) {
-		error("%s: cannot set my name to %s %m",
-		      __func__, "slurmctld_rpcmgr");
+	if (prctl(PR_SET_NAME, "rpcmgr", NULL, NULL, NULL) < 0) {
+		error("%s: cannot set my name to %s %m", __func__, "rpcmgr");
 	}
 #endif
 
@@ -943,13 +958,14 @@ static void *_slurmctld_rpc_mgr(void *no_data)
 
 	/* set node_addr to bind to (NULL means any) */
 	if (slurmctld_conf.backup_controller && slurmctld_conf.backup_addr &&
-	    (strcmp(node_name, slurmctld_conf.backup_controller) == 0) &&
-	    (strcmp(slurmctld_conf.backup_controller,
-		    slurmctld_conf.backup_addr) != 0)) {
+	    ((xstrcmp(node_name_short,slurmctld_conf.backup_controller) == 0) ||
+	     (xstrcmp(node_name_long, slurmctld_conf.backup_controller) == 0))&&
+	    (xstrcmp(slurmctld_conf.backup_controller,
+		     slurmctld_conf.backup_addr) != 0)) {
 		node_addr = slurmctld_conf.backup_addr ;
 	}
 	else if (_valid_controller() &&
-		 strcmp(slurmctld_conf.control_machine,
+		 xstrcmp(slurmctld_conf.control_machine,
 			 slurmctld_conf.control_addr)) {
 		node_addr = slurmctld_conf.control_addr ;
 	}
@@ -1076,9 +1092,8 @@ static void *_service_connection(void *arg)
 	slurm_msg_t *msg = xmalloc(sizeof(slurm_msg_t));
 
 #if HAVE_SYS_PRCTL_H
-	if (prctl(PR_SET_NAME, "slurmctld_srvcn", NULL, NULL, NULL) < 0) {
-		error("%s: cannot set my name to %s %m",
-		      __func__, "slurmctld_srvcn");
+	if (prctl(PR_SET_NAME, "srvcn", NULL, NULL, NULL) < 0) {
+		error("%s: cannot set my name to %s %m", __func__, "srvcn");
 	}
 #endif
 	slurm_msg_t_init(msg);
@@ -1087,7 +1102,10 @@ static void *_service_connection(void *arg)
 	 * possibility for slurmctld_req() to close accepted connection.
 	 */
 	if (slurm_receive_msg(conn->newsockfd, msg, 0) != 0) {
-		error("slurm_receive_msg: %m");
+		char addr_buf[32];
+		slurm_print_slurm_addr(&conn->cli_addr, addr_buf,
+				       sizeof(addr_buf));
+		error("slurm_receive_msg [%s]: %m", addr_buf);
 		/* close the new socket */
 		slurm_close(conn->newsockfd);
 		goto cleanup;
@@ -1389,13 +1407,13 @@ static int _init_tres(void)
 
 		tres_rec->type = temp_char;
 
-		if (!strcasecmp(temp_char, "cpu"))
+		if (!xstrcasecmp(temp_char, "cpu"))
 			tres_rec->id = TRES_CPU;
-		else if (!strcasecmp(temp_char, "mem"))
+		else if (!xstrcasecmp(temp_char, "mem"))
 			tres_rec->id = TRES_MEM;
-		else if (!strcasecmp(temp_char, "energy"))
+		else if (!xstrcasecmp(temp_char, "energy"))
 			tres_rec->id = TRES_ENERGY;
-		else if (!strcasecmp(temp_char, "node"))
+		else if (!xstrcasecmp(temp_char, "node"))
 			tres_rec->id = TRES_NODE;
 		else if (!strncasecmp(temp_char, "bb/", 3)) {
 			tres_rec->type[2] = '\0';
@@ -1938,7 +1956,8 @@ static void *_slurmctld_background(void *no_data)
 		    (difftime(now, last_assert_primary_time) >=
 		     slurmctld_conf.slurmctld_timeout) &&
 		    slurmctld_conf.backup_controller &&
-		    strcmp(node_name, slurmctld_conf.backup_controller)) {
+		    xstrcmp(node_name_short,slurmctld_conf.backup_controller) &&
+		    xstrcmp(node_name_long, slurmctld_conf.backup_controller)) {
 			now = time(NULL);
 			last_assert_primary_time = now;
 			(void) _shutdown_backup_controller(0);
@@ -2144,13 +2163,13 @@ extern void set_cluster_tres(bool assoc_mgr_locked)
 		} else if (tres_rec->id == TRES_MEM) {
 			mem_tres = tres_rec;
 			continue;
-		} else if (!strcmp(tres_rec->type, "bb")) {
+		} else if (!xstrcmp(tres_rec->type, "bb")) {
 			tres_rec->count = bb_g_get_system_size(tres_rec->name);
 			continue;
-		} else if (!strcmp(tres_rec->type, "gres")) {
+		} else if (!xstrcmp(tres_rec->type, "gres")) {
 			tres_rec->count = gres_get_system_cnt(tres_rec->name);
 			continue;
-		} else if (!strcmp(tres_rec->type, "license")) {
+		} else if (!xstrcmp(tres_rec->type, "license")) {
 			tres_rec->count = get_total_license_cnt(
 				tres_rec->name);
 			continue;
@@ -2197,9 +2216,10 @@ extern void set_cluster_tres(bool assoc_mgr_locked)
 							   true);
 		xfree(node_ptr->tres_fmt_str);
 		node_ptr->tres_fmt_str =
-			assoc_mgr_make_tres_str_from_array(node_ptr->tres_cnt,
-							   0,
-							   true);
+			assoc_mgr_make_tres_str_from_array(
+				node_ptr->tres_cnt,
+				TRES_STR_CONVERT_UNITS,
+				true);
 	}
 
 	/* FIXME: cluster_cpus probably needs to be removed and handled
@@ -2557,6 +2577,7 @@ static bool _verify_clustername(void)
 	char *filename = NULL;
 	char name[512];
 	bool create_file = false;
+
 	xstrfmtcat(filename, "%s/clustername",
 		   slurmctld_conf.state_save_location);
 
@@ -2633,7 +2654,7 @@ static void _kill_old_slurmctld(void)
 /* NOTE: No need to lock the config data since we are still single-threaded */
 static void _init_pidfile(void)
 {
-	if (strcmp(slurmctld_conf.slurmctld_pidfile,
+	if (xstrcmp(slurmctld_conf.slurmctld_pidfile,
 		   slurmctld_conf.slurmd_pidfile) == 0)
 		error("SlurmctldPid == SlurmdPid, use different names");
 
@@ -2871,7 +2892,8 @@ static bool  _valid_controller(void)
 	if (slurmctld_conf.control_machine == NULL)
 		return match;
 
-	if (strcmp(node_name, slurmctld_conf.control_machine) == 0)
+	if ((xstrcmp(node_name_short,slurmctld_conf.control_machine) == 0) ||
+	    (xstrcmp(node_name_long, slurmctld_conf.control_machine) == 0))
 		match = true;
 	else if (strchr(slurmctld_conf.control_machine, ',')) {
 		char *token, *last = NULL;
@@ -2879,7 +2901,8 @@ static bool  _valid_controller(void)
 
 		token = strtok_r(tmp_name, ",", &last);
 		while (token) {
-			if (strcmp(node_name, token) == 0) {
+			if ((xstrcmp(node_name_short, token) == 0) ||
+			    (xstrcmp(node_name_long, token) == 0)) {
 				match = true;
 				break;
 			}

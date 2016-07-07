@@ -30,7 +30,7 @@ of Slurm cgroup plugins.
 .TP
 \fBCgroupAutomount\fR=<yes|no>
 Slurm cgroup plugins require valid and functional cgroup subsystem to be mounted
-under /cgroup/<subsystem_name>.
+under /sys/fs/cgroup/<subsystem_name>.
 When launched, plugins check their subsystem availability. If not available,
 the plugin launch fails unless CgroupAutomount is set to yes. In that case, the
 plugin will first try to mount the required subsystems.
@@ -39,7 +39,7 @@ plugin will first try to mount the required subsystems.
 \fBCgroupMountpoint\fR=\fIPATH\fR
 Specify the \fIPATH\fR under which cgroups should be mounted. This
 should be a writable directory which will contain cgroups mounted
-one per subsystem. The default \fIPATH\fR is /cgroup.
+one per subsystem. The default \fIPATH\fR is /sys/fs/cgroup.
 
 .TP
 \fBCgroupReleaseAgentDir\fR=<path_to_release_agent_directory>

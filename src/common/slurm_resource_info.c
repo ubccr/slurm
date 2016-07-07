@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  slurm_resource_info.c - Functions to determine number of available resources
- *  $Id: slurm_resource_info.c,v 1.12 2006/10/04 21:52:24 palermo Exp $
  *****************************************************************************
  *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
@@ -92,7 +91,7 @@ static bool _have_task_affinity(void)
 	bool rc = true;
 	char *plugin_name = slurm_get_task_plugin();
 
-	if (plugin_name && !strcmp(plugin_name, "task/none"))
+	if (plugin_name && !xstrcmp(plugin_name, "task/none"))
 		rc = false;
 	xfree(plugin_name);
 	return rc;
@@ -295,7 +294,7 @@ int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 
 	p = buf;
 	while ((tok = strsep(&p, ";"))) {
-		if (strcasecmp(tok, "help") == 0) {
+		if (xstrcasecmp(tok, "help") == 0) {
 			slurm_print_cpu_bind_help();
 			return 1;
 		}
@@ -304,19 +303,19 @@ int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 			     "binding");
 			log_binding = false;
 		}
-		if ((strcasecmp(tok, "q") == 0) ||
-			   (strcasecmp(tok, "quiet") == 0)) {
+		if ((xstrcasecmp(tok, "q") == 0) ||
+			   (xstrcasecmp(tok, "quiet") == 0)) {
 		        *flags &= ~CPU_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "v") == 0) ||
-			   (strcasecmp(tok, "verbose") == 0)) {
+		} else if ((xstrcasecmp(tok, "v") == 0) ||
+			   (xstrcasecmp(tok, "verbose") == 0)) {
 		        *flags |= CPU_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "one_thread") == 0)) {
+		} else if ((xstrcasecmp(tok, "one_thread") == 0)) {
 		        *flags |= CPU_BIND_ONE_THREAD_PER_CORE;
-		} else if ((strcasecmp(tok, "no") == 0) ||
-			   (strcasecmp(tok, "none") == 0)) {
+		} else if ((xstrcasecmp(tok, "no") == 0) ||
+			   (xstrcasecmp(tok, "none") == 0)) {
 			_clear_then_set((int *)flags, bind_bits, CPU_BIND_NONE);
 			xfree(*cpu_bind);
-		} else if (strcasecmp(tok, "rank") == 0) {
+		} else if (xstrcasecmp(tok, "rank") == 0) {
 			_clear_then_set((int *)flags, bind_bits, CPU_BIND_RANK);
 			xfree(*cpu_bind);
 		} else if ((strncasecmp(tok, "map_cpu", 7) == 0) ||
@@ -349,7 +348,7 @@ int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 				xfree(buf);
 				return -1;
 			}
-		} else if (strcasecmp(tok, "rank_ldom") == 0) {
+		} else if (xstrcasecmp(tok, "rank_ldom") == 0) {
 			_clear_then_set((int *)flags, bind_bits,
 					CPU_BIND_LDRANK);
 			xfree(*cpu_bind);
@@ -385,68 +384,63 @@ int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 				xfree(buf);
 				return -1;
 			}
-		} else if ((strcasecmp(tok, "socket") == 0) ||
-		           (strcasecmp(tok, "sockets") == 0)) {
+		} else if ((xstrcasecmp(tok, "socket") == 0) ||
+		           (xstrcasecmp(tok, "sockets") == 0)) {
 			if (task_plugin_param &
 			    (CPU_BIND_NONE | CPU_BIND_TO_CORES |
 			     CPU_BIND_TO_THREADS | CPU_BIND_TO_LDOMS |
 			     CPU_BIND_TO_BOARDS)) {
-				error("--cpu_bind=sockets incompatible with "
+				debug("--cpu_bind=sockets incompatible with "
 				      "TaskPluginParam configuration "
 				      "parameter");
-				return -1;
 			}
 			_clear_then_set((int *)flags, bind_to_bits,
 				       CPU_BIND_TO_SOCKETS);
-		} else if ((strcasecmp(tok, "core") == 0) ||
-		           (strcasecmp(tok, "cores") == 0)) {
+		} else if ((xstrcasecmp(tok, "core") == 0) ||
+		           (xstrcasecmp(tok, "cores") == 0)) {
 			if (task_plugin_param &
 			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS |
 			     CPU_BIND_TO_THREADS | CPU_BIND_TO_LDOMS |
 			     CPU_BIND_TO_BOARDS)) {
-				error("--cpu_bind=cores incompatible with "
+				debug("--cpu_bind=cores incompatible with "
 				      "TaskPluginParam configuration "
 				      "parameter");
-				return -1;
 			}
 			_clear_then_set((int *)flags, bind_to_bits,
 				       CPU_BIND_TO_CORES);
-		} else if ((strcasecmp(tok, "thread") == 0) ||
-		           (strcasecmp(tok, "threads") == 0)) {
+		} else if ((xstrcasecmp(tok, "thread") == 0) ||
+		           (xstrcasecmp(tok, "threads") == 0)) {
 			if (task_plugin_param &
 			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS |
 			     CPU_BIND_TO_CORES | CPU_BIND_TO_LDOMS |
 			     CPU_BIND_TO_BOARDS)) {
-				error("--cpu_bind=threads incompatible with "
+				debug("--cpu_bind=threads incompatible with "
 				      "TaskPluginParam configuration "
 				      "parameter");
-				return -1;
 			}
 			_clear_then_set((int *)flags, bind_to_bits,
 				       CPU_BIND_TO_THREADS);
-		} else if ((strcasecmp(tok, "ldom") == 0) ||
-		           (strcasecmp(tok, "ldoms") == 0)) {
+		} else if ((xstrcasecmp(tok, "ldom") == 0) ||
+		           (xstrcasecmp(tok, "ldoms") == 0)) {
 			if (task_plugin_param &
 			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS |
 			     CPU_BIND_TO_CORES | CPU_BIND_TO_THREADS |
 			     CPU_BIND_TO_BOARDS)) {
-				error("--cpu_bind=threads incompatible with "
+				debug("--cpu_bind=threads incompatible with "
 				      "TaskPluginParam configuration "
 				      "parameter");
-				return -1;
 			}
 			_clear_then_set((int *)flags, bind_to_bits,
 				       CPU_BIND_TO_LDOMS);
-		} else if ((strcasecmp(tok, "board") == 0) ||
-		           (strcasecmp(tok, "boards") == 0)) {
+		} else if ((xstrcasecmp(tok, "board") == 0) ||
+		           (xstrcasecmp(tok, "boards") == 0)) {
 			if (task_plugin_param &
 			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS |
 			     CPU_BIND_TO_CORES | CPU_BIND_TO_THREADS |
 			     CPU_BIND_TO_LDOMS)) {
-				error("--cpu_bind=threads incompatible with "
+				debug("--cpu_bind=threads incompatible with "
 				      "TaskPluginParam configuration "
 				      "parameter");
-				return -1;
 			}
 			_clear_then_set((int *)flags, bind_to_bits,
 				       CPU_BIND_TO_BOARDS);
@@ -457,6 +451,22 @@ int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 		}
 	}
 	xfree(buf);
+
+	/* Set system default CPU binding as needed */
+	if ((*flags & (~CPU_BIND_VERBOSE)) == 0) {
+                if (task_plugin_param & CPU_BIND_NONE)
+                        *flags = CPU_BIND_NONE;
+                else if (task_plugin_param & CPU_BIND_TO_SOCKETS)
+                        *flags = CPU_BIND_TO_SOCKETS;
+                else if (task_plugin_param & CPU_BIND_TO_CORES)
+                        *flags = CPU_BIND_TO_CORES;
+                else if (task_plugin_param & CPU_BIND_TO_THREADS)
+                        *flags |= CPU_BIND_TO_THREADS;
+                else if (task_plugin_param & CPU_BIND_TO_LDOMS)
+                        *flags |= CPU_BIND_TO_LDOMS;
+                else if (task_plugin_param & CPU_BIND_TO_BOARDS)
+                        *flags |= CPU_BIND_TO_BOARDS;
+	}
 
 	return 0;
 }
@@ -513,25 +523,25 @@ int slurm_verify_mem_bind(const char *arg, char **mem_bind,
 
 	p = buf;
 	while ((tok = strsep(&p, ";"))) {
-		if (strcasecmp(tok, "help") == 0) {
+		if (xstrcasecmp(tok, "help") == 0) {
 			slurm_print_mem_bind_help();
 			return 1;
 
-		} else if ((strcasecmp(tok, "q") == 0) ||
-			   (strcasecmp(tok, "quiet") == 0)) {
+		} else if ((xstrcasecmp(tok, "q") == 0) ||
+			   (xstrcasecmp(tok, "quiet") == 0)) {
 		        *flags &= ~MEM_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "v") == 0) ||
-			   (strcasecmp(tok, "verbose") == 0)) {
+		} else if ((xstrcasecmp(tok, "v") == 0) ||
+			   (xstrcasecmp(tok, "verbose") == 0)) {
 		        *flags |= MEM_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "no") == 0) ||
-			   (strcasecmp(tok, "none") == 0)) {
+		} else if ((xstrcasecmp(tok, "no") == 0) ||
+			   (xstrcasecmp(tok, "none") == 0)) {
 			_clear_then_set((int *)flags, bind_bits, MEM_BIND_NONE);
 			xfree(*mem_bind);
-		} else if (strcasecmp(tok, "rank") == 0) {
+		} else if (xstrcasecmp(tok, "rank") == 0) {
 			_clear_then_set((int *)flags, bind_bits, MEM_BIND_RANK);
 			xfree(*mem_bind);
-		} else if (strcasecmp(tok, "local") == 0) {
-			_clear_then_set((int *)flags, bind_bits, MEM_BIND_LOCAL);
+		} else if (xstrcasecmp(tok, "local") == 0) {
+			_clear_then_set((int *)flags, bind_bits,MEM_BIND_LOCAL);
 			xfree(*mem_bind);
 		} else if ((strncasecmp(tok, "map_mem", 7) == 0) ||
 		           (strncasecmp(tok, "mapmem", 6) == 0)) {

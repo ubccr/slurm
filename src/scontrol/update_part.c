@@ -100,8 +100,8 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 		}
 		else if (strncasecmp(tag, "MaxCPUsPerNode", MAX(taglen, 4))
 			  == 0) {
-			if ((strcasecmp(val,"UNLIMITED") == 0) ||
-			    (strcasecmp(val,"INFINITE") == 0)) {
+			if ((xstrcasecmp(val,"UNLIMITED") == 0) ||
+			    (xstrcasecmp(val,"INFINITE") == 0)) {
 				part_msg_ptr->max_cpus_per_node =
 					(uint32_t) INFINITE;
 			} else if (parse_uint32(val, &part_msg_ptr->
@@ -112,8 +112,8 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			(*update_cnt_ptr)++;
 		}
 		else if (strncasecmp(tag, "MaxNodes", MAX(taglen, 4)) == 0) {
-			if ((strcasecmp(val,"UNLIMITED") == 0) ||
-			    (strcasecmp(val,"INFINITE") == 0))
+			if ((xstrcasecmp(val,"UNLIMITED") == 0) ||
+			    (xstrcasecmp(val,"INFINITE") == 0))
 				part_msg_ptr->max_nodes = (uint32_t) INFINITE;
 			else {
 				min = 1;
@@ -227,7 +227,8 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			}
 			(*update_cnt_ptr)++;
 		}
-		else if (strncasecmp(tag, "Shared", MAX(taglen, 2)) == 0) {
+		else if (!strncasecmp(tag, "OverSubscribe", MAX(taglen, 2)) ||
+			 !strncasecmp(tag, "Shared", MAX(taglen, 2))) {
 			char *colon_pos = strchr(val, ':');
 			if (colon_pos) {
 				*colon_pos = '\0';
@@ -263,7 +264,7 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			} else {
 				exit_code = 1;
 				error("Invalid input: %s", argv[i]);
-				error("Acceptable Shared values are "
+				error("Acceptable OverSubscribe values are "
 					"NO, EXCLUSIVE, YES:#, and FORCE:#");
 				return -1;
 			}
@@ -279,9 +280,27 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			}
 			(*update_cnt_ptr)++;
 		}
-		else if (strncasecmp(tag, "Priority", MAX(taglen, 3)) == 0) {
-			if (parse_uint16(val, &part_msg_ptr->priority)) {
-				error ("Invalid Priority value: %s", val);
+		else if (!strncasecmp(tag, "Priority", MAX(taglen, 3))) {
+			if (parse_uint16(val, &part_msg_ptr->priority_tier)) {
+				error("Invalid Priority value: %s", val);
+				return -1;
+			}
+			part_msg_ptr->priority_job_factor =
+				part_msg_ptr->priority_tier;
+			(*update_cnt_ptr)++;
+		}
+		else if (!strncasecmp(tag,"PriorityJobFactor",MAX(taglen, 3))) {
+			if (parse_uint16(val,
+					 &part_msg_ptr->priority_job_factor)) {
+				error("Invalid PriorityJobFactor value: %s",
+				      val);
+				return -1;
+			}
+			(*update_cnt_ptr)++;
+		}
+		else if (!strncasecmp(tag, "PriorityTier", MAX(taglen, 3))) {
+			if (parse_uint16(val, &part_msg_ptr->priority_tier)) {
+				error("Invalid PriorityTier value: %s", val);
 				return -1;
 			}
 			(*update_cnt_ptr)++;
@@ -448,7 +467,7 @@ scontrol_create_part (int argc, char *argv[])
 		exit_code = 1;
 		error("PartitionName must be given.");
 		return 0;
-	} else if (strcasecmp(part_msg.name, "default") == 0) {
+	} else if (xstrcasecmp(part_msg.name, "default") == 0) {
 		exit_code = 1;
 		error("PartitionName cannot be \"DEFAULT\".");
 		return 0;

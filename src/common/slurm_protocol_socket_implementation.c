@@ -599,7 +599,7 @@ static int _slurm_connect (int __fd, struct sockaddr const * __addr,
 	ufds.revents = 0;
 
 	if (timeout == 0)
-		timeout = slurm_get_msg_timeout() * 1000 / 2;
+		timeout = slurm_get_tcp_timeout() * 1000;
 
 again:	rc = poll(&ufds, 1, timeout);
 	if (rc == -1) {
@@ -712,13 +712,15 @@ static int _slurm_vfcntl(int fd, int cmd, va_list va )
 
 extern void slurm_set_addr_char (slurm_addr_t * addr, uint16_t port, char *host)
 {
+#if 1
+/* NOTE: gethostbyname() is obsolete, but the alternative function (below)
+ * does not work reliably. See bug 2186. */
 	struct hostent * he    = NULL;
 	int	   h_err = 0;
 	char *	   h_buf[4096];
 
 	/*
-	 * If NULL hostname passed in, we only update the port
-	 *   of addr
+	 * If NULL hostname passed in, we only update the port of addr
 	 */
 	addr->sin_family = AF_SLURM;
 	addr->sin_port   = htons(port);
@@ -735,6 +737,40 @@ extern void slurm_set_addr_char (slurm_addr_t * addr, uint16_t port, char *host)
 		addr->sin_port = 0;
 	}
 	return;
+#else
+/* NOTE: getaddrinfo() currently does not support aliases and is failing with
+ * EAGAIN repeatedly in some cases. Comment out this logic until the function
+ * works as designed. See bug 2186. */
+	struct addrinfo *addrs;
+	struct addrinfo *addr_ptr;
+
+	/*
+	 * If NULL hostname passed in, we only update the port of addr
+	 */
+	addr->sin_family = AF_SLURM;
+	addr->sin_port   = htons(port);
+	if (host == NULL)
+		return;
+
+	addrs = get_addr_info(host);
+	for (addr_ptr = addrs; addr_ptr != NULL; addr_ptr = addr_ptr->ai_next) {
+		if (addr_ptr->ai_family == AF_INET)
+			break;
+	}
+	if (addr_ptr) {
+		struct sockaddr_in *addr2;
+		addr2 = (struct sockaddr_in *)addr_ptr->ai_addr;
+		memcpy(&addr->sin_addr.s_addr,
+		       &addr2->sin_addr.s_addr, sizeof(addr2->sin_addr.s_addr));
+	} else {
+		error("%s: Unable to resolve \"%s\"", __func__, host);
+		addr->sin_family = 0;
+		addr->sin_port = 0;
+	}
+
+	if (addrs)
+		free_addr_info(addrs);
+#endif
 }
 
 extern void slurm_get_addr (slurm_addr_t *addr, uint16_t *port, char *host,

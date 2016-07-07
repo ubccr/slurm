@@ -295,7 +295,7 @@ _get_command (int *argc, char **argv)
 	if (in_line == NULL) {
 		exit_flag = true;
 		return 0;
-	} else if (strcmp (in_line, "!!") == 0) {
+	} else if (xstrcmp (in_line, "!!") == 0) {
 		free (in_line);
 		in_line = last_in_line;
 		in_line_size = last_in_line_size;
@@ -547,17 +547,21 @@ static void
 _print_daemons (void)
 {
 	slurm_ctl_conf_info_msg_t *conf;
-	char me[MAX_SLURM_NAME], *b, *c, *n, *token, *save_ptr = NULL;
+	char node_name_short[MAX_SLURM_NAME];
+	char node_name_long[MAX_SLURM_NAME];
+	char *b, *c, *n, *token, *save_ptr = NULL;
 	int actld = 0, ctld = 0, d = 0;
 	char daemon_list[] = "slurmctld slurmd";
 
 	slurm_conf_init(NULL);
 	conf = slurm_conf_lock();
 
-	gethostname_short(me, MAX_SLURM_NAME);
+	gethostname_short(node_name_short, MAX_SLURM_NAME);
+	gethostname(node_name_long, MAX_SLURM_NAME);
 	if ((b = conf->backup_controller)) {
-		if ((strcmp(b, me) == 0) ||
-		    (strcasecmp(b, "localhost") == 0))
+		if ((xstrcmp(b, node_name_short) == 0) ||
+		    (xstrcmp(b, node_name_long)  == 0) ||
+		    (xstrcasecmp(b, "localhost") == 0))
 			ctld = 1;
 	}
 	if (conf->control_machine) {
@@ -565,8 +569,9 @@ _print_daemons (void)
 		c = xstrdup(conf->control_machine);
 		token = strtok_r(c, ",", &save_ptr);
 		while (token) {
-			if ((strcmp(token, me) == 0) ||
-			    (strcasecmp(token, "localhost") == 0)) {
+			if ((xstrcmp(token, node_name_short) == 0) ||
+			    (xstrcmp(token, node_name_long)  == 0) ||
+			    (xstrcasecmp(token, "localhost") == 0)) {
 				ctld = 1;
 				break;
 			}
@@ -576,7 +581,7 @@ _print_daemons (void)
 	}
 	slurm_conf_unlock();
 
-	if ((n = slurm_conf_get_nodename(me))) {
+	if ((n = slurm_conf_get_nodename(node_name_short))) {
 		d = 1;
 		xfree(n);
 	} else if ((n = slurm_conf_get_aliased_nodename())) {
@@ -651,6 +656,7 @@ static int _reboot_nodes(char *node_list)
 
 	slurm_msg_t_init(&msg);
 
+	bzero(&req, sizeof(reboot_msg_t));
 	req.node_list = node_list;
 	msg.msg_type = REQUEST_REBOOT_NODES;
 	msg.data = &req;
@@ -1005,6 +1011,23 @@ _process_command (int argc, char *argv[])
 			}
 		}
 	}
+	else if (strncasecmp (tag, "top", MAX(tag_len, 2)) == 0) {
+		if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too few arguments for keyword:%s\n",
+					tag);
+		} else if (argc > 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too many arguments for keyword:%s\n",
+					tag);
+		} else {
+			scontrol_top_job(argv[1]);
+		}
+	}
 	else if (strncasecmp (tag, "wait_job", MAX(tag_len, 2)) == 0) {
 		if (cluster_flags & CLUSTER_FLAG_CRAY_A) {
 			fprintf(stderr,
@@ -1108,7 +1131,7 @@ _process_command (int argc, char *argv[])
 				"debug5", NULL};
 			int index = 0;
 			while (levels[index]) {
-				if (strcasecmp(argv[1], levels[index]) == 0) {
+				if (xstrcasecmp(argv[1], levels[index]) == 0) {
 					level = index;
 					break;
 				}
@@ -1159,7 +1182,7 @@ _process_command (int argc, char *argv[])
 				"disable", "enable", NULL};
 			int index = 0;
 			while (levels[index]) {
-				if (strcasecmp(argv[1], levels[index]) == 0) {
+				if (xstrcasecmp(argv[1], levels[index]) == 0) {
 					level = index;
 					break;
 				}
@@ -1203,7 +1226,7 @@ _process_command (int argc, char *argv[])
 			fprintf(stderr,
 				"too few arguments for keyword:%s\n",
 				tag);
-		} else if (strcmp(argv[1], "config")) {
+		} else if (xstrcmp(argv[1], "config")) {
 			exit_code = 1;
 			fprintf (stderr,
 				 "invalid write argument:%s\n",
@@ -1237,8 +1260,8 @@ _process_command (int argc, char *argv[])
 		/* require full command name */
 		uint16_t options = 0;
 		if (argc == 2) {
-			if (strcmp(argv[1], "slurmctld") &&
-			    strcmp(argv[1], "controller")) {
+			if (xstrcmp(argv[1], "slurmctld") &&
+			    xstrcmp(argv[1], "controller")) {
 				error_code = 1;
 				exit_code = 1;
 				fprintf (stderr,
@@ -1561,8 +1584,6 @@ _show_it (int argc, char *argv[])
 	} else if (strncasecmp (tag, "reservations", MAX(tag_len, 1)) == 0 ||
 		   strncasecmp (tag, "reservationname", MAX(tag_len, 1)) == 0) {
 		scontrol_print_res (val);
-	} else if (strncasecmp (tag, "sicp", MAX(tag_len, 2)) == 0) {
-		scontrol_print_sicp ();     /* UNDOCUMENTED TESTING OPTION */
 	} else if (strncasecmp (tag, "slurmd", MAX(tag_len, 2)) == 0) {
 		_print_slurmd (val);
 	} else if (strncasecmp (tag, "steps", MAX(tag_len, 2)) == 0) {
@@ -1963,6 +1984,7 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      shutdown <OPTS>          shutdown slurm daemons                       \n\
 			      (the primary controller will be stopped)     \n\
      suspend <job_list>       susend specified job (see resume)            \n\
+     top <job_id>             Put specified job first in queue for user    \n\
      takeover                 ask slurm backup controller to take over     \n\
      uhold <jobid_list>       place user hold on specified job (see hold)  \n\
      update <SPECIFICATIONS>  update job, node, partition, reservation,    \n\

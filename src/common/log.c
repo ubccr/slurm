@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  log.c - slurm logging facilities
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -47,9 +46,16 @@
 /*
 ** MT safe
 */
+#ifndef   _GNU_SOURCE
+#  define _GNU_SOURCE
+#endif
 
 #if HAVE_CONFIG_H
 #  include "config.h"
+#endif
+
+#if HAVE_SYS_PRCTL_H
+#  include <sys/prctl.h>
 #endif
 
 #include <stdio.h>
@@ -91,6 +97,8 @@
 #ifndef LINEBUFSIZE
 #  define LINEBUFSIZE 256
 #endif
+
+#define NAMELEN 16
 
 /*
 ** Define slurm-specific aliases for use by plugins, see slurm_xlator.h
@@ -678,12 +686,25 @@ static void
 set_idbuf(char *idbuf)
 {
 	struct timeval now;
+	char thread_name[NAMELEN];
+	int max_len = 12; /* handles current longest thread name */
 
 	gettimeofday(&now, NULL);
+#if HAVE_SYS_PRCTL_H
+	if (prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL) < 0) {
+		error("failed to get thread name: %m");
+		max_len = 0;
+		thread_name[0] = '\0';
+	}
+#else
+	/* skip printing thread name if not available */
+	max_len = 0;
+	thread_name[0] = '\0';
+#endif
 
-	sprintf(idbuf, "%.15s.%-6d %5d %p", slurm_ctime(&now.tv_sec) + 4,
-	        (int)now.tv_usec, (int)getpid(), (void *)pthread_self());
-
+	sprintf(idbuf, "%.15s.%-6d %5d %-*s %p", slurm_ctime(&now.tv_sec) + 4,
+		(int)now.tv_usec, (int)getpid(), max_len, thread_name,
+		(void *)pthread_self());
 }
 
 /* return a heap allocated string formed from fmt and ap arglist
@@ -973,7 +994,7 @@ static void log_msg(log_level_t level, const char *fmt, va_list args)
 
 	if (SCHED_LOG_INITIALIZED &&
 	    (sched_log->opt.logfile_level > LOG_LEVEL_QUIET) &&
-	    (strncmp(fmt, "sched: ", 7) == 0)) {
+	    (xstrncmp(fmt, "sched: ", 7) == 0)) {
 		buf = vxstrfmt(fmt, args);
 		xlogfmtcat(&msgbuf, "[%M] %s%s%s", sched_log->fpfx, pfx, buf);
 		_log_printf(sched_log, sched_log->fbuf, sched_log->logfp,
@@ -1052,8 +1073,8 @@ static void log_msg(log_level_t level, const char *fmt, va_list args)
 		if (log->fmt == LOG_FMT_THREAD_ID) {
 			char tmp[64];
 			set_idbuf(tmp);
-			_log_printf(log, log->buf, stderr, "%s %s: %s%s\n",
-			            tmp, log->argv0, pfx, buf);
+			_log_printf(log, log->buf, stderr, "%s: %s%s\n",
+			            tmp, pfx, buf);
 		} else {
 			_log_printf(log, log->buf, stderr, "%s: %s%s\n",
 			            log->argv0, pfx, buf);

@@ -110,7 +110,7 @@ uint32_t *cr_node_cores_offset;
  */
 const char plugin_name[] = "Serial Job Resource Selection plugin";
 const char plugin_type[] = "select/serial";
-const uint32_t plugin_id      = 106;
+const uint32_t plugin_id      = SELECT_PLUGIN_SERIAL;
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 const uint32_t pstate_version = 7;	/* version control on saved state */
 
@@ -193,8 +193,10 @@ static void _dump_nodes(void)
 static void _dump_part(struct part_res_record *p_ptr)
 {
 	uint16_t i;
-	info("part:%s rows:%u pri:%u ", p_ptr->part_ptr->name, p_ptr->num_rows,
-	     p_ptr->part_ptr->priority);
+
+	info("part:%s rows:%u prio:%u ", p_ptr->part_ptr->name, p_ptr->num_rows,
+	     p_ptr->part_ptr->priority_tier);
+
 	if (!p_ptr->row)
 		return;
 
@@ -1291,7 +1293,8 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 
 	/* Remove the running jobs one at a time from exp_node_cr and try
 	 * scheduling the pending job after each one. */
-	if (rc != SLURM_SUCCESS) {
+	if ((rc != SLURM_SUCCESS) &&
+	    ((job_ptr->bit_flags & TEST_NOW_ONLY) == 0)) {
 		list_sort(cr_job_list, _cr_job_list_sort);
 		job_iterator = list_iterator_create(cr_job_list);
 		while ((tmp_job_ptr = list_next(job_iterator))) {
@@ -1708,6 +1711,11 @@ extern int select_p_job_signal(struct job_record *job_ptr, int signal)
 	return SLURM_SUCCESS;
 }
 
+extern int select_p_job_mem_confirm(struct job_record *job_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
 extern int select_p_job_fini(struct job_record *job_ptr)
 {
 	xassert(job_ptr);
@@ -1757,7 +1765,7 @@ extern int select_p_step_start(struct step_record *step_ptr)
 	return SLURM_SUCCESS;
 }
 
-extern int select_p_step_finish(struct step_record *step_ptr)
+extern int select_p_step_finish(struct step_record *step_ptr, bool killing_step)
 {
 	return SLURM_SUCCESS;
 }
@@ -1827,11 +1835,11 @@ extern int select_p_select_nodeinfo_set_all(void)
 {
 	struct part_res_record *p_ptr;
 	struct node_record *node_ptr = NULL;
-	int i=0, n=0, c, start, end;
-	uint16_t tmp, tmp_16 = 0;
+	int i, n, start, end;
 	static time_t last_set_all = 0;
-	uint32_t node_threads, node_cpus;
 	select_nodeinfo_t *nodeinfo = NULL;
+	uint32_t alloc_cpus, node_cores, node_cpus, node_threads;
+	bitstr_t *alloc_core_bitmap = NULL;
 
 	/* only set this once when the last_node_update is newer than
 	   the last time we set things up. */
@@ -1843,7 +1851,26 @@ extern int select_p_select_nodeinfo_set_all(void)
 	}
 	last_set_all = last_node_update;
 
-	for (n=0; n < select_node_cnt; n++) {
+	/* Build bitmap representing all cores allocated to all active jobs
+	 * (running or preempted jobs) */
+	for (p_ptr = select_part_record; p_ptr; p_ptr = p_ptr->next) {
+		if (!p_ptr->row)
+			continue;
+		for (i = 0; i < p_ptr->num_rows; i++) {
+			if (!p_ptr->row[i].row_bitmap)
+				continue;
+			if (!alloc_core_bitmap) {
+				alloc_core_bitmap =
+					bit_copy(p_ptr->row[i].row_bitmap);
+			} else if (bit_size(alloc_core_bitmap) ==
+				   bit_size(p_ptr->row[i].row_bitmap)) {
+				bit_or(alloc_core_bitmap,
+				       p_ptr->row[i].row_bitmap);
+			}
+		}
+	}
+
+	for (n = 0; n < select_node_cnt; n++) {
 		node_ptr = &(node_record_table_ptr[n]);
 
 		/* We have to use the '_g_' here to make sure we get
@@ -1868,34 +1895,27 @@ extern int select_p_select_nodeinfo_set_all(void)
 		}
 
 		start = cr_get_coremap_offset(n);
-		end = cr_get_coremap_offset(n+1);
-		tmp_16 = 0;
-		for (p_ptr = select_part_record; p_ptr; p_ptr = p_ptr->next) {
-			if (!p_ptr->row)
-				continue;
-			for (i = 0; i < p_ptr->num_rows; i++) {
-				if (!p_ptr->row[i].row_bitmap)
-					continue;
-				tmp = 0;
-				for (c = start; c < end; c++) {
-					if (bit_test(p_ptr->row[i].row_bitmap,
-						     c))
-						tmp++;
-				}
-				/* get the row with the largest cpu
-				 * count on it. */
-				if (tmp > tmp_16)
-					tmp_16 = tmp;
-			}
+		end = cr_get_coremap_offset(n + 1);
+		if (alloc_core_bitmap) {
+			alloc_cpus = bit_set_count_range(alloc_core_bitmap,
+							 start, end);
+		} else {
+			alloc_cpus = 0;
 		}
+		node_cores = end - start;
 
-		/* The minimum allocatable unit may a core, so scale
-		 * threads up to the proper CPU count */
-		if ((end - start) < node_cpus)
-			tmp_16 *= node_threads;
+		/* Administrator could resume suspended jobs and oversubscribe
+		 * cores, avoid reporting more cores in use than configured */
+		if (alloc_cpus > node_cores)
+			alloc_cpus = node_cores;
 
-		nodeinfo->alloc_cpus = tmp_16;
+		/* The minimum allocatable unit may a core, so scale by thread
+		 * count up to the proper CPU count as needed */
+		if (node_cores < node_cpus)
+			alloc_cpus *= node_threads;
+		nodeinfo->alloc_cpus = alloc_cpus;
 	}
+	FREE_NULL_BITMAP(alloc_core_bitmap);
 
 	return SLURM_SUCCESS;
 }
@@ -2073,13 +2093,31 @@ extern int select_p_update_node_config(int index)
 		return SLURM_ERROR;
 	}
 
+	/* Socket and core count can be changed when KNL node reboots in a
+	 * different NUMA configuration */
+	if ((select_fast_schedule == 1) &&
+	    (select_node_record[index].sockets !=
+	     select_node_record[index].node_ptr->config_ptr->sockets) &&
+	    (select_node_record[index].cores !=
+	     select_node_record[index].node_ptr->config_ptr->cores) &&
+	    ((select_node_record[index].sockets *
+	      select_node_record[index].cores) ==
+	     (select_node_record[index].node_ptr->sockets *
+	      select_node_record[index].node_ptr->cores))) {
+		select_node_record[index].sockets =
+			select_node_record[index].node_ptr->config_ptr->sockets;
+		select_node_record[index].cores =
+			select_node_record[index].node_ptr->config_ptr->cores;
+	}
+
 	if (select_fast_schedule)
 		return SLURM_SUCCESS;
 
-	select_node_record[index].real_memory = select_node_record[index].
-						node_ptr->real_memory;
-	select_node_record[index].mem_spec_limit = select_node_record[index].
-		node_ptr->mem_spec_limit;
+	select_node_record[index].real_memory =
+		select_node_record[index].node_ptr->real_memory;
+	select_node_record[index].mem_spec_limit =
+		select_node_record[index].node_ptr->mem_spec_limit;
+
 	return SLURM_SUCCESS;
 }
 

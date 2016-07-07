@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  allocate.c - allocate nodes for a job or step with supplied contraints
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -750,11 +749,14 @@ static void _destroy_allocation_response_socket(listen_t *listen)
 static int
 _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 {
-	uid_t req_uid   = g_slurm_auth_get_uid(msg->auth_cred,
-					       slurm_get_auth_info());
+	char *auth_info = slurm_get_auth_info();
+	uid_t req_uid;
 	uid_t uid       = getuid();
 	uid_t slurm_uid = (uid_t) slurm_get_slurm_user_id();
 	int rc = 0;
+
+	req_uid = g_slurm_auth_get_uid(msg->auth_cred, auth_info);
+	xfree(auth_info);
 
 	if ((req_uid != slurm_uid) && (req_uid != 0) && (req_uid != uid)) {
 		error ("Security violation, slurm message from uid %u",
@@ -766,7 +768,8 @@ _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 		case RESPONSE_RESOURCE_ALLOCATION:
 			debug2("resource allocation response received");
 			slurm_send_rc_msg(msg, SLURM_SUCCESS);
-			*resp = msg->data;
+			*resp = msg->data;    /* transfer payload to response */
+			msg->data = NULL;
 			rc = 1;
 			break;
 		case SRUN_JOB_COMPLETE:
@@ -820,7 +823,7 @@ _accept_msg_connection(int listen_fd,
 		return SLURM_ERROR;
 	}
 
-	rc = _handle_msg(msg, resp); /* handle_msg frees msg */
+	rc = _handle_msg(msg, resp); /* _handle_msg transfers message payload */
 	slurm_free_msg(msg);
 
 	slurm_close(conn_fd);

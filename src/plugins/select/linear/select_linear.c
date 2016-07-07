@@ -41,6 +41,10 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#ifndef   _GNU_SOURCE
+#  define _GNU_SOURCE
+#endif
+
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
 #  if HAVE_STDINT_H
@@ -52,10 +56,11 @@
 #endif
 
 #include <stdio.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -215,7 +220,7 @@ extern int select_p_select_nodeinfo_free(select_nodeinfo_t *nodeinfo);
  */
 const char plugin_name[]       	= "Linear node selection plugin";
 const char plugin_type[]       	= "select/linear";
-const uint32_t plugin_id	= 102;
+const uint32_t plugin_id	= SELECT_PLUGIN_LINEAR;
 const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 
 static struct node_record *select_node_ptr = NULL;
@@ -223,6 +228,7 @@ static int select_node_cnt = 0;
 static uint16_t select_fast_schedule;
 static uint16_t cr_type;
 static bool have_dragonfly = false;
+static bool topo_optional = false;
 
 /* Record of resources consumed on each node including job details */
 static struct cr_record *cr_ptr = NULL;
@@ -748,7 +754,8 @@ static int _job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 					   min_nodes, max_nodes, req_nodes);
 	}
 	
-	if (switch_record_cnt && switch_record_table) {
+	if (switch_record_cnt && switch_record_table &&
+	    ((topo_optional == false) || job_ptr->req_switch)) {
 		/* Perform optimized resource selection based upon topology */
 		if (have_dragonfly) {
 			return _job_test_dfly(job_ptr, bitmap,
@@ -3392,7 +3399,8 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 
 	/* Remove the running jobs one at a time from exp_node_cr and try
 	 * scheduling the pending job after each one */
-	if (rc != SLURM_SUCCESS) {
+	if ((rc != SLURM_SUCCESS) &&
+	    ((job_ptr->bit_flags & TEST_NOW_ONLY) == 0)) {
 		list_sort(cr_job_list, _cr_job_list_sort);
 		job_iterator = list_iterator_create(cr_job_list);
 		while ((tmp_job_ptr = (struct job_record *)
@@ -3464,9 +3472,13 @@ extern int init ( void )
 		verbose("%s loaded with argument %u", plugin_name, cr_type);
 
 	topo_param = slurm_get_topology_param();
-	if (topo_param && strstr(topo_param, "dragonfly"))
-		have_dragonfly = true;
-	xfree(topo_param);
+	if (topo_param) {
+		if (strcasestr(topo_param, "dragonfly"))
+			have_dragonfly = true;
+		if (strcasestr(topo_param, "TopoOptional"))
+			topo_optional = true;
+		xfree(topo_param);
+	}
 
 	return rc;
 }
@@ -3731,6 +3743,11 @@ extern int select_p_job_signal(struct job_record *job_ptr, int signal)
 	return SLURM_SUCCESS;
 }
 
+extern int select_p_job_mem_confirm(struct job_record *job_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
 /*
  * Note termination of job is starting. Executed from slurmctld.
  * IN job_ptr - pointer to job being terminated
@@ -3806,7 +3823,7 @@ extern int select_p_step_start(struct step_record *step_ptr)
 	return SLURM_SUCCESS;
 }
 
-extern int select_p_step_finish(struct step_record *step_ptr)
+extern int select_p_step_finish(struct step_record *step_ptr, bool killing_step)
 {
 	return SLURM_SUCCESS;
 }

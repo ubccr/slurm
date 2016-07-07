@@ -218,14 +218,24 @@ int main(int argc, char *argv[])
 	}
 
 	if (opt.get_user_env_time >= 0) {
+		bool no_env_cache = false;
+		char *sched_params;
 		char *user = uid_to_string(opt.uid);
-		if (strcmp(user, "nobody") == 0) {
+
+		if (xstrcmp(user, "nobody") == 0) {
 			error("Invalid user id %u: %m", (uint32_t)opt.uid);
 			exit(error_exit);
 		}
+
+		sched_params = slurm_get_sched_params();
+		no_env_cache = (sched_params &&
+				strstr(sched_params, "no_env_cache"));
+		xfree(sched_params);
+
 		env = env_array_user_default(user,
 					     opt.get_user_env_time,
-					     opt.get_user_env_mode);
+					     opt.get_user_env_mode,
+					     no_env_cache);
 		xfree(user);
 		if (env == NULL)
 			exit(error_exit);    /* error already logged */
@@ -439,12 +449,12 @@ int main(int argc, char *argv[])
 
 	env_array_set_environment(env);
 	env_array_free(env);
-	pthread_mutex_lock(&allocation_state_lock);
+	slurm_mutex_lock(&allocation_state_lock);
 	if (allocation_state == REVOKED) {
 		error("Allocation was revoked for job %u before command could "
 		      "be run", alloc->job_id);
 		pthread_cond_broadcast(&allocation_state_cond);
-		pthread_mutex_unlock(&allocation_state_lock);
+		slurm_mutex_unlock(&allocation_state_lock);
 		if (slurm_complete_job(alloc->job_id, status) != 0) {
 			error("Unable to clean up allocation for job %u: %m",
 			      alloc->job_id);
@@ -453,7 +463,7 @@ int main(int argc, char *argv[])
  	}
 	allocation_state = GRANTED;
 	pthread_cond_broadcast(&allocation_state_cond);
-	pthread_mutex_unlock(&allocation_state_lock);
+	slurm_mutex_unlock(&allocation_state_lock);
 
 	/*  Ensure that salloc has initial terminal foreground control.  */
 	if (is_interactive) {
@@ -470,12 +480,12 @@ int main(int argc, char *argv[])
 
 		tcsetpgrp(STDIN_FILENO, pid);
 	}
-	pthread_mutex_lock(&allocation_state_lock);
+	slurm_mutex_lock(&allocation_state_lock);
 	if (suspend_flag)
 		pthread_cond_wait(&allocation_state_cond, &allocation_state_lock);
 	command_pid = _fork_command(command_argv);
 	pthread_cond_broadcast(&allocation_state_cond);
-	pthread_mutex_unlock(&allocation_state_lock);
+	slurm_mutex_unlock(&allocation_state_lock);
 
 	/*
 	 * Wait for command to exit, OR for waitpid to be interrupted by a
@@ -504,20 +514,20 @@ int main(int argc, char *argv[])
 	 * Relinquish the job allocation (if not already revoked).
 	 */
 relinquish:
-	pthread_mutex_lock(&allocation_state_lock);
+	slurm_mutex_lock(&allocation_state_lock);
 	if (allocation_state != REVOKED) {
-		pthread_mutex_unlock(&allocation_state_lock);
+		slurm_mutex_unlock(&allocation_state_lock);
 
 		info("Relinquishing job allocation %u", alloc->job_id);
 		if ((slurm_complete_job(alloc->job_id, status) != 0) &&
 		    (slurm_get_errno() != ESLURM_ALREADY_DONE))
 			error("Unable to clean up job allocation %u: %m",
 			      alloc->job_id);
-		pthread_mutex_lock(&allocation_state_lock);
+		slurm_mutex_lock(&allocation_state_lock);
 		allocation_state = REVOKED;
 	}
 	pthread_cond_broadcast(&allocation_state_cond);
-	pthread_mutex_unlock(&allocation_state_lock);
+	slurm_mutex_unlock(&allocation_state_lock);
 
 	slurm_free_resource_allocation_response_msg(alloc);
 	slurm_allocation_msg_thr_destroy(msg_thr);
@@ -684,6 +694,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->mail_user = xstrdup(opt.mail_user);
 	if (opt.begin)
 		desc->begin_time = opt.begin;
+	if (opt.deadline)
+		desc->deadline = opt.deadline;
 	if (opt.burst_buffer)
 		desc->burst_buffer = opt.burst_buffer;
 	if (opt.account)
@@ -765,6 +777,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->time_limit = opt.time_limit;
 	if (opt.time_min  != NO_VAL)
 		desc->time_min = opt.time_min;
+	if (opt.job_flags)
+		desc->bitflags = opt.job_flags;
 	desc->shared = opt.shared;
 	desc->job_id = opt.jobid;
 
@@ -781,8 +795,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 
 	if (opt.power_flags)
 		desc->power_flags = opt.power_flags;
-	if (opt.sicp_mode)
-		desc->sicp_mode = opt.sicp_mode;
+	if (opt.mcs_label)
+		desc->mcs_label = xstrdup(opt.mcs_label);
 
 	return 0;
 }
@@ -866,7 +880,7 @@ static void _job_complete_handler(srun_job_complete_msg_t *comp)
 	}
 
 	if (comp->step_id == NO_VAL) {
-		pthread_mutex_lock(&allocation_state_lock);
+		slurm_mutex_lock(&allocation_state_lock);
 		if (allocation_state != REVOKED) {
 			/* If the allocation_state is already REVOKED, then
 			 * no need to print this message.  We probably
@@ -883,7 +897,7 @@ static void _job_complete_handler(srun_job_complete_msg_t *comp)
 		}
 		allocation_state = REVOKED;
 		pthread_cond_broadcast(&allocation_state_cond);
-		pthread_mutex_unlock(&allocation_state_lock);
+		slurm_mutex_unlock(&allocation_state_lock);
 		/*
 		 * Clean up child process: only if the forked process has not
 		 * yet changed state (waitpid returning 0).
@@ -1121,7 +1135,7 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 
 	pending_job_id = alloc->job_id;
 
-	if (alloc->alias_list && !strcmp(alloc->alias_list, "TBD"))
+	if (alloc->alias_list && !xstrcmp(alloc->alias_list, "TBD"))
 		opt.wait_all_nodes = 1;	/* Wait for boot & addresses */
 	if (opt.wait_all_nodes == (uint16_t) NO_VAL)
 		opt.wait_all_nodes = DEFAULT_WAIT_ALL_NODES;
@@ -1156,7 +1170,7 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 		char *tmp_str;
 		if (i > 0)
      			info("Nodes %s are ready for job", alloc->node_list);
-		if (alloc->alias_list && !strcmp(alloc->alias_list, "TBD") &&
+		if (alloc->alias_list && !xstrcmp(alloc->alias_list, "TBD") &&
 		    (slurm_allocation_lookup_lite(pending_job_id, &resp)
 		     == SLURM_SUCCESS)) {
 			tmp_str = alloc->alias_list;

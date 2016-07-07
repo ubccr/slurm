@@ -42,6 +42,7 @@
 #include "src/common/read_config.h"
 #include "src/common/slurm_time.h"
 #include "src/common/uid.h"
+#include "src/common/slurm_strcasestr.h"
 #include "sacct.h"
 #include <time.h>
 
@@ -49,6 +50,7 @@
 #define OPT_LONG_NAME	   0x100
 #define OPT_LONG_DELIMITER 0x101
 #define OPT_LONG_NOCONVERT 0x102
+#define OPT_LONG_UNITS     0x103
 
 void _help_fields_msg(void);
 void _help_msg(void);
@@ -140,7 +142,8 @@ static int _addto_id_char_list(List char_list, char *names, bool gid)
 					name = _convert_to_id( name, gid );
 
 					while((tmp_char = list_next(itr))) {
-						if (!strcasecmp(tmp_char, name))
+						if (!xstrcasecmp(tmp_char,
+								 name))
 							break;
 					}
 
@@ -168,7 +171,7 @@ static int _addto_id_char_list(List char_list, char *names, bool gid)
 			name = _convert_to_id(name, gid);
 
 			while((tmp_char = list_next(itr))) {
-				if (!strcasecmp(tmp_char, name))
+				if (!xstrcasecmp(tmp_char, name))
 					break;
 			}
 
@@ -225,7 +228,8 @@ static int _addto_state_char_list(List char_list, char *names)
 					name = xstrdup_printf("%d", c);
 
 					while((tmp_char = list_next(itr))) {
-						if (!strcasecmp(tmp_char, name))
+						if (!xstrcasecmp(tmp_char,
+								 name))
 							break;
 					}
 
@@ -257,7 +261,7 @@ static int _addto_state_char_list(List char_list, char *names)
 			name = xstrdup_printf("%d", c);
 
 			while((tmp_char = list_next(itr))) {
-				if (!strcasecmp(tmp_char, name))
+				if (!xstrcasecmp(tmp_char, name))
 					break;
 			}
 
@@ -373,8 +377,8 @@ sacct [<OPTION>]                                                            \n \
      -s, --state:                                                           \n\
 	           Select jobs based on their current state or the state    \n\
                    they were in during the time period given: running (r),  \n\
-                   completed (cd), failed (f), timeout (to), resizing (rs)  \n\
-                   and node_fail (nf).                                      \n\
+                   completed (cd), failed (f), timeout (to), resizing (rs), \n\
+                   deadline (dl) and node_fail (nf).                        \n\
      -S, --starttime:                                                       \n\
                    Select jobs eligible after this time.  Default is        \n\
                    00:00:00 of the current day, unless '-s' is set then     \n\
@@ -421,6 +425,7 @@ void _init_params()
 	params.job_cond = xmalloc(sizeof(slurmdb_job_cond_t));
 	params.job_cond->without_usage_truncation = 1;
 	params.convert_flags = CONVERT_NUM_UNIT_EXACT;
+	params.units = NO_VAL;
 }
 
 int get_data(void)
@@ -524,6 +529,7 @@ void parse_command_line(int argc, char **argv)
                 {"clusters",       required_argument, 0,    'M'},
                 {"nodelist",       required_argument, 0,    'N'},
                 {"noconvert",      no_argument,       0,    OPT_LONG_NOCONVERT},
+                {"units",          required_argument, 0,    OPT_LONG_UNITS},
                 {"noheader",       no_argument,       0,    'n'},
                 {"fields",         required_argument, 0,    'o'},
                 {"format",         required_argument, 0,    'o'},
@@ -580,7 +586,7 @@ void parse_command_line(int argc, char **argv)
 			   everything else.
 			*/
 		case 'M':
-			if (!strcasecmp(optarg, "-1")) {
+			if (!xstrcasecmp(optarg, "-1")) {
 				all_clusters = 1;
 				break;
 			}
@@ -671,6 +677,14 @@ void parse_command_line(int argc, char **argv)
 		case OPT_LONG_NOCONVERT:
 			params.convert_flags |= CONVERT_NUM_UNIT_NO;
 			break;
+		case OPT_LONG_UNITS:
+		{
+			int type = get_unit_type(*optarg);
+			if (type == SLURM_ERROR)
+				fatal("Invalid unit type");
+			params.units = type;
+		}
+			break;
 		case 'n':
 			print_fields_have_header = 0;
 			break;
@@ -744,7 +758,7 @@ void parse_command_line(int argc, char **argv)
 			params.opt_help = 3;
 			break;
 		case 'u':
-			if (!strcmp(optarg, "-1")) {
+			if (!xstrcmp(optarg, "-1")) {
 				all_users = 1;
 				break;
 			}
@@ -848,7 +862,7 @@ void parse_command_line(int argc, char **argv)
 		g_slurm_jobcomp_init(params.opt_filein);
 
 		acct_type = slurm_get_jobcomp_type();
-		if ((strcmp(acct_type, "jobcomp/none") == 0)
+		if ((xstrcmp(acct_type, "jobcomp/none") == 0)
 		    &&  (stat(params.opt_filein, &stat_buf) != 0)) {
 			fprintf(stderr, "SLURM job completion is disabled\n");
 			exit(1);
@@ -858,7 +872,7 @@ void parse_command_line(int argc, char **argv)
 		slurm_acct_storage_init(params.opt_filein);
 
 		acct_type = slurm_get_accounting_storage_type();
-		if ((strcmp(acct_type, "accounting_storage/none") == 0)
+		if ((xstrcmp(acct_type, "accounting_storage/none") == 0)
 		    &&  (stat(params.opt_filein, &stat_buf) != 0)) {
 			fprintf(stderr,
 				"SLURM accounting storage is disabled\n");

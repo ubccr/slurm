@@ -34,6 +34,13 @@
 FAILURES=0
 COMPLETIONS=0
 
+# Clear any environment variables that could break the tests.
+# Cray sets some squeue format options that break tests
+unset SQUEUE_ALL
+unset SQUEUE_SORT
+unset SQUEUE_FORMAT
+unset SQUEUE_FORMAT2
+
 # Make sure we are in the desired directory before possibly
 # removing files the user does not want to lose.
 if [ ! -x ./regression ]; then
@@ -71,6 +78,7 @@ for major in `seq 1 100`; do
 			echo "$TEST FAILURE"
 			grep "$TEST " README >& 2
 			echo "=============" >& 2
+			if [ -f ./slurm_status ]; then ./slurm_status; fi
 		fi
 		/bin/echo "============================================"
 	done

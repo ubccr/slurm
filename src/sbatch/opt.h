@@ -81,7 +81,7 @@ typedef struct sbatch_options {
 	bool nodes_set;		/* true if nodes explicitly set */
 	int sockets_per_node;	/* --sockets-per-node=n		*/
 	int cores_per_socket;	/* --cores-per-socket=n		*/
-	uint32_t kill_invalid_dep;  /* --kill_invalid_dep           */
+	uint32_t job_flags;	/* --kill_invalid_dep, --gres-flags */
 	int threads_per_core;	/* --threads-per-core=n		*/
 	int ntasks_per_node;	/* --ntasks-per-node=n		*/
 	int ntasks_per_socket;	/* --ntasks-per-socket=n	*/
@@ -168,6 +168,7 @@ typedef struct sbatch_options {
 	int get_user_env_mode;	/* --get-user-env=[S|L]         */
 	char *export_env;	/* --export			*/
 	char *export_file;	/* --export-file=file		*/
+	bool wait;		/* -W, --wait			*/
 	char *wckey;            /* --wckey workload characterization key */
 	char *reservation;      /* --reservation */
  	int ckpt_interval;	/* --checkpoint (int minutes)   */
@@ -186,7 +187,8 @@ typedef struct sbatch_options {
 	bool test_only;		/* --test-only			*/
 	char *burst_buffer;	/* -bb				*/
 	uint8_t power_flags;	/* Power management options	*/
-	uint8_t sicp_mode;	/* Inter-cluster job ID		*/
+	char *mcs_label;	/* mcs label if mcs plugin in use */
+	time_t deadline;	/* ---deadline                  */
 } opt_t;
 
 extern opt_t opt;

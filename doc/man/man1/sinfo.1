@@ -1,4 +1,4 @@
-.TH sinfo "1" "Slurm Commands" "April 2015" "Slurm Commands"
+.TH sinfo "1" "Slurm Commands" "March 2016" "Slurm Commands"
 
 .SH "NAME"
 sinfo \- view information about Slurm nodes and partitions.
@@ -79,7 +79,7 @@ Don't convert units from their original type (e.g. 2048M won't be converted to
 
 .TP
 \fB\-N\fR, \fB\-\-Node\fR
-Print information in a node\-oriented format.
+Print information in a node\-oriented format with one line per node.
 The default is to print information in a partition\-oriented format.
 This is ignored if the \fB\-\-format\fR option is specified.
 
@@ -136,6 +136,9 @@ Number of nodes by state in the format "allocated/idle".
 Do not use this with a node state option ("%t" or "%T") or
 the different node states will be placed on separate lines.
 .TP
+\fB%b\fR
+Features currently active on the nodes, also see \fB%f\fR
+.TP
 \fB%B\fR
 The max number of CPUs per node available to jobs in the partition.
 .TP
@@ -154,11 +157,14 @@ Size of temporary disk space per node in megabytes
 \fB%D\fR
 Number of nodes
 .TP
+\fB%e\fR
+Free memory of a node
+.TP
 \fB%E\fR
 The reason a node is unavailable (down, drained, or draining states).
 .TP
 \fB%f\fR
-Features associated with the nodes
+Features available the nodes, also see \fB%b\fR
 .TP
 \fB%F\fR
 Number of nodes by state in the format
@@ -173,10 +179,14 @@ Groups which may use the nodes
 Generic resources (gres) associated with the nodes
 .TP
 \fB%h\fR
-Jobs may share nodes, "yes", "no", or "force"
+Jobs may oversubscribe compute resources (i.e. CPUs), "yes", "no", "exclusive"
+or "force"
 .TP
 \fB%H\fR
 Print the timestamp of the reason a node is unavailable.
+.TP
+\fB%I\fR
+Partition job priority weighting factor.
 .TP
 \fB%l\fR
 Maximum time for any job in the format "days\-hours:minutes:seconds"
@@ -202,11 +212,8 @@ List of node communication addresses
 \fB%O\fR
 CPU load of a node
 .TP
-\fB%e\fR
-Free memory of a node
-.TP
 \fB%p\fR
-Partition scheduling priority
+Partition scheduling tier priority.
 .TP
 \fB%P\fR
 Partition name followed by "*" for the default partition, also see \fB%R\fR
@@ -318,11 +325,15 @@ Number of cores per socket.
 .TP
 \fBdefaulttime\fR
 Default time for any job in the format "days\-hours:minutes:seconds".
+.TP
 \fBdisk\fR
 Size of temporary disk space per node in megabytes.
 .TP
 \fBfeatures\fR
-Features associated with the nodes.
+Features available on the nodes. Also see \fBfeatures_act\fR.
+.TP
+\fBfeatures_act\fR
+Features currently active on the nodes. Also see \fBfeatures\fR.
 .TP
 \fBgroups\fR
 Groups which may use the nodes.
@@ -359,6 +370,10 @@ List of node hostnames.
 \fBnodelist\fR
 List of node names.
 .TP
+\fBoversubscribe\fR
+Jobs may oversubscribe compute resources (i.e. CPUs), "yes", "no", "exclusive"
+or "force".
+.TP
 \fBpartition\fR
 Partition name followed by "*" for the default partition, also see \fB%R\fR.
 .TP
@@ -368,17 +383,17 @@ Partition name, also see \fB%P\fR.
 \fBpreemptmode\fR
 PreemptionMode.
 .TP
-\fBpriority\fR
-Partition scheduling priority.
+\fBpriorityjobfactor\fR
+Partition factor used by priority/multifactor plugin in calculating job priority.
+.TP
+\fBprioritytier\fR or \fBpriority\fR
+Partition scheduling tier priority.
 .TP
 \fBreason\fR
 The reason a node is unavailable (down, drained, or draining states).
 .TP
 \fBroot\fR
 Only user root may initiate jobs, "yes" or "no".
-.TP
-\fBshare\fR
-Jobs may share nodes, "yes", "no", or "force".
 .TP
 \fBsize\fR
 Maximum job size in nodes.
@@ -555,15 +570,15 @@ default partition.
 Is the ability to allocate resources in this partition
 restricted to user root, \fByes\fR or \fBno\fR.
 .TP
-\fBSHARE\fR
-Will jobs allocated resources in this partition share those
-resources.
-\fBno\fR indicates resources are never shared.
+\fBOVERSUBSCRIBE\fR
+Will jobs allocated resources in this partition oversubscribe those
+compute resources (i.e. CPUs).
+\fBno\fR indicates resources are never oversubscribed.
 \fBexclusive\fR indicates whole nodes are dedicated to jobs
 (equivalent to srun \-\-exclusive option, may be used even
-with shared/cons_res managing individual processors).
-\fBforce\fR indicates resources are always available to be shared.
-\fByes\fR indicates resource may be shared or not
+with select/cons_res managing individual processors).
+\fBforce\fR indicates resources are always available to be oversubscribed.
+\fByes\fR indicates resource may be oversubscribed or not
 per job's resource allocation.
 .TP
 \fBSTATE\fR
@@ -761,8 +776,8 @@ Report more complete information about the partition debug:
 .nf
 
 > sinfo --long --partition=debug
-PARTITION AVAIL TIMELIMIT JOB_SIZE ROOT SHARE GROUPS NODES STATE NODELIST
-debug*    up        30:00        8 no   no    all        8 idle  dev[0-7]
+PARTITION AVAIL TIMELIMIT JOB_SIZE ROOT OVERSUBS GROUPS NODES STATE NODELIST
+debug*    up        30:00        8 no   no       all        8 idle  dev[0-7]
 .fi
 
 Report only those nodes that are in state DRAINED:
@@ -804,7 +819,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2009 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010-2013 SchedMD LLC.
+Copyright (C) 2010-2016 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <http://slurm.schedmd.com/>.

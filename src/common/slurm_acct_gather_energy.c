@@ -35,9 +35,17 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#ifdef HAVE_CONFIG_H
+#  include "config.h"
+#endif
+
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if HAVE_SYS_PRCTL_H
+#  include <sys/prctl.h>
+#endif
 
 #include "src/common/macros.h"
 #include "src/common/plugin.h"
@@ -89,10 +97,16 @@ static void *_watch_node(void *arg)
 	int type = PROFILE_ENERGY;
 	int delta = acct_gather_profile_timer[type].freq - 1;
 
+#if HAVE_SYS_PRCTL_H
+	if (prctl(PR_SET_NAME, "acctg_energy", NULL, NULL, NULL) < 0) {
+		error("%s: cannot set my name to %s %m",
+		      __func__, "acctg_energy");
+	}
+#endif
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
-	while (init_run && acct_gather_profile_running) {
+	while (init_run && acct_gather_profile_test()) {
 		/* Do this until shutdown is requested */
 		slurm_mutex_lock(&g_context_lock);
 		(*(ops.set_data))(ENERGY_DATA_PROFILE, &delta);

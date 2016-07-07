@@ -1369,7 +1369,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 		safe_unpackmem_xmalloc(sigp, &len, buffer);
 		cred->siglen = len;
 		xassert(len > 0);
-	} else if (protocol_version >= SLURM_14_03_PROTOCOL_VERSION) {
+	} else if (protocol_version >= SLURM_14_11_PROTOCOL_VERSION) {
 		safe_unpack32(&cred->jobid, buffer);
 		safe_unpack32(&cred->stepid, buffer);
 		safe_unpack32(&cred_uid, buffer);
@@ -2412,7 +2412,7 @@ int extract_sbcast_cred(slurm_cred_ctx_t ctx,
 			free_buf(buffer);
 			if (rc)
 				err_str = (char *)(*(ops.crypto_str_error))(rc);
-			if (err_str && strcmp(err_str, "Credential replayed")) {
+			if (err_str && xstrcmp(err_str, "Credential replayed")){
 				error("sbcast_cred verify: %s", err_str);
 				return -1;
 			}

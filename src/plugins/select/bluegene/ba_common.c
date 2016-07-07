@@ -73,9 +73,11 @@ static bool _check_deny_pass(int dim, uint16_t *deny_pass)
 		return true;
 
 	switch (dim) {
+#ifndef HAVE_BG_L_P
 	case A:
 		check = PASS_DENY_A;
 		break;
+#endif
 	case X:
 		check = PASS_DENY_X;
 		break;
@@ -579,7 +581,7 @@ static ba_mp_t *_internal_loc2ba_mp(int level, uint16_t *coords,
 	curr_mp = coord2ba_mp(coords);
 	if (!curr_mp)
 		return NULL;
-	if (strcasecmp(check, curr_mp->loc))
+	if (xstrcasecmp(check, curr_mp->loc))
 		curr_mp = NULL;
 
 	return curr_mp;

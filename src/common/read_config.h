@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2016 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Mette <jette1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -75,7 +75,7 @@ extern char *default_plugstack;
 #define DEFAULT_FAST_SCHEDULE       1
 #define DEFAULT_FIRST_JOB_ID        1
 #define DEFAULT_GET_ENV_TIMEOUT     2
-#define DEFAULT_GROUP_INFO          600
+#define DEFAULT_GROUP_INFO          (GROUP_FORCE | 600)
 /* NOTE: DEFAULT_INACTIVE_LIMIT must be 0 for Blue Gene/L systems */
 #define DEFAULT_INACTIVE_LIMIT      0
 #define DEFAULT_JOB_ACCT_GATHER_TYPE  "jobacct_gather/none"
@@ -120,6 +120,7 @@ extern char *default_plugstack;
 #define DEFAULT_MAX_JOB_COUNT       10000
 #define DEFAULT_MAX_JOB_ID          0x7fff0000
 #define DEFAULT_MAX_STEP_COUNT      40000
+#define DEFAULT_MCS_PLUGIN          "mcs/none"
 #define DEFAULT_MEM_PER_CPU         0
 #define DEFAULT_MAX_MEM_PER_CPU     0
 #define DEFAULT_MIN_JOB_AGE         300
@@ -182,6 +183,7 @@ extern char *default_plugstack;
 #  define DEFAULT_SWITCH_TYPE         "switch/none"
 #endif
 #define DEFAULT_TASK_PLUGIN         "task/none"
+#define DEFAULT_TCP_TIMEOUT         2
 #define DEFAULT_TMP_FS              "/tmp"
 #if defined HAVE_3D && !defined HAVE_ALPS_CRAY
 #  define DEFAULT_TOPOLOGY_PLUGIN     "topology/3d_torus"
@@ -270,7 +272,8 @@ typedef struct slurm_conf_partition {
 	char	*name;		/* name of the partition */
 	char 	*nodes;		/* comma delimited list names of nodes */
 	uint16_t preempt_mode;	/* See PREEMPT_MODE_* in slurm/slurm.h */
-	uint16_t priority;	/* scheduling priority for jobs */
+	uint16_t priority_job_factor;	/* job priority weight factor */
+	uint16_t priority_tier;	/* tier for scheduling and preemption */
 	char    *qos_char;      /* Name of QOS associated with partition */
 	bool     req_resv_flag; /* 1 if partition can only be used in a
 				 * reservation */
@@ -575,5 +578,9 @@ extern char *get_extra_conf_path(char *conf_name);
  * returns true if slurm_prog_name (set in log.c) is in list, false otherwise.
  */
 extern bool run_in_daemon(char *daemons);
+
+/* Translate a job constraint specification into a node feature specification
+ * RET - String MUST be xfreed */
+extern char *xlate_features(char *job_features);
 
 #endif /* !_READ_CONFIG_H */

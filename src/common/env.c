@@ -222,9 +222,9 @@ _extend_env(char ***envp)
  *	srun's --get-user-env option */
 static bool _discard_env(char *name, char *value)
 {
-	if ((strcmp(name, "DISPLAY")     == 0) ||
-	    (strcmp(name, "ENVIRONMENT") == 0) ||
-	    (strcmp(name, "HOSTNAME")    == 0))
+	if ((xstrcmp(name, "DISPLAY")     == 0) ||
+	    (xstrcmp(name, "ENVIRONMENT") == 0) ||
+	    (xstrcmp(name, "HOSTNAME")    == 0))
 		return true;
 
 	return false;
@@ -1690,7 +1690,7 @@ void env_array_merge_slurm(char ***dest_array, const char **src_array)
 	for (ptr = (char **)src_array; *ptr != NULL; ptr++) {
 		if (_env_array_entry_splitter(*ptr, name, sizeof(name),
 					      value, ENV_BUFSIZE) &&
-		    (strncmp(name, "SLURM", 5) == 0))
+		    (xstrncmp(name, "SLURM", 5) == 0))
 			env_array_overwrite(dest_array, name, value);
 	}
 	xfree(value);
@@ -1713,7 +1713,7 @@ void env_array_merge_spank(char ***dest_array, const char **src_array)
 	for (ptr = (char **)src_array; *ptr != NULL; ptr++) {
 		if (_env_array_entry_splitter(*ptr, name, sizeof(name),
 					      value, ENV_BUFSIZE)) {
-			if (strncmp(name, "SPANK_" ,6))
+			if (xstrncmp(name, "SPANK_" ,6))
 				env_array_overwrite(dest_array, name, value);
 			else
 				env_array_overwrite(dest_array, name+6, value);
@@ -1835,7 +1835,7 @@ char **env_array_from_file(const char *fname)
 			 * that this new value does not get overwritten
 			 * in the subsequent call to env_array_merge().
 			 */
-			if (strcmp(name, "SLURM_SUBMIT_DIR") == 0)
+			if (xstrcmp(name, "SLURM_SUBMIT_DIR") == 0)
 				unsetenv(name);
 			env_array_overwrite(&env, name, value);
 		}
@@ -1914,7 +1914,8 @@ static char **_load_env_cache(const char *username)
  *    Depending upon the user's login scripts, this may take a very
  *    long time to complete or possibly never return
  * 2. Load the user environment from a cache file. This is used
- *    in the event that option 1 times out.
+ *    in the event that option 1 times out.  This only happens if no_cache isn't
+ *    set.  If it is set then NULL will be returned if the normal load fails.
  *
  * timeout value is in seconds or zero for default (2 secs)
  * mode is 1 for short ("su <user>"), 2 for long ("su - <user>")
@@ -1923,7 +1924,8 @@ static char **_load_env_cache(const char *username)
  * NOTE: The calling process must have an effective uid of root for
  * this function to succeed.
  */
-char **env_array_user_default(const char *username, int timeout, int mode)
+char **env_array_user_default(const char *username, int timeout, int mode,
+			      bool no_cache)
 {
 	char *line = NULL, *last = NULL, name[MAXPATHLEN], *value, *buffer;
 	char **env = NULL;
@@ -1946,8 +1948,9 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	snprintf(stepd_path, sizeof(stepd_path), "%s/sbin/slurmstepd",
 		 SLURM_PREFIX);
 	config_timeout = slurm_get_env_timeout();
+
 	if (config_timeout == 0)	/* just read directly from cache */
-		 return _load_env_cache(username);
+		return _load_env_cache(username);
 
 	if (stat(SUCMD, &buf))
 		fatal("Could not locate command: "SUCMD);
@@ -2080,7 +2083,7 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	if (!found) {
 		error("Failed to load current user environment variables");
 		xfree(buffer);
-		return _load_env_cache(username);
+		return no_cache ? _load_env_cache(username) : NULL;
 	}
 
 	/* First look for the start token in the output */
@@ -2088,7 +2091,7 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	found = 0;
 	line = strtok_r(buffer, "\n", &last);
 	while (!found && line) {
-		if (!strncmp(line, starttoken, len)) {
+		if (!xstrncmp(line, starttoken, len)) {
 			found = 1;
 			break;
 		}
@@ -2097,7 +2100,7 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	if (!found) {
 		error("Failed to get current user environment variables");
 		xfree(buffer);
-		return _load_env_cache(username);
+		return no_cache ? _load_env_cache(username) : NULL;
 	}
 
 	/* Process environment variables until we find the stop token */
@@ -2107,7 +2110,7 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	line = strtok_r(NULL, "\n", &last);
 	value = xmalloc(ENV_BUFSIZE);
 	while (!found && line) {
-		if (!strncmp(line, stoptoken, len)) {
+		if (!xstrncmp(line, stoptoken, len)) {
 			found = 1;
 			break;
 		}
@@ -2137,7 +2140,7 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	if (!found) {
 		error("Failed to get all user environment variables");
 		env_array_free(env);
-		return _load_env_cache(username);
+		return no_cache ? _load_env_cache(username) : NULL;
 	}
 
 	return env;

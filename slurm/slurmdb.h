@@ -38,32 +38,9 @@
 #ifndef _SLURMDB_H
 #define _SLURMDB_H
 
-/* BEGIN_C_DECLS should be used at the beginning of your declarations,
-   so that C++ compilers don't mangle their names.  Use END_C_DECLS at
-   the end of C declarations. */
-#undef BEGIN_C_DECLS
-#undef END_C_DECLS
 #ifdef __cplusplus
-# define BEGIN_C_DECLS	extern "C" {
-# define END_C_DECLS	}
-#else
-# define BEGIN_C_DECLS	/* empty */
-# define END_C_DECLS	/* empty */
+extern "C" {
 #endif
-
-/* PARAMS is a macro used to wrap function prototypes, so that compilers
-   that don't understand ANSI C prototypes still work, and ANSI C
-   compilers can issue warnings about type mismatches.  */
-#undef PARAMS
-#if defined (__STDC__) || defined (_AIX)			\
-	|| (defined (__mips) && defined (_SYSTYPE_SVR4))	\
-	|| defined(WIN32) || defined(__cplusplus)
-# define PARAMS(protos)	protos
-#else
-# define PARAMS(protos)	()
-#endif
-
-BEGIN_C_DECLS
 
 #include <slurm/slurm.h>
 
@@ -188,6 +165,7 @@ typedef enum {
 #define CLUSTER_FLAG_BGP    0x00000004 /* This is a bluegene/p cluster */
 #define CLUSTER_FLAG_BGQ    0x00000008 /* This is a bluegene/q cluster */
 #define CLUSTER_FLAG_SC     0x00000010 /* This is a sun constellation cluster */
+				       /* Removed v16.05 */
 #define CLUSTER_FLAG_XCPU   0x00000020 /* This has xcpu, removed v15.08 */
 #define CLUSTER_FLAG_AIX    0x00000040 /* This is an aix cluster */
 #define CLUSTER_FLAG_MULTSD 0x00000080 /* This cluster is multiple slurmd */
@@ -724,6 +702,8 @@ typedef struct {
 } slurmdb_job_rec_t;
 
 typedef struct {
+	List acct_limit_list; /* slurmdb_used_limits_t's (DON'T PACK
+			       * for state file) */
 	List job_list; /* list of job pointers to submitted/running
 			  jobs (DON'T PACK) */
 	uint32_t grp_used_jobs;	/* count of active jobs (DON'T PACK
@@ -781,8 +761,12 @@ typedef struct {
 					   * (DON'T PACK) */
 	uint32_t grp_wall; /* total time in hours this qos can run for */
 
+	uint32_t max_jobs_pa;	/* max number of jobs an account can
+				 * run with this qos at one time */
 	uint32_t max_jobs_pu;	/* max number of jobs a user can
 				 * run with this qos at one time */
+	uint32_t max_submit_jobs_pa; /* max number of jobs an account can
+					submit with this qos at once */
 	uint32_t max_submit_jobs_pu; /* max number of jobs a user can
 					submit with this qos at once */
 	char *max_tres_mins_pj;    /* max number of tres seconds this
@@ -791,6 +775,12 @@ typedef struct {
 					  * based off the ordering of the
 					  * total number of TRES in the system
 					  * (DON'T PACK) */
+	char *max_tres_pa;         /* max number of tres this
+				    * QOS can allocate per account */
+	uint64_t *max_tres_pa_ctld;   /* max_tres_pa broken out in an array
+				       * based off the ordering of the
+				       * total number of TRES in the system
+				       * (DON'T PACK) */
 	char *max_tres_pj;         /* max number of tres this
 				    * qos can allocate per job */
 	uint64_t *max_tres_pj_ctld;   /* max_tres_pj broken out in an array
@@ -809,6 +799,18 @@ typedef struct {
 				       * based off the ordering of the
 				       * total number of TRES in the system
 				       * (DON'T PACK) */
+	char *max_tres_run_mins_pa;   /* max number of tres minutes this
+				       * qos can having running at one
+				       * time per account, currently
+				       * this doesn't do anything.
+				       */
+	uint64_t *max_tres_run_mins_pa_ctld; /* max_tres_run_mins_pa
+					      * broken out in an array
+					      * based off the ordering
+					      * of the total number of TRES in
+					      * the system, currently
+					      * this doesn't do anything.
+					      * (DON'T PACK) */
 	char *max_tres_run_mins_pu;   /* max number of tres minutes this
 				       * qos can having running at one
 				       * time, currently this doesn't
@@ -978,15 +980,16 @@ typedef struct {
 } slurmdb_txn_rec_t;
 
 /* Right now this is used in the slurmdb_qos_rec_t structure.  In the
- * user_limit_list. */
+ * user_limit_list and acct_limit_list. */
 typedef struct {
+	char *acct; /* If limits for an account this is the accounts name */
 	uint32_t jobs;	/* count of active jobs */
 	uint32_t submit_jobs; /* count of jobs pending or running */
 	uint64_t *tres; /* array of TRES allocated */
 	uint64_t *tres_run_mins; /* array of how many TRES mins are
 				  * allocated currently, currently this doesn't
 				  * do anything and isn't set up. */
-	uint32_t uid;
+	uint32_t uid; /* If limits for a user this is the users uid */
 } slurmdb_used_limits_t;
 
 typedef struct {
@@ -1221,8 +1224,8 @@ extern List slurmdb_associations_modify(void *db_conn,
  * RET: List containing (char *'s) else NULL on error
  * note List needs to be freed with slurm_list_destroy() when called
  */
-extern List slurmdb_associations_remove(
-	void *db_conn, slurmdb_assoc_cond_t *assoc_cond);
+extern List slurmdb_associations_remove(void *db_conn,
+					slurmdb_assoc_cond_t *assoc_cond);
 
 /************** cluster functions **************/
 
@@ -1299,14 +1302,19 @@ extern List slurmdb_report_cluster_user_by_wckey(void *db_conn,
 
 
 extern List slurmdb_report_job_sizes_grouped_by_top_account(void *db_conn,
-							    slurmdb_job_cond_t *job_cond, List grouping_list, bool flat_view);
+							    slurmdb_job_cond_t *job_cond,
+							    List grouping_list,
+							    bool flat_view);
 
 extern List slurmdb_report_job_sizes_grouped_by_wckey(void *db_conn,
-						      slurmdb_job_cond_t *job_cond, List grouping_list);
+						      slurmdb_job_cond_t *job_cond,
+						      List grouping_list);
 
 extern List slurmdb_report_job_sizes_grouped_by_top_account_then_wckey(
-	void *db_conn, slurmdb_job_cond_t *job_cond,
-	List grouping_list, bool flat_view);
+	void *db_conn,
+	slurmdb_job_cond_t *job_cond,
+	List grouping_list,
+	bool flat_view);
 
 
 /* report on users with top usage
@@ -1345,7 +1353,8 @@ extern int slurmdb_connection_close(void **db_conn);
  * IN:  slurmdb_user_cond_t *user_cond
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
-extern int slurmdb_coord_add(void *db_conn, List acct_list,
+extern int slurmdb_coord_add(void *db_conn,
+			     List acct_list,
 			     slurmdb_user_cond_t *user_cond);
 
 /*
@@ -1440,7 +1449,8 @@ extern List slurmdb_get_info_cluster(char *cluster_names);
  * called
  */
 extern int slurmdb_get_first_avail_cluster(job_desc_msg_t *req,
-        char *cluster_names, slurmdb_cluster_rec_t **cluster_rec);
+					   char *cluster_names,
+					   slurmdb_cluster_rec_t **cluster_rec);
 
 /************** helper functions **************/
 extern void slurmdb_destroy_assoc_usage(void *object);
@@ -1498,19 +1508,20 @@ extern void slurmdb_destroy_report_acct_grouping(void *object);
 extern void slurmdb_destroy_report_cluster_grouping(void *object);
 
 extern void slurmdb_init_assoc_rec(slurmdb_assoc_rec_t *assoc,
-					 bool free_it);
+				   bool free_it);
 extern void slurmdb_init_clus_res_rec(slurmdb_clus_res_rec_t *clus_res,
 				      bool free_it);
 extern void slurmdb_init_cluster_rec(slurmdb_cluster_rec_t *cluster,
 				     bool free_it);
 extern void slurmdb_init_qos_rec(slurmdb_qos_rec_t *qos,
-				 bool free_it, uint32_t init_val);
+				 bool free_it,
+				 uint32_t init_val);
 extern void slurmdb_init_res_rec(slurmdb_res_rec_t *res,
 				 bool free_it);
 extern void slurmdb_init_wckey_rec(slurmdb_wckey_rec_t *wckey,
 				   bool free_it);
 extern void slurmdb_init_tres_cond(slurmdb_tres_cond_t *tres,
-				    bool free_it);
+				   bool free_it);
 extern void slurmdb_init_cluster_cond(slurmdb_cluster_cond_t *cluster,
 				      bool free_it);
 extern void slurmdb_init_res_cond(slurmdb_res_cond_t *cluster,
@@ -1519,7 +1530,8 @@ extern void slurmdb_init_res_cond(slurmdb_res_cond_t *cluster,
 /* The next two functions have pointers to assoc_list so do not
  * destroy assoc_list before using the list returned from this function.
  */
-extern List slurmdb_get_hierarchical_sorted_assoc_list(List assoc_list);
+extern List slurmdb_get_hierarchical_sorted_assoc_list(
+	List assoc_list, bool use_lft);
 extern List slurmdb_get_acct_hierarchical_rec_list(List assoc_list);
 
 
@@ -1629,8 +1641,11 @@ extern List slurmdb_tres_get(void *db_conn, slurmdb_tres_cond_t *tres_cond);
  * IN:  end time stamp for records <=
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
-extern int slurmdb_usage_get(void *db_conn,  void *in, int type,
-			     time_t start, time_t end);
+extern int slurmdb_usage_get(void *db_conn,
+			     void *in,
+			     int type,
+			     time_t start,
+			     time_t end);
 
 /*
  * roll up data in the storage
@@ -1640,7 +1655,8 @@ extern int slurmdb_usage_get(void *db_conn,  void *in, int type,
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
 extern int slurmdb_usage_roll(void *db_conn,
-			      time_t sent_start, time_t sent_end,
+			      time_t sent_start,
+			      time_t sent_end,
 			      uint16_t archive_data);
 
 /************** user functions **************/
@@ -1723,6 +1739,8 @@ extern List slurmdb_wckeys_modify(void *db_conn,
 extern List slurmdb_wckeys_remove(void *db_conn,
 				  slurmdb_wckey_cond_t *wckey_cond);
 
-END_C_DECLS
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* !_SLURMDB_H */

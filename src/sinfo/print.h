@@ -88,6 +88,8 @@ void print_sinfo_reservation(reserve_info_msg_t *resv_ptr);
 	format_add_function(list,wid,right,suffix,_print_disk)
 #define format_add_features(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_features)
+#define format_add_features_act(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_features_act)
 #define format_add_groups(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_groups)
 #define format_add_gres(list,wid,right,suffix) \
@@ -114,14 +116,16 @@ void print_sinfo_reservation(reserve_info_msg_t *resv_ptr);
 	format_add_function(list,wid,right,suffix,_print_prefix)
 #define format_add_preempt_mode(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_preempt_mode)
-#define format_add_priority(list,wid,right,suffix) \
-	format_add_function(list,wid,right,suffix,_print_priority)
+#define format_add_priority_job_factor(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_priority_job_factor)
+#define format_add_priority_tier(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_priority_tier)
 #define format_add_reason(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_reason)
 #define format_add_root(list,wid,right,prefix) \
 	format_add_function(list,wid,right,prefix,_print_root)
-#define format_add_share(list,wid,right,suffix) \
-	format_add_function(list,wid,right,suffix,_print_share)
+#define format_add_oversubscribe(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_oversubscribe)
 #define format_add_size(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_size)
 #define format_add_state_compact(list,wid,right,suffix) \
@@ -177,6 +181,8 @@ int _print_disk(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_features(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
+int _print_features_act(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
 int _print_groups(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_gres(sinfo_data_t * sinfo_data, int width,
@@ -195,6 +201,8 @@ int _print_nodes_ai(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_nodes_aiot(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
+int _print_oversubscribe(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
 int _print_partition(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_partition_name(sinfo_data_t * sinfo_data, int width,
@@ -203,13 +211,13 @@ int _print_prefix(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_preempt_mode(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
-int _print_priority(sinfo_data_t * sinfo_data, int width,
+int _print_priority_job_factor(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
+int _print_priority_tier(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_reason(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_root(sinfo_data_t * sinfo_data, int width,
-			bool right_justify, char *suffix);
-int _print_share(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_size(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);

@@ -1,7 +1,6 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bluegene blocks,
  *	 wiring, mapping for smap, etc.
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -47,6 +46,7 @@
 #include <math.h>
 #include "block_allocator.h"
 #include "src/common/slurmdb_defs.h"
+#include "src/common/strlcpy.h"
 #include "src/common/timers.h"
 #include "src/common/uid.h"
 
@@ -2180,10 +2180,8 @@ static int _set_external_wires(int dim, int count, ba_mp_t* source,
 			continue;
 		}
 
-                memset(&from_node, 0, sizeof(from_node));
-                memset(&to_node, 0, sizeof(to_node));
-                strncpy(from_node, wire_id+2, NODE_LEN-1);
-                strncpy(to_node, wire_id+UNDER_POS+1, NODE_LEN-1);
+                strlcpy(from_node, wire_id+2, NODE_LEN);
+                strlcpy(to_node, wire_id+UNDER_POS+1, NODE_LEN);
 		free(wire_id);
 
 		if ((rc = bridge_get_data(my_wire, RM_WireFromPort, &my_port))

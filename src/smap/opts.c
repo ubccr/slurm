@@ -93,15 +93,15 @@ extern void parse_command_line(int argc, char *argv[])
 			params.command = xstrdup(optarg);
 			break;
 		case 'D':
-			if (!strcmp(optarg, "j"))
+			if (!xstrcmp(optarg, "j"))
 				tmp = JOBS;
-			else if (!strcmp(optarg, "s"))
+			else if (!xstrcmp(optarg, "s"))
 				tmp = SLURMPART;
-			else if (!strcmp(optarg, "b"))
+			else if (!xstrcmp(optarg, "b"))
 				tmp = BGPART;
-			else if (!strcmp(optarg, "c"))
+			else if (!xstrcmp(optarg, "c"))
 				tmp = COMMANDS;
-			else if (!strcmp(optarg, "r"))
+			else if (!xstrcmp(optarg, "r"))
 				tmp = RESERVATIONS;
 
 			params.display = tmp;
@@ -249,11 +249,11 @@ extern char *resolve_mp(char *desc, node_info_msg_t *node_info_ptr)
 			if (!rack_mid)
 				break;
 			if (desc[0] != 'R') {
-				if (!strcasecmp(name, node_geo))
+				if (!xstrcasecmp(name, node_geo))
 					ret_str = xstrdup_printf(
 						"%s resolves to %s\n",
 						node_geo, rack_mid);
-			} else if (!strcasecmp(name, rack_mid))
+			} else if (!xstrcasecmp(name, rack_mid))
 				ret_str = xstrdup_printf(
 					"%s resolves to %s\n",
 					rack_mid, node_geo);

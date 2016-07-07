@@ -71,7 +71,7 @@
 #include "kvs.h"
 #include "ring.h"
 
-#define PMI2_SOCK_ADDR_FMT "/tmp/sock.pmi2.%u.%u"
+#define PMI2_SOCK_ADDR_FMT "%s/sock.pmi2.%u.%u"
 
 
 extern char **environ;
@@ -184,7 +184,7 @@ static int
 _setup_stepd_tree_info(const stepd_step_rec_t *job, char ***env)
 {
 	hostlist_t hl;
-	char srun_host[64];
+	char *srun_host;
 	uint16_t port;
 	char *p;
 	int tree_width;
@@ -233,23 +233,22 @@ _setup_stepd_tree_info(const stepd_step_rec_t *job, char ***env)
 
 	tree_info.pmi_port = 0;	/* not used */
 
-	p = getenvp(*env, "SLURM_SRUN_COMM_HOST");
-	if (!p) {
+	srun_host = getenvp(*env, "SLURM_SRUN_COMM_HOST");
+	if (!srun_host) {
 		error("mpi/pmi2: unable to find srun comm ifhn in env");
 		return SLURM_ERROR;
-	} else {
-		strncpy(srun_host, p, 64);
 	}
 	p = getenvp(*env, PMI2_SRUN_PORT_ENV);
 	if (!p) {
 		error("mpi/pmi2: unable to find srun pmi2 port in env");
 		return SLURM_ERROR;
-	} else {
-		port = atoi(p);
-		unsetenvp(*env, PMI2_SRUN_PORT_ENV);
 	}
+	port = atoi(p);
+
 	tree_info.srun_addr = xmalloc(sizeof(slurm_addr_t));
 	slurm_set_addr(tree_info.srun_addr, port, srun_host);
+
+	unsetenvp(*env, PMI2_SRUN_PORT_ENV);
 
 	/* init kvs seq to 0. TODO: reduce array size */
 	tree_info.children_kvs_seq = xmalloc(sizeof(uint32_t) *
@@ -266,6 +265,7 @@ _setup_stepd_sockets(const stepd_step_rec_t *job, char ***env)
 {
 	struct sockaddr_un sa;
 	int i;
+	char *spool;
 
 	debug("mpi/pmi2: setup sockets");
 
@@ -275,9 +275,12 @@ _setup_stepd_sockets(const stepd_step_rec_t *job, char ***env)
 		return SLURM_ERROR;
 	}
 	sa.sun_family = PF_UNIX;
+
+	spool = slurm_get_slurmd_spooldir();
 	snprintf(sa.sun_path, sizeof(sa.sun_path), PMI2_SOCK_ADDR_FMT,
-		 job->jobid, job->stepid);
+		 spool, job->jobid, job->stepid);
 	unlink(sa.sun_path);    /* remove possible old socket */
+	xfree(spool);
 
 	if (bind(tree_sock, (struct sockaddr *)&sa, SUN_LEN(&sa)) < 0) {
 		error("mpi/pmi2: failed to bind tree socket: %m");
@@ -609,6 +612,7 @@ _setup_srun_tree_info(const mpi_plugin_client_info_t *job)
 {
 	char *p;
 	uint16_t p_port;
+	char *spool;
 
 	memset(&tree_info, 0, sizeof(tree_info));
 
@@ -628,8 +632,10 @@ _setup_srun_tree_info(const mpi_plugin_client_info_t *job)
 	} else
 		tree_info.srun_addr = NULL;
 
+	spool = slurm_get_slurmd_spooldir();
 	snprintf(tree_sock_addr, 128, PMI2_SOCK_ADDR_FMT,
-		 job->jobid, job->stepid);
+		 spool, job->jobid, job->stepid);
+	xfree(spool);
 
 	/* init kvs seq to 0. TODO: reduce array size */
 	tree_info.children_kvs_seq = xmalloc(sizeof(uint32_t) *

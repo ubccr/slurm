@@ -4,6 +4,8 @@
  *  Copyright (C) 2012 Bull
  *  Written by Don Albert, <don.albert@bull.com>
  *  Modified by Rod Schultz, <rod.schultz@bull.com> for min-max:gov
+ *  Modified by Janne Blomqvist, <janne.blomqvist@aalto.fi> for
+ *  intel_pstate support
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -44,7 +46,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
+#include <limits.h>     /* for PATH_MAX */
 #include <stdlib.h>
 
 #include "slurm/slurm.h"
@@ -61,7 +63,6 @@
 
 #define PATH_TO_CPU	"/sys/devices/system/cpu/"
 #define LINE_LEN	100
-#define SYSFS_PATH_MAX	255
 #define FREQ_LIST_MAX	32
 #define GOV_NAME_LEN	24
 
@@ -118,14 +119,12 @@ static int _fd_lock_retry(int fd)
  * reset CPU frequency if it was the last job to set the CPU frequency.
  * with gang scheduling and cancellation of suspended or running jobs there
  * can be timing issues.
- * _set_cpu_owner_lock  - set specified job to own the CPU, this CPU file is
- *	locked on exit
- * _test_cpu_owner_lock - test if the specified job owns the CPU, this CPU is
- *	locked on return with true
+ * _set_cpu_owner_lock  - set specified job to own the CPU, file locked at exit
+ * _test_cpu_owner_lock - test if the specified job owns the CPU
  */
 static int _set_cpu_owner_lock(int cpu_id, uint32_t job_id)
 {
-	char tmp[64];
+	char tmp[PATH_MAX];
 	int fd, sz;
 
 	snprintf(tmp, sizeof(tmp), "%s/cpu", slurmd_spooldir);
@@ -148,9 +147,11 @@ static int _set_cpu_owner_lock(int cpu_id, uint32_t job_id)
 	return fd;
 }
 
+/* Test if specified job ID owns this CPU for frequency/governor control
+ * RET 0 if owner, -1 otherwise */
 static int _test_cpu_owner_lock(int cpu_id, uint32_t job_id)
 {
-	char tmp[64];
+	char tmp[PATH_MAX];
 	uint32_t in_job_id;
 	int fd, sz;
 
@@ -174,9 +175,11 @@ static int _test_cpu_owner_lock(int cpu_id, uint32_t job_id)
 	sz = sizeof(uint32_t);
 	if (fd_read_n(fd, (void *) &in_job_id, sz) != sz) {
 		error("%s: read: %m %s", __func__, tmp);
+		(void) fd_release_lock(fd);
 		close(fd);
 		return -1;
 	}
+	(void) fd_release_lock(fd);
 	if (job_id != in_job_id) {
 		/* Result of various race conditions */
 		debug("%s: CPU %d now owned by job %u rather than job %u",
@@ -184,10 +187,11 @@ static int _test_cpu_owner_lock(int cpu_id, uint32_t job_id)
 		close(fd);
 		return -1;
 	}
+	close(fd);
 	debug("%s: CPU %d owned by job %u as expected",
 	      __func__, cpu_id, job_id);
 
-	return fd;
+	return 0;
 }
 
 /*
@@ -200,7 +204,7 @@ static int
 _cpu_freq_cpu_avail(int cpuidx)
 {
 	FILE *fp = NULL;
-	char path[SYSFS_PATH_MAX];
+	char path[PATH_MAX];
 	int i, j, k;
 	uint32_t freq;
 	bool all_avail = false;
@@ -208,11 +212,9 @@ _cpu_freq_cpu_avail(int cpuidx)
 	snprintf(path, sizeof(path),  PATH_TO_CPU
 		 "cpu%u/cpufreq/scaling_available_frequencies", cpuidx);
 	if ( ( fp = fopen(path, "r") ) == NULL ) {
-		static bool open_err_log = true;	/* Log once */
-		if (open_err_log) {
-			error("%s: Could not open %s", __func__, path);
-			open_err_log = false;
-		}
+		/* Don't log an error here,
+		 * scaling_available_frequencies does not exist when
+		 * using the intel_pstate driver.  */
 		return SLURM_FAILURE;
 	}
 	for (i = 0; i < (FREQ_LIST_MAX-1); i++) {
@@ -246,7 +248,7 @@ _cpu_freq_cpu_avail(int cpuidx)
 extern void
 cpu_freq_init(slurmd_conf_t *conf)
 {
-	char path[SYSFS_PATH_MAX];
+	char path[PATH_MAX];
 	struct stat statbuf;
 	FILE *fp;
 	char value[LINE_LEN];
@@ -629,7 +631,7 @@ static int
 _cpu_freq_get_cur_gov(int cpuidx)
 {
 	FILE *fp = NULL;
-	char path[SYSFS_PATH_MAX], gov_value[LINE_LEN];
+	char path[PATH_MAX], gov_value[LINE_LEN];
 	int j;
 
 	snprintf(path, sizeof(path),
@@ -662,7 +664,7 @@ _cpu_freq_get_cur_gov(int cpuidx)
 static int
 _cpu_freq_set_gov(stepd_step_rec_t *job, int cpuidx, char* gov )
 {
-	char path[SYSFS_PATH_MAX];
+	char path[PATH_MAX];
 	FILE *fp;
 	int fd, rc;
 
@@ -678,7 +680,10 @@ _cpu_freq_set_gov(stepd_step_rec_t *job, int cpuidx, char* gov )
 		error("%s: Can not set CPU governor: %m", __func__);
 		rc = SLURM_FAILURE;
 	}
-	(void) close(fd);
+	if (fd >= 0) {
+		(void) fd_release_lock(fd);
+		(void) close(fd);
+	}
 	return rc;
 }
 
@@ -691,7 +696,7 @@ static uint32_t
 _cpu_freq_get_scaling_freq(int cpuidx, char* option)
 {
 	FILE *fp = NULL;
-	char path[SYSFS_PATH_MAX];
+	char path[PATH_MAX];
 	uint32_t freq;
 	/* get the value from 'option' */
 	snprintf(path, sizeof(path), PATH_TO_CPU
@@ -718,7 +723,7 @@ static int
 _cpu_freq_set_scaling_freq(stepd_step_rec_t *job, int cpx, uint32_t freq,
 		char* option)
 {
-	char path[SYSFS_PATH_MAX];
+	char path[PATH_MAX];
 	FILE *fp;
 	int fd, rc;
 	uint32_t newfreq;
@@ -734,7 +739,10 @@ _cpu_freq_set_scaling_freq(stepd_step_rec_t *job, int cpx, uint32_t freq,
 		error("%s: Can not set %s: %m", __func__, option);
 		rc = SLURM_FAILURE;
 	}
-	(void) close(fd);
+	if (fd >= 0) {
+		(void) fd_release_lock(fd);
+		(void) close(fd);
+	}
 	if (debug_flags & DEBUG_FLAG_CPU_FREQ) {
 		newfreq = _cpu_freq_get_scaling_freq(cpx, option);
 		if (newfreq != freq) {
@@ -761,9 +769,12 @@ _cpu_freq_current_state(int cpuidx)
 	 * than the 'cpuinfo' values.
 	 * The 'cpuinfo' values are read only. min/max seem to be raw
 	 * hardware capability.
-	 * The 'scaling' values are set by the governor
+	 * The 'scaling' values are set by the governor.
+	 * For the current frequency, use the cpuinfo_cur_freq file
+	 * since the intel_pstate driver doesn't necessarily create
+	 * the scaling_cur_freq file.
 	 */
-	freq = _cpu_freq_get_scaling_freq(cpuidx, "scaling_cur_freq");
+	freq = _cpu_freq_get_scaling_freq(cpuidx, "cpuinfo_cur_freq");
 	if (freq == 0)
 		return SLURM_FAILURE;
 	cpufreq[cpuidx].org_frequency = freq;
@@ -898,13 +909,18 @@ _cpu_freq_setup_data(stepd_step_rec_t *job, int cpx)
 	if (   (job->cpu_freq_min == NO_VAL || job->cpu_freq_min==0)
 	    && (job->cpu_freq_max == NO_VAL || job->cpu_freq_max==0)
 	    && (job->cpu_freq_gov == NO_VAL || job->cpu_freq_gov==0)) {
-		return; /* No --cpu-freq */
+		/* If no --cpu-freq, use default governor from conf file.  */
+		slurm_ctl_conf_t *conf = slurm_conf_lock();
+		job->cpu_freq_gov = conf->cpu_freq_def;
+		slurm_conf_unlock();
+		if (job->cpu_freq_gov == NO_VAL)
+			return;
 	}
 
 	/* Get current state */
 	if (_cpu_freq_current_state(cpx) == SLURM_FAILURE)
 		return;
-	
+
 	if (job->cpu_freq_min == NO_VAL &&
 	    job->cpu_freq_max != NO_VAL &&
 	    job->cpu_freq_gov == NO_VAL) {
@@ -1020,6 +1036,7 @@ cpu_freq_set(stepd_step_rec_t *job)
 
 	if ((!cpu_freq_count) || (!cpufreq))
 		return;
+
 	for (i = 0; i < cpu_freq_count; i++) {
 		if (cpufreq[i].new_frequency == NO_VAL
 		    && cpufreq[i].new_min_freq == NO_VAL
@@ -1091,7 +1108,7 @@ cpu_freq_set(stepd_step_rec_t *job)
 				continue;
 		}
 		if (cpufreq[i].new_frequency != NO_VAL) {
-			if (strcmp(cpufreq[i].org_governor,"userspace")) {
+			if (xstrcmp(cpufreq[i].org_governor,"userspace")) {
 				rc = _cpu_freq_set_gov(job, i, "userspace");
 				if (rc == SLURM_FAILURE)
 					continue;
@@ -1228,7 +1245,7 @@ cpu_freq_to_string(char *buf, int buf_size, uint32_t cpu_freq)
 			buf[0] = '\0';
 	} else
 		convert_num_unit2((double)cpu_freq, buf, buf_size,
-				  UNIT_KILO, 1000, 0);
+				  UNIT_KILO, NO_VAL, 1000, 0);
 }
 
 /*
@@ -1377,14 +1394,8 @@ cpu_freq_verify_def(const char *arg, uint32_t *freq)
 		*freq = cpufreq;
 		return 0;
 	}
-	cpufreq = _cpu_freq_check_freq(arg);
-	if (cpufreq == 0) {
-		error("cpu_freq_verify_def: CpuFreqDef=%s invalid", arg);
-		return -1;
-	}
-	debug3("cpu_freq_verify_def: %s set", arg);
-	*freq = cpufreq;
-	return 0;
+	error("%s: CpuFreqDef=%s invalid", __func__, arg);
+	return -1;
 }
 
 /*

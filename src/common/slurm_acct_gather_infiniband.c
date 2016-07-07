@@ -35,9 +35,17 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#ifdef HAVE_CONFIG_H
+#  include "config.h"
+#endif
+
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if HAVE_SYS_PRCTL_H
+#  include <sys/prctl.h>
+#endif
 
 #include "src/common/macros.h"
 #include "src/common/plugin.h"
@@ -79,10 +87,16 @@ static void *_watch_node(void *arg)
 {
 	int type = PROFILE_NETWORK;
 
+#if HAVE_SYS_PRCTL_H
+	if (prctl(PR_SET_NAME, "acctg_ib", NULL, NULL, NULL) < 0) {
+		error("%s: cannot set my name to %s %m", __func__, "acctg_ib");
+	}
+#endif
+
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
-	while (init_run && acct_gather_profile_running) {
+	while (init_run && acct_gather_profile_test()) {
 		/* Do this until shutdown is requested */
 		slurm_mutex_lock(&g_context_lock);
 		(*(ops.node_update))();

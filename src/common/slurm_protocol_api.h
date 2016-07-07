@@ -220,6 +220,11 @@ char *slurm_get_msg_aggr_params(void);
  */
 extern uint16_t slurm_get_msg_timeout(void);
 
+/* slurm_get_tcp_timeout
+ * get default tcp timeout value from slurmctld_conf object
+ */
+extern uint16_t slurm_get_tcp_timeout(void);
+
 /* slurm_api_set_default_config
  *	called by the send_controller_msg function to insure that at least
  *	the compiled in default slurm_protocol_config object is initialized
@@ -258,6 +263,18 @@ char *slurm_get_gres_plugins(void);
  * RET char *   - job_submit_plugins, MUST be xfreed by caller
  */
 char *slurm_get_job_submit_plugins(void);
+
+/* slurm_get_slurmctld_logfile
+ * get slurmctld_logfile from slurmctld_conf object from slurmctld_conf object
+ * RET char *   - slurmctld_logfile, MUST be xfreed by caller
+ */
+char *slurm_get_job_slurmctld_logfile(void);
+
+/* slurm_get_node_features_plugins
+ * get node_features_plugins from slurmctld_conf object
+ * RET char *   - knl_plugins, MUST be xfreed by caller
+ */
+char *slurm_get_node_features_plugins(void);
 
 /* slurm_get_slurmctld_plugstack
  * get slurmctld_plugstack from slurmctld_conf object from
@@ -607,6 +624,14 @@ char *slurm_get_launch_type(void);
  * RET 0 or error code
  */
 int slurm_set_launch_type(char *launch_type);
+
+/* slurm_get_mcs_plugin
+ * RET mcs_plugin name, must be xfreed by caller */
+char *slurm_get_mcs_plugin(void);
+
+/* slurm_get_mcs_plugin_params
+ * RET mcs_plugin_params name, must be xfreed by caller */
+char *slurm_get_mcs_plugin_params(void);
 
 /* slurm_get_preempt_mode
  * returns the PreemptMode value from slurmctld_conf object
@@ -1016,10 +1041,13 @@ int slurm_send_node_msg(slurm_fd_t open_fd, slurm_msg_t *msg);
 
 /* calls connect to make a connection-less datagram connection to the
  *	primary or secondary slurmctld message engine
- * IN/OUT addr     - address of controller contacted
+ * IN/OUT addr       - address of controller contacted
+ * IN/OUT use_backup - IN: whether to try the backup first or not
+ *                     OUT: set to true if connection established with backup
  * RET slurm_fd	- file descriptor of the connection created
  */
-extern slurm_fd_t slurm_open_controller_conn(slurm_addr_t *addr);
+extern slurm_fd_t slurm_open_controller_conn(slurm_addr_t *addr,
+					     bool *use_backup);
 extern slurm_fd_t slurm_open_controller_conn_spec(enum controller_id dest);
 
 /* In the bsd socket implementation it creates a SOCK_STREAM socket
@@ -1239,11 +1267,13 @@ extern void slurm_free_msg(slurm_msg_t * msg);
 extern char *nodelist_nth_host(const char *nodelist, int inx);
 extern int nodelist_find(const char *nodelist, const char *name);
 extern void convert_num_unit2(double num, char *buf, int buf_size,
-			      int orig_type, int divisor, uint32_t flags);
+			      int orig_type, int spec_type, int divisor,
+			      uint32_t flags);
 extern void convert_num_unit(double num, char *buf, int buf_size,
-			     int orig_type, uint32_t flags);
+			     int orig_type, int spec_type, uint32_t flags);
 extern int revert_num_unit(const char *buf);
 extern int get_convert_unit_val(int base_type, char convert_to);
+extern int get_unit_type(char unit);
 extern void parse_int_to_array(int in, int *out);
 
 /*
@@ -1262,14 +1292,15 @@ extern int slurm_job_step_create (
 /* Should this be in <slurm/slurm.h> ? */
 /*
  * slurm_forward_data - forward arbitrary data to unix domain sockets on nodes
- * IN nodelist: nodes to forward data to
+ * IN/OUT nodelist: Nodes to forward data to (if failure this list is changed to
+ *                  reflect the failed nodes).
  * IN address: address of unix domain socket
  * IN len: length of data
  * IN data: real data
  * RET: error code
  */
-extern int slurm_forward_data(char *nodelist, char *address, uint32_t len,
-			      char *data);
+extern int slurm_forward_data(
+	char **nodelist, char *address, uint32_t len, const char *data);
 
 /*
  * slurm_setup_sockaddr - setup a sockaddr_in struct to be used for

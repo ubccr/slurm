@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id$
+ *  util-net.h - assorted network functions
  *****************************************************************************
  *  Copyright (C) 2001-2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -140,5 +140,12 @@ extern bool is_full_path(const char *);
  * to the current working directory.
  */
 extern char *make_full_path(char *);
+
+/* Wrapper functions for name and address resolution routines.
+ */
+extern struct addrinfo *get_addr_info(const char *);
+extern int get_name_info(struct sockaddr *, socklen_t, char *);
+extern void free_addr_info(struct addrinfo *);
+
 
 #endif /* !_UTIL_NET_H */

@@ -181,8 +181,8 @@ main (int argc, char *argv[])
 
 	/* Check to see if we are running a supported accounting plugin */
 	temp = slurm_get_accounting_storage_type();
-	if (strcasecmp(temp, "accounting_storage/slurmdbd")
-	   && strcasecmp(temp, "accounting_storage/mysql")) {
+	if (xstrcasecmp(temp, "accounting_storage/slurmdbd")
+	   && xstrcasecmp(temp, "accounting_storage/mysql")) {
 		fprintf (stderr, "You are not running a supported "
 			 "accounting_storage plugin\n(%s).\n"
 			 "Only 'accounting_storage/slurmdbd' "
@@ -303,10 +303,10 @@ _get_command (int *argc, char **argv)
 	if (in_line == NULL) {
 		exit_flag = 2;
 		return 0;
-	} else if (strncmp (in_line, "#", 1) == 0) {
+	} else if (xstrncmp (in_line, "#", 1) == 0) {
 		free (in_line);
 		return 0;
-	} else if (strcmp (in_line, "!!") == 0) {
+	} else if (xstrcmp (in_line, "!!") == 0) {
 		free (in_line);
 		in_line = last_in_line;
 		in_line_size = last_in_line_size;
@@ -651,6 +651,8 @@ static void _show_it (int argc, char *argv[])
 	} else if (strncasecmp(argv[0], "Problems",
 				MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_problem((argc - 1), &argv[1]);
+	} else if (strncasecmp(argv[0], "LostJobs", MAX(command_len, 1)) == 0) {
+		error_code = sacctmgr_list_lost_jobs((argc - 1), &argv[1]);
 	} else if (strncasecmp(argv[0], "QOS", MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_qos((argc - 1), &argv[1]);
 	} else if (!strncasecmp(argv[0], "Resource", MAX(command_len, 4))) {

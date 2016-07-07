@@ -458,7 +458,7 @@ scontrol_hold(char *op, char *job_str)
 	     i++, job_ptr++) {
 		if (job_name &&
 		    ((job_ptr->name == NULL) ||
-		     strcmp(job_name, job_ptr->name)))
+		     xstrcmp(job_name, job_ptr->name)))
 			continue;
 
 		if (!IS_JOB_PENDING(job_ptr)) {
@@ -683,6 +683,31 @@ scontrol_requeue_hold(uint32_t state_flag, char *job_str)
 }
 
 /*
+ * scontrol_top_job - Move the specified job ID to the top of the queue for
+ *	a given user ID, partition, account, and QOS.
+ * IN job_str - a job id
+ */
+extern void
+scontrol_top_job(char *job_id_str)
+{
+	int rc;
+
+	if (strncasecmp(job_id_str, "jobid=", 6) == 0)
+		job_id_str += 6;
+	if (strncasecmp(job_id_str, "job=", 4) == 0)
+		job_id_str += 4;
+
+	rc = slurm_top_job(job_id_str);
+	if (rc != SLURM_SUCCESS) {
+		exit_code = 1;
+		if (quiet_flag != 1) {
+			fprintf(stderr, "%s for job %s\n",
+				slurm_strerror(slurm_get_errno()), job_id_str);
+		}
+	}
+}
+
+/*
  * scontrol_update_job - update the slurm job configuration per the supplied
  *	arguments
  * IN argc - count of arguments
@@ -866,9 +891,9 @@ scontrol_update_job (int argc, char *argv[])
 		else if ((strncasecmp(tag, "ReqNodes", MAX(taglen, 8)) == 0) ||
 		         (strncasecmp(tag, "NumNodes", MAX(taglen, 8)) == 0)) {
 			int min_nodes, max_nodes, rc;
-			if (strcmp(val, "0") == 0) {
+			if (xstrcmp(val, "0") == 0) {
 				job_msg.min_nodes = 0;
-			} else if (strcasecmp(val, "ALL") == 0) {
+			} else if (xstrcasecmp(val, "ALL") == 0) {
 				job_msg.min_nodes = INFINITE;
 			} else {
 				min_nodes = (int) job_msg.min_nodes;
@@ -997,7 +1022,8 @@ scontrol_update_job (int argc, char *argv[])
 			}
 			update_cnt++;
 		}
-		else if (strncasecmp(tag, "Shared", MAX(taglen, 2)) == 0) {
+		else if (!strncasecmp(tag, "OverSubscribe", MAX(taglen, 2)) ||
+			 !strncasecmp(tag, "Shared", MAX(taglen, 2))) {
 			if (strncasecmp(val, "YES", MAX(vallen, 1)) == 0)
 				job_msg.shared = 1;
 			else if (strncasecmp(val, "NO", MAX(vallen, 1)) == 0)
@@ -1022,7 +1048,7 @@ scontrol_update_job (int argc, char *argv[])
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "CoreSpec", MAX(taglen, 4)) == 0) {
-			if (!strcmp(val, "-1") || !strcmp(val, "*"))
+			if (!xstrcmp(val, "-1") || !xstrcmp(val, "*"))
 				job_msg.core_spec = (uint16_t) INFINITE;
 			else if (parse_uint16(val, &job_msg.core_spec)) {
 				error ("Invalid CoreSpec value: %s", val);
@@ -1032,7 +1058,7 @@ scontrol_update_job (int argc, char *argv[])
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "ThreadSpec", MAX(taglen, 4)) == 0) {
-			if (!strcmp(val, "-1") || !strcmp(val, "*"))
+			if (!xstrcmp(val, "-1") || !xstrcmp(val, "*"))
 				job_msg.core_spec = (uint16_t) INFINITE;
 			else if (parse_uint16(val, &job_msg.core_spec)) {
 				error ("Invalid ThreadSpec value: %s", val);
@@ -1057,8 +1083,8 @@ scontrol_update_job (int argc, char *argv[])
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "Gres", MAX(taglen, 2)) == 0) {
-			if (!strcasecmp(val, "help") ||
-			    !strcasecmp(val, "list")) {
+			if (!xstrcasecmp(val, "help") ||
+			    !xstrcasecmp(val, "list")) {
 				print_gres_help();
 			} else {
 				job_msg.gres = val;
@@ -1172,6 +1198,11 @@ scontrol_update_job (int argc, char *argv[])
 				return 0;
 			}
 			job_uid = (uint32_t) user_id;
+		}
+		else if (!strncasecmp(tag, "Deadline", MAX(taglen, 3))) {
+			if ((job_msg.deadline = parse_time(val, 0))) {
+				update_cnt++;
+			}
 		}
 		else {
 			exit_code = 1;
@@ -1550,7 +1581,7 @@ static char *_job_name2id(char *job_name, uint32_t job_uid)
 			if ((job_uid != NO_VAL) &&
 			    (job_uid != job_ptr->user_id))
 				continue;
-			if (!job_ptr->name || strcmp(job_name, job_ptr->name))
+			if (!job_ptr->name || xstrcmp(job_name, job_ptr->name))
 				continue;
 			if (job_ptr->array_task_id != NO_VAL) {
 				xstrfmtcat(job_id_str, "%s%u_%u", sep,

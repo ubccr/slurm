@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  opt.c - options processing for sattach
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -192,7 +191,7 @@ static void _opt_default()
 	uid_t uid = getuid();
 
 	opt.user = uid_to_string(uid);
-	if (strcmp(opt.user, "nobody") == 0)
+	if (xstrcmp(opt.user, "nobody") == 0)
 		fatal("Invalid user id: %u", uid);
 
 	opt.uid = uid;
@@ -331,21 +330,21 @@ void set_options(const int argc, char **argv)
 			exit(0);
 			break;
 		case LONG_OPT_IN_FILTER:
-			if (strcmp(optarg, "-") != 0) {
+			if (xstrcmp(optarg, "-") != 0) {
 				opt.input_filter = (uint32_t)
 					_get_pos_int(optarg, "input-filter");
 			}
 			opt.input_filter_set = true;
 			break;
 		case LONG_OPT_OUT_FILTER:
-			if (strcmp(optarg, "-") != 0) {
+			if (xstrcmp(optarg, "-") != 0) {
 				opt.output_filter = (uint32_t)
 					_get_pos_int(optarg, "output-filter");
 			}
 			opt.output_filter_set = true;
 			break;
 		case LONG_OPT_ERR_FILTER:
-			if (strcmp(optarg, "-") != 0) {
+			if (xstrcmp(optarg, "-") != 0) {
 				opt.error_filter = (uint32_t)
 					_get_pos_int(optarg, "error-filter");
 			}

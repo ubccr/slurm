@@ -29,12 +29,12 @@
 #define _GNU_SOURCE
 #define __USE_GNU
 #include <errno.h>
+#include <inttypes.h>
 #include <sched.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <inttypes.h>
 
 #include "config.h"
 
@@ -55,20 +55,62 @@ static void _load_mask(cpu_set_t *mask)
 	}
 }
 
+int val_to_char(int v)
+{
+	if (v >= 0 && v < 10)
+		return '0' + v;
+	else if (v >= 10 && v < 16)
+		return ('a' - 10) + v;
+	else
+		return -1;
+}
+
+static char *_cpuset_to_str(const cpu_set_t *mask, char *str, int size)
+{
+	int base, cnt;
+	char *ptr = str;
+	char *ret = NULL;
+
+	for (base = CPU_SETSIZE - 4; base >= 0; base -= 4) {
+		char val = 0;
+		if (++cnt >= size)
+			break;
+		if (CPU_ISSET(base, mask))
+			val |= 1;
+		if (CPU_ISSET(base + 1, mask))
+			val |= 2;
+		if (CPU_ISSET(base + 2, mask))
+			val |= 4;
+		if (CPU_ISSET(base + 3, mask))
+			val |= 8;
+		if (!ret && val)
+			ret = ptr;
+		*ptr++ = val_to_char(val);
+	}
+	*ptr = '\0';
+	return ret ? ret : ptr - 1;
+}
 
 static uint64_t _mask_to_int(cpu_set_t *mask)
 {
 	uint64_t i, rc = 0;
-	for (i=0; i<CPU_SETSIZE; i++) {
-		if (CPU_ISSET(i, mask))
-			rc += (1 << i);
+
+	for (i = 0; i < CPU_SETSIZE; i++) {
+		if (CPU_ISSET(i, mask)) {
+			if (i > 63) {
+				printf("OVERFLOW\n");
+				rc = 999999999;
+				break;
+			}
+			rc += (((uint64_t) 1) << i);
+		}
 	}
 	return rc;
 }
 
 int main (int argc, char **argv)
 {
-	char *task_str;
+	char mask_str[2048], *task_str;
 	cpu_set_t mask;
 	int task_id;
 
@@ -80,6 +122,10 @@ int main (int argc, char **argv)
 		exit(1);
 	}
 	task_id = atoi(task_str);
-	printf("TASK_ID:%d,MASK:%"PRIu64"\n", task_id, _mask_to_int(&mask));
+	/* NOTE: The uint64_t number is subject to overflow if there are
+	 * >64 CPUs on a compute node, but the hex value will be valid */
+	printf("TASK_ID:%d,MASK:%"PRIu64":0x%s\n", task_id,
+	       _mask_to_int(&mask),
+	       _cpuset_to_str(&mask, mask_str, sizeof(mask_str)));
 	exit(0);
 }

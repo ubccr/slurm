@@ -36,7 +36,6 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#define _GNU_SOURCE
 #include "src/scontrol/scontrol.h"
 #include "src/slurmctld/reservation.h"
 #include "src/common/proc_args.h"
@@ -118,31 +117,19 @@ static int _parse_resv_core_cnt(resv_desc_msg_t *resv_msg_ptr, char *val,
 {
 
 	char *endptr = NULL, *core_cnt, *tok, *ptrptr = NULL;
-	char *type;
 	int node_inx = 0;
+	uint32_t select_type = slurmdb_setup_plugin_id_select();
 
-	type = slurm_get_select_type();
-	if (strcasestr(type, "cray")) {
-		int param;
-		param = slurm_get_select_type_param();
-		if (! (param & CR_OTHER_CONS_RES)) {
-			error("CoreCnt or CPUCnt is only "
-			      "supported when "
-			      "SelectTypeParameters "
-			      "includes OTHER_CONS_RES");
-			xfree(type);
-			return SLURM_ERROR;
-		}
-	} else if (strcasestr(type, "cons_res") == NULL) {
+	/* only have this on a cons_res machine */
+	if (select_type != SELECT_PLUGIN_CONS_RES &&
+	    select_type != SELECT_PLUGIN_CRAY_CONS_RES) {
 		error("CoreCnt or CPUCnt is only "
-		      "supported when "
-		      "SelectType includes "
-		      "select/cons_res");
-		xfree(type);
+		      "supported when SelectType includes "
+		      "select/cons_res or SelectTypeParameters "
+		      "includes OTHER_CONS_RES on a Cray.");
 		return SLURM_ERROR;
 	}
 
-	xfree(type);
 	core_cnt = xstrdup(val);
 	tok = strtok_r(core_cnt, ",", &ptrptr);
 	while (tok) {
@@ -186,7 +173,7 @@ static int _is_configured_tres(char *type)
 	}
 
 	for (i = 0; i < msg->tres_cnt; ++i) {
-		if (!strcasecmp(msg->tres_names[i], type)) {
+		if (!xstrcasecmp(msg->tres_names[i], type)) {
 			slurm_free_assoc_mgr_info_msg(msg);
 			return SLURM_SUCCESS;
 		}
@@ -220,7 +207,7 @@ static int _parse_resv_tres(char *val, resv_desc_msg_t  *resv_msg_ptr,
 
 		compound = strtok_r(token, "=", &value_str);
 
-		if (!value_str || !*value_str) {
+		if (!compound || !value_str || !*value_str) {
 			error("TRES component '%s' has an invalid value '%s'",
 			      type, token);
 			goto error;
@@ -235,23 +222,19 @@ static int _parse_resv_tres(char *val, resv_desc_msg_t  *resv_msg_ptr,
 		if (_is_configured_tres(compound) < 0)
 			goto error;
 
-		if (!strcasecmp(type, "license")) {
+		if (!xstrcasecmp(type, "license")) {
 			if (tres_license && tres_license[0] != '\0')
 				xstrcatchar(tres_license, ',');
 			xstrfmtcat(tres_license, "%s:%s", name, value_str);
 			token = strtok_r(NULL, ",", &saveptr1);
-			if (tmp)
-				xfree(tmp);
 
-		} else if (strcasecmp(type, "bb") == 0) {
+		} else if (xstrcasecmp(type, "bb") == 0) {
 			if (tres_bb && tres_bb[0] != '\0')
 				xstrcatchar(tres_bb, ',');
 			xstrfmtcat(tres_bb, "%s:%s", name, value_str);
 			token = strtok_r(NULL, ",", &saveptr1);
-			if (tmp)
-				xfree(tmp);
 
-		} else if (strcasecmp(type, "cpu") == 0) {
+		} else if (xstrcasecmp(type, "cpu") == 0) {
 			first = true;
 			discard = false;
 			do {
@@ -280,7 +263,7 @@ static int _parse_resv_tres(char *val, resv_desc_msg_t  *resv_msg_ptr,
 				}
 			} while (!discard && token);
 
-		} else if (strcasecmp(type, "node") == 0) {
+		} else if (xstrcasecmp(type, "node") == 0) {
 			if (tres_nodecnt && tres_nodecnt[0] != '\0')
 				xstrcatchar(tres_nodecnt, ',');
 			xstrcat(tres_nodecnt, value_str);
@@ -319,9 +302,11 @@ static int _parse_resv_tres(char *val, resv_desc_msg_t  *resv_msg_ptr,
 		*free_tres_bb = 1;
 	}
 
+	xfree(tmp);
 	return SLURM_SUCCESS;
 
 error:
+	xfree(tmp);
 	xfree(tres_nodecnt);
 	xfree(tres_corecnt);
 	exit_code = 1;
@@ -615,7 +600,7 @@ scontrol_create_res(int argc, char *argv[])
 	 * only allocate all of the nodes the partition.
 	 */
 	if ((resv_msg.partition != NULL) && (resv_msg.node_list != NULL) &&
-	    (strcasecmp(resv_msg.node_list, "ALL") == 0)) {
+	    (xstrcasecmp(resv_msg.node_list, "ALL") == 0)) {
 		if (resv_msg.flags == NO_VAL)
 			resv_msg.flags = RESERVE_FLAG_PART_NODES;
 		else
@@ -627,7 +612,7 @@ scontrol_create_res(int argc, char *argv[])
 	 * flag is set make sure a partition name is specified.
 	 */
 	if ((resv_msg.partition == NULL) && (resv_msg.node_list != NULL) &&
-	    (strcasecmp(resv_msg.node_list, "ALL") == 0) &&
+	    (xstrcasecmp(resv_msg.node_list, "ALL") == 0) &&
 	    (resv_msg.flags != NO_VAL) &&
 	    (resv_msg.flags & RESERVE_FLAG_PART_NODES)) {
 		exit_code = 1;

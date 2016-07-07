@@ -1,7 +1,5 @@
 /*****************************************************************************\
  *  node_select_info.c - get the node select plugin state information of slurm
- *
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -125,10 +123,10 @@ char *slurm_sprint_block_info(
 
 	/****** Line 1 ******/
 	convert_num_unit((float)block_ptr->cnode_cnt, tmp1, sizeof(tmp1),
-			 UNIT_NONE, CONVERT_NUM_UNIT_EXACT);
+			 UNIT_NONE, NO_VAL, CONVERT_NUM_UNIT_EXACT);
 	if (cluster_flags & CLUSTER_FLAG_BGQ) {
 		convert_num_unit((float)block_ptr->cnode_err_cnt, tmp2,
-				 sizeof(tmp2), UNIT_NONE,
+				 sizeof(tmp2), UNIT_NONE, NO_VAL,
 				 CONVERT_NUM_UNIT_EXACT);
 		tmp_char = xstrdup_printf("%s/%s", tmp1, tmp2);
 	} else

@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2016 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -50,6 +50,7 @@
 
 #include "src/common/parse_time.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_selecttype_info.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
@@ -221,8 +222,8 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 		xstrcat(out, "MaxNodes=UNLIMITED");
 	else {
 		if (cluster_flags & CLUSTER_FLAG_BG) {
-			convert_num_unit((float)part_ptr->max_nodes,
-					 tmp, sizeof(tmp), UNIT_NONE,
+			convert_num_unit((float)part_ptr->max_nodes, tmp,
+					 sizeof(tmp), UNIT_NONE, NO_VAL,
 					 CONVERT_NUM_UNIT_EXACT);
 			xstrfmtcat(out, "MaxNodes=%s", tmp);
 		} else
@@ -241,8 +242,7 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 
 	if (cluster_flags & CLUSTER_FLAG_BG) {
 		convert_num_unit((float)part_ptr->min_nodes, tmp, sizeof(tmp),
-				 UNIT_NONE,
-				 CONVERT_NUM_UNIT_EXACT);
+				 UNIT_NONE, NO_VAL, CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(out, " MinNodes=%s", tmp);
 	} else
 		xstrfmtcat(out, " MinNodes=%u", part_ptr->min_nodes);
@@ -271,7 +271,8 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 
 	/****** Line 7 ******/
 
-	xstrfmtcat(out, "Priority=%u", part_ptr->priority);
+	xstrfmtcat(out, "PriorityJobFactor=%u", part_ptr->priority_job_factor);
+	xstrfmtcat(out, " PriorityTier=%u", part_ptr->priority_tier);
 
 	if (part_ptr->flags & PART_FLAG_ROOT_ONLY)
 		xstrcat(out, " RootOnly=YES");
@@ -286,14 +287,13 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	force = part_ptr->max_share & SHARED_FORCE;
 	val = part_ptr->max_share & (~SHARED_FORCE);
 	if (val == 0)
-		xstrcat(out, " Shared=EXCLUSIVE");
-	else if (force) {
-		xstrfmtcat(out, " Shared=FORCE:%u", val);
-	} else if (val == 1)
-		xstrcat(out, " Shared=NO");
-	else {
-		xstrfmtcat(out, " Shared=YES:%u", val);
-	}
+		xstrcat(out, " OverSubscribe=EXCLUSIVE");
+	else if (force)
+		xstrfmtcat(out, " OverSubscribe=FORCE:%u", val);
+	else if (val == 1)
+		xstrcat(out, " OverSubscribe=NO");
+	else
+		xstrfmtcat(out, " OverSubscribe=YES:%u", val);
 
 	preempt_mode = part_ptr->preempt_mode;
 	if (preempt_mode == (uint16_t) NO_VAL)
@@ -316,29 +316,22 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 		xstrcat(out, "State=UNKNOWN");
 
 	if (cluster_flags & CLUSTER_FLAG_BG) {
-		convert_num_unit((float)part_ptr->total_cpus, tmp,
-				 sizeof(tmp), UNIT_NONE,
-				 CONVERT_NUM_UNIT_EXACT);
+		convert_num_unit((float)part_ptr->total_cpus, tmp, sizeof(tmp),
+				 UNIT_NONE, NO_VAL, CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(out, " TotalCPUs=%s", tmp);
 	} else
 		xstrfmtcat(out, " TotalCPUs=%u", part_ptr->total_cpus);
 
 
 	if (cluster_flags & CLUSTER_FLAG_BG) {
-		convert_num_unit((float)part_ptr->total_nodes, tmp,
-				 sizeof(tmp), UNIT_NONE,
-				 CONVERT_NUM_UNIT_EXACT);
+		convert_num_unit((float)part_ptr->total_nodes, tmp, sizeof(tmp),
+				 UNIT_NONE, NO_VAL, CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(out, " TotalNodes=%s", tmp);
 	} else
 		xstrfmtcat(out, " TotalNodes=%u", part_ptr->total_nodes);
 
-
-	if (part_ptr->cr_type & CR_CORE)
-		xstrcat(out, " SelectTypeParameters=CR_CORE");
-	else if (part_ptr->cr_type & CR_SOCKET)
-		xstrcat(out, " SelectTypeParameters=CR_SOCKET");
-	else
-		xstrcat(out, " SelectTypeParameters=N/A");
+	xstrfmtcat(out, " SelectTypeParameters=%s",
+		   select_type_param_string(part_ptr->cr_type));
 
 	xstrcat(out, line_end);
 

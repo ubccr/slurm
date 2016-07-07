@@ -1,7 +1,6 @@
 /*****************************************************************************\
  *  allocate_msg.c - Message handler for communication with with
  *                       the slurmctld during an allocation.
- *  $Id: allocate_msg.c 11641 2007-06-05 23:03:51Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -86,9 +85,9 @@ static void *_msg_thr_internal(void *arg)
 
 	debug("Entering _msg_thr_internal");
 	xsignal_block(signals);
-	pthread_mutex_lock(&msg_thr_start_lock);
+	slurm_mutex_lock(&msg_thr_start_lock);
 	pthread_cond_signal(&msg_thr_start_cond);
-	pthread_mutex_unlock(&msg_thr_start_lock);
+	slurm_mutex_unlock(&msg_thr_start_lock);
 	eio_handle_mainloop((eio_handle_t *)arg);
 	debug("Leaving _msg_thr_internal");
 
@@ -145,7 +144,7 @@ extern allocation_msg_thread_t *slurm_allocation_msg_thr_create(
 		return NULL;
 	}
 	eio_new_initial_obj(msg_thr->handle, obj);
-	pthread_mutex_lock(&msg_thr_start_lock);
+	slurm_mutex_lock(&msg_thr_start_lock);
 	slurm_attr_init(&attr);
 	if (pthread_create(&msg_thr->id, &attr,
 			   _msg_thr_internal, (void *)msg_thr->handle) != 0) {
@@ -160,7 +159,7 @@ extern allocation_msg_thread_t *slurm_allocation_msg_thr_create(
 	/* Wait until the message thread has blocked signals
 	   before continuing. */
 	pthread_cond_wait(&msg_thr_start_cond, &msg_thr_start_lock);
-	pthread_mutex_unlock(&msg_thr_start_lock);
+	slurm_mutex_unlock(&msg_thr_start_lock);
 
 	return (allocation_msg_thread_t *)msg_thr;
 }
@@ -187,8 +186,6 @@ static void _handle_node_fail(struct allocation_msg_thread *msg_thr,
 
 	if (msg_thr->callback.node_fail != NULL)
 		(msg_thr->callback.node_fail)(nf);
-
-	slurm_free_srun_node_fail_msg(msg->data);
 }
 
 /*
@@ -205,8 +202,6 @@ static void _handle_timeout(struct allocation_msg_thread *msg_thr,
 
 	if (msg_thr->callback.timeout != NULL)
 		(msg_thr->callback.timeout)(to);
-
-	slurm_free_srun_timeout_msg(msg->data);
 }
 
 static void _handle_user_msg(struct allocation_msg_thread *msg_thr,
@@ -217,8 +212,6 @@ static void _handle_user_msg(struct allocation_msg_thread *msg_thr,
 
 	if (msg_thr->callback.user_msg != NULL)
 		(msg_thr->callback.user_msg)(um);
-
-	slurm_free_srun_user_msg(msg->data);
 }
 
 static void _handle_ping(struct allocation_msg_thread *msg_thr,
@@ -230,8 +223,6 @@ static void _handle_ping(struct allocation_msg_thread *msg_thr,
 
 	if (msg_thr->callback.ping != NULL)
 		(msg_thr->callback.ping)(ping);
-
-	slurm_free_srun_ping_msg(msg->data);
 }
 
 static void _handle_job_complete(struct allocation_msg_thread *msg_thr,
@@ -242,8 +233,6 @@ static void _handle_job_complete(struct allocation_msg_thread *msg_thr,
 
 	if (msg_thr->callback.job_complete != NULL)
 		(msg_thr->callback.job_complete)(comp);
-
-	slurm_free_srun_job_complete_msg(msg->data);
 }
 
 static void _handle_suspend(struct allocation_msg_thread *msg_thr,
@@ -254,18 +243,19 @@ static void _handle_suspend(struct allocation_msg_thread *msg_thr,
 
 	if (msg_thr->callback.job_suspend != NULL)
 		(msg_thr->callback.job_suspend)(sus_msg);
-
-	slurm_free_suspend_msg(msg->data);
 }
 
 static void
 _handle_msg(void *arg, slurm_msg_t *msg)
 {
+	char *auth_info = slurm_get_auth_info();
 	struct allocation_msg_thread *msg_thr =
 		(struct allocation_msg_thread *)arg;
-	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred,
-					     slurm_get_auth_info());
+	uid_t req_uid;
 	uid_t uid = getuid();
+
+	req_uid = g_slurm_auth_get_uid(msg->auth_cred, auth_info);
+	xfree(auth_info);
 
 	if ((req_uid != slurm_uid) && (req_uid != 0) && (req_uid != uid)) {
 		error ("Security violation, slurm message from uid %u",

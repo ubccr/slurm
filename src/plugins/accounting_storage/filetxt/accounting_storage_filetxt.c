@@ -1,7 +1,5 @@
 /*****************************************************************************\
  *  accounting_storage_filetxt.c - account interface to filetxt.
- *
- *  $Id: accounting_storage_filetxt.c 13061 2008-01-22 21:23:56Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -467,7 +465,7 @@ extern List acct_storage_p_get_accts(void *db_conn, uid_t uid,
 }
 
 extern List acct_storage_p_get_clusters(void *db_conn, uid_t uid,
-					slurmdb_account_cond_t *cluster_q)
+					slurmdb_cluster_cond_t *cluster_cond)
 {
 	return NULL;
 }
@@ -547,6 +545,12 @@ extern int acct_storage_p_roll_usage(void *db_conn,
 	int rc = SLURM_SUCCESS;
 
 	return rc;
+}
+
+extern int acct_storage_p_fix_lost_jobs(void *db_conn, uint32_t uid,
+					List jobs)
+{
+	return SLURM_SUCCESS;
 }
 
 extern int clusteracct_storage_p_node_down(void *db_conn,
@@ -1045,6 +1049,12 @@ extern int acct_storage_p_flush_jobs_on_cluster(
 }
 
 extern int acct_storage_p_reconfig(void *db_conn)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_reset_lft_rgt(void *db_conn, uid_t uid,
+					List cluster_list)
 {
 	return SLURM_SUCCESS;
 }

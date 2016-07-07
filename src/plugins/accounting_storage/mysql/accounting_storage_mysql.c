@@ -1,7 +1,5 @@
 /*****************************************************************************\
  *  accounting_storage_mysql.c - accounting interface to as_mysql.
- *
- *  $Id: accounting_storage_mysql.c 13061 2008-01-22 21:23:56Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -53,6 +51,7 @@
 #include "as_mysql_assoc.h"
 #include "as_mysql_cluster.h"
 #include "as_mysql_convert.h"
+#include "as_mysql_fix_lost_jobs.h"
 #include "as_mysql_job.h"
 #include "as_mysql_jobacct_process.h"
 #include "as_mysql_problems.h"
@@ -201,7 +200,7 @@ static List _get_cluster_names(mysql_conn_t *mysql_conn, bool with_deleted)
 	ret_list = list_create(slurm_destroy_char);
 	while ((row = mysql_fetch_row(result))) {
 		if (row[0] && row[0][0]) {
-			if (cluster_name && !strcmp(cluster_name, row[0]))
+			if (cluster_name && !xstrcmp(cluster_name, row[0]))
 				found = 1;
 			list_append(ret_list, xstrdup(row[0]));
 		}
@@ -553,12 +552,16 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		{ "description", "text" },
 		{ "flags", "int unsigned default 0" },
 		{ "grace_time", "int unsigned default NULL" },
+		{ "max_jobs_pa", "int default NULL" },
 		{ "max_jobs_per_user", "int default NULL" },
+		{ "max_submit_jobs_pa", "int default NULL" },
 		{ "max_submit_jobs_per_user", "int default NULL" },
+		{ "max_tres_pa", "text not null default ''" },
 		{ "max_tres_pj", "text not null default ''" },
 		{ "max_tres_pn", "text not null default ''" },
 		{ "max_tres_pu", "text not null default ''" },
 		{ "max_tres_mins_pj", "text not null default ''" },
+		{ "max_tres_run_mins_pa", "text not null default ''" },
 		{ "max_tres_run_mins_pu", "text not null default ''" },
 		{ "min_tres_pj", "text not null default ''" },
 		{ "max_wall_duration_per_job", "int default NULL" },
@@ -1074,7 +1077,8 @@ extern void reset_mysql_conn(mysql_conn_t *mysql_conn)
 	list_flush(mysql_conn->update_list);
 }
 
-extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
+extern int create_cluster_assoc_table(
+	mysql_conn_t *mysql_conn, char *cluster_name)
 {
 	storage_field_t assoc_table_fields[] = {
 		{ "creation_time", "int unsigned not null" },
@@ -1108,6 +1112,24 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ NULL, NULL}
 	};
 
+	char table_name[200];
+
+	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
+		 cluster_name, assoc_table);
+	if (mysql_db_create_table(mysql_conn, table_name,
+				  assoc_table_fields,
+				  ", primary key (id_assoc), "
+				  "unique index (user(20), acct(20), "
+				  "`partition`(20)), "
+				  "key lft (lft), key account (acct(20)))")
+	    == SLURM_ERROR)
+		return SLURM_ERROR;
+
+	return SLURM_SUCCESS;
+}
+
+extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
+{
 	storage_field_t cluster_usage_table_fields[] = {
 		{ "creation_time", "int unsigned not null" },
 		{ "mod_time", "int unsigned default 0 not null" },
@@ -1289,14 +1311,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 
 	char table_name[200];
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, assoc_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  assoc_table_fields,
-				  ", primary key (id_assoc), "
-				  "unique index (user(20), acct(20), "
-				  "`partition`(20)), "
-				  "key lft (lft), key account (acct(20)))")
+	if (create_cluster_assoc_table(mysql_conn, cluster_name)
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -2009,12 +2024,16 @@ extern int remove_common(mysql_conn_t *mysql_conn,
 			"update %s set "
 			"mod_time=%ld, deleted=1, "
 			"grace_time=DEFAULT, "
+			"max_jobs_pa=DEFAULT, "
 			"max_jobs_per_user=DEFAULT, "
+			"max_submit_jobs_pa=DEFAULT, "
 			"max_submit_jobs_per_user=DEFAULT, "
+			"max_tres_pa=DEFAULT, "
 			"max_tres_pj=DEFAULT, "
 			"max_tres_pn=DEFAULT, "
 			"max_tres_pu=DEFAULT, "
 			"max_tres_mins_pj=DEFAULT, "
+			"max_tres_run_mins_pa=DEFAULT, "
 			"max_tres_run_mins_pu=DEFAULT, "
 			"min_tres_pj=DEFAULT, "
 			"max_wall_duration_per_job=DEFAULT, "
@@ -2521,8 +2540,8 @@ extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit)
 				while ((rem_cluster = list_next(itr3))) {
 					while ((cluster_name =
 						list_next(itr2))) {
-						if (!strcmp(cluster_name,
-							    rem_cluster)) {
+						if (!xstrcmp(cluster_name,
+							     rem_cluster)) {
 							list_delete_item(itr2);
 							break;
 						}
@@ -2856,6 +2875,12 @@ extern int acct_storage_p_roll_usage(mysql_conn_t *mysql_conn,
 				   sent_end, archive_data);
 }
 
+extern int acct_storage_p_fix_lost_jobs(void *db_conn, uint32_t uid,
+					List jobs)
+{
+	return as_mysql_fix_lost_jobs(db_conn, uid, jobs);
+}
+
 extern int clusteracct_storage_p_node_down(mysql_conn_t *mysql_conn,
 					   struct node_record *node_ptr,
 					   time_t event_time, char *reason,
@@ -3075,4 +3100,13 @@ extern int acct_storage_p_reconfig(mysql_conn_t *mysql_conn, bool dbd)
 {
 	debug_flags = slurm_get_debug_flags();
 	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_reset_lft_rgt(mysql_conn_t *mysql_conn, uid_t uid,
+					List cluster_list)
+{
+	if (check_connection(mysql_conn) != SLURM_SUCCESS)
+		return ESLURM_DB_CONNECTION;
+
+	return as_mysql_reset_lft_rgt(mysql_conn, uid, cluster_list);
 }

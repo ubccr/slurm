@@ -324,7 +324,7 @@ static int _isdefault(int cond_set, List acct_list, List assoc_list)
 			   only_defs, so thre query could return all
 			   the associations, even without defaults. */
 			if (cond_set == 1) {
-				if (strcasecmp(acct, assoc->acct))
+				if (xstrcasecmp(acct, assoc->acct))
 					continue;
 			} else {
 				snprintf(tmp, 1000, " A = %s ", assoc->acct);
@@ -526,7 +526,7 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 			if (start_acct->organization)
 				acct->organization =
 					xstrdup(start_acct->organization);
-			else if (strcmp(start_assoc->parent_acct, "root"))
+			else if (xstrcmp(start_assoc->parent_acct, "root"))
 				acct->organization =
 					xstrdup(start_assoc->parent_acct);
 			else
@@ -1088,7 +1088,7 @@ extern int sacctmgr_delete_account(int argc, char *argv[])
 		char *tmp_char = NULL;
 		itr = list_iterator_create(acct_cond->assoc_cond->acct_list);
 		while ((tmp_char = list_next(itr))) {
-			if (!strcasecmp(tmp_char, "root"))
+			if (!xstrcasecmp(tmp_char, "root"))
 				break;
 		}
 		list_iterator_destroy(itr);

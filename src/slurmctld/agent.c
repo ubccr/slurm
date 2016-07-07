@@ -234,9 +234,8 @@ void *agent(void *args)
 	int rpc_thread_cnt;
 
 #if HAVE_SYS_PRCTL_H
-	if (prctl(PR_SET_NAME, "slurmctld_agent", NULL, NULL, NULL) < 0) {
-		error("%s: cannot set my name to %s %m",
-		      __func__, "slurmctld_agent");
+	if (prctl(PR_SET_NAME, "agent", NULL, NULL, NULL) < 0) {
+		error("%s: cannot set my name to %s %m", __func__, "agent");
 	}
 #endif
 
@@ -248,7 +247,7 @@ void *agent(void *args)
 	slurm_mutex_lock(&agent_cnt_mutex);
 	if (!wiki2_sched_test) {
 		char *sched_type = slurm_get_sched_type();
-		if (strcmp(sched_type, "sched/wiki2") == 0)
+		if (xstrcmp(sched_type, "sched/wiki2") == 0)
 			wiki2_sched = true;
 		xfree(sched_type);
 		wiki2_sched_test = true;
@@ -386,17 +385,17 @@ void *agent(void *args)
 /* Basic validity test of agent argument */
 static int _valid_agent_arg(agent_arg_t *agent_arg_ptr)
 {
+	int hostlist_cnt;
+
 	xassert(agent_arg_ptr);
 	xassert(agent_arg_ptr->hostlist);
 
 	if (agent_arg_ptr->node_count == 0)
 		return SLURM_FAILURE;	/* no messages to be sent */
-	if (agent_arg_ptr->node_count
-	    != hostlist_count(agent_arg_ptr->hostlist)) {
-		error("you said you were going to send to %d "
-		     "hosts but I only have %d",
-		     agent_arg_ptr->node_count,
-		     hostlist_count(agent_arg_ptr->hostlist));
+	hostlist_cnt = hostlist_count(agent_arg_ptr->hostlist);
+	if (agent_arg_ptr->node_count != hostlist_cnt) {
+		error("%s: node_count RPC different from hosts listed (%d!=%d)",
+		     __func__, agent_arg_ptr->node_count, hostlist_cnt);
 		return SLURM_FAILURE;	/* no messages to be sent */
 	}
 	return SLURM_SUCCESS;
@@ -1757,7 +1756,8 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 		mi->user_name = xstrdup(job_ptr->mail_user);
 
 	/* Use job array master record, if available */
-	if ((job_ptr->array_task_id != NO_VAL) && !job_ptr->array_recs) {
+	if (!(job_ptr->mail_type & MAIL_ARRAY_TASKS) &&
+	    (job_ptr->array_task_id != NO_VAL) && !job_ptr->array_recs) {
 		struct job_record *master_job_ptr;
 		master_job_ptr = find_job_record(job_ptr->array_job_id);
 		if (master_job_ptr && master_job_ptr->array_recs)
@@ -1766,7 +1766,7 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 
 	_set_job_time(job_ptr, mail_type, job_time, sizeof(job_time));
 	_set_job_term_info(job_ptr, mail_type, term_msg, sizeof(term_msg));
-	if (job_ptr->array_recs) {
+	if (job_ptr->array_recs && !(job_ptr->mail_type & MAIL_ARRAY_TASKS)) {
 		mi->message = xstrdup_printf("SLURM Job_id=%u_* (%u) Name=%s "
 					     "%s%s%s",
 					     job_ptr->array_job_id,
@@ -1808,7 +1808,7 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 	batch_job_launch_msg_t *launch_msg_ptr;
 	time_t now = time(NULL);
 	struct job_record  *job_ptr;
-	int delay_time, nodes_ready = 0, tmp;
+	int nodes_ready = 0, tmp = 0;
 
 	agent_arg_ptr = queued_req_ptr->agent_arg_ptr;
 	if (agent_arg_ptr->msg_type != REQUEST_BATCH_JOB_LAUNCH)
@@ -1834,7 +1834,7 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 		if (tmp == (READY_JOB_STATE | READY_NODE_STATE)) {
 			nodes_ready = 1;
 			if (launch_msg_ptr->alias_list &&
-			    !strcmp(launch_msg_ptr->alias_list, "TBD")) {
+			    !xstrcmp(launch_msg_ptr->alias_list, "TBD")) {
 				/* Update launch RPC with correct node
 				 * aliases */
 				struct job_record *job_ptr;
@@ -1870,17 +1870,8 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 #endif
 	}
 
-	delay_time = difftime(now, job_ptr->start_time);
 	if (nodes_ready) {
-		/* ready to launch, adjust time limit for boot time */
-		if (delay_time && (job_ptr->time_limit != INFINITE) &&
-		    (!wiki2_sched)) {
-			verbose("Job %u launch delayed by %d secs, "
-				"updating end_time",
-				launch_msg_ptr->job_id, delay_time);
-			job_ptr->end_time += delay_time;
-			job_ptr->end_time_exp = job_ptr->end_time;
-		}
+		job_config_fini(job_ptr);
 		queued_req_ptr->last_attempt = (time_t) 0;
 		return 0;
 	}
@@ -1890,18 +1881,10 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 		queued_req_ptr->last_attempt  = now;
 	} else if (difftime(now, queued_req_ptr->first_attempt) >=
 				 slurm_get_resume_timeout()) {
-		error("agent waited too long for nodes to respond, "
-		      "sending batch request anyway...");
-		if (delay_time && (job_ptr->time_limit != INFINITE) &&
-		    (!wiki2_sched)) {
-			verbose("Job %u launch delayed by %d secs, "
-				"updating end_time",
-				launch_msg_ptr->job_id, delay_time);
-			job_ptr->end_time += delay_time;
-			job_ptr->end_time_exp = job_ptr->end_time;
-		}
-		queued_req_ptr->last_attempt = (time_t) 0;
-		return 0;
+		/* Nodes will get marked DOWN and job requeued, if possible */
+		error("agent waited too long for nodes to respond, abort launch of job %u",
+		      job_ptr->job_id);
+		return -1;
 	}
 
 	queued_req_ptr->last_attempt  = now;

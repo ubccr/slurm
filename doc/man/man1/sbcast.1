@@ -1,4 +1,4 @@
-.TH sbcast "1" "Slurm Commands" "April 2015" "Slurm Commands"
+.TH sbcast "1" "Slurm Commands" "March 2016" "Slurm Commands"
 
 .SH "NAME"
 sbcast \- transmit a file to the nodes allocated to a Slurm job.
@@ -22,8 +22,11 @@ by file size, degree of parallelism, and network type.
 
 .SH "OPTIONS"
 .TP
-\fB\-C\fR, \fB\-\-compress\fR
+\fB\-C\fR [\fIlibrary\fR], \fB\-\-compress\fR[=\fIlibrary\fR]
 Compress the file being transmitted.
+The optional argument specifies the data compression library to be used.
+Supported values are "lz4" (default) and "zlib".
+Some compression libraries may be unavailable on some systems.
 .TP
 \fB\-f\fR, \fB\-\-force\fR
 If the destination file already exists, replace it.
@@ -45,8 +48,9 @@ Specify the block size used for file broadcast.
 The size can have a suffix of \fIk\fR or \fIm\fR for kilobytes
 or megabytes respectively (defaults to bytes).
 This size subject to rounding and range limits to maintain
-good performance. This value may need to be set on systems
-with very limited memory.
+good performance.
+The default value is the file size or 8MB, whichever is smaller.
+This value may need to be set on systems with very limited memory.
 .TP
 \fB\-t\fB \fIseconds\fR, fB\-\-timeout\fR=\fIseconds\fR
 Specify the message timeout in seconds.

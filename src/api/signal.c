@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  signal.c - Send a signal to a slurm job or job step
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -78,6 +77,9 @@ static int _local_send_recv_rc_msgs(const char *nodelist,
 		error("slurm_signal_job: no list was returned");
 		rc = SLURM_ERROR;
 	}
+
+	/* don't attempt to free a local variable */
+	msg->data = NULL;
 
 	slurm_free_msg(msg);
 	return rc;

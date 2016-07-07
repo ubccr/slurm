@@ -83,10 +83,10 @@ extern int spawn_msg_thread(void)
 {
 	pthread_attr_t thread_attr_msg;
 
-	pthread_mutex_lock( &thread_flag_mutex );
+	slurm_mutex_lock( &thread_flag_mutex );
 	if (thread_running) {
 		error("Wiki thread already running, not starting another");
-		pthread_mutex_unlock(&thread_flag_mutex);
+		slurm_mutex_unlock(&thread_flag_mutex);
 		return SLURM_ERROR;
 	}
 
@@ -98,7 +98,7 @@ extern int spawn_msg_thread(void)
 
 	slurm_attr_destroy(&thread_attr_msg);
 	thread_running = true;
-	pthread_mutex_unlock(&thread_flag_mutex);
+	slurm_mutex_unlock(&thread_flag_mutex);
 	return SLURM_SUCCESS;
 }
 
@@ -107,7 +107,7 @@ extern int spawn_msg_thread(void)
 \*****************************************************************************/
 extern void term_msg_thread(void)
 {
-	pthread_mutex_lock(&thread_flag_mutex);
+	slurm_mutex_lock(&thread_flag_mutex);
 	if (thread_running) {
 		int fd;
                 slurm_addr_t addr;
@@ -133,7 +133,7 @@ extern void term_msg_thread(void)
                 thread_running = false;
                 debug2("join of sched/wiki thread was successful");
 	}
-	pthread_mutex_unlock(&thread_flag_mutex);
+	slurm_mutex_unlock(&thread_flag_mutex);
 }
 
 /*****************************************************************************\
@@ -339,9 +339,9 @@ extern int parse_wiki_config(void)
 	}
 
 	if (s_p_get_string(&priority_mode, "JobPriority", tbl)) {
-		if (strcasecmp(priority_mode, "hold") == 0)
+		if (xstrcasecmp(priority_mode, "hold") == 0)
 			init_prio_mode = PRIO_HOLD;
-		else if (strcasecmp(priority_mode, "run") == 0)
+		else if (xstrcasecmp(priority_mode, "run") == 0)
 			init_prio_mode = PRIO_DECREMENT;
 		else
 			error("Invalid value for JobPriority in wiki.conf");
@@ -593,7 +593,7 @@ static int	_parse_msg(char *msg, char **req)
 	if (auth_key[0] != '\0') {
 		char sum[20];	/* format is "CK=%08x08x" */
 		checksum(sum, auth_key, ts_ptr);
-		if (strncmp(sum, msg, 19) != 0) {
+		if (xstrncmp(sum, msg, 19) != 0) {
 			err_code = -422;
 			err_msg = "bad checksum";
 			error("wiki: message checksum error, "
@@ -639,27 +639,27 @@ static void	_proc_msg(slurm_fd_t new_fd, char *msg)
 	}
 	cmd_ptr +=4;
 	err_code = 0;
-	if        (strncmp(cmd_ptr, "GETJOBS", 7) == 0) {
+	if        (xstrncmp(cmd_ptr, "GETJOBS", 7) == 0) {
 		msg_type = "wiki:GETJOBS";
 		if (!get_jobs(cmd_ptr, &err_code, &err_msg))
 			goto free_resp_msg;
-	} else if (strncmp(cmd_ptr, "GETNODES", 8) == 0) {
+	} else if (xstrncmp(cmd_ptr, "GETNODES", 8) == 0) {
 		msg_type = "wiki:GETNODES";
 		if (!get_nodes(cmd_ptr, &err_code, &err_msg))
 			goto free_resp_msg;
-	} else if (strncmp(cmd_ptr, "STARTJOB", 8) == 0) {
+	} else if (xstrncmp(cmd_ptr, "STARTJOB", 8) == 0) {
 		msg_type = "wiki:STARTJOB";
 		start_job(cmd_ptr, &err_code, &err_msg);
-	} else if (strncmp(cmd_ptr, "CANCELJOB", 9) == 0) {
+	} else if (xstrncmp(cmd_ptr, "CANCELJOB", 9) == 0) {
 		msg_type = "wiki:CANCELJOB";
 		cancel_job(cmd_ptr, &err_code, &err_msg);
-	} else if (strncmp(cmd_ptr, "SUSPENDJOB", 10) == 0) {
+	} else if (xstrncmp(cmd_ptr, "SUSPENDJOB", 10) == 0) {
 		msg_type = "wiki:SUSPENDJOB";
 		suspend_job(cmd_ptr, &err_code, &err_msg);
-	} else if (strncmp(cmd_ptr, "RESUMEJOB", 9) == 0) {
+	} else if (xstrncmp(cmd_ptr, "RESUMEJOB", 9) == 0) {
 		msg_type = "wiki:RESUMEJOB";
 		resume_job(cmd_ptr, &err_code, &err_msg);
-	} else if (strncmp(cmd_ptr, "MODIFYJOB", 9) == 0) {
+	} else if (xstrncmp(cmd_ptr, "MODIFYJOB", 9) == 0) {
 		msg_type = "wiki:MODIFYJOB";
 		job_modify_wiki(cmd_ptr, &err_code, &err_msg);
 	} else {

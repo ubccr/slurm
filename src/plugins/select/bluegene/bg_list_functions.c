@@ -1,8 +1,6 @@
 /*****************************************************************************\
  *  bg_list_functions.c - header for dealing with the lists that
  *                        contain bg_records.
- *
- *  $Id: bg_list_functions.c 12954 2008-01-04 20:37:49Z da $
  *****************************************************************************
  *  Copyright (C) 2011 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -126,7 +124,7 @@ extern bg_record_t *find_bg_record_in_list(List my_list,
 	itr = list_iterator_create(my_list);
 	while ((bg_record = list_next(itr))) {
 		if (bg_record->bg_block_id && (bg_record->magic == BLOCK_MAGIC))
-			if (!strcasecmp(bg_record->bg_block_id, bg_block_id))
+			if (!xstrcasecmp(bg_record->bg_block_id, bg_block_id))
 				break;
 	}
 	list_iterator_destroy(itr);
@@ -181,8 +179,8 @@ extern bg_record_t *find_and_remove_org_from_bg_list(List my_list,
 		if (bit_equal(bg_record->mp_bitmap, found_record->mp_bitmap)
 		    && bit_equal(bg_record->ionode_bitmap,
 				 found_record->ionode_bitmap)) {
-			if (!strcmp(bg_record->bg_block_id,
-				    found_record->bg_block_id)) {
+			if (!xstrcmp(bg_record->bg_block_id,
+				     found_record->bg_block_id)) {
 				list_remove(itr);
 				if (bg_conf->slurm_debug_flags
 				    & DEBUG_FLAG_SELECT_TYPE)
@@ -210,8 +208,8 @@ extern bg_record_t *find_org_in_bg_list(List my_list, bg_record_t *bg_record)
 		    && bit_equal(bg_record->ionode_bitmap,
 				 found_record->ionode_bitmap)) {
 
-			if (!strcmp(bg_record->bg_block_id,
-				    found_record->bg_block_id)) {
+			if (!xstrcmp(bg_record->bg_block_id,
+				     found_record->bg_block_id)) {
 				if (bg_conf->slurm_debug_flags
 				    & DEBUG_FLAG_SELECT_TYPE)
 					info("got the block");

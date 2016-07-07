@@ -1,7 +1,5 @@
 /*****************************************************************************\
  *  common_as.c - common functions for accounting storage
- *
- *  $Id: common_as.c 13061 2008-01-22 21:23:56Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -503,7 +501,7 @@ extern void merge_delta_qos_list(List qos_list, List delta_qos_list)
 	while((new_qos = list_next(new_itr))) {
 		if (new_qos[0] == '-') {
 			while((curr_qos = list_next(curr_itr))) {
-				if (!strcmp(curr_qos, new_qos+1)) {
+				if (!xstrcmp(curr_qos, new_qos+1)) {
 					list_delete_item(curr_itr);
 					break;
 				}
@@ -511,7 +509,7 @@ extern void merge_delta_qos_list(List qos_list, List delta_qos_list)
 			list_iterator_reset(curr_itr);
 		} else if (new_qos[0] == '+') {
 			while((curr_qos = list_next(curr_itr))) {
-				if (!strcmp(curr_qos, new_qos+1)) {
+				if (!xstrcmp(curr_qos, new_qos+1)) {
 					break;
 				}
 			}
@@ -560,7 +558,7 @@ extern bool is_user_coord(slurmdb_user_rec_t *user, char *account)
 
 	itr = list_iterator_create(user->coord_accts);
 	while((coord = list_next(itr))) {
-		if (!strcasecmp(coord->name, account))
+		if (!xstrcasecmp(coord->name, account))
 			break;
 	}
 	list_iterator_destroy(itr);

@@ -89,6 +89,9 @@ typedef struct gres_node_state {
 	/* Non-consumable: Do not track resources allocated to jobs */
 	bool no_consume;
 
+	/* True if set by node_feature plugin, ignore info from compute node */
+	bool node_feature;
+
 	/* Total resources available for allocation to jobs.
 	 * gres_cnt_found or gres_cnt_config, depending upon FastSchedule */
 	uint64_t gres_cnt_avail;
@@ -255,6 +258,11 @@ extern void gres_plugin_recv_stepd(int fd);
 extern int gres_plugin_init_node_config(char *node_name, char *orig_config,
 					List *gres_list);
 
+/* Add a GRES record. This is used by the node_features plugin after the
+ * slurm.conf file is read and the initial GRES records are built by
+ * gres_plugin_init(). */
+extern void gres_plugin_add(char *gres_name);
+
 /*
  * Unpack this node's configuration from a buffer (built/packed by slurmd)
  * IN/OUT buffer - message buffer to unpack
@@ -281,6 +289,18 @@ extern int gres_plugin_node_config_validate(char *node_name,
 					    List *gres_list,
 					    uint16_t fast_schedule,
 					    char **reason_down);
+
+/*
+ * Add a GRES from node_feature plugin
+ * IN node_name - name of the node for which the gres information applies
+ * IN gres_name - name of the GRES being added or updated from the plugin
+ * IN gres_size - count of this GRES on this node
+ * IN/OUT new_config - Updated GRES info from slurm.conf
+ * IN/OUT gres_list - List of GRES records for this node to track usage
+ */
+extern void gres_plugin_node_feature(char *node_name,
+				     char *gres_name, uint64_t gres_size,
+				     char **new_config, List *gres_list);
 
 /*
  * Note that a node's configuration has been modified (e.g. "scontol update ..")

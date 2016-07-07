@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ################################################################################
 # Purpose: Test of SLURM functionality
 #          Sets the job name environment variable, and changes it using srun,
@@ -53,7 +53,7 @@ make_bash_script $file_in "
 # Tests -J by using srun
 #
 set found 0
-set srun_pid [spawn $srun -J $name $file_in]
+set srun_pid [spawn $srun -J $name -t1 $file_in]
 expect {
         "SLURM_JOB_NAME=$name" {
             set found 1
@@ -78,7 +78,7 @@ send_user "SUCCESS\n"
 # Tests -J using sbatch
 #
 set found 0
-set sbatch_pid [spawn $sbatch -J $name -o $file_out --wrap=env]
+set sbatch_pid [spawn $sbatch -J $name -t1 -o $file_out --wrap=env]
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
@@ -106,7 +106,7 @@ expect {
 	}
 }
 
-if  {$found != 1} {
+if {$found != 1} {
 	send_user "\nFAILURE: COULD NOT FIND SLURM_JOB_NAME=banana\n"
 	exit 1
 }
@@ -120,7 +120,7 @@ exec rm -f slurm-$job_id.out
 # Tests -J using salloc
 #
 set found 0
-set salloc_pid [spawn $salloc -J $name ./$file_in]
+set salloc_pid [spawn $salloc -J $name -t1 ./$file_in]
 expect {
         "SLURM_JOB_NAME=$name" {
 		set found 1

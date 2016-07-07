@@ -13,12 +13,11 @@ ControlMachine=sdb
 #BackupAddr=
 #
 AuthType=auth/munge
-CacheGroups=0
 #CheckpointType=checkpoint/none
 CoreSpecPlugin=cray
 CryptoType=crypto/munge
 #DisableRootJobs=NO
-#EnforcePartLimits=NO
+EnforcePartLimits=any
 #Epilog=
 #EpilogSlurmctld=
 #FirstJobId=1

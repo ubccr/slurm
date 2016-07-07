@@ -1,7 +1,5 @@
 /*****************************************************************************\
  *  bg_record_functions.c - header for creating blocks in a static environment.
- *
- *  $Id: bg_record_functions.c 12954 2008-01-04 20:37:49Z da $
  *****************************************************************************
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -473,7 +471,7 @@ extern int bg_record_cmpf_inc(void *r1, void *r2)
 	}
 
 	if (rec_a->mp_str && rec_b->mp_str) {
-		size_a = strcmp(rec_a->mp_str, rec_b->mp_str);
+		size_a = xstrcmp(rec_a->mp_str, rec_b->mp_str);
 		if (size_a < 0)
 			return -1;
 		else if (size_a > 0)
@@ -1647,7 +1645,7 @@ extern int resume_block(bg_record_t *bg_record)
 		while ((ba_mp = list_next(itr))) {
 			node_ptr = &node_record_table_ptr[ba_mp->index];
 			if (node_ptr->reason
-			    && !strncmp(node_ptr->reason, "update_block", 12))
+			    && !xstrncmp(node_ptr->reason, "update_block", 12))
 				xfree(node_ptr->reason);
 		}
 		list_iterator_destroy(itr);
@@ -1948,7 +1946,7 @@ static int _check_all_blocks_error(int node_inx, time_t event_time,
 			reason = "update_block: setting partial node down.";
 
 		if (!node_ptr->reason
-		    || !strncmp(node_ptr->reason, "update_block", 12)) {
+		    || !xstrncmp(node_ptr->reason, "update_block", 12)) {
 			xfree(node_ptr->reason);
 			node_ptr->reason = xstrdup(reason);
 			node_ptr->reason_time = event_time;

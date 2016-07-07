@@ -47,6 +47,19 @@
  */
 extern void allocate_nodes(struct job_record *job_ptr);
 
+/* For a given job, if the available nodes differ from those with currently
+ *	active features, return a bitmap of nodes with the job's required
+ *	features currently active
+ * IN job_ptr - job requesting resource allocation
+ * IN avail_bitmap - nodes currently available for this job
+ * OUT active_bitmap - nodes with job's features currently active, NULL if
+ *	identical to avail_bitmap
+ * NOTE: Currently supports only simple AND of features
+ */
+extern void build_active_feature_bitmap(struct job_record *job_ptr,
+					bitstr_t *avail_bitmap,
+					bitstr_t **active_bitmap);
+
 /*
  * build_node_details - sets addresses for allocated nodes
  * IN job_ptr - pointer to a job record
@@ -67,6 +80,22 @@ extern void build_node_details(struct job_record *job_ptr, bool new_alloc);
  */
 extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 		bool suspended, bool preempted);
+
+/* Remove nodes from consideration for allocation based upon "mcs" by
+ * other users
+ * job_ptr IN - Job to be scheduled
+ * usable_node_mask IN/OUT - Nodes available for use by this job's mcs
+ */
+extern void filter_by_node_mcs(struct job_record *job_ptr, int mcs_select,
+			       bitstr_t *usable_node_mask);
+
+/* Remove nodes from consideration for allocation based upon "ownership" by
+ * other users
+ * job_ptr IN - Job to be scheduled
+ * usable_node_mask IN/OUT - Nodes available for use by this job's user
+ */
+extern void filter_by_node_owner(struct job_record *job_ptr,
+				 bitstr_t *usable_node_mask);
 
 /*
  * re_kill_job - for a given job, deallocate its nodes for a second time,

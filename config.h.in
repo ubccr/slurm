@@ -181,6 +181,9 @@
 /* Define to 1 if you have a functional curl library. */
 #undef HAVE_LIBCURL
 
+/* Define to 1 if you have `z' library (-lz) */
+#undef HAVE_LIBZ
+
 /* Define to 1 if you have the <limits.h> header file. */
 #undef HAVE_LIMITS_H
 
@@ -192,6 +195,9 @@
 
 /* Compile with Lua 5.2 */
 #undef HAVE_LUA_5_2
+
+/* Define to 1 if you have 'lz4' library (-llz4) */
+#undef HAVE_LZ4
 
 /* Define to 1 if your system has a GNU libc compatible `malloc' function, and
    to 0 otherwise. */
@@ -253,6 +259,9 @@
 
 /* define if you have permapi_h */
 #undef HAVE_PERMAPI_H
+
+/* Define to 1 if pmix library found */
+#undef HAVE_PMIX
 
 /* Define if you have Posix semaphores. */
 #undef HAVE_POSIX_SEMS
@@ -334,9 +343,6 @@
 
 /* Define to 1 if you have the `strsignal' function. */
 #undef HAVE_STRSIGNAL
-
-/* define if Sun Constellation system */
-#undef HAVE_SUN_CONST
 
 /* Define to 1 if you have the `sysctlbyname' function. */
 #undef HAVE_SYSCTLBYNAME

@@ -845,7 +845,7 @@ extern int sacctmgr_list_assoc(int argc, char *argv[])
 		return SLURM_ERROR;
 	}
 
-	slurmdb_sort_hierarchical_assoc_list(assoc_list);
+	slurmdb_sort_hierarchical_assoc_list(assoc_list, true);
 
 	itr = list_iterator_create(assoc_list);
 	itr2 = list_iterator_create(print_fields_list);
@@ -855,7 +855,7 @@ extern int sacctmgr_list_assoc(int argc, char *argv[])
 
 	while((assoc = list_next(itr))) {
 		int curr_inx = 1;
-		if (!last_cluster || strcmp(last_cluster, assoc->cluster)) {
+		if (!last_cluster || xstrcmp(last_cluster, assoc->cluster)) {
 			if (tree_list) {
 				list_flush(tree_list);
 			} else {

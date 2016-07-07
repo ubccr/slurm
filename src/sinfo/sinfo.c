@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2011 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2016 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -755,6 +755,11 @@ static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 		return false;
 
 	if (sinfo_ptr->nodes &&
+	    params.match_flags.features_act_flag &&
+	    (xstrcmp(node_ptr->features_act, sinfo_ptr->features_act)))
+		return false;
+
+	if (sinfo_ptr->nodes &&
 	    params.match_flags.gres_flag &&
 	    (xstrcmp(node_ptr->gres, sinfo_ptr->gres)))
 		return false;
@@ -892,7 +897,7 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 	     (sinfo_ptr->part_info->flags & PART_FLAG_ROOT_ONLY)))
 		return false;
 
-	if (params.match_flags.share_flag &&
+	if (params.match_flags.oversubscribe_flag &&
 	    (part_ptr->max_share != sinfo_ptr->part_info->max_share))
 		return false;
 
@@ -900,8 +905,13 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 	    (part_ptr->preempt_mode != sinfo_ptr->part_info->preempt_mode))
 		return false;
 
-	if (params.match_flags.priority_flag &&
-	    (part_ptr->priority != sinfo_ptr->part_info->priority))
+	if (params.match_flags.priority_tier_flag &&
+	    (part_ptr->priority_tier != sinfo_ptr->part_info->priority_tier))
+		return false;
+
+	if (params.match_flags.priority_job_factor_flag &&
+	    (part_ptr->priority_job_factor !=
+	     sinfo_ptr->part_info->priority_job_factor))
 		return false;
 
 	if (params.match_flags.max_cpus_per_node_flag &&
@@ -927,6 +937,7 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 	if (sinfo_ptr->nodes_total == 0) {	/* first node added */
 		sinfo_ptr->node_state = node_ptr->node_state;
 		sinfo_ptr->features   = node_ptr->features;
+		sinfo_ptr->features_act = node_ptr->features_act;
 		sinfo_ptr->gres       = node_ptr->gres;
 		sinfo_ptr->reason     = node_ptr->reason;
 		sinfo_ptr->reason_time= node_ptr->reason_time;
@@ -1250,7 +1261,7 @@ static void _sinfo_list_delete(void *data)
 /* Find the given partition name in the list */
 static int _find_part_list(void *x, void *key)
 {
-	if (!strcmp((char *)x, (char *)key))
+	if (!xstrcmp((char *)x, (char *)key))
 		return 1;
 	return 0;
 }
