@@ -74,6 +74,7 @@
 #include "slurm/slurm_errno.h"
 
 #include "src/common/parse_time.h"
+#include "src/common/slurm_mcs.h"
 #include "src/common/slurm_time.h"
 #include "src/common/xstring.h"
 #include "src/common/gres.h"
@@ -341,7 +342,7 @@ static int _write_last_decay_ran(time_t last_ran, time_t last_reset)
 	char *old_file, *new_file, *state_file;
 	Buf buffer;
 
-	if (!strcmp(slurmctld_conf.state_save_location, "/dev/null")) {
+	if (!xstrcmp(slurmctld_conf.state_save_location, "/dev/null")) {
 		error("Can not save priority state information, "
 		      "StateSaveLocation is /dev/null");
 		return error_code;
@@ -598,7 +599,7 @@ static uint32_t _get_priority_internal(time_t start_time,
 		part_iterator = list_iterator_create(job_ptr->part_ptr_list);
 		while ((part_ptr = (struct part_record *)
 			list_next(part_iterator))) {
-			priority_part = part_ptr->priority /
+			priority_part = part_ptr->priority_job_factor /
 				(double)part_max_priority *
 				(double)weight_part;
 			priority_part +=
@@ -801,7 +802,7 @@ static double _calc_billable_tres(struct job_record *job_ptr, time_t start_time)
 		    ((i == TRES_ARRAY_CPU) ||
 		     (i == TRES_ARRAY_MEM) ||
 		     (i == TRES_ARRAY_NODE) ||
-		     (!strcasecmp(tres_type, "gres"))))
+		     (!xstrcasecmp(tres_type, "gres"))))
 			to_bill_node = MAX(to_bill_node, tres_value);
 		else
 			to_bill_global += tres_value;
@@ -1203,9 +1204,8 @@ static void *_decay_thread(void *no_data)
 				   NO_LOCK, NO_LOCK, NO_LOCK };
 
 #if HAVE_SYS_PRCTL_H
-	if (prctl(PR_SET_NAME, "slurmctld_decay", NULL, NULL, NULL) < 0) {
-		error("%s: cannot set my name to %s %m",
-		      __func__, "slurmctld_decay");
+	if (prctl(PR_SET_NAME, "decay", NULL, NULL, NULL) < 0) {
+		error("%s: cannot set my name to %s %m", __func__, "decay");
 	}
 #endif
 	/*
@@ -1634,8 +1634,8 @@ int init ( void )
 
 	/* Check to see if we are running a supported accounting plugin */
 	temp = slurm_get_accounting_storage_type();
-	if (strcasecmp(temp, "accounting_storage/slurmdbd")
-	    && strcasecmp(temp, "accounting_storage/mysql")) {
+	if (xstrcasecmp(temp, "accounting_storage/slurmdbd")
+	    && xstrcasecmp(temp, "accounting_storage/mysql")) {
 		error("You are not running a supported "
 		      "accounting_storage plugin\n(%s).\n"
 		      "Fairshare can only be calculated with either "
@@ -1846,12 +1846,15 @@ extern List priority_p_get_priority_factors_list(
 			if (_filter_job(job_ptr, req_job_list, req_user_list))
 				continue;
 
-			if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS)
-			    && (job_ptr->user_id != uid)
-			    && !validate_operator(uid)
-			    && !assoc_mgr_is_user_acct_coord(
-				    acct_db_conn, uid,
-				    job_ptr->account))
+			if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS) &&
+			    (job_ptr->user_id != uid) &&
+			    !validate_operator(uid) &&
+			    (((slurm_mcs_get_privatedata() == 0) &&
+			      !assoc_mgr_is_user_acct_coord(acct_db_conn, uid,
+							    job_ptr->account))||
+			     ((slurm_mcs_get_privatedata() == 1) &&
+			      (mcs_g_check_mcs_label(uid, job_ptr->mcs_label)
+			       != 0))))
 				continue;
 
 			obj = xmalloc(sizeof(priority_factors_object_t));
@@ -2041,7 +2044,8 @@ extern void set_priority_factors(time_t start_time, struct job_record *job_ptr)
 			job_ptr->prio_factors->priority_js = 1.0;
 	}
 
-	if (job_ptr->part_ptr && job_ptr->part_ptr->priority && weight_part) {
+	if (job_ptr->part_ptr && job_ptr->part_ptr->priority_job_factor &&
+	    weight_part) {
 		job_ptr->prio_factors->priority_part =
 			job_ptr->part_ptr->norm_priority;
 	}

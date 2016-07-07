@@ -73,7 +73,15 @@ extern List build_job_queue(bool clear_start, bool backfill);
 /* Given a scheduled job, return a pointer to it batch_job_launch_msg_t data */
 extern batch_job_launch_msg_t *build_launch_job_msg(
 					struct job_record *job_ptr,
-					uint16_t protocol_versin);
+					uint16_t protocol_version);
+
+/* Determine if job's deadline specification is still valid, kill job if not
+ * job_ptr IN - Job to test
+ * func IN - function named used for logging, "sched" or "backfill"
+ * RET - true of valid, false if invalid and job cancelled
+ */
+extern bool deadline_ok(struct job_record *job_ptr, char *func);
+
 /*
  * epilog_slurmctld - execute the prolog_slurmctld for a job that has just
  *	terminated.
@@ -114,6 +122,10 @@ extern void launch_job(struct job_record *job_ptr);
 extern int make_batch_job_cred(batch_job_launch_msg_t *launch_msg_ptr,
 			       struct job_record *job_ptr,
 			       uint16_t protocol_version);
+
+/* Return a node bitmap identifying which nodes must be rebooted for a job
+ * to start. */
+extern bitstr_t *node_features_reboot(struct job_record *job_ptr);
 
 /* Print a job's dependency information based upon job_ptr->depend_list */
 extern void print_job_dependency(struct job_record *job_ptr);

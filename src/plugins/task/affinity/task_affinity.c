@@ -90,7 +90,13 @@ const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
  */
 extern int init (void)
 {
-	debug("%s loaded", plugin_name);
+	cpu_set_t cur_mask;
+	char mstr[1 + CPU_SETSIZE / 4];
+
+	slurm_getaffinity(0, sizeof(cur_mask), &cur_mask);
+	cpuset_to_str(&cur_mask, mstr);
+	verbose("%s loaded with CPU mask %s", plugin_name, mstr);
+
 	return SLURM_SUCCESS;
 }
 
@@ -110,43 +116,44 @@ static void _update_bind_type(launch_tasks_request_msg_t *req)
 {
 	bool set_bind = false;
 
-	if (conf->task_plugin_param & CPU_BIND_NONE) {
-		req->cpu_bind_type |= CPU_BIND_NONE;
-		req->cpu_bind_type &= (~CPU_BIND_TO_SOCKETS);
-		req->cpu_bind_type &= (~CPU_BIND_TO_CORES);
-		req->cpu_bind_type &= (~CPU_BIND_TO_THREADS);
-		req->cpu_bind_type &= (~CPU_BIND_TO_LDOMS);
-		set_bind = true;
-	} else if (conf->task_plugin_param & CPU_BIND_TO_SOCKETS) {
-		req->cpu_bind_type &= (~CPU_BIND_NONE);
-		req->cpu_bind_type |= CPU_BIND_TO_SOCKETS;
-		req->cpu_bind_type &= (~CPU_BIND_TO_CORES);
-		req->cpu_bind_type &= (~CPU_BIND_TO_THREADS);
-		req->cpu_bind_type &= (~CPU_BIND_TO_LDOMS);
-		set_bind = true;
-	} else if (conf->task_plugin_param & CPU_BIND_TO_CORES) {
-		req->cpu_bind_type &= (~CPU_BIND_NONE);
-		req->cpu_bind_type &= (~CPU_BIND_TO_SOCKETS);
-		req->cpu_bind_type |= CPU_BIND_TO_CORES;
-		req->cpu_bind_type &= (~CPU_BIND_TO_THREADS);
-		req->cpu_bind_type &= (~CPU_BIND_TO_LDOMS);
-		set_bind = true;
-	} else if (conf->task_plugin_param & CPU_BIND_TO_THREADS) {
-		req->cpu_bind_type &= (~CPU_BIND_NONE);
-		req->cpu_bind_type &= (~CPU_BIND_TO_SOCKETS);
-		req->cpu_bind_type &= (~CPU_BIND_TO_CORES);
-		req->cpu_bind_type |= CPU_BIND_TO_THREADS;
-		req->cpu_bind_type &= (~CPU_BIND_TO_LDOMS);
-		set_bind = true;
-	} else if (conf->task_plugin_param & CPU_BIND_TO_LDOMS) {
-		req->cpu_bind_type &= (~CPU_BIND_NONE);
-		req->cpu_bind_type &= (~CPU_BIND_TO_SOCKETS);
-		req->cpu_bind_type &= (~CPU_BIND_TO_CORES);
-		req->cpu_bind_type &= (~CPU_BIND_TO_THREADS);
-		req->cpu_bind_type &= CPU_BIND_TO_LDOMS;
-		set_bind = true;
+	if ((req->cpu_bind_type & (~CPU_BIND_VERBOSE)) == 0) {
+		if (conf->task_plugin_param & CPU_BIND_NONE) {
+			req->cpu_bind_type |= CPU_BIND_NONE;
+			req->cpu_bind_type &= (~CPU_BIND_TO_SOCKETS);
+			req->cpu_bind_type &= (~CPU_BIND_TO_CORES);
+			req->cpu_bind_type &= (~CPU_BIND_TO_THREADS);
+			req->cpu_bind_type &= (~CPU_BIND_TO_LDOMS);
+			set_bind = true;
+		} else if (conf->task_plugin_param & CPU_BIND_TO_SOCKETS) {
+			req->cpu_bind_type &= (~CPU_BIND_NONE);
+			req->cpu_bind_type |= CPU_BIND_TO_SOCKETS;
+			req->cpu_bind_type &= (~CPU_BIND_TO_CORES);
+			req->cpu_bind_type &= (~CPU_BIND_TO_THREADS);
+			req->cpu_bind_type &= (~CPU_BIND_TO_LDOMS);
+			set_bind = true;
+		} else if (conf->task_plugin_param & CPU_BIND_TO_CORES) {
+			req->cpu_bind_type &= (~CPU_BIND_NONE);
+			req->cpu_bind_type &= (~CPU_BIND_TO_SOCKETS);
+			req->cpu_bind_type |= CPU_BIND_TO_CORES;
+			req->cpu_bind_type &= (~CPU_BIND_TO_THREADS);
+			req->cpu_bind_type &= (~CPU_BIND_TO_LDOMS);
+			set_bind = true;
+		} else if (conf->task_plugin_param & CPU_BIND_TO_THREADS) {
+			req->cpu_bind_type &= (~CPU_BIND_NONE);
+			req->cpu_bind_type &= (~CPU_BIND_TO_SOCKETS);
+			req->cpu_bind_type &= (~CPU_BIND_TO_CORES);
+			req->cpu_bind_type |= CPU_BIND_TO_THREADS;
+			req->cpu_bind_type &= (~CPU_BIND_TO_LDOMS);
+			set_bind = true;
+		} else if (conf->task_plugin_param & CPU_BIND_TO_LDOMS) {
+			req->cpu_bind_type &= (~CPU_BIND_NONE);
+			req->cpu_bind_type &= (~CPU_BIND_TO_SOCKETS);
+			req->cpu_bind_type &= (~CPU_BIND_TO_CORES);
+			req->cpu_bind_type &= (~CPU_BIND_TO_THREADS);
+			req->cpu_bind_type &= CPU_BIND_TO_LDOMS;
+			set_bind = true;
+		}
 	}
-
 	if (conf->task_plugin_param & CPU_BIND_VERBOSE) {
 		req->cpu_bind_type |= CPU_BIND_VERBOSE;
 		set_bind = true;
@@ -293,7 +300,7 @@ extern int task_p_slurmd_release_resources (uint32_t job_id)
 			continue;
 		if (rc || (result == NULL))
 			break;
-		if (strncmp(entry.d_name, "slurm", 5))
+		if (xstrncmp(entry.d_name, "slurm", 5))
 			continue;
 		if (snprintf(path, PATH_MAX, "%s/%s",
 					 base, entry.d_name) >= PATH_MAX) {

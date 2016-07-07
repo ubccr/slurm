@@ -264,7 +264,7 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 			slurm_mutex_lock(&as_mysql_cluster_list_lock);
 			check_itr = list_iterator_create(as_mysql_cluster_list);
 			while ((tmp_name = list_next(check_itr))) {
-				if (!strcmp(tmp_name, object->name))
+				if (!xstrcmp(tmp_name, object->name))
 					break;
 			}
 			list_iterator_destroy(check_itr);
@@ -445,6 +445,7 @@ extern List as_mysql_modify_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 		if (debug_flags & DEBUG_FLAG_DB_ASSOC)
 			DB_DEBUG(mysql_conn->conn,
 				 "didn't effect anything\n%s", query);
+		xfree(name_char);
 		xfree(vals);
 		xfree(query);
 		return ret_list;
@@ -775,7 +776,7 @@ empty:
 	assoc_itr = list_iterator_create(assoc_list);
 	while ((cluster = list_next(itr))) {
 		while ((assoc = list_next(assoc_itr))) {
-			if (strcmp(assoc->cluster, cluster->name))
+			if (xstrcmp(assoc->cluster, cluster->name))
 				continue;
 
 			if (cluster->root_assoc) {
@@ -1098,7 +1099,7 @@ extern int as_mysql_node_down(mysql_conn_t *mysql_conn,
 	row = mysql_fetch_row(result);
 	if (row && (node_ptr->node_state == slurm_atoul(row[0])) &&
 	    my_reason && row[1] &&
-	    !strcasecmp(my_reason, row[1])) {
+	    !xstrcasecmp(my_reason, row[1])) {
 		debug("as_mysql_node_down: no change needed %u == %s "
 		      "and %s == %s",
 		     node_ptr->node_state, row[0], my_reason, row[1]);
@@ -1199,7 +1200,7 @@ extern int as_mysql_register_ctld(mysql_conn_t *mysql_conn,
 
 	/* check if we are running on the backup controller */
 	if (slurmctld_conf.backup_controller
-	    && !strcmp(slurmctld_conf.backup_controller, hostname)) {
+	    && !xstrcmp(slurmctld_conf.backup_controller, hostname)) {
 		address = slurmctld_conf.backup_addr;
 	} else
 		address = slurmctld_conf.control_addr;
@@ -1391,7 +1392,7 @@ extern int as_mysql_cluster_tres(mysql_conn_t *mysql_conn,
 				(void) mysql_db_query(mysql_conn, query);
 				xfree(query);
 				goto update_it;
-			} else if (!strcmp(cluster_nodes, row[1])) {
+			} else if (!xstrcmp(cluster_nodes, row[1])) {
 				if (debug_flags & DEBUG_FLAG_DB_EVENT)
 					DB_DEBUG(mysql_conn->conn,
 						 "we have the same nodes "

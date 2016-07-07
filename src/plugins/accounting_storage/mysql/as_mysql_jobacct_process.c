@@ -330,6 +330,7 @@ static void _state_time_string(char **extra, char *cluster_name, uint32_t state,
 	case JOB_TIMEOUT:
 	case JOB_NODE_FAIL:
 	case JOB_PREEMPTED:
+	case JOB_DEADLINE:
 	default:
 		xstrfmtcat(*extra, "(t1.state='%u' && (t1.time_end && ", state);
 		if (start) {
@@ -701,7 +702,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 		if (row[JOB_REQ_NODELIST])
 			job->nodes = xstrdup(row[JOB_REQ_NODELIST]);
 
-		if (!job->nodes || !strcmp(job->nodes, "(null)")) {
+		if (!job->nodes || !xstrcmp(job->nodes, "(null)")) {
 			xfree(job->nodes);
 			job->nodes = xstrdup("(unknown)");
 		}

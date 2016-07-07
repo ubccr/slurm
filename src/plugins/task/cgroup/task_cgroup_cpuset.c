@@ -537,7 +537,7 @@ static int _get_sched_cpuset(hwloc_topology_t topology,
 
 	if (job->cpu_bind_type & CPU_BIND_MAP) {
 		unsigned int mycpu = 0;
-		if (strncmp(mstr, "0x", 2) == 0) {
+		if (xstrncmp(mstr, "0x", 2) == 0) {
 			mycpu = strtoul (&(mstr[2]), NULL, 16);
 		} else {
 			mycpu = strtoul (mstr, NULL, 10);
@@ -580,7 +580,7 @@ static int _get_sched_cpuset(hwloc_topology_t topology,
 
 	if (job->cpu_bind_type & CPU_BIND_LDMAP) {
 		uint32_t myldom = 0;
-		if (strncmp(mstr, "0x", 2) == 0) {
+		if (xstrncmp(mstr, "0x", 2) == 0) {
 			myldom = strtoul (&(mstr[2]), NULL, 16);
 		} else {
 			myldom = strtoul (mstr, NULL, 10);
@@ -1229,7 +1229,7 @@ again:
 			   getuid(),getgid()) != XCGROUP_SUCCESS) {
 		goto error;
 	}
-	if (xcgroup_instanciate(&user_cpuset_cg) != XCGROUP_SUCCESS) {
+	if (xcgroup_instantiate(&user_cpuset_cg) != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&user_cpuset_cg);
 		goto error;
 	}
@@ -1265,7 +1265,7 @@ again:
 		xcgroup_destroy(&user_cpuset_cg);
 		goto error;
 	}
-	if (xcgroup_instanciate(&job_cpuset_cg) != XCGROUP_SUCCESS) {
+	if (xcgroup_instantiate(&job_cpuset_cg) != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&user_cpuset_cg);
 		xcgroup_destroy(&job_cpuset_cg);
 		goto error;
@@ -1291,7 +1291,7 @@ again:
 		xcgroup_destroy(&job_cpuset_cg);
 		goto error;
 	}
-	if (xcgroup_instanciate(&step_cpuset_cg) != XCGROUP_SUCCESS) {
+	if (xcgroup_instantiate(&step_cpuset_cg) != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&user_cpuset_cg);
 		xcgroup_destroy(&job_cpuset_cg);
 		xcgroup_destroy(&step_cpuset_cg);

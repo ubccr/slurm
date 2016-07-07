@@ -15,6 +15,7 @@ EXTRA_DIST = \
 	README				\
 	regression			\
 	regression.py			\
+	slurm_status			\
 	test1.1				\
 	test1.2				\
 	test1.3				\
@@ -126,6 +127,17 @@ EXTRA_DIST = \
 	test1.99			\
 	test1.100			\
 	test1.101			\
+	test1.102			\
+	test1.103			\
+	test1.104			\
+	test1.105			\
+	test1.106			\
+	test1.107			\
+	test1.108			\
+	test1.109			\
+	test1.110			\
+	test1.111			\
+	test1.112			\
 	test2.1				\
 	test2.2				\
 	test2.3				\
@@ -175,6 +187,7 @@ EXTRA_DIST = \
 	test3.13			\
 	test3.14			\
 	test3.15			\
+	test3.16			\
 	test4.1				\
 	test4.2				\
 	test4.3				\
@@ -370,6 +383,15 @@ EXTRA_DIST = \
 	test15.25			\
 	test15.26			\
 	test15.27			\
+	test15.30			\
+	test15.31			\
+	test15.32			\
+	test15.33			\
+	test15.34			\
+	test15.35			\
+	test15.36			\
+	test15.37			\
+	test15.38			\
 	test16.1			\
 	test16.2			\
 	test16.3			\
@@ -409,13 +431,28 @@ EXTRA_DIST = \
 	test17.32			\
 	test17.33			\
 	test17.34			\
+	test17.35			\
 	test17.36			\
 	test17.37			\
 	test17.38			\
 	test17.39			\
 	test17.40			\
 	test17.41			\
+	test17.42			\
 	test17.43			\
+	test17.44			\
+	test17.51			\
+	test17.52			\
+	test17.53			\
+	test17.54			\
+	test17.55			\
+	test17.56			\
+	test17.57			\
+	test17.58			\
+	test17.59			\
+	test17.60			\
+	test17.61			\
+	test17.62			\
 	test19.1			\
 	test19.2			\
 	test19.3			\
@@ -437,6 +474,7 @@ EXTRA_DIST = \
 	test20.10			\
 	test20.11			\
 	test20.12			\
+	test20.13			\
 	test21.1			\
 	test21.2			\
 	test21.3			\
@@ -470,8 +508,10 @@ EXTRA_DIST = \
 	test21.30                       \
 	test21.31			\
 	test21.32			\
+	test21.33			\
 	test21.34			\
 	test21.35			\
+	test21.36			\
 	inc21.30.1                      \
 	inc21.30.2                      \
 	inc21.30.3                      \
@@ -560,7 +600,11 @@ EXTRA_DIST = \
 	test34.1			\
 	test34.2			\
 	test35.1			\
-	test35.2
+	test35.2			\
+	test36.1			\
+	test36.2			\
+	test36.3			\
+	test36.4
 
 distclean-local:
 	rm -rf *error *output

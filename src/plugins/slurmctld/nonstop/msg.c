@@ -62,7 +62,7 @@
 
 /* This version string is defined at configure time of libsmd. The
  * META of libsmd needs to reflect this version. */
-char *version_string = "VERSION:15.08";
+char *version_string = "VERSION:16.05";
 
 /* When a remote socket closes on AIX, we have seen poll() return EAGAIN
  * indefinitely for a pending write request. Rather than locking up
@@ -248,43 +248,44 @@ static void _proc_msg(slurm_fd_t new_fd, char *msg, slurm_addr_t cli_addr)
 		info("slurmctld/nonstop: msg decrypted:%s", msg_decrypted);
 	cmd_ptr = msg_decrypted;
 
-			   /* 123456789012345678901234567890 */
-	if (strncmp(cmd_ptr, version_string, 13) == 0) {
+	/* 123456789012345678901234567890 */
+	if (xstrncmp(cmd_ptr, version_string, 13) == 0) {
 		cmd_ptr = strchr(cmd_ptr + 13, ':');
 		if (cmd_ptr) {
 			cmd_ptr++;
 			protocol_version = SLURM_PROTOCOL_VERSION;
 		}
 	}
+
 	if (protocol_version == 0) {
 		info("slurmctld/nonstop: Message version invalid");
 		resp = xstrdup("Error:\"Message version invalid\"");
 		goto send_resp;
 	}
-	if (strncmp(cmd_ptr, "CALLBACK:JOBID:", 15) == 0) {
+	if (xstrncmp(cmd_ptr, "CALLBACK:JOBID:", 15) == 0) {
 		resp = register_callback(cmd_ptr, cmd_uid, cli_addr,
 					 protocol_version);
-	} else if (strncmp(cmd_ptr, "DRAIN:NODES:", 12) == 0) {
+	} else if (xstrncmp(cmd_ptr, "DRAIN:NODES:", 12) == 0) {
 		lock_slurmctld(node_write_lock);
 		resp = drain_nodes_user(cmd_ptr, cmd_uid, protocol_version);
 		unlock_slurmctld(node_write_lock);
-	} else if (strncmp(cmd_ptr, "DROP_NODE:JOBID:", 15) == 0) {
+	} else if (xstrncmp(cmd_ptr, "DROP_NODE:JOBID:", 15) == 0) {
 		lock_slurmctld(job_write_lock2);
 		resp = drop_node(cmd_ptr, cmd_uid, protocol_version);
 		unlock_slurmctld(job_write_lock2);
-	} else if (strncmp(cmd_ptr, "GET_FAIL_NODES:JOBID:", 21) == 0) {
+	} else if (xstrncmp(cmd_ptr, "GET_FAIL_NODES:JOBID:", 21) == 0) {
 		lock_slurmctld(job_read_lock);
 		resp = fail_nodes(cmd_ptr, cmd_uid, protocol_version);
 		unlock_slurmctld(job_read_lock);
-	} else if (strncmp(cmd_ptr, "REPLACE_NODE:JOBID:", 19) == 0) {
+	} else if (xstrncmp(cmd_ptr, "REPLACE_NODE:JOBID:", 19) == 0) {
 		lock_slurmctld(job_write_lock2);
 		resp = replace_node(cmd_ptr, cmd_uid, protocol_version);
 		unlock_slurmctld(job_write_lock2);
-	} else if (strncmp(cmd_ptr, "SHOW_CONFIG", 11) == 0) {
+	} else if (xstrncmp(cmd_ptr, "SHOW_CONFIG", 11) == 0) {
 		resp = show_config(cmd_ptr, cmd_uid, protocol_version);
-	} else if (strncmp(cmd_ptr, "SHOW_JOB:JOBID:", 15) == 0) {
+	} else if (xstrncmp(cmd_ptr, "SHOW_JOB:JOBID:", 15) == 0) {
 		resp = show_job(cmd_ptr, cmd_uid, protocol_version);
-	} else if (strncmp(cmd_ptr, "TIME_INCR:JOBID:", 16) == 0) {
+	} else if (xstrncmp(cmd_ptr, "TIME_INCR:JOBID:", 16) == 0) {
 		lock_slurmctld(job_write_lock);
 		resp = time_incr(cmd_ptr, cmd_uid, protocol_version);
 		unlock_slurmctld(job_write_lock);
@@ -357,10 +358,10 @@ extern int spawn_msg_thread(void)
 {
 	pthread_attr_t thread_attr_msg;
 
-	pthread_mutex_lock(&thread_flag_mutex);
+	slurm_mutex_lock(&thread_flag_mutex);
 	if (thread_running) {
 		error("nonstop thread already running");
-		pthread_mutex_unlock(&thread_flag_mutex);
+		slurm_mutex_unlock(&thread_flag_mutex);
 		return SLURM_ERROR;
 	}
 
@@ -370,14 +371,14 @@ extern int spawn_msg_thread(void)
 		fatal("pthread_create %m");
 	slurm_attr_destroy(&thread_attr_msg);
 	thread_running = true;
-	pthread_mutex_unlock(&thread_flag_mutex);
+	slurm_mutex_unlock(&thread_flag_mutex);
 
 	return SLURM_SUCCESS;
 }
 
 extern void term_msg_thread(void)
 {
-	pthread_mutex_lock(&thread_flag_mutex);
+	slurm_mutex_lock(&thread_flag_mutex);
 	if (thread_running) {
 		int fd;
 		slurm_addr_t addr;
@@ -402,5 +403,5 @@ extern void term_msg_thread(void)
 		thread_running = false;
 		debug2("join of slurmctld/nonstop thread was successful");
 	}
-	pthread_mutex_unlock(&thread_flag_mutex);
+	slurm_mutex_unlock(&thread_flag_mutex);
 }

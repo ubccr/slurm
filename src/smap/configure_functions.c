@@ -161,7 +161,7 @@ static int _full_request(select_ba_request_t *request,
 	allocated_block_t *allocated_block;
 	int rc = 1;
 
-	if (!strcasecmp(layout_mode,"OVERLAP"))
+	if (!xstrcasecmp(layout_mode,"OVERLAP"))
 		bg_configure_reset_ba_system(true);
 
 	if (usable_mp_bitmap)
@@ -369,7 +369,7 @@ static int _create_allocation(char *com, List allocated_blocks)
 				request->deny_pass |= PASS_DENY_Y;
 			if (strstr(com+i, "Z"))
 				request->deny_pass |= PASS_DENY_Z;
-			if (!strcasecmp(com+i, "ALL"))
+			if (!xstrcasecmp(com+i, "ALL"))
 				request->deny_pass |= PASS_DENY_ALL;
 		} else if (!strncasecmp(com+i, "nodecard", 8)) {
 			small32 = 0;
@@ -1200,7 +1200,7 @@ static int _load_configuration(char *com, List allocated_blocks)
 		xfree(layout);
 	}
 
-	if (strcasecmp(layout_mode, "DYNAMIC")) {
+	if (xstrcasecmp(layout_mode, "DYNAMIC")) {
 		if (!s_p_get_array((void ***)&blockreq_array,
 				   &count, "MPs", tbl)) {
 			if (!s_p_get_array((void ***)&blockreq_array,
@@ -1389,7 +1389,7 @@ void get_command(void)
 
 	if (working_cluster_rec) {
 		char *cluster_name = slurm_get_cluster_name();
-		if (strcmp(working_cluster_rec->name, cluster_name)) {
+		if (xstrcmp(working_cluster_rec->name, cluster_name)) {
 			xfree(cluster_name);
 			endwin();
 			printf("To use the configure option you must be on the "
@@ -1423,7 +1423,7 @@ void get_command(void)
 		echo();
 	}
 
-	while (strcmp(com, "quit")) {
+	while (xstrcmp(com, "quit")) {
 		clear_window(grid_win);
 		print_grid();
 		clear_window(text_win);
@@ -1479,7 +1479,7 @@ void get_command(void)
 		wmove(command_win, 1, 1);
 		wgetstr(command_win, com);
 
-		if (!strcmp(com, "exit")) {
+		if (!xstrcmp(com, "exit")) {
 			endwin();
 			FREE_NULL_LIST(allocated_blocks);
 			bg_configure_ba_fini();
@@ -1487,7 +1487,7 @@ void get_command(void)
 		}
 	run_command:
 
-		if (!strcmp(com, "quit") || !strcmp(com, "\\q")) {
+		if (!xstrcmp(com, "quit") || !xstrcmp(com, "\\q")) {
 			break;
 		} else if (!strncasecmp(com, "layout", 6)) {
 			_set_layout(com);

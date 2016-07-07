@@ -59,6 +59,7 @@
 #include "src/common/strlcpy.h"
 #include "src/common/util-net.h"
 #include "src/common/macros.h"
+#include "src/common/xstring.h"
 
 
 #ifndef INET_ADDRSTRLEN
@@ -306,14 +307,14 @@ static int validate_hostent_copy(
 		return(-1);
 	if (src->h_name == dst->h_name)
 		return(-1);
-	if (strcmp(src->h_name, dst->h_name))
+	if (xstrcmp(src->h_name, dst->h_name))
 		return(-1);
 	if (src->h_addrtype != dst->h_addrtype)
 		return(-1);
 	if (src->h_length != dst->h_length)
 		return(-1);
 	for (p=src->h_aliases, q=dst->h_aliases; *p; p++, q++)
-		if ((!q) || (p == q) || (strcmp(*p, *q)))
+		if ((!q) || (p == q) || (xstrcmp(*p, *q)))
 			return(-1);
 	for (p=src->h_addr_list, q=dst->h_addr_list; *p; p++, q++)
 		if ((!q) || (p == q) || (memcmp(*p, *q, src->h_length)))
@@ -412,3 +413,54 @@ extern char *make_full_path(char *rpath)
 	return cwd2;
 }
 
+struct addrinfo *
+get_addr_info(const char *hostname)
+{
+	struct addrinfo* result = NULL;
+	struct addrinfo hints;
+	int err;
+
+	if (hostname == NULL)
+		return NULL;
+
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_flags = AI_CANONNAME;
+
+	err = getaddrinfo(hostname, NULL, &hints, &result);
+	if (err == EAI_SYSTEM) {
+		error("%s: getaddrinfo() failed: %s: %m", __func__,
+		      gai_strerror(err));
+		return NULL;
+	} else if (err != 0) {
+		error("%s: getaddrinfo() failed: %s", __func__,
+		      gai_strerror(err));
+		return NULL;
+	}
+
+	return result;
+}
+
+int
+get_name_info(struct sockaddr *sa, socklen_t len, char *host)
+{
+	int err;
+
+        err = getnameinfo(sa, len, host, NI_MAXHOST, NULL, 0, 0);
+	if (err != 0) {
+		error("%s: getaddrinfo() failed: %s", __func__,
+		      gai_strerror(err));
+		return -1;
+	}
+
+	return 0;
+}
+
+void
+free_addr_info(struct addrinfo *info)
+{
+	if (info == NULL)
+		return;
+
+	freeaddrinfo(info);
+}

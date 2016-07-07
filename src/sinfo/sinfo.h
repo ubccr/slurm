@@ -108,6 +108,7 @@ typedef struct {
 
 	char *version;
 	char *features;
+	char *features_act;
 	char *gres;
 	char *reason;
 	time_t reason_time;
@@ -119,7 +120,7 @@ typedef struct {
 	hostlist_t ionodes;
 
 	/* part_info contains partition, avail, max_time, job_size,
-	 * root, share, groups, priority */
+	 * root, share/oversubscribe, groups, priority */
 	partition_info_t* part_info;
 	uint16_t part_inx;
 } sinfo_data_t;
@@ -136,6 +137,7 @@ struct sinfo_match_flags {
 	bool sct_flag;
 	bool disk_flag;
 	bool features_flag;
+	bool features_act_flag;
 	bool groups_flag;
 	bool gres_flag;
 	bool hostnames_flag;
@@ -146,10 +148,11 @@ struct sinfo_match_flags {
 	bool node_addr_flag;
 	bool partition_flag;
 	bool preempt_mode_flag;
-	bool priority_flag;
+	bool priority_job_factor_flag;
+	bool priority_tier_flag;
 	bool reason_flag;
 	bool root_flag;
-	bool share_flag;
+	bool oversubscribe_flag;
 	bool state_flag;
 	bool weight_flag;
 	bool reason_timestamp_flag;

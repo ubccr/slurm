@@ -1,4 +1,4 @@
-#!/usr/bin/expect
+#!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
 #          Validates that the OR dependency option is enforced
@@ -42,11 +42,16 @@ set exit_code     0
 print_header $test_id
 
 set select_type [test_select_type]
+set def_part_name [default_partition]
+set nb_nodes [get_node_cnt_in_part $def_part_name]
 if {![string compare $select_type "linear"]} {
-	set def_part_name [default_partition]
-	set nb_nodes [get_node_cnt_in_part $def_part_name]
 	if {$nb_nodes < 2} {
 		send_user "\nWARNING: This test is incompatible with select/linear and only one node\n"
+		exit $exit_code
+	}
+} elseif {[default_part_exclusive]} {
+	if {$nb_nodes < 2} {
+		send_user "\nWARNING: This test is incompatible with exclusive node allocations and only one node\n"
 		exit $exit_code
 	}
 }
@@ -80,8 +85,8 @@ proc check_state {id state} {
 	}
 }
 
-# Submit job 1 of 2
-spawn $sbatch -t3 -o/dev/null $slow_job
+# Submit job 1 of 3
+spawn $sbatch -t3 -o/dev/null --mem=10 $slow_job
 expect {
 	-re "Submitted batch job ($number)" {
 		set slow_id $expect_out(1,string)
@@ -100,8 +105,8 @@ if {$slow_id == 0} {
 	exit 1
 }
 
-# Submit job 2 of 2
-spawn $sbatch -t3 -o/dev/null $fast_job
+# Submit job 2 of 3
+spawn $sbatch -t3 -o/dev/null --mem=10 $fast_job
 expect {
 	-re "Node count specification invalid" {
 		send_user "\nWARNING: can't test with less than two nodes\n"
@@ -124,8 +129,8 @@ if {$fast_id == 0} {
 	exit 1
 }
 
-# Submit dependency job
-spawn $sbatch --dependency=afterok:$slow_id?afterok:$fast_id -o/dev/null $slow_job
+# Submit dependency job, 3 of 3
+spawn $sbatch --dependency=afterok:$slow_id?afterok:$fast_id -o/dev/null --mem=10 $slow_job
 expect {
 	-re "Submitted batch job ($number)" {
 		set dep_id $expect_out(1,string)

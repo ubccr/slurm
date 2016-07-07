@@ -1,7 +1,5 @@
 /*****************************************************************************
- *  $Id$
- *****************************************************************************
- *  $LSDId: cbuf.c,v 1.35 2005/01/13 00:41:17 dun Exp $
+ *  cbuf.c
  *****************************************************************************
  *  Copyright (C) 2002-2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -165,14 +163,6 @@ static int cbuf_is_valid (cbuf_t cb);
 /************
  *  Macros  *
  ************/
-
-#ifndef MAX
-#  define MAX(x,y) (((x) >= (y)) ? (x) : (y))
-#endif /* !MAX */
-
-#ifndef MIN
-#  define MIN(x,y) (((x) <= (y)) ? (x) : (y))
-#endif /* !MIN */
 
 #ifdef WITH_PTHREADS
 

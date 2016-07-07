@@ -1,7 +1,5 @@
 /*****************************************************************************\
- *  $Id$
- *****************************************************************************
- *  $LSDId: hostlist.c,v 1.14 2003/10/14 20:11:54 grondo Exp $
+ *  hostlist.c
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -863,7 +861,7 @@ static hostrange_t hostrange_delete_host(hostrange_t hr, unsigned long n)
 
 /* hostrange_cmp() is used to sort hostrange objects. It will
  * sort based on the following (in order):
- *  o result of strcmp on prefixes
+ *  o result of xstrcmp on prefixes
  *  o if widths are compatible, then:
  *       sort based on lowest suffix in range
  *    else
@@ -1606,7 +1604,7 @@ hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op,
 			 */
 			if (pos > 0) {
 				if (pos != strlen(prefix) ||
-				    strncmp(prefix, tok, pos) != 0)
+				    xstrncmp(prefix, tok, pos) != 0)
 					error = 1;
 			}
 
@@ -2702,12 +2700,13 @@ static int _is_bracket_needed(hostlist_t hl, int i)
  * Assumes hostlist is locked.
  */
 static int
-_get_bracketed_list(hostlist_t hl, int *start, const size_t n, char *buf)
+_get_bracketed_list(hostlist_t hl, int *start, const size_t n, char *buf,
+		    int brackets)
 {
 	hostrange_t *hr = hl->hr;
 	int i = *start;
 	int m, len = 0;
-	int bracket_needed = _is_bracket_needed(hl, i);
+	int bracket_needed = brackets ? _is_bracket_needed(hl, i) : 0;
 	int zeropad = 0;
 
 	if (is_cray_system()) {
@@ -3300,7 +3299,8 @@ notbox:
 		for (i = 0; i < hl->nranges && len < n;) {
 			if (i)
 				buf[len++] = ',';
-			len += _get_bracketed_list(hl, &i, n - len, buf + len);
+			len += _get_bracketed_list(hl, &i, n - len, buf + len,
+						   brackets);
 		}
 	}
 
@@ -3502,7 +3502,7 @@ char *hostlist_next_range(hostlist_iterator_t i)
 	buf_size = 8192;
 	buf = malloc(buf_size);
 	if (buf &&
-	    (_get_bracketed_list(i->hl, &j, buf_size, buf) == buf_size)) {
+	    (_get_bracketed_list(i->hl, &j, buf_size, buf, 1) == buf_size)) {
 		buf_size *= 2;
 		buf = realloc(buf, buf_size);
 	}

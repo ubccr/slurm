@@ -168,7 +168,9 @@ typedef struct salloc_options {
 	uint32_t cpu_freq_max;  /* Maximum cpu frequency  */
 	uint32_t cpu_freq_gov;  /* cpu frequency governor */
 	uint8_t power_flags;	/* Power management options	*/
-	uint8_t sicp_mode;	/* Inter-cluster job ID		*/
+	char *mcs_label;	/* mcs label if mcs plugin in use */
+	time_t deadline;	/* --deadline                   */
+	uint32_t job_flags;	/* --kill_invalid_dep, --gres-flags */
 } opt_t;
 
 extern opt_t opt;

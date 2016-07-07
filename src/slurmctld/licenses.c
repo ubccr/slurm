@@ -418,7 +418,7 @@ extern void license_remove_remote(slurmdb_res_rec_t *rec)
 	while ((license_entry = list_next(iter))) {
 		if (!license_entry->remote)
 			continue;
-		if (!strcmp(license_entry->name, name)) {
+		if (!xstrcmp(license_entry->name, name)) {
 			info("license_remove_remote: license %s "
 			     "removed with %u in use",
 			     license_entry->name, license_entry->used);
@@ -459,7 +459,7 @@ extern void license_sync_remote(List res_list)
 			while ((license_entry = list_next(iter))) {
 				if (!license_entry->remote)
 					continue;
-				if (!strcmp(license_entry->name, name)) {
+				if (!xstrcmp(license_entry->name, name)) {
 					license_entry->remote = 2;
 					license_entry->total =
 						((rec->count *
@@ -962,7 +962,7 @@ extern void license_set_job_tres_cnt(List license_list,
 static void
 _pack_license(struct licenses *lic, Buf buffer, uint16_t protocol_version)
 {
-	if (protocol_version >= SLURM_14_03_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		packstr(lic->name, buffer);
 		pack32(lic->total, buffer);
 		pack32(lic->used, buffer);

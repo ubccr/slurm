@@ -93,6 +93,9 @@ static pthread_t commit_handler_thread;	/* thread ID for commit hander */
 static pthread_mutex_t rollup_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool running_rollup = 0;
 static bool running_commit = 0;
+static bool restart_backup = false;
+static bool reset_lft_rgt = 0;
+static List lft_rgt_list = NULL;
 
 /* Local functions */
 static void  _become_slurm_user(void);
@@ -113,12 +116,14 @@ static void *_signal_handler(void *no_data);
 static void  _update_logging(bool startup);
 static void  _update_nice(void);
 static void  _usage(char *prog_name);
+static void  _restart_self(int argc, char **argv);
 
 /* main - slurmctld main function, start various threads and process RPCs */
 int main(int argc, char *argv[])
 {
 	pthread_attr_t thread_attr;
-	char node_name[128];
+	char node_name_short[128];
+	char node_name_long[128];
 	void *db_conn = NULL;
 	assoc_init_args_t assoc_init_arg;
 
@@ -195,13 +200,28 @@ int main(int argc, char *argv[])
 		goto end_it;
 	}
 
-	if (gethostname_short(node_name, sizeof(node_name)))
+	if (reset_lft_rgt) {
+		int rc;
+		if ((rc = acct_storage_g_reset_lft_rgt(
+			     db_conn, slurmdbd_conf->slurm_user_id,
+			     lft_rgt_list)) != SLURM_SUCCESS)
+			fatal("Error when trying to reset lft and rgt's");
+
+		if (acct_storage_g_commit(db_conn, 1))
+			fatal("commit failed, meaning reset failed");
+		FREE_NULL_LIST(lft_rgt_list);
+	}
+
+	if (gethostname(node_name_long, sizeof(node_name_long)))
 		fatal("getnodename: %m");
+	if (gethostname_short(node_name_short, sizeof(node_name_short)))
+		fatal("getnodename_short: %m");
 
 	while (1) {
 		if (slurmdbd_conf->dbd_backup &&
-		    (!strcmp(node_name, slurmdbd_conf->dbd_backup) ||
-		     !strcmp(slurmdbd_conf->dbd_backup, "localhost"))) {
+		    (!xstrcmp(node_name_short, slurmdbd_conf->dbd_backup) ||
+		     !xstrcmp(node_name_long, slurmdbd_conf->dbd_backup) ||
+		     !xstrcmp(slurmdbd_conf->dbd_backup, "localhost"))) {
 			info("slurmdbd running in background mode");
 			have_control = false;
 			backup = true;
@@ -211,14 +231,16 @@ int main(int argc, char *argv[])
 			if (!shutdown_time)
 				assoc_mgr_refresh_lists(db_conn, 0);
 		} else if (slurmdbd_conf->dbd_host &&
-			   (!strcmp(slurmdbd_conf->dbd_host, node_name) ||
-			    !strcmp(slurmdbd_conf->dbd_host, "localhost"))) {
+			   (!xstrcmp(slurmdbd_conf->dbd_host, node_name_short)||
+			    !xstrcmp(slurmdbd_conf->dbd_host, node_name_long) ||
+			    !xstrcmp(slurmdbd_conf->dbd_host, "localhost"))) {
 			backup = false;
 			have_control = true;
 		} else {
 			fatal("This host not configured to run SlurmDBD "
-			      "(%s != %s | (backup) %s)",
-			      node_name, slurmdbd_conf->dbd_host,
+			      "((%s or %s) != %s | (backup) %s)",
+			      node_name_short, node_name_long,
+			      slurmdbd_conf->dbd_host,
 			      slurmdbd_conf->dbd_backup);
 		}
 
@@ -259,7 +281,7 @@ int main(int argc, char *argv[])
 		if (rpc_handler_thread)
 			pthread_join(rpc_handler_thread, NULL);
 
-		if (backup && primary_resumed) {
+		if (backup && primary_resumed && !restart_backup) {
 			shutdown_time = 0;
 			info("Backup has given up control");
 		}
@@ -271,7 +293,7 @@ int main(int argc, char *argv[])
 
 end_it:
 
-	if (signal_handler_thread)
+	if (signal_handler_thread && (!backup || !restart_backup))
 		pthread_join(signal_handler_thread, NULL);
 	if (commit_handler_thread)
 		pthread_join(commit_handler_thread, NULL);
@@ -286,6 +308,13 @@ end_it:
 	}
 
 	FREE_NULL_LIST(registered_clusters);
+
+	if (backup && restart_backup) {
+		info("Primary has come back but backup is "
+		     "running the rollup. To avoid contention, "
+		     "the backup dbd will now restart.");
+		_restart_self(argc, argv);
+	}
 
 	assoc_mgr_fini(NULL);
 	slurm_acct_storage_fini();
@@ -353,7 +382,7 @@ static void _parse_commandline(int argc, char *argv[])
 	char *tmp_char;
 
 	opterr = 0;
-	while ((c = getopt(argc, argv, "Dhn:vV")) != -1)
+	while ((c = getopt(argc, argv, "Dhn:R::vV")) != -1)
 		switch (c) {
 		case 'D':
 			foreground = 1;
@@ -363,11 +392,20 @@ static void _parse_commandline(int argc, char *argv[])
 			exit(0);
 			break;
 		case 'n':
+			if (!optarg) /* CLANG fix */
+				break;
 			new_nice = strtol(optarg, &tmp_char, 10);
 			if (tmp_char[0] != '\0') {
 				error("Invalid option for -n option (nice "
 				      "value), ignored");
 				new_nice = 0;
+			}
+			break;
+		case 'R':
+			reset_lft_rgt = 1;
+			if (optarg) {
+				lft_rgt_list = list_create(slurm_destroy_char);
+				slurm_addto_char_list(lft_rgt_list, optarg);
 			}
 			break;
 		case 'v':
@@ -394,6 +432,12 @@ static void _usage(char *prog_name)
 		"Print this help message.\n");
 	fprintf(stderr, "  -n value   \t"
 		"Run the daemon at the specified nice value.\n");
+	fprintf(stderr, "  -R [Names] \t"
+		"Reset the lft and rgt values of the associations "
+		"\n\t\tin the given cluster list. "
+		"\n\t\tLft and rgt values are used to distinguish "
+		"\n\t\thierarical groups in the slurm accounting database.  "
+		"\n\t\tThis option should be very rarely used.\n");
 	fprintf(stderr, "  -v         \t"
 		"Verbose mode. Multiple -v's increase verbosity.\n");
 	fprintf(stderr, "  -V         \t"
@@ -557,12 +601,23 @@ static void _request_registrations(void *db_conn)
 
 static void _rollup_handler_cancel()
 {
-	if (running_rollup)
-		debug("Waiting for rollup thread to finish.");
-	slurm_mutex_lock(&rollup_lock);
-	if (rollup_handler_thread)
-		pthread_cancel(rollup_handler_thread);
-	slurm_mutex_unlock(&rollup_lock);
+	if (running_rollup) {
+		if (backup && running_rollup && primary_resumed)
+			debug("Hard cancelling rollup thread");
+		else
+			debug("Waiting for rollup thread to finish.");
+	}
+
+	if (rollup_handler_thread) {
+		if (backup && running_rollup && primary_resumed) {
+			pthread_cancel(rollup_handler_thread);
+			restart_backup = true;
+		} else {
+			slurm_mutex_lock(&rollup_lock);
+			pthread_cancel(rollup_handler_thread);
+			slurm_mutex_unlock(&rollup_lock);
+		}
+	}
 }
 
 /* _rollup_handler - Process rollup duties */
@@ -805,4 +860,11 @@ static void _become_slurm_user(void)
 		fatal("Can not set uid to SlurmUser(%u): %m",
 		      slurmdbd_conf->slurm_user_id);
 	}
+}
+
+extern void _restart_self(int argc, char **argv)
+{
+	info("Restarting self");
+	if (execvp(argv[0], argv))
+		fatal("failed to restart the dbd: %m");
 }

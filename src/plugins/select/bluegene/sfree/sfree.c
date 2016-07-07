@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  sfree.c - free specified block or all blocks.
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -96,10 +95,10 @@ static int _check_status()
 			while ((block_name = list_next(itr))) {
 				for (i=0; i<block_ptr->record_count;
 				     i++) {
-					if (!strcmp(block_name,
-						    block_ptr->
-						    block_array[i].
-						    bg_block_id)) {
+					if (!xstrcmp(block_name,
+						     block_ptr->
+						     block_array[i].
+						     bg_block_id)) {
 						if (block_ptr->
 						    block_array[i].
 						    state == BG_BLOCK_FREE)

@@ -1039,8 +1039,7 @@ static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
 			*/
 			if (!(req->cpu_bind_type & CPU_BIND_ONE_THREAD_PER_CORE)
 			    && ((req->cpu_bind_type & CPU_BIND_TO_CORES)
-				|| (slurm_get_select_type_param() &
-				    CR_ONE_TASK_PER_CORE))) {
+				|| (req->ntasks_per_core == 1))) {
 				int threads_not_used;
 				if (req->cpus_per_task < hw_threads)
 					threads_not_used =
@@ -1104,6 +1103,7 @@ static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 	int max_cpus = max_tasks * req->cpus_per_task;
 	bitstr_t *avail_map;
 	bitstr_t **masks = NULL;
+	int sock_inx, pu_per_socket, *socket_tasks = NULL;
 
 	info("_task_layout_lllp_block ");
 
@@ -1138,6 +1138,9 @@ static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 	*masks_p = xmalloc(max_tasks * sizeof(bitstr_t*));
 	masks = *masks_p;
 
+	pu_per_socket = hw_cores * hw_threads;
+	socket_tasks = xmalloc(hw_sockets);
+
 	/* block distribution with oversubsciption */
 	c = 0;
 	while (taskcount < max_tasks) {
@@ -1152,6 +1155,12 @@ static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 			/* skip unavailable resources */
 			if (bit_test(avail_map, i) == 0)
 				continue;
+
+			sock_inx = i / pu_per_socket;
+			if ((req->ntasks_per_socket != 0) &&
+			    (socket_tasks[sock_inx] >= req->ntasks_per_socket))
+				continue;
+			socket_tasks[sock_inx]++;
 
 			if (!masks[taskcount])
 				masks[taskcount] = bit_alloc(
@@ -1174,8 +1183,7 @@ static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 			*/
 			if (!(req->cpu_bind_type & CPU_BIND_ONE_THREAD_PER_CORE)
 			    && ((req->cpu_bind_type & CPU_BIND_TO_CORES)
-				|| (slurm_get_select_type_param() &
-				    CR_ONE_TASK_PER_CORE))) {
+				|| (req->ntasks_per_core == 1))) {
 				int threads_not_used;
 				if (req->cpus_per_task < hw_threads)
 					threads_not_used =
@@ -1189,7 +1197,10 @@ static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 			if (++taskcount >= max_tasks)
 				break;
 		}
+		for (i = 0; i < hw_sockets; i++)
+			socket_tasks[i] = 0;
 	}
+	xfree(socket_tasks);
 
 	/* last step: expand the masks to bind each task
 	 * to the requested resource */

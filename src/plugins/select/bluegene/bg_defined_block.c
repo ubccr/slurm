@@ -1,7 +1,5 @@
 /*****************************************************************************\
  *  defined_block.c - functions for creating blocks in a static environment.
- *
- *  $Id: defined_block.c 12954 2008-01-04 20:37:49Z da $
  *****************************************************************************
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -174,7 +172,7 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 						 name);
 
 					xfree(name);
-					if (strcmp(temp, bg_record->mp_str)) {
+					if (xstrcmp(temp, bg_record->mp_str)) {
 						fatal("given list of %s "
 						      "but allocated %s, "
 						      "your order might be "
@@ -345,7 +343,7 @@ extern int create_full_system_block(List bg_found_block_list)
 			if (bg_record->cnode_cnt < bg_conf->mp_cnode_cnt)
 				continue;
 
-			if (!strcmp(name, bg_record->mp_str)) {
+			if (!xstrcmp(name, bg_record->mp_str)) {
 				xfree(name);
 				list_iterator_destroy(itr);
 				/* don't create total already there */
@@ -374,7 +372,7 @@ extern int create_full_system_block(List bg_found_block_list)
 			if (bg_record->cnode_cnt < bg_conf->mp_cnode_cnt)
 				continue;
 
-			if (!strcmp(name, bg_record->mp_str)) {
+			if (!xstrcmp(name, bg_record->mp_str)) {
 				debug2("create_full_system_block: not "
 				       "implicitly adding full system block -"
 				       " block already defined");

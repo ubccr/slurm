@@ -1,8 +1,7 @@
 #!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
-#          Validates the rpm build is accepting the prefix and that
-#          Slurm is being built in the correct directories.
+#          Validates that RPMs are built with the correct prefix.
 #
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -32,7 +31,7 @@
 ############################################################################
 source ./globals
 
-set test_id      "test30.1"
+set test_id      "30.1"
 set tar_name     "Slurm-0-0.tar.bz2"
 set prefix_loc   "_prefix /opt/slurm"
 set rpm_loc      "/opt/slurm"
@@ -82,7 +81,7 @@ if { [catch {exec which rpmbuild}]} {
 }
 
 
-set timeout 1000
+set timeout 1200
 exec $bin_rm -fr /tmp/slurm $tar_name /tmp/built_rpms
 spawn $bin_cp -L -R -v $src_dir /tmp/slurm
 expect {
@@ -180,7 +179,7 @@ expect {
 	}
 }
 set rpm_path "${rpm_base}/${sub_dir}/Slurm-0-0.${sub_dir}.rpm"
-set timeout 1000
+set timeout 1200
 
 # Check to see that srun man pages are in the correct directory.
 check_path /opt/slurm srun.1

@@ -84,6 +84,8 @@ static int _set_wckey_cond(int *start, int argc, char *argv[],
 
 	if (!wckey_cond->cluster_list)
 		wckey_cond->cluster_list = list_create(slurm_destroy_char);
+	if (cluster_flag)
+		slurm_addto_char_list(wckey_cond->cluster_list, cluster_flag);
 
 	for (i = (*start); i < argc; i++) {
 		end = parse_option_end(argv[i]);
@@ -150,6 +152,7 @@ static int _set_wckey_cond(int *start, int argc, char *argv[],
 	(*start) = i;
 
 	if (!local_cluster_flag && !list_count(wckey_cond->cluster_list)) {
+		/* Get the default Cluster since no cluster is specified */
 		char *temp = slurm_get_cluster_name();
 		if (temp)
 			list_append(wckey_cond->cluster_list, temp);
@@ -189,6 +192,9 @@ static int _set_assoc_cond(int *start, int argc, char *argv[],
 
 	if (!assoc_cond->cluster_list)
 		assoc_cond->cluster_list = list_create(slurm_destroy_char);
+	if (cluster_flag)
+		slurm_addto_char_list(assoc_cond->cluster_list, cluster_flag);
+
 	for (i = (*start); i < argc; i++) {
 		end = parse_option_end(argv[i]);
 		if (!end)
@@ -252,6 +258,7 @@ static int _set_assoc_cond(int *start, int argc, char *argv[],
 	(*start) = i;
 
 	if (!local_cluster_flag && !list_count(assoc_cond->cluster_list)) {
+		/* Get the default Cluster since no cluster is specified */
 		char *temp = slurm_get_cluster_name();
 		if (temp)
 			list_append(assoc_cond->cluster_list, temp);
@@ -290,6 +297,9 @@ static int _set_cluster_cond(int *start, int argc, char *argv[],
 
 	if (!cluster_cond->cluster_list)
 		cluster_cond->cluster_list = list_create(slurm_destroy_char);
+	if (cluster_flag)
+		slurm_addto_char_list(cluster_cond->cluster_list, cluster_flag);
+
 	for (i = (*start); i < argc; i++) {
 		end = parse_option_end(argv[i]);
 		if (!end)
@@ -332,6 +342,7 @@ static int _set_cluster_cond(int *start, int argc, char *argv[],
 	(*start) = i;
 
 	if (!local_cluster_flag && !list_count(cluster_cond->cluster_list)) {
+		/* Get the default Cluster since no cluster is specified */
 		char *temp = slurm_get_cluster_name();
 		if (temp)
 			list_append(cluster_cond->cluster_list, temp);

@@ -213,6 +213,12 @@ extern int other_job_resized(struct job_record *job_ptr,
 extern int other_job_signal(struct job_record *job_ptr, int signal);
 
 /*
+ * Pass job memory allocation confirmation request to other plugin.
+ * IN job_ptr - job to be signalled
+ */
+extern int other_job_mem_confirm(struct job_record *job_ptr);
+
+/*
  * Note termination of job is starting. Executed from slurmctld.
  * IN job_ptr - pointer to job being terminated
  */
@@ -257,8 +263,10 @@ extern int other_step_start(struct step_record *step_ptr);
 /*
  * clear what happened in select_g_step_pick_nodes
  * IN/OUT step_ptr - Flush the resources from the job and step.
+ * IN killing_step - if true then we are just starting to kill the step
+ *                   if false, the step is completely terminated
  */
-extern int other_step_finish(struct step_record *step_ptr);
+extern int other_step_finish(struct step_record *step_ptr, bool killing_step);
 
 /* allocate storage for a select job credential
  * RET jobinfo - storage for a select job credential

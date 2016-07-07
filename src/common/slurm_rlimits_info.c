@@ -1,8 +1,6 @@
 /*****************************************************************************\
  *  slurm_rlimits_info.c - resource limits that are used by srun and the slurmd
- *  $Id: slurm.hp.rlimits.patch,v 1.5 2005/07/18 18:39:11 danielc Exp $
  *****************************************************************************
- *
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *
  *  This file is part of SLURM, a resource management program.
@@ -126,12 +124,12 @@ parse_rlimits( char *rlimits_str, int propagate_flag )
 
 	xassert( rlimits_str );
 
-	if (strcmp(rlimits_str, "NONE") == 0) {
+	if (xstrcmp(rlimits_str, "NONE") == 0) {
 		propagate_none = true;
 		propagate_flag = !propagate_flag;
 	}
 
-	if (propagate_none || strcmp( rlimits_str, "ALL" ) == 0) {
+	if (propagate_none || xstrcmp( rlimits_str, "ALL" ) == 0) {
 		/*
 		 * Propagate flag value applies to all rlimits
 		 */
@@ -158,9 +156,9 @@ parse_rlimits( char *rlimits_str, int propagate_flag )
 				/*
 				 * Accept either "RLIMIT_CORE" or "CORE"
 				 */
-				if (strncmp( tp, RLIMIT_, LEN_RLIMIT_ ) == 0)
+				if (xstrncmp( tp, RLIMIT_, LEN_RLIMIT_ ) == 0)
 					tp += LEN_RLIMIT_;
-				if (strcmp( tp, rli->name ))
+				if (xstrcmp( tp, rli->name ))
 					continue;
 				rli->propagate_flag = propagate_flag;
 				found = TRUE;

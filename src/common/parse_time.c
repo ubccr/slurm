@@ -55,6 +55,8 @@
 #include "slurm/slurm.h"
 #include "src/common/macros.h"
 #include "src/common/slurm_time.h"
+#include "src/common/strlcpy.h"
+#include "src/common/xstring.h"
 
 #define _RUN_STAND_ALONE 0
 
@@ -727,15 +729,15 @@ slurm_make_time_str (time_t *time, char *string, int size)
 			/* Format MM/DD-HH:MM:SS */
 			display_fmt = "%m/%d-%T";
 #endif
-			if ((!fmt) || (!*fmt) || (!strcmp(fmt, "standard"))) {
+			if ((!fmt) || (!*fmt) || (!xstrcmp(fmt, "standard"))) {
 				;
-			} else if (strcmp(fmt, "relative") == 0) {
+			} else if (xstrcmp(fmt, "relative") == 0) {
 				use_relative_format = true;
 			} else if ((strchr(fmt, '%')  == NULL) ||
 				   (strlen(fmt) >= sizeof(fmt_buf))) {
 				error("invalid SLURM_TIME_FORMAT = '%s'", fmt);
 			} else {
-				strncpy(fmt_buf, fmt, sizeof(fmt_buf));
+				strlcpy(fmt_buf, fmt, sizeof(fmt_buf));
 				display_fmt = fmt_buf;
 			}
 		}
@@ -779,9 +781,9 @@ extern int time_str2secs(const char *string)
 	if ((string == NULL) || (string[0] == '\0'))
 		return NO_VAL;	/* invalid input */
 
-	if ((!strcasecmp(string, "-1"))
-	    || (!strcasecmp(string, "INFINITE"))
-	    || (!strcasecmp(string, "UNLIMITED"))) {
+	if ((!xstrcasecmp(string, "-1"))
+	    || (!xstrcasecmp(string, "INFINITE"))
+	    || (!xstrcasecmp(string, "UNLIMITED"))) {
 		return INFINITE;
 	}
 

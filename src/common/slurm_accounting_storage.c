@@ -1,8 +1,5 @@
-
 /*****************************************************************************\
  *  slurm_accounting_storage.c - account storage plugin wrapper.
- *
- *  $Id: slurm_accounting_storage.c 10744 2007-01-11 20:09:18Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -173,6 +170,7 @@ typedef struct slurm_acct_storage_ops {
 	int (*roll_usage)          (void *db_conn,
 				    time_t sent_start, time_t sent_end,
 				    uint16_t archive_data);
+	int (*fix_lost_jobs)       (void *db_conn, uint32_t uid, List jobs);
 	int  (*node_down)          (void *db_conn,
 				    struct node_record *node_ptr,
 				    time_t event_time,
@@ -206,6 +204,8 @@ typedef struct slurm_acct_storage_ops {
 	int (*flush_jobs)          (void *db_conn,
 				    time_t event_time);
 	int (*reconfig)            (void *db_conn, bool dbd);
+	int (*reset_lft_rgt)       (void *db_conn, uid_t uid,
+				    List cluster_list);
 } slurm_acct_storage_ops_t;
 /*
  * Must be synchronized with slurm_acct_storage_ops_t above.
@@ -257,6 +257,7 @@ static const char *syms[] = {
 	"acct_storage_p_get_txn",
 	"acct_storage_p_get_usage",
 	"acct_storage_p_roll_usage",
+	"acct_storage_p_fix_lost_jobs",
 	"clusteracct_storage_p_node_down",
 	"clusteracct_storage_p_node_up",
 	"clusteracct_storage_p_cluster_tres",
@@ -274,6 +275,7 @@ static const char *syms[] = {
 	"acct_storage_p_update_shares_used",
 	"acct_storage_p_flush_jobs_on_cluster",
 	"acct_storage_p_reconfig",
+	"acct_storage_p_reset_lft_rgt",
 };
 
 static slurm_acct_storage_ops_t ops;
@@ -731,6 +733,14 @@ extern int acct_storage_g_roll_usage(void *db_conn,
 	return (*(ops.roll_usage))(db_conn, sent_start, sent_end, archive_data);
 }
 
+extern int acct_storage_g_fix_lost_jobs(void *db_conn, uint32_t uid, List jobs)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return SLURM_ERROR;
+	return (*(ops.fix_lost_jobs))(db_conn, uid, jobs);
+
+}
+
 extern int clusteracct_storage_g_node_down(void *db_conn,
 					   struct node_record *node_ptr,
 					   time_t event_time,
@@ -1001,5 +1011,18 @@ extern int acct_storage_g_reconfig(void *db_conn, bool dbd)
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;
 	return (*(ops.reconfig))(db_conn, dbd);
+
+}
+
+/*
+ * Reset the lft and rights of an association table.
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int acct_storage_g_reset_lft_rgt(void *db_conn, uid_t uid,
+					List cluster_list)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return SLURM_ERROR;
+	return (*(ops.reset_lft_rgt))(db_conn, uid, cluster_list);
 
 }

@@ -42,6 +42,12 @@ set delay       10
 
 print_header $test_id
 
+set enforce [test_enforce_part_limits]
+if {![string compare $enforce "NO"]} {
+	send_user "\nWARNING: This test is incompatible EnforcePartLimits = $enforce\n"
+	exit 0
+}
+
 make_bash_script $file_in "
 #SBATCH --job-name='$job_name'
 $bin_sleep $delay
@@ -88,8 +94,7 @@ if {$matches != 1} {
 #
 # Build input script file
 #
-make_bash_script $file_in "
-#SBATCH -N1000000k
+make_bash_script $file_in "#SBATCH -N1000000k
 $bin_sleep $delay
 "
 set match 0
@@ -105,7 +110,7 @@ expect {
 		send_user "\nFAILURE: Test B was supposed to fail submission\n"
 		set exit_code 1
 		cancel_job $job_id
-	    exit 1
+		exit 1
 	}
 	timeout {
 		send_user "\nFAILURE: sbatch not responding\n"

@@ -580,7 +580,7 @@ static int _mod_assoc(sacctmgr_file_opts_t *file_opts,
 			   file_opts->assoc_rec.max_wall_pj);
 	}
 	if (assoc->parent_acct && parent
-	    && strcmp(assoc->parent_acct, parent)) {
+	    && xstrcmp(assoc->parent_acct, parent)) {
 		mod_assoc.parent_acct = parent;
 		changed = 1;
 		xstrfmtcat(my_info,
@@ -604,7 +604,7 @@ static int _mod_assoc(sacctmgr_file_opts_t *file_opts,
 			mod_assoc.qos_list = list_create(slurm_destroy_char);
 		while ((new_qos = list_next(new_qos_itr))) {
 			while ((now_qos = list_next(now_qos_itr))) {
-				if (!strcmp(new_qos, now_qos))
+				if (!xstrcmp(new_qos, now_qos))
 					break;
 			}
 			list_iterator_reset(now_qos_itr);
@@ -784,7 +784,7 @@ static int _mod_acct(sacctmgr_file_opts_t *file_opts,
 	if (file_opts->desc)
 		desc = xstrdup(file_opts->desc);
 
-	if (desc && strcmp(desc, acct->description)) {
+	if (desc && xstrcmp(desc, acct->description)) {
 		xstrfmtcat(my_info,
 			   "%-30.30s for %-7.7s %-10.10s %8s -> %s\n",
 			   " Changed description", "Account",
@@ -799,7 +799,7 @@ static int _mod_acct(sacctmgr_file_opts_t *file_opts,
 	if (file_opts->org)
 		org = xstrdup(file_opts->org);
 
-	if (org && strcmp(org, acct->organization)) {
+	if (org && xstrcmp(org, acct->organization)) {
 		xstrfmtcat(my_info,
 			   "%-30.30s for %-7.7s %-10.10s %8s -> %s\n",
 			   " Changed organization", "Account",
@@ -875,7 +875,7 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 		def_acct = xstrdup(file_opts->def_acct);
 
 	if (def_acct &&
-	    (!user->default_acct || strcmp(def_acct, user->default_acct))) {
+	    (!user->default_acct || xstrcmp(def_acct, user->default_acct))) {
 		xstrfmtcat(my_info,
 			   "%-30.30s for %-7.7s %-10.10s %8s -> %s\n",
 			   " Changed Default Account", "User",
@@ -890,7 +890,7 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 		def_wckey = xstrdup(file_opts->def_wckey);
 
 	if (def_wckey &&
-	    (!user->default_wckey || strcmp(def_wckey, user->default_wckey))) {
+	    (!user->default_wckey || xstrcmp(def_wckey, user->default_wckey))) {
 		xstrfmtcat(my_info,
 			   "%-30.30s for %-7.7s %-10.10s %8s -> %s\n",
 			   " Changed Default WCKey", "User",
@@ -992,7 +992,7 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 			while ((coord = list_next(coord_itr))) {
 				if (!coord->direct)
 					continue;
-				if (!strcmp(coord->name, temp_char)) {
+				if (!xstrcmp(coord->name, temp_char)) {
 					break;
 				}
 			}
@@ -1036,7 +1036,7 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 			wckey->name = xstrdup(temp_char);
 			wckey->cluster = xstrdup(cluster);
 			wckey->user = xstrdup(user->name);
-			if (!strcmp(wckey->name, user->default_wckey))
+			if (!xstrcmp(wckey->name, user->default_wckey))
 				wckey->is_def = 1;
 			list_push(user->wckey_list, wckey);
 
@@ -1066,7 +1066,7 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 
 		while ((temp_char = list_next(char_itr))) {
 			while ((wckey = list_next(wckey_itr))) {
-				if (!strcmp(wckey->name, temp_char))
+				if (!xstrcmp(wckey->name, temp_char))
 					break;
 			}
 			if (!wckey) {
@@ -1076,7 +1076,7 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 				wckey->name = xstrdup(temp_char);
 				wckey->cluster = xstrdup(cluster);
 				wckey->user = xstrdup(user->name);
-				if (!strcmp(wckey->name, user->default_wckey))
+				if (!xstrcmp(wckey->name, user->default_wckey))
 					wckey->is_def = 1;
 
 				list_append(add_list, wckey);
@@ -1164,7 +1164,7 @@ static slurmdb_user_rec_t *_set_user_up(sacctmgr_file_opts_t *file_opts,
 			wckey->name = xstrdup(temp_char);
 			wckey->user = xstrdup(user->name);
 			wckey->cluster = xstrdup(cluster);
-			if (!strcmp(wckey->name, user->default_wckey))
+			if (!xstrcmp(wckey->name, user->default_wckey))
 				wckey->is_def = 1;
 			list_push(user->wckey_list, wckey);
 		}
@@ -1189,7 +1189,7 @@ static slurmdb_account_rec_t *_set_acct_up(sacctmgr_file_opts_t *file_opts,
 		acct->description = xstrdup(file_opts->name);
 	if (file_opts->org)
 		acct->organization = xstrdup(file_opts->org);
-	else if (strcmp(parent, "root"))
+	else if (xstrcmp(parent, "root"))
 		acct->organization = xstrdup(parent);
 	else
 		acct->organization = xstrdup(file_opts->name);
@@ -1234,7 +1234,7 @@ static slurmdb_assoc_rec_t *_set_assoc_up(sacctmgr_file_opts_t *file_opts,
 		assoc->cluster = xstrdup(cluster);
 		assoc->partition = xstrdup(file_opts->assoc_rec.partition);
 		assoc->user = xstrdup(file_opts->name);
-		if (!strcmp(assoc->acct, file_opts->def_acct))
+		if (!xstrcmp(assoc->acct, file_opts->def_acct))
 			assoc->is_def = 1;
 		break;
 	default:
@@ -1407,7 +1407,8 @@ extern int print_file_add_limits_to_line(char **line,
 	if (assoc->grp_tres_mins) {
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
-			assoc->grp_tres_mins, g_tres_list);
+			assoc->grp_tres_mins, g_tres_list, NO_VAL,
+			CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(*line, ":GrpTRESMins=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1415,7 +1416,8 @@ extern int print_file_add_limits_to_line(char **line,
 	if (assoc->grp_tres_run_mins) {
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
-			assoc->grp_tres_run_mins, g_tres_list);
+			assoc->grp_tres_run_mins, g_tres_list, NO_VAL,
+			CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(*line, ":GrpTRESRunMins=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1423,7 +1425,8 @@ extern int print_file_add_limits_to_line(char **line,
 	if (assoc->grp_tres) {
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
-			assoc->grp_tres, g_tres_list);
+			assoc->grp_tres, g_tres_list, NO_VAL,
+			CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(*line, ":GrpTRES=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1440,7 +1443,8 @@ extern int print_file_add_limits_to_line(char **line,
 	if (assoc->max_tres_mins_pj) {
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
-			assoc->max_tres_mins_pj, g_tres_list);
+			assoc->max_tres_mins_pj, g_tres_list, NO_VAL,
+			CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(*line, ":MaxTRESMinsPerJob=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1448,7 +1452,8 @@ extern int print_file_add_limits_to_line(char **line,
 	if (assoc->max_tres_run_mins) {
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
-			assoc->max_tres_run_mins, g_tres_list);
+			assoc->max_tres_run_mins, g_tres_list, NO_VAL,
+			CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(*line, ":MaxTRESRunMins=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1456,7 +1461,8 @@ extern int print_file_add_limits_to_line(char **line,
 	if (assoc->max_tres_pj) {
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
-			assoc->max_tres_pj, g_tres_list);
+			assoc->max_tres_pj, g_tres_list, NO_VAL,
+			CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(*line, ":MaxTRESPerJob=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1464,7 +1470,8 @@ extern int print_file_add_limits_to_line(char **line,
 	if (assoc->max_tres_pn) {
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
-			assoc->max_tres_pn, g_tres_list);
+			assoc->max_tres_pn, g_tres_list, NO_VAL,
+			CONVERT_NUM_UNIT_EXACT);
 		xstrfmtcat(*line, ":MaxTRESPerNode=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1695,8 +1702,8 @@ extern void load_sacctmgr_cfg_file (int argc, char *argv[])
 		}
 		start++;
 
-		if (!strcasecmp("Machine", object)
-		    || !strcasecmp("Cluster", object)) {
+		if (!xstrcasecmp("Machine", object)
+		    || !xstrcasecmp("Cluster", object)) {
 			slurmdb_assoc_cond_t assoc_cond;
 
 			if (cluster_name && !cluster_name_set) {
@@ -1885,7 +1892,7 @@ extern void load_sacctmgr_cfg_file (int argc, char *argv[])
 			break;
 		}
 
-		if (!strcasecmp("Parent", object)) {
+		if (!xstrcasecmp("Parent", object)) {
 			file_opts = _parse_options(line+start);
 			xfree(parent);
 
@@ -1918,8 +1925,8 @@ extern void load_sacctmgr_cfg_file (int argc, char *argv[])
 			       "before any children in your file\n");
 		}
 
-		if (!strcasecmp("Project", object)
-		    || !strcasecmp("Account", object)) {
+		if (!xstrcasecmp("Project", object)
+		    || !xstrcasecmp("Account", object)) {
 			file_opts = _parse_options(line+start);
 
 			if (!file_opts) {
@@ -2011,7 +2018,7 @@ extern void load_sacctmgr_cfg_file (int argc, char *argv[])
 			}
 			_destroy_sacctmgr_file_opts(file_opts);
 			continue;
-		} else if (!strcasecmp("User", object)) {
+		} else if (!xstrcasecmp("User", object)) {
 			file_opts = _parse_options(line+start);
 
 			if (!file_opts) {

@@ -309,7 +309,7 @@ extern void get_bg_part(void)
 
 		itr = list_iterator_create(block_list);
 		while ((found_block = (db2_block_info_t*)list_next(itr))) {
-			if (!strcmp(block_ptr->mp_str, found_block->mp_str)) {
+			if (!xstrcmp(block_ptr->mp_str, found_block->mp_str)) {
 				block_ptr->letter_num =
 					found_block->letter_num;
 				break;
@@ -557,7 +557,7 @@ static int _print_text_part(partition_info_t *part_ptr,
 
 	if (params.cluster_flags & CLUSTER_FLAG_BG)
 		convert_num_unit((float)part_ptr->total_nodes, tmp_cnt,
-				 sizeof(tmp_cnt), UNIT_NONE,
+				 sizeof(tmp_cnt), UNIT_NONE, NO_VAL,
 				 CONVERT_NUM_UNIT_EXACT);
 	else
 		snprintf(tmp_cnt, sizeof(tmp_cnt), "%u", part_ptr->total_nodes);

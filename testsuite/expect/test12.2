@@ -38,7 +38,7 @@ set file_in     "test$test_id.input"
 set file_out    "test$test_id.output"
 set file_err    "test$test_id.error"
 set file_prog   "test$test_id.prog"
-set file_name   "test$test_id.filename"
+set file_name   "/tmp/test$test_id.filename"
 set job_id      0
 set matches     0
 set aix         0
@@ -330,7 +330,6 @@ if {[wait_for_job $job_id "DONE"] != 0} {
 #
 # Report basic sacct info
 #
-
 spawn $sacct --noheader -P --job=$job_id.$step_id --format jobid,jobname,state,exitcode
 expect {
 	-re "$job_id\.$step_id" {
@@ -342,6 +341,11 @@ expect {
 		exp_continue
 	}
 	-re "FAILED" {
+		incr matches
+		exp_continue
+	}
+	-re "COMPLETING" {
+		send_user "\nWARNING: Step in completing state rather than FAILED\n"
 		incr matches
 		exp_continue
 	}

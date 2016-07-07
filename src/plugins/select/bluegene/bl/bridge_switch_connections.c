@@ -1,8 +1,6 @@
 /*****************************************************************************\
  *  bg_switch_connections.c - Blue Gene switch management functions,
  *  establish switch connections
- *
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -157,7 +155,7 @@ static int _get_switches_by_mpid(
 			continue;
 		}
 
-		if (!strcasecmp((char *)mpid, (char *)curr_mpid)) {
+		if (!xstrcasecmp((char *)mpid, (char *)curr_mpid)) {
 			coord_switch[found_mpid] = curr_switch;
 			found_mpid++;
 			if (found_mpid==SYSTEM_DIMENSIONS) {

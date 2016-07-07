@@ -87,6 +87,7 @@
 #define CKPT_WAIT	10
 #define	MAX_INPUT_FIELDS 128
 #define BUFFER_SIZE 4096
+#define FORMAT_STRING_SIZE 34
 
 typedef enum {
 	/* COMMON */
@@ -122,13 +123,17 @@ typedef enum {
 	PRINT_MAXCU,
 	PRINT_MAXTM,
 	PRINT_MAXTRM,
+	PRINT_MAXTRMA,
 	PRINT_MAXT,
+	PRINT_MAXTA,
 	PRINT_MAXTN,
 	PRINT_MAXTU,
 	PRINT_MAXJ,
+	PRINT_MAXJA,
 	PRINT_MAXN,
 	PRINT_MAXNU,
 	PRINT_MAXS,
+	PRINT_MAXSA,
 	PRINT_MAXW,
 	PRINT_MINC,
 	PRINT_MINT,
@@ -352,5 +357,8 @@ extern void load_sacctmgr_cfg_file (int argc, char *argv[]);
 
 /* txn_functions.c */
 extern int sacctmgr_list_txn(int argc, char *argv[]);
+
+/* lost_jobs_functions.c */
+extern int sacctmgr_list_lost_jobs(int argc, char *argv[]);
 
 #endif

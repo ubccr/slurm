@@ -81,7 +81,12 @@ scontrol_update_node (int argc, char *argv[])
 			update_cnt++;
 		} else if (strncasecmp(tag, "NodeName", MAX(tag_len, 1)) == 0) {
 			node_msg.node_names = val;
-		} else if (strncasecmp(tag, "Features", MAX(tag_len, 1)) == 0) {
+		} else if (!strncasecmp(tag, "ActiveFeatures", MAX(tag_len,3))){
+			node_msg.features_act = val;
+			update_cnt++;
+		} else if (!strncasecmp(tag, "Features", MAX(tag_len, 1)) ||
+			   !strncasecmp(tag, "AvailableFeatures",
+					MAX(tag_len,3))) {
 			node_msg.features = val;
 			update_cnt++;
 		} else if (strncasecmp(tag, "Gres", MAX(tag_len, 1)) == 0) {
@@ -99,8 +104,8 @@ scontrol_update_node (int argc, char *argv[])
 			}
 			if ((num == 0 && errno == EINVAL)
         		            || (*endptr != '\0')) {
-				if ((strcasecmp(val, "UNLIMITED") == 0) ||
-				    (strcasecmp(val, "INFINITE")  == 0)) {
+				if ((xstrcasecmp(val, "UNLIMITED") == 0) ||
+				    (xstrcasecmp(val, "INFINITE")  == 0)) {
 					num = (uint32_t) INFINITE;
 				} else {
 					error("Weight value (%s) is not a "

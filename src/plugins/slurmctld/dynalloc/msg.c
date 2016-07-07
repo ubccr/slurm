@@ -101,10 +101,10 @@ extern int spawn_msg_thread(void)
 		return SLURM_ERROR;
 	}
 
-	pthread_mutex_lock( &thread_flag_mutex );
+	slurm_mutex_lock( &thread_flag_mutex );
 	if (thread_running) {
 		error("dynalloc thread already running, not starting another");
-		pthread_mutex_unlock(&thread_flag_mutex);
+		slurm_mutex_unlock(&thread_flag_mutex);
 		return SLURM_ERROR;
 	}
 
@@ -118,7 +118,7 @@ extern int spawn_msg_thread(void)
 
 	slurm_attr_destroy(&thread_attr_msg);
 	thread_running = true;
-	pthread_mutex_unlock(&thread_flag_mutex);
+	slurm_mutex_unlock(&thread_flag_mutex);
 	return SLURM_SUCCESS;
 }
 
@@ -127,7 +127,7 @@ extern int spawn_msg_thread(void)
 \*****************************************************************************/
 extern void term_msg_thread(void)
 {
-	pthread_mutex_lock(&thread_flag_mutex);
+	slurm_mutex_lock(&thread_flag_mutex);
 	if (thread_running) {
 		int fd;
 		slurm_addr_t addr;
@@ -153,7 +153,7 @@ extern void term_msg_thread(void)
 		thread_running = false;
 		debug2("join of dynalloc thread successful");
 	}
-	pthread_mutex_unlock(&thread_flag_mutex);
+	slurm_mutex_unlock(&thread_flag_mutex);
 }
 
 /*****************************************************************************\
@@ -347,13 +347,14 @@ static void	_proc_msg(slurm_fd_t new_fd, char *msg)
 		send_reply(new_fd, send_buf);
 	} else {
 		//identify the cmd
-		if (0 == strcasecmp(msg, "get total nodes and slots")) {
+		if (0 == xstrcasecmp(msg, "get total nodes and slots")) {
 			get_total_nodes_slots(&nodes, &slots);
 			sprintf(send_buf, "total_nodes=%d total_slots=%d",
 				nodes, slots);
 			info("BBB: send to client: %s", send_buf);
 			send_reply(new_fd, send_buf);
-		} else if (0 == strcasecmp(msg, "get available nodes and slots")) {
+		} else if (0 == xstrcasecmp(msg,
+					    "get available nodes and slots")) {
 			get_free_nodes_slots(&nodes, &slots);
 			sprintf(send_buf, "avail_nodes=%d avail_slots=%d",
 				nodes, slots);

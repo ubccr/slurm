@@ -31,6 +31,7 @@
 #include "src/sview/sview.h"
 #include "src/common/parse_time.h"
 #include "src/common/proc_args.h"
+#include "src/common/slurm_strcasestr.h"
 
 #define _DEBUG 0
 
@@ -239,9 +240,9 @@ static void _set_active_combo_resv(GtkComboBox *combo,
 		goto end_it;
 	switch (type) {
 	case SORTID_ACTION:
-		if (!strcmp(temp_char, "none"))
+		if (!xstrcmp(temp_char, "none"))
 			action = 0;
-		else if (!strcmp(temp_char, "remove"))
+		else if (!xstrcmp(temp_char, "remove"))
 			action = 1;
 		else
 			action = 0;
@@ -261,9 +262,9 @@ static uint32_t _parse_watts(char * watts_str)
 	uint32_t watts_num = 0;
 	char *end_ptr = NULL;
 
-	if (!strcasecmp(watts_str, "n/a") || !strcasecmp(watts_str, "none"))
+	if (!xstrcasecmp(watts_str, "n/a") || !xstrcasecmp(watts_str, "none"))
 		return watts_num;
-	if (!strcasecmp(watts_str, "INFINITE"))
+	if (!xstrcasecmp(watts_str, "INFINITE"))
 		return INFINITE;
 	watts_num = strtol(watts_str, &end_ptr, 10);
 	if ((end_ptr[0] == 'k') || (end_ptr[0] == 'K')) {
@@ -277,6 +278,43 @@ static uint32_t _parse_watts(char * watts_str)
 	return watts_num;
 }
 
+/* Inspired by same func in src/scontrol/create_res.c, without error msgs */
+static int _parse_resv_core_cnt(resv_desc_msg_t *resv_msg_ptr, const char *val)
+{
+
+        char *endptr = NULL, *core_cnt = NULL, *tok = NULL;
+	char *type = NULL, *ptrptr = NULL;
+        int node_inx = 0;
+	uint32_t select_type = slurmdb_setup_plugin_id_select();
+
+	/* only have this on a cons_res machine */
+	if (select_type != SELECT_PLUGIN_CONS_RES &&
+	    select_type != SELECT_PLUGIN_CRAY_CONS_RES)
+		return SLURM_ERROR;
+
+        xfree(type);
+        core_cnt = xstrdup(val);
+        tok = strtok_r(core_cnt, ",", &ptrptr);
+        while (tok) {
+                xrealloc(resv_msg_ptr->core_cnt,
+                         sizeof(uint32_t) * (node_inx + 2));
+                resv_msg_ptr->core_cnt[node_inx] =
+                        strtol(tok, &endptr, 10);
+                if ((endptr == NULL) ||
+                    (endptr[0] != '\0') ||
+                    (tok[0] == '\0')) {
+                        xfree(core_cnt);
+                        return SLURM_ERROR;
+                }
+                node_inx++;
+                tok = strtok_r(NULL, ",", &ptrptr);
+        }
+
+        xfree(core_cnt);
+        return SLURM_SUCCESS;
+}
+
+
 /* don't free this char */
 static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 				 const char *new_text,
@@ -289,6 +327,8 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 
 	/* need to clear global_edit_error here (just in case) */
 	global_edit_error = 0;
+	if (global_edit_error_msg)
+		g_free(global_edit_error_msg);
 
 	if (!resv_msg)
 		return NULL;
@@ -300,7 +340,7 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 		break;
 	case SORTID_ACTION:
 		xfree(got_edit_signal);
-		if (!strcasecmp(new_text, "None"))
+		if (!xstrcasecmp(new_text, "None"))
 			got_edit_signal = NULL;
 		else
 			got_edit_signal = xstrdup(new_text);
@@ -309,6 +349,18 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 		resv_msg->burst_buffer = xstrdup(new_text);
 		type = "burst_buffer";
 		break;
+        case SORTID_CORE_CNT:
+		if (cluster_flags & CLUSTER_FLAG_BG)
+			type = "Cnode Count";
+		else
+			type = "Core Count";
+                if (_parse_resv_core_cnt(resv_msg, new_text) == SLURM_ERROR) {
+			global_edit_error_msg = g_strdup_printf(
+				"Can't use %s when system "
+				"is not running cons_res select plugin", type);
+			goto return_error;
+                }
+                break;
 	case SORTID_DURATION:
 		temp_int = time_str2mins((char *)new_text);
 		if (temp_int <= 0)
@@ -340,7 +392,10 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 		type = "name";
 		break;
 	case SORTID_NODE_CNT:
-		type = "Node Count";
+		if (cluster_flags & CLUSTER_FLAG_BG)
+			type = "Midplane Count";
+		else
+			type = "Node Count";
 		block_inx = 0;
 		tmp_text = xstrdup(new_text);
 		tok = strtok_r(tmp_text, ",", &last);
@@ -364,7 +419,10 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 		break;
 	case SORTID_NODELIST:
 		resv_msg->node_list = xstrdup(new_text);
-		type = "node list";
+		if (cluster_flags & CLUSTER_FLAG_BG)
+			type = "Midplane List";
+		else
+			type = "Node List";
 		break;
 	case SORTID_PARTITION:
 		resv_msg->partition = xstrdup(new_text);
@@ -387,7 +445,7 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 		break;
 	}
 
-	if (strcmp(type, "unknown"))
+	if (xstrcmp(type, "unknown"))
 		global_send_update_msg = 1;
 
 	return type;
@@ -455,9 +513,7 @@ static gboolean _admin_focus_out_resv(GtkEntry *entry,
 		const char *name = gtk_entry_get_text(entry);
 		type -= DEFAULT_ENTRY_LENGTH;
 		col_name = _set_resv_msg(resv_msg, name, type);
-		if (global_edit_error) {
-			if (global_edit_error_msg)
-				g_free(global_edit_error_msg);
+		if (global_edit_error && !global_edit_error_msg) {
 			global_edit_error_msg = g_strdup_printf(
 				"Reservation %s %s can't be set to %s",
 				resv_msg->name,
@@ -536,7 +592,7 @@ static void _layout_resv_record(GtkTreeView *treeview,
 				   resv_ptr->burst_buffer);
 
 	convert_num_unit((float)resv_ptr->core_cnt,
-			 time_buf, sizeof(time_buf), UNIT_NONE,
+			 time_buf, sizeof(time_buf), UNIT_NONE, NO_VAL,
 			 working_sview_config.convert_flags);
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_resv,
@@ -569,7 +625,7 @@ static void _layout_resv_record(GtkTreeView *treeview,
 
 	/* NOTE: node_cnt in reservation info from slurmctld ONE number */
 	convert_num_unit((float)resv_ptr->node_cnt,
-			 time_buf, sizeof(time_buf), UNIT_NONE,
+			 time_buf, sizeof(time_buf), UNIT_NONE, NO_VAL,
 			 working_sview_config.convert_flags);
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_resv,
@@ -645,11 +701,11 @@ static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 	tmp_flags = reservation_flags_string(resv_ptr->flags);
 
 	convert_num_unit((float)resv_ptr->core_cnt,
-			 tmp_cores, sizeof(tmp_cores), UNIT_NONE,
+			 tmp_cores, sizeof(tmp_cores), UNIT_NONE, NO_VAL,
 			 working_sview_config.convert_flags);
 
 	convert_num_unit((float)resv_ptr->node_cnt,
-			 tmp_nodes, sizeof(tmp_nodes), UNIT_NONE,
+			 tmp_nodes, sizeof(tmp_nodes), UNIT_NONE, NO_VAL,
 			 working_sview_config.convert_flags);
 
 	slurm_make_time_str((time_t *)&resv_ptr->start_time, tmp_start,
@@ -727,7 +783,7 @@ static void _update_info_resv(List info_list,
 		if (sview_resv_info->iter_set) {
 			gtk_tree_model_get(model, &sview_resv_info->iter_ptr,
 					   SORTID_NAME, &name, -1);
-			if (strcmp(name, sview_resv_info->resv_name)) {
+			if (xstrcmp(name, sview_resv_info->resv_name)) {
 				/* Bad pointer */
 				sview_resv_info->iter_set = false;
 				//g_print("bad resv iter pointer\n");
@@ -766,8 +822,8 @@ static int _sview_resv_sort_aval_dec(void *s1, void *s2)
 		return 1;
 
 	if (rec_a->resv_ptr->node_list && rec_b->resv_ptr->node_list) {
-		size_a = strcmp(rec_a->resv_ptr->node_list,
-				rec_b->resv_ptr->node_list);
+		size_a = xstrcmp(rec_a->resv_ptr->node_list,
+				 rec_b->resv_ptr->node_list);
 		if (size_a < 0)
 			return -1;
 		else if (size_a > 0)
@@ -810,8 +866,8 @@ static List _create_resv_info_list(reserve_info_msg_t *resv_info_ptr)
 		if (last_list_itr) {
 			while ((sview_resv_info_ptr =
 				list_next(last_list_itr))) {
-				if (!strcmp(sview_resv_info_ptr->resv_name,
-					    resv_ptr->name)) {
+				if (!xstrcmp(sview_resv_info_ptr->resv_name,
+					     resv_ptr->name)) {
 					list_remove(last_list_itr);
 					_resv_info_free(sview_resv_info_ptr);
 					break;
@@ -872,7 +928,7 @@ need_refresh:
 	itr = list_iterator_create(info_list);
 	while ((sview_resv_info = (sview_resv_info_t*) list_next(itr))) {
 		resv_ptr = sview_resv_info->resv_ptr;
-		if (!strcmp(resv_ptr->name, name)) {
+		if (!xstrcmp(resv_ptr->name, name)) {
 			j=0;
 			while (resv_ptr->node_inx[j] >= 0) {
 				change_grid_color(
@@ -1064,7 +1120,7 @@ extern void admin_edit_resv(GtkCellRendererText *cell,
 	int column = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cell),
 						       "column"));
 
-	if (!new_text || !strcmp(new_text, ""))
+	if (!new_text || !xstrcmp(new_text, ""))
 		goto no_input;
 
 	gtk_tree_model_get_iter(GTK_TREE_MODEL(treestore), &iter, path);
@@ -1089,7 +1145,7 @@ extern void admin_edit_resv(GtkCellRendererText *cell,
 		goto no_input;
 	}
 
-	if (old_text && !strcmp(old_text, new_text)) {
+	if (old_text && !xstrcmp(old_text, new_text)) {
 		temp = g_strdup_printf("No change in value.");
 	} else if (slurm_update_reservation(resv_msg)
 		   == SLURM_SUCCESS) {
@@ -1368,8 +1424,7 @@ display_it:
 			hostset_destroy(hostset);
 			break;
 		case JOB_PAGE:
-			if (strcmp(resv_ptr->name,
-				   search_info->gchar_data))
+			if (xstrcmp(resv_ptr->name, search_info->gchar_data))
 				continue;
 			break;
 		case RESV_PAGE:
@@ -1378,8 +1433,8 @@ display_it:
 				if (!search_info->gchar_data)
 					continue;
 
-				if (strcmp(resv_ptr->name,
-					   search_info->gchar_data))
+				if (xstrcmp(resv_ptr->name,
+					    search_info->gchar_data))
 					continue;
 				break;
 			default:
@@ -1497,7 +1552,7 @@ extern void popup_all_resv(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	itr = list_iterator_create(popup_list);
 	while ((popup_win = list_next(itr))) {
 		if (popup_win->spec_info)
-			if (!strcmp(popup_win->spec_info->title, title)) {
+			if (!xstrcmp(popup_win->spec_info->title, title)) {
 				break;
 			}
 	}
@@ -1604,7 +1659,7 @@ static void _admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type)
 
 	resv_msg->name = xstrdup(resvid);
 
-	if (!strcasecmp("Remove Reservation", type)) {
+	if (!xstrcasecmp("Remove Reservation", type)) {
 		resv_name_msg.name = resvid;
 
 		label = gtk_dialog_add_button(GTK_DIALOG(popup),
@@ -1663,7 +1718,13 @@ static void _admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type)
 			if (got_edit_signal)
 				goto end_it;
 
-			if (!global_send_update_msg) {
+			if (global_edit_error) {
+				temp = g_strdup_printf(
+					"Something was wrong with the "
+					"values you wanted to change: %s",
+					global_edit_error_msg ?
+					global_edit_error_msg : "unknown");
+			} else if (!global_send_update_msg) {
 				temp = g_strdup_printf("No change detected.");
 			} else if (slurm_update_reservation(resv_msg)
 				   == SLURM_SUCCESS) {

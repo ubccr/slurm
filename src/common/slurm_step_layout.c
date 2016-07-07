@@ -1,8 +1,6 @@
 /*****************************************************************************\
  *  slurm_step_layout.c - functions to distribute tasks over nodes.
- *  $Id$
  *****************************************************************************
- *
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *  Written by Chris Holmes, <cholmes@hp.com>, who borrowed heavily
  *  from other parts of SLURM.
@@ -243,6 +241,7 @@ extern slurm_step_layout_t *slurm_step_layout_copy(
 	layout = xmalloc(sizeof(slurm_step_layout_t));
 	layout->node_list = xstrdup(step_layout->node_list);
 	layout->node_cnt = step_layout->node_cnt;
+	layout->start_protocol_ver = step_layout->start_protocol_ver;
 	layout->task_cnt = step_layout->task_cnt;
 	layout->task_dist = step_layout->task_dist;
 
@@ -265,7 +264,26 @@ extern void pack_slurm_step_layout(slurm_step_layout_t *step_layout,
 {
 	uint32_t i = 0;
 
-	if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
+		if (step_layout)
+			i = 1;
+
+		pack16(i, buffer);
+		if (!i)
+			return;
+		packstr(step_layout->front_end, buffer);
+		packstr(step_layout->node_list, buffer);
+		pack32(step_layout->node_cnt, buffer);
+		pack16(step_layout->start_protocol_ver, buffer);
+		pack32(step_layout->task_cnt, buffer);
+		pack32(step_layout->task_dist, buffer);
+
+		for (i = 0; i < step_layout->node_cnt; i++) {
+			pack32_array(step_layout->tids[i],
+				     step_layout->tasks[i],
+				     buffer);
+		}
+	} else if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
 		if (step_layout)
 			i = 1;
 
@@ -317,12 +335,40 @@ extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, Buf buffer,
 	slurm_step_layout_t *step_layout = NULL;
 	int i;
 
-	if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
 		safe_unpack16(&uint16_tmp, buffer);
 		if (!uint16_tmp)
 			return SLURM_SUCCESS;
 
 		step_layout = xmalloc(sizeof(slurm_step_layout_t));
+		*layout = step_layout;
+
+		safe_unpackstr_xmalloc(&step_layout->front_end,
+				       &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&step_layout->node_list,
+				       &uint32_tmp, buffer);
+		safe_unpack32(&step_layout->node_cnt, buffer);
+		safe_unpack16(&step_layout->start_protocol_ver, buffer);
+		safe_unpack32(&step_layout->task_cnt, buffer);
+		safe_unpack32(&step_layout->task_dist, buffer);
+
+		step_layout->tasks =
+			xmalloc(sizeof(uint32_t) * step_layout->node_cnt);
+		step_layout->tids = xmalloc(sizeof(uint32_t *)
+					    * step_layout->node_cnt);
+		for (i = 0; i < step_layout->node_cnt; i++) {
+			safe_unpack32_array(&(step_layout->tids[i]),
+					    &num_tids,
+					    buffer);
+			step_layout->tasks[i] = num_tids;
+		}
+	} else if (protocol_version >= SLURM_15_08_PROTOCOL_VERSION) {
+		safe_unpack16(&uint16_tmp, buffer);
+		if (!uint16_tmp)
+			return SLURM_SUCCESS;
+
+		step_layout = xmalloc(sizeof(slurm_step_layout_t));
+		step_layout->start_protocol_ver = protocol_version;
 		*layout = step_layout;
 
 		safe_unpackstr_xmalloc(&step_layout->front_end,
@@ -350,6 +396,7 @@ extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, Buf buffer,
 			return SLURM_SUCCESS;
 
 		step_layout = xmalloc(sizeof(slurm_step_layout_t));
+		step_layout->start_protocol_ver = protocol_version;
 		*layout = step_layout;
 
 		safe_unpackstr_xmalloc(&step_layout->front_end,
@@ -553,7 +600,7 @@ static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
 	while((host = hostlist_next(itr))) {
 		step_layout->tasks[i] = 0;
 		while((host_task = hostlist_next(itr_task))) {
-			if (!strcmp(host, host_task)) {
+			if (!xstrcmp(host, host_task)) {
 				step_layout->tasks[i]++;
 				task_cnt++;
 			}
@@ -570,7 +617,7 @@ static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
 		j = 0;
 		hostlist_iterator_reset(itr_task);
 		while((host_task = hostlist_next(itr_task))) {
-			if (!strcmp(host, host_task)) {
+			if (!xstrcmp(host, host_task)) {
 				step_layout->tids[i][j] = taskid;
 				j++;
 			}

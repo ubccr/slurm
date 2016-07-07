@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  src/common/job_options.c  - Extra job options
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -198,7 +197,7 @@ int job_options_unpack (job_options_t opts, Buf buf)
 
 	safe_unpackstr_xmalloc (&tag, &len, buf);
 
-	if (strncmp (tag, JOB_OPTIONS_PACK_TAG, len) != 0) {
+	if (xstrncmp (tag, JOB_OPTIONS_PACK_TAG, len) != 0) {
 		xfree(tag);
 		return (-1);
 	}

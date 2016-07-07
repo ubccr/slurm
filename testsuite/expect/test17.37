@@ -1,9 +1,7 @@
 #!/usr/bin/env expect
 ############################################################################
 # Purpose: Test of SLURM functionality
-#          Validates that the afternotok dependency is enforced
-#          when a job runs to completion
-#
+#          Validate that afternotok dependency is enforced.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
@@ -45,10 +43,6 @@ make_bash_script $script "sleep 10"
 # Submit a job to depend on
 spawn $sbatch -t1 -o/dev/null $script
 expect {
-	-re "Node count specification invalid" {
-		send_user "\nWARNING: can't this test with less than two nodes\n"
-		exit 0
-	}
 	-re "Submitted batch job ($number)" {
 		set job_id1 $expect_out(1,string)
 		exp_continue
@@ -107,7 +101,8 @@ expect {
 	}
 }
 if { $match != 1 } {
-	send_user "\nFAILURE: job $job_id1 did not exit with exit code 0\n"
+	send_user "\nFAILURE: Job $job_id1 did not exit with exit code 0\n"
+	send_user "\nFAILURE: Could be due to small configured MinJobAge value\n"
 	set exit_code 1
 }
 
@@ -132,8 +127,9 @@ expect {
 	}
 }
 if { $match != 2 } {
-	send_user "\nFAILURE: job $job_id2 should be in pending state and "
+	send_user "\nFAILURE: Job $job_id2 should be in pending state and "
 	send_user "should have DependencyNeverSatisfied for a reason\n"
+	send_user "\nFAILURE: Could be due to small configured MinJobAge value\n"
 	set exit_code 1
 }
 if {[cancel_job $job_id2] != 0} {

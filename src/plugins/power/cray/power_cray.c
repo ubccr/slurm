@@ -434,7 +434,7 @@ static void _get_capabilities(void)
 	json_object_object_foreachC(j_obj, iter) {
 		/* NOTE: The error number "e" and message "err_msg" fields
 		 * are currently ignored. */
-		if (!strcmp(iter.key, "groups")) {
+		if (!xstrcmp(iter.key, "groups")) {
 			ents = _json_parse_array_capabilities(j_obj, iter.key,
 							      &num_ent);
 			break;
@@ -534,15 +534,15 @@ static void _parse_capable_control(json_object *j_control,
 				break;
 			case json_type_string:
 //				info("%s: Key string %s", __func__, iter.key);
-				if (!strcmp(iter.key, "name"))
+				if (!xstrcmp(iter.key, "name"))
 					p = json_object_get_string(iter.val);
 				break;
 			case json_type_int:
 //				info("%s: Key int %s", __func__, iter.key);
 				x = json_object_get_int64(iter.val);
-				if (!strcmp(iter.key, "max"))
+				if (!xstrcmp(iter.key, "max"))
 					max_watts = x;
-				else if (!strcmp(iter.key, "min"))
+				else if (!xstrcmp(iter.key, "min"))
 					min_watts = x;
 				break;
 			default:
@@ -551,10 +551,10 @@ static void _parse_capable_control(json_object *j_control,
 	}
 
 	if (p) {
-		if (!strcmp(p, "accel")) {
+		if (!xstrcmp(p, "accel")) {
 			ent->accel_max_watts = max_watts;
 			ent->accel_min_watts = min_watts;
-		} else if (!strcmp(p, "node")) {
+		} else if (!xstrcmp(p, "node")) {
 			ent->node_max_watts = max_watts;
 			ent->node_min_watts = min_watts;
 		}
@@ -646,9 +646,9 @@ static void _json_parse_capabilities(json_object *jobj,
 				break;
 			case json_type_array:
 //				info("%s: Key array %s", __func__, iter.key);
-				if (!strcmp(iter.key, "controls")) {
+				if (!xstrcmp(iter.key, "controls")) {
 					_parse_capable_controls(jobj, ent);
-				} else if (!strcmp(iter.key, "nids")) {
+				} else if (!xstrcmp(iter.key, "nids")) {
 					_parse_nids(jobj, ent, "nids");
 				}
 				break;
@@ -743,7 +743,7 @@ static void _get_caps(void)
 	json_object_object_foreachC(j_obj, iter) {
 		/* NOTE: The error number "e" and message "err_msg" fields
 		 * are currently ignored. */
-		if (!strcmp(iter.key, "nids")) {
+		if (!xstrcmp(iter.key, "nids")) {
 			ents = _json_parse_array_caps(j_obj, iter.key,
 						      &num_ent);
 			break;
@@ -824,13 +824,13 @@ static void _parse_caps_control(json_object *j_control,
 				break;
 			case json_type_string:
 //				info("%s: Key string %s", __func__, iter.key);
-				if (!strcmp(iter.key, "name"))
+				if (!xstrcmp(iter.key, "name"))
 					p = json_object_get_string(iter.val);
 				break;
 			case json_type_int:
 //				info("%s: Key int %s", __func__, iter.key);
 				x = json_object_get_int64(iter.val);
-				if (!strcmp(iter.key, "val"))
+				if (!xstrcmp(iter.key, "val"))
 					cap_watts = x;
 				break;
 			default:
@@ -839,7 +839,7 @@ static void _parse_caps_control(json_object *j_control,
 	}
 
 	if (p) {
-		if (!strcmp(p, "node")) {
+		if (!xstrcmp(p, "node")) {
 			ent->cap_watts = cap_watts;
 		}
 	}
@@ -899,14 +899,14 @@ static void _json_parse_nid(json_object *jobj, power_config_nodes_t *ent)
 				break;
 			case json_type_array:
 //				info("%s: Key array %s", __func__, iter.key);
-				if (!strcmp(iter.key, "controls")) {
+				if (!xstrcmp(iter.key, "controls")) {
 					_parse_caps_controls(jobj, ent);
 				}
 				break;
 			case json_type_int:
 //				info("%s: Key int %s", __func__, iter.key);
 				x = json_object_get_int64(iter.val);
-				if (!strcmp(iter.key, "nid")) {
+				if (!xstrcmp(iter.key, "nid")) {
 					ent->node_name = xmalloc(sizeof(char *));
 					xstrfmtcat(ent->node_name[0],
 						   "nid%5.5d", x);
@@ -965,7 +965,7 @@ static void _get_nodes_ready(void)
 	json_object_object_foreachC(j_obj, iter) {
 		/* NOTE: The error number "e", message "err_msg", "off", and
 		 * "on" fields are currently ignored. */
-		if (!strcmp(iter.key, "ready")) {
+		if (!xstrcmp(iter.key, "ready")) {
 			ents = _json_parse_ready(j_obj, iter.key, &num_ent);
 			break;
 		}
@@ -1025,7 +1025,7 @@ _json_parse_ready(json_object *jobj, char *key, int *num)
 				break;
 			case json_type_array:
 //				info("%s: Key array %s", __func__, iter.key);
-				if (!strcmp(iter.key, "ready")) {
+				if (!xstrcmp(iter.key, "ready")) {
 					ents->state = 1;	/* 1=ready */
 					_parse_nids(jobj, ents, "ready");
 				}
@@ -1100,7 +1100,7 @@ static void _get_node_energy_counter(void)
 	json_object_object_foreachC(j_obj, iter) {
 		/* NOTE: The error number "e", message "err_msg", and
 		 * "nid_count" fields are currently ignored. */
-		if (!strcmp(iter.key, "nodes")) {
+		if (!xstrcmp(iter.key, "nodes")) {
 			ents = _json_parse_array_energy(j_obj, iter.key,
 							&num_ent);
 			break;
@@ -1217,9 +1217,9 @@ static void _json_parse_energy(json_object *jobj, power_config_nodes_t *ent)
 			case json_type_int:
 //				info("%s: Key int %s", __func__, iter.key);
 				x = json_object_get_int64(iter.val);
-				if (!strcmp(iter.key, "energy_ctr")) {
+				if (!xstrcmp(iter.key, "energy_ctr")) {
 					ent->joule_counter = x;
-				} else if (!strcmp(iter.key, "nid")) {
+				} else if (!xstrcmp(iter.key, "nid")) {
 					ent->node_cnt = 1;
 					ent->node_name = xmalloc(sizeof(char*));
 					ent->node_name[0] = xmalloc(10);
@@ -1230,7 +1230,7 @@ static void _json_parse_energy(json_object *jobj, power_config_nodes_t *ent)
 			case json_type_string:
 //				info("%s: Key string %s", __func__, iter.key);
 				p = json_object_get_string(iter.val);
-				if (!strcmp(iter.key, "time")) {
+				if (!xstrcmp(iter.key, "time")) {
 					ent->time_usec =
 						_time_str2num((char *) p);
 				}
@@ -1251,10 +1251,10 @@ static void _my_sleep(int add_secs)
 
 	ts.tv_sec  = tv.tv_sec + add_secs;
 	ts.tv_nsec = tv.tv_usec * 1000;
-	pthread_mutex_lock(&term_lock);
+	slurm_mutex_lock(&term_lock);
 	if (!stop_power)
 		pthread_cond_timedwait(&term_cond, &term_lock, &ts);
-	pthread_mutex_unlock(&term_lock);
+	slurm_mutex_unlock(&term_lock);
 }
 
 /* Periodically attempt to re-balance power caps across nodes */
@@ -1702,10 +1702,10 @@ static void _set_power_caps(void)
 /* Terminate power thread */
 static void _stop_power_agent(void)
 {
-	pthread_mutex_lock(&term_lock);
+	slurm_mutex_lock(&term_lock);
 	stop_power = true;
 	pthread_cond_signal(&term_cond);
-	pthread_mutex_unlock(&term_lock);
+	slurm_mutex_unlock(&term_lock);
 }
 
 /*
@@ -1719,10 +1719,10 @@ extern int init(void)
 	if (!run_in_daemon("slurmctld"))
 		return SLURM_SUCCESS;
 
-	pthread_mutex_lock(&thread_flag_mutex);
+	slurm_mutex_lock(&thread_flag_mutex);
 	if (power_thread) {
 		debug2("Power thread already running, not starting another");
-		pthread_mutex_unlock(&thread_flag_mutex);
+		slurm_mutex_unlock(&thread_flag_mutex);
 		return SLURM_ERROR;
 	}
 
@@ -1732,7 +1732,7 @@ extern int init(void)
 	if (pthread_create(&power_thread, &attr, _power_agent, NULL))
 		error("Unable to start power thread: %m");
 	slurm_attr_destroy(&attr);
-	pthread_mutex_unlock(&thread_flag_mutex);
+	slurm_mutex_unlock(&thread_flag_mutex);
 
 	return SLURM_SUCCESS;
 }
@@ -1742,7 +1742,7 @@ extern int init(void)
  */
 extern void fini(void)
 {
-	pthread_mutex_lock(&thread_flag_mutex);
+	slurm_mutex_lock(&thread_flag_mutex);
 	if (power_thread) {
 		_stop_power_agent();
 		pthread_join(power_thread, NULL);
@@ -1750,15 +1750,15 @@ extern void fini(void)
 		xfree(capmc_path);
 		xfree(full_nid_string);
 	}
-	pthread_mutex_unlock(&thread_flag_mutex);
+	slurm_mutex_unlock(&thread_flag_mutex);
 }
 
 /* Read the configuration file */
 extern void power_p_reconfig(void)
 {
-	pthread_mutex_lock(&thread_flag_mutex);
+	slurm_mutex_lock(&thread_flag_mutex);
 	_load_config();
-	pthread_mutex_unlock(&thread_flag_mutex);
+	slurm_mutex_unlock(&thread_flag_mutex);
 }
 
 /* Note that a suspended job has been resumed */

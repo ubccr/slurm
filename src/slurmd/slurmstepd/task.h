@@ -1,6 +1,5 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/task.h - task launching functions for slurmstepd
- * $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -53,5 +52,9 @@
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 void exec_task(stepd_step_rec_t *job, int i);
+
+/* Given a program name, translate it to a fully qualified pathname as needed
+ * based upon the PATH environment variable and current working directory */
+extern char *build_path(char* fname, char **prog_env, char *cwd);
 
 #endif /* !_TASK_H */

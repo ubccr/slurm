@@ -85,7 +85,7 @@ static int _sort_cluster_grouping_dec(void *v1, void *v2)
 	if (!cluster_a->cluster || !cluster_b->cluster)
 		return 0;
 
-	diff = strcmp(cluster_a->cluster, cluster_b->cluster);
+	diff = xstrcmp(cluster_a->cluster, cluster_b->cluster);
 
 	if (diff > 0)
 		return 1;
@@ -126,7 +126,7 @@ static int _sort_acct_grouping_dec(void *v1, void *v2)
 	if ((wckey_b = strstr(tmp_acct_b, ":")))
 		*wckey_b++ = 0;
 
-	diff = strcmp(tmp_acct_a, tmp_acct_b);
+	diff = xstrcmp(tmp_acct_a, tmp_acct_b);
 
 	if (diff > 0)
 		return 1;
@@ -136,7 +136,7 @@ static int _sort_acct_grouping_dec(void *v1, void *v2)
 	if (!wckey_a || !wckey_b)
 		return 0;
 
-	diff = strcmp(wckey_a, wckey_b);
+	diff = xstrcmp(wckey_a, wckey_b);
 
 	if (diff > 0)
 		return 1;
@@ -196,7 +196,8 @@ static int _addto_uid_char_list(List char_list, char *names)
 					name = _string_to_uid( name );
 
 					while ((tmp_char = list_next(itr))) {
-						if (!strcasecmp(tmp_char, name))
+						if (!xstrcasecmp(tmp_char,
+								 name))
 							break;
 					}
 
@@ -224,7 +225,7 @@ static int _addto_uid_char_list(List char_list, char *names)
 			name = _string_to_uid( name );
 
 			while ((tmp_char = list_next(itr))) {
-				if (!strcasecmp(tmp_char, name))
+				if (!xstrcasecmp(tmp_char, name))
 					break;
 			}
 
@@ -252,6 +253,8 @@ static int _set_cond(int *start, int argc, char *argv[],
 
 	if (!job_cond->cluster_list)
 		job_cond->cluster_list = list_create(slurm_destroy_char);
+	if (cluster_flag)
+		slurm_addto_char_list(job_cond->cluster_list, cluster_flag);
 
 	for (i = (*start); i < argc; i++) {
 		end = parse_option_end(argv[i]);
@@ -399,6 +402,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 	(*start) = i;
 
 	if (!local_cluster_flag && !list_count(job_cond->cluster_list)) {
+		/* Get the default Cluster since no cluster is specified */
 		char *temp = slurm_get_cluster_name();
 		if (temp)
 			list_append(job_cond->cluster_list, temp);
@@ -526,7 +530,7 @@ static int _setup_grouping_print_fields_list(List grouping_list)
 	uint32_t size = 0;
 	char *tmp_char = NULL, *tres_type;
 
-	if (!tres_str || !strcasecmp(tres_str, "cpu"))
+	if (!tres_str || !xstrcasecmp(tres_str, "cpu"))
 		tres_type = "CPUs";
 	else
 		tres_type = "TRES";

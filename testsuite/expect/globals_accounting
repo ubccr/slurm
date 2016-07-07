@@ -101,8 +101,7 @@ proc add_cluster { name clus_req_in } {
 	}
 
 	if {$matches != 1} {
-		send_user "\nFAILURE:  sacctmgr had a problem adding clusters
-	got $matches\n"
+		send_user "\nFAILURE:  sacctmgr had a problem adding clusters got $matches\n"
 		incr exit_code 1
 	}
 
@@ -1741,7 +1740,7 @@ proc check_resource_limits { name res_limits } {
 	set match 0
 	spawn $sacctmgr -p -n list resource $name $command
 	expect {
-		-re "$values" {
+		-nocase -re "$values" {
 			set match 1
 			exp_continue
 		}

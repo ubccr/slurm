@@ -128,7 +128,7 @@ extern int job_submit_plugin_init(void)
 			 (sizeof(slurm_submit_ops_t) * (g_context_cnt + 1)));
 		xrealloc(g_context,
 			 (sizeof(plugin_context_t *) * (g_context_cnt + 1)));
-		if (strncmp(type, "job_submit/", 11) == 0)
+		if (xstrncmp(type, "job_submit/", 11) == 0)
 			type += 11; /* backward compatibility */
 		type = xstrdup_printf("job_submit/%s", type);
 		g_context[g_context_cnt] = plugin_context_create(
@@ -144,7 +144,7 @@ extern int job_submit_plugin_init(void)
 
 		xfree(type);
 		g_context_cnt++;
-		names = NULL; /* for next iteration */
+		names = NULL; /* for next strtok_r() iteration */
 	}
 	init_run = true;
 
@@ -207,7 +207,7 @@ extern int job_submit_plugin_reconfig(void)
 
 	slurm_mutex_lock(&g_context_lock);
 	if (plugin_names && submit_plugin_list &&
-	    strcmp(plugin_names, submit_plugin_list))
+	    xstrcmp(plugin_names, submit_plugin_list))
 		plugin_change = true;
 	else
 		plugin_change = false;
