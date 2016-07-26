@@ -14,6 +14,30 @@ const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char **err_msg) {
 
+	if(job_desc->account){
+	    if( strstr(job_desc->account, "pi-") ){
+		/* Consolidate to one account without the "pi-" */
+		char piacct[64];
+		strncpy( piacct, job_desc->account, 64);
+		piacct[63]='\0';
+		char* nopi = piacct + 3
+		info("Removing PI account: %s, for User: %u. Changing to %s", job_desc->account, submit_uid, nopi);
+		xfree(job_desc->account);
+		xstrcat(job_desc->account, nopi);
+	    }
+	}
+
+	if (job_desc->qos){
+	    if ( strcmp( job_desc->qos, "supporters" ) == 0 ){
+		/* Leave this job alone */
+		return SLURM_SUCCESS;
+	    }
+
+	    /* Otherwise delete it and log */
+            info("Clearing existing QOS: %s for UID: %u on Partition: %s", job_desc->qos, submit_uid, job_desc->partition);
+            xfree(job_desc->qos);
+	}
+
 	if(job_desc->partition){
 		// Add a qos that matches the partition name
 		xstrcat(job_desc->qos, job_desc->partition);
