@@ -20,7 +20,7 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 		char piacct[64];
 		strncpy( piacct, job_desc->account, 64);
 		piacct[63]='\0';
-		char* nopi = piacct + 3
+		char* nopi = piacct + 3;
 		info("Removing PI account: %s, for User: %u. Changing to %s", job_desc->account, submit_uid, nopi);
 		xfree(job_desc->account);
 		xstrcat(job_desc->account, nopi);
