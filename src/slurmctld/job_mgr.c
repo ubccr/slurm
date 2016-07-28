@@ -4258,6 +4258,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 			job_completion_logger(job_ptr, false);
 		} else {	/* job remains queued */
 			if ((error_code == ESLURM_NODES_BUSY) ||
+			    (error_code == ESLURM_BURST_BUFFER_WAIT) ||
 			    (error_code == ESLURM_RESERVATION_BUSY) ||
 			    (error_code == ESLURM_ACCOUNTING_POLICY)) {
 				error_code = SLURM_SUCCESS;
@@ -4357,8 +4358,6 @@ extern int job_fail(uint32_t job_id, uint32_t job_state)
 static int _job_signal(struct job_record *job_ptr, uint16_t signal,
 		       uint16_t flags, uid_t uid, bool preempt)
 {
-	ListIterator step_iterator;
-	struct step_record *step_ptr;
 	uint16_t job_term_state;
 	char jbuf[JBUFSIZ];
 	time_t now = time(NULL);
@@ -4399,15 +4398,6 @@ static int _job_signal(struct job_record *job_ptr, uint16_t signal,
 		verbose("%s: of pending %s successful",
 			__func__, jobid2str(job_ptr, jbuf, sizeof(jbuf)));
 		return SLURM_SUCCESS;
-	}
-
-	if ((IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr)) &&
-	    (signal == SIGKILL)) {
-		step_iterator = list_iterator_create(job_ptr->step_list);
-		while ((step_ptr =
-		       (struct step_record *) list_next(step_iterator)))
-			select_g_step_finish(step_ptr, true);
-		list_iterator_destroy(step_iterator);
 	}
 
 	if (preempt)
@@ -7776,15 +7766,7 @@ extern int job_update_tres_cnt(struct job_record *job_ptr, int node_inx)
 /* Terminate a job that has exhausted its time limit */
 static void _job_timed_out(struct job_record *job_ptr)
 {
-	ListIterator step_iterator;
-	struct step_record *step_ptr;
-
 	xassert(job_ptr);
-
-	step_iterator = list_iterator_create(job_ptr->step_list);
-	while ((step_ptr = (struct step_record *) list_next(step_iterator)))
-		select_g_step_finish(step_ptr, true);
-	list_iterator_destroy(step_iterator);
 
 	srun_timeout(job_ptr);
 	if (job_ptr->details) {
@@ -10333,7 +10315,7 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 	/* NOTE: Update QOS before updating partition in order to enforce
 	 * AllowQOS and DenyQOS partition configuration options */
 	if (job_specs->qos) {
-		if (!authorized || !IS_JOB_PENDING(job_ptr))
+		if (!IS_JOB_PENDING(job_ptr))
 			error_code = ESLURM_JOB_NOT_PENDING;
 		else {
 			slurmdb_qos_rec_t qos_rec;
@@ -12333,8 +12315,6 @@ validate_jobs_on_node(slurm_node_registration_status_msg_t *reg_msg)
 			     reg_msg->node_name);
 			continue;
 		}
-		if (reg_msg->step_id[i] == SLURM_EXTERN_CONT)
-			continue;
 
 		job_ptr = find_job_record(reg_msg->job_id[i]);
 		if (job_ptr == NULL) {
@@ -12516,7 +12496,8 @@ static void _notify_srun_missing_step(struct job_record *job_ptr, int node_inx,
 	xassert(job_ptr);
 	step_iterator = list_iterator_create (job_ptr->step_list);
 	while ((step_ptr = (struct step_record *) list_next (step_iterator))) {
-		if (step_ptr->state != JOB_RUNNING)
+		if ((step_ptr->step_id == SLURM_EXTERN_CONT) ||
+		    (step_ptr->state != JOB_RUNNING))
 			continue;
 		if (!bit_test(step_ptr->step_node_bitmap, node_inx))
 			continue;
