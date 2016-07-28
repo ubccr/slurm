@@ -297,6 +297,12 @@ static uint32_t _get_exit_code(stepd_step_rec_t *job)
 	uint32_t i;
 	uint32_t step_rc = NO_VAL;
 
+	/* We are always killing/cancelling the extern_step so don't
+	 * report that.
+	 */
+	if (job->stepid == SLURM_EXTERN_CONT)
+		return 0;
+
 	for (i = 0; i < job->node_tasks; i++) {
 		/* if this task was killed by cmd, ignore its
 		 * return status as it only reflects the fact
@@ -1025,9 +1031,12 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 	}
 
 	job->pgid = pid;
+
 	if ((rc = proctrack_g_add(job, pid)) != SLURM_SUCCESS) {
 		error("%s: Step %u.%u unable to add pid %d to the proctrack plugin",
 		      __func__, job->jobid, job->stepid, pid);
+		killpg(pid, SIGKILL);
+		kill(pid, SIGKILL);
 		goto fail1;
 	}
 
@@ -1042,7 +1051,7 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 	if (!conf->job_acct_gather_freq)
 		jobacct_gather_stat_task(0);
 
-	if (spank_task_post_fork(job, 0) < 0)
+	if (spank_task_post_fork(job, -1) < 0)
 		error("spank extern task post-fork failed");
 
 	while ((wait4(pid, &status, 0, &rusage) < 0) && (errno == EINTR)) {
@@ -1067,16 +1076,13 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 	/* Call the other plugins to clean up
 	 * the cgroup hierarchy.
 	 */
+	_set_job_state(job, SLURMSTEPD_STEP_ENDING);
 	step_terminate_monitor_start(job->jobid, job->stepid);
 	proctrack_g_signal(job->cont_id, SIGKILL);
 	proctrack_g_wait(job->cont_id);
 	step_terminate_monitor_stop();
 
 	task_g_post_step(job);
-
-	/* Notify srun of completion AFTER frequency reset to avoid race
-	 * condition starting another job on these CPUs. */
-	while (_send_pending_exit_msgs(job)) {;}
 
 fail1:
 	debug2("%s: Before call to spank_fini()", __func__);
@@ -1085,6 +1091,9 @@ fail1:
 	debug2("%s: After call to spank_fini()", __func__);
 
 	_set_job_state(job, SLURMSTEPD_STEP_ENDING);
+
+	if (step_complete.rank > -1)
+		_wait_for_children_slurmstepd(job);
 	_send_step_complete_msgs(job);
 
 	return rc;

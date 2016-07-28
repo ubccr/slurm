@@ -169,8 +169,9 @@ static struct step_record * _create_step_record(struct job_record *job_ptr,
 	struct step_record *step_ptr;
 
 	xassert(job_ptr);
-	/* NOTE: Reserve highest step ID values for NO_VAL and
-	 * SLURM_BATCH_SCRIPT */
+	/* NOTE: Reserve highest step ID values for
+	 * SLURM_EXTERN_CONT and SLURM_BATCH_SCRIPT and any other
+	 * special step that may come our way. */
 	if (job_ptr->next_step_id >= 0xfffffff0) {
 		/* avoid step records in the accounting database */
 		info("job %u has reached step id limit", job_ptr->job_id);
@@ -213,7 +214,7 @@ static void _build_pending_step(struct job_record *job_ptr,
 	step_ptr->port		= step_specs->port;
 	step_ptr->host		= xstrdup(step_specs->host);
 	step_ptr->state		= JOB_PENDING;
-	step_ptr->step_id	= SLURM_EXTERN_CONT;
+	step_ptr->step_id	= SLURM_PENDING_STEP;
 	if (job_ptr->node_bitmap)
 		step_ptr->step_node_bitmap = bit_copy(job_ptr->node_bitmap);
 	step_ptr->time_last_active = time(NULL);
@@ -224,18 +225,21 @@ static void _internal_step_complete(struct job_record *job_ptr,
 				    struct step_record *step_ptr)
 {
 	jobacct_storage_g_step_complete(acct_db_conn, step_ptr);
-	if (step_ptr->step_id != SLURM_EXTERN_CONT) {
+
+	if (step_ptr->step_id == SLURM_PENDING_STEP)
+		return;
+
+	if (step_ptr->step_id != SLURM_EXTERN_CONT)
 		job_ptr->derived_ec = MAX(job_ptr->derived_ec,
 					  step_ptr->exit_code);
 
-		step_ptr->state |= JOB_COMPLETING;
-		select_g_step_finish(step_ptr, false);
+	step_ptr->state |= JOB_COMPLETING;
+	select_g_step_finish(step_ptr, false);
 #if !defined(HAVE_NATIVE_CRAY) && !defined(HAVE_CRAY_NETWORK)
-		/* On native Cray, post_job_step is called after NHC completes.
-		 * IF SIMULATING A CRAY THIS NEEDS TO BE COMMENTED OUT!!!! */
-		post_job_step(step_ptr);
+	/* On native Cray, post_job_step is called after NHC completes.
+	 * IF SIMULATING A CRAY THIS NEEDS TO BE COMMENTED OUT!!!! */
+	post_job_step(step_ptr);
 #endif
-	}
 }
 
 /*
@@ -256,7 +260,7 @@ extern void delete_step_records (struct job_record *job_ptr)
 	step_iterator = list_iterator_create(job_ptr->step_list);
 	while ((step_ptr = (struct step_record *) list_next (step_iterator))) {
 		/* Only check if not a pending step */
-		if (step_ptr->step_id != SLURM_EXTERN_CONT) {
+		if (step_ptr->step_id != SLURM_PENDING_STEP) {
 			uint16_t cleaning = 0;
 			select_g_select_jobinfo_get(step_ptr->select_jobinfo,
 						    SELECT_JOBDATA_CLEANING,
@@ -306,8 +310,10 @@ static void _free_step_rec(struct step_record *step_ptr)
  * and not upon record purging. Presently both events occur
  * simultaneously. */
 	if (step_ptr->switch_job) {
-		switch_g_job_step_complete(step_ptr->switch_job,
-					   step_ptr->step_layout->node_list);
+		if (step_ptr->step_layout)
+			switch_g_job_step_complete(
+				step_ptr->switch_job,
+				step_ptr->step_layout->node_list);
 		switch_g_free_jobinfo (step_ptr->switch_job);
 	}
 	resv_port_free(step_ptr);
@@ -562,11 +568,6 @@ int job_step_signal(uint32_t job_id, uint32_t step_id,
 	} else if ((signal == SIGKILL) || notify_slurmd)
 		signal_step_tasks(step_ptr, signal, REQUEST_SIGNAL_TASKS);
 
-	/* This has to be done last or we have a race condition with the
-	 * step_ptr not being around after this is called.  */
-	if (signal == SIGKILL)
-		select_g_step_finish(step_ptr, true);
-
 	return SLURM_SUCCESS;
 }
 
@@ -741,8 +742,8 @@ int job_step_complete(uint32_t job_id, uint32_t step_id, uid_t uid,
 	if (step_ptr == NULL)
 		return ESLURM_INVALID_JOB_ID;
 
-	if (step_ptr->step_id == SLURM_EXTERN_CONT)
-		return select_g_step_finish(step_ptr, true);
+	if (step_ptr->step_id == SLURM_PENDING_STEP)
+		return SLURM_SUCCESS;
 
 	/* If the job is already cleaning we have already been here
 	 * before, so just return. */
@@ -3313,24 +3314,16 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid,
 	}
 
 	step_ptr = find_step_record(job_ptr, req->job_step_id);
-	if ((step_ptr == NULL) && (req->job_step_id == SLURM_EXTERN_CONT)) {
-		step_ptr = _create_step_record(job_ptr, 0);
-		checkpoint_alloc_jobinfo(&step_ptr->check_job);
-		step_ptr->ext_sensors = ext_sensors_alloc();
-		step_ptr->name = xstrdup("extern");
-		step_ptr->select_jobinfo = select_g_select_jobinfo_alloc();
-		step_ptr->state = JOB_RUNNING;
-		step_ptr->start_time = job_ptr->start_time;
-		step_ptr->step_id = SLURM_EXTERN_CONT;
-		if (job_ptr->node_bitmap) {
-			step_ptr->step_node_bitmap =
-				bit_copy(job_ptr->node_bitmap);
-		}
-		step_ptr->time_last_active = time(NULL);
-		step_set_alloc_tres(step_ptr, 1, false, false);
 
-		jobacct_storage_g_step_start(acct_db_conn, step_ptr);
-	}
+	/* FIXME: It was changed in 16.05.3 to make the extern step
+	 * at the beginning of the job, so this isn't really needed
+	 * anymore, but just incase there were steps out on the nodes
+	 * during an upgrade this was left in.  It can probably be
+	 * taken out in future releases though.
+	 */
+	if ((step_ptr == NULL) && (req->job_step_id == SLURM_EXTERN_CONT))
+		step_ptr = build_extern_step(job_ptr);
+
 	if (step_ptr == NULL) {
 		info("step_partial_comp: StepID=%u.%u invalid",
 		     req->job_id, req->job_step_id);
@@ -3462,7 +3455,7 @@ extern void step_set_alloc_tres(
 			mem_count = step_ptr->job_ptr->job_resrcs->
 				memory_allocated[0];
 	} else if ((step_ptr->step_id == SLURM_EXTERN_CONT) &&
-	    step_ptr->job_ptr->tres_alloc_str) {
+		   step_ptr->job_ptr->tres_alloc_str) {
 		/* get the tres from the whole job */
 		step_ptr->tres_alloc_str =
 			xstrdup(step_ptr->job_ptr->tres_alloc_str);
@@ -4027,7 +4020,11 @@ extern int load_step_state(struct job_record *job_ptr, Buf buffer,
 	slurm_step_layout_destroy(step_ptr->step_layout);
 	step_ptr->step_layout  = step_layout;
 
-	step_ptr->switch_job   = switch_tmp;
+	if ((step_ptr->step_id == SLURM_EXTERN_CONT) && switch_tmp) {
+		switch_g_free_jobinfo(switch_tmp);
+		switch_tmp = NULL;
+	} else
+		step_ptr->switch_job   = switch_tmp;
 
 	xfree(step_ptr->tres_alloc_str);
 	step_ptr->tres_alloc_str     = tres_alloc_str;
@@ -4042,11 +4039,14 @@ extern int load_step_state(struct job_record *job_ptr, Buf buffer,
 	step_ptr->cpu_freq_max = cpu_freq_max;
 	step_ptr->cpu_freq_gov = cpu_freq_gov;
 	step_ptr->state        = state;
+
+	step_ptr->start_protocol_ver = start_protocol_ver;
+
 	/* Prior to 16.05, the step_layout->start_protocol_version isn't set on
 	 * creation of the layout. After 16.05 is EOL'ed then the step_layout's
 	 * start_protocol_version doesn't need to be set here anymore. */
-	step_ptr->step_layout->start_protocol_ver = step_ptr->start_protocol_ver
-		= start_protocol_ver;
+	if (step_ptr->step_layout)
+		step_ptr->step_layout->start_protocol_ver = start_protocol_ver;
 
 	if (!step_ptr->ext_sensors)
 		step_ptr->ext_sensors = ext_sensors_alloc();
@@ -4072,8 +4072,9 @@ extern int load_step_state(struct job_record *job_ptr, Buf buffer,
 		xfree(core_job);
 	}
 
-	switch_g_job_step_allocated(switch_tmp,
-				    step_ptr->step_layout->node_list);
+	if (step_ptr->step_layout && switch_tmp)
+		switch_g_job_step_allocated(switch_tmp,
+					    step_ptr->step_layout->node_list);
 
 	info("recovered job step %u.%u", job_ptr->job_id, step_id);
 	return SLURM_SUCCESS;
@@ -4221,7 +4222,6 @@ static void _signal_step_timelimit(struct job_record *job_ptr,
 
 	if (notify_srun) {	/* Handle termination from srun, not slurmd */
 		srun_step_timeout(step_ptr, now);
-		(void) select_g_step_finish(step_ptr, true);
 		return;
 	}
 
@@ -4262,8 +4262,6 @@ static void _signal_step_timelimit(struct job_record *job_ptr,
 		agent_args->node_count++;
 	}
 #endif
-
-	(void) select_g_step_finish(step_ptr, true);
 
 	if (agent_args->node_count == 0) {
 		hostlist_destroy(agent_args->hostlist);
@@ -4540,6 +4538,10 @@ extern void rebuild_step_bitmaps(struct job_record *job_ptr,
 	list_iterator_destroy (step_iterator);
 }
 
+/* NOTE: this function will call delete_step_record which will lock
+ * the job_ptr->step_list so make sure you don't call this if you are
+ * already holding a lock on that list (list_for_each).
+ */
 extern int post_job_step(struct step_record *step_ptr)
 {
 	struct job_record *job_ptr = step_ptr->job_ptr;
@@ -4563,4 +4565,39 @@ extern int post_job_step(struct step_record *step_ptr)
 	_wake_pending_steps(job_ptr);
 
 	return SLURM_SUCCESS;
+}
+
+extern struct step_record *build_extern_step(struct job_record *job_ptr)
+{
+	struct step_record *step_ptr = _create_step_record(job_ptr, 0);
+	char *node_list;
+	uint32_t node_cnt;
+
+#ifdef HAVE_FRONT_END
+	node_list = job_ptr->front_end_ptr->name;
+	node_cnt = 1;
+#else
+	node_list = job_ptr->nodes;
+	node_cnt = job_ptr->node_cnt;
+#endif
+
+	step_ptr->step_layout = fake_slurm_step_layout_create(
+		node_list, NULL, NULL, node_cnt, node_cnt);
+
+	checkpoint_alloc_jobinfo(&step_ptr->check_job);
+	step_ptr->ext_sensors = ext_sensors_alloc();
+	step_ptr->name = xstrdup("extern");
+	step_ptr->select_jobinfo = select_g_select_jobinfo_alloc();
+	step_ptr->state = JOB_RUNNING;
+	step_ptr->start_time = job_ptr->start_time;
+	step_ptr->step_id = SLURM_EXTERN_CONT;
+	if (job_ptr->node_bitmap)
+		step_ptr->step_node_bitmap =
+			bit_copy(job_ptr->node_bitmap);
+	step_ptr->time_last_active = time(NULL);
+	step_set_alloc_tres(step_ptr, 1, false, false);
+
+	jobacct_storage_g_step_start(acct_db_conn, step_ptr);
+
+	return step_ptr;
 }
