@@ -2690,31 +2690,31 @@ static void _node_state_log(void *gres_data, char *node_name, char *gres_name)
 	info("  gres_used:%s", gres_node_ptr->gres_used);
 
 	for (i = 0; i < gres_node_ptr->topo_cnt; i++) {
+		info("  type[%d]:%s", i, gres_node_ptr->topo_model[i]);
 		if (gres_node_ptr->topo_cpus_bitmap[i]) {
 			bit_fmt(tmp_str, sizeof(tmp_str),
 				gres_node_ptr->topo_cpus_bitmap[i]);
-			info("  topo_cpus_bitmap[%d]:%s", i, tmp_str);
+			info("   topo_cpus_bitmap[%d]:%s", i, tmp_str);
 		} else
-			info("  topo_cpus_bitmap[%d]:NULL", i);
+			info("   topo_cpus_bitmap[%d]:NULL", i);
 		if (gres_node_ptr->topo_gres_bitmap[i]) {
 			bit_fmt(tmp_str, sizeof(tmp_str),
 				gres_node_ptr->topo_gres_bitmap[i]);
-			info("  topo_gres_bitmap[%d]:%s", i, tmp_str);
+			info("   topo_gres_bitmap[%d]:%s", i, tmp_str);
 		} else
-			info("  topo_gres_bitmap[%d]:NULL", i);
-		info("  topo_gres_cnt_alloc[%d]:%"PRIu64"", i,
+			info("   topo_gres_bitmap[%d]:NULL", i);
+		info("   topo_gres_cnt_alloc[%d]:%"PRIu64"", i,
 		     gres_node_ptr->topo_gres_cnt_alloc[i]);
-		info("  topo_gres_cnt_avail[%d]:%"PRIu64"", i,
+		info("   topo_gres_cnt_avail[%d]:%"PRIu64"", i,
 		     gres_node_ptr->topo_gres_cnt_avail[i]);
-		info("  type[%d]:%s", i, gres_node_ptr->topo_model[i]);
 	}
 
 	for (i = 0; i < gres_node_ptr->type_cnt; i++) {
-		info("  type_cnt_alloc[%d]:%"PRIu64"", i,
-		     gres_node_ptr->type_cnt_alloc[i]);
-		info("  type_cnt_avail[%d]:%"PRIu64"", i,
-		     gres_node_ptr->type_cnt_avail[i]);
 		info("  type[%d]:%s", i, gres_node_ptr->type_model[i]);
+		info("   type_cnt_alloc[%d]:%"PRIu64"", i,
+		     gres_node_ptr->type_cnt_alloc[i]);
+		info("   type_cnt_avail[%d]:%"PRIu64"", i,
+		     gres_node_ptr->type_cnt_avail[i]);
 	}
 }
 
@@ -4285,6 +4285,22 @@ static int _job_alloc(void *job_gres_data, void *node_gres_data,
 			}
 		}
 		type_array_updated = true;
+		if (job_gres_ptr->type_model && job_gres_ptr->type_model[0]) {
+			/* We may not know how many GRES of this type will be
+			 * available on this node, but need to track how many
+			 * are allocated to this job from here to avoid
+			 * underflows when this job is deallocated */
+			_add_gres_type(job_gres_ptr->type_model, node_gres_ptr,
+				       0);
+			for (j = 0; j < node_gres_ptr->type_cnt; j++) {
+				if (xstrcmp(job_gres_ptr->type_model,
+					    node_gres_ptr->type_model[j]))
+					continue;
+				node_gres_ptr->type_cnt_alloc[j] +=
+					job_gres_ptr->gres_cnt_alloc;
+				break;
+			}
+		}
 	}
 
 	if (!type_array_updated && job_gres_ptr->type_model) {
@@ -4498,7 +4514,7 @@ static int _job_dealloc(void *job_gres_data, void *node_gres_data,
 					      "(%"PRIu64" %"PRIu64")",
 					      gres_name, job_id, node_name,
 					      node_gres_ptr->type_model[j],
-					      node_gres_ptr->type_cnt_alloc[i],
+					      node_gres_ptr->type_cnt_alloc[j],
 					      gres_cnt);
 					node_gres_ptr->type_cnt_alloc[j] = 0;
 				}

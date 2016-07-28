@@ -79,6 +79,7 @@
 #include "src/slurmctld/agent.h"
 #include "src/slurmctld/burst_buffer.h"
 #include "src/slurmctld/front_end.h"
+#include "src/slurmctld/gang.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/licenses.h"
 #include "src/slurmctld/node_scheduler.h"
@@ -609,8 +610,12 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 #endif
 
 	if ((agent_args->node_count - down_node_cnt) == 0) {
+		/* Can not wait for epilog completet to release licenses and
+		 * update gang scheduling table */
 		delete_step_records(job_ptr);
 		job_ptr->job_state &= (~JOB_COMPLETING);
+		(void) gs_job_fini(job_ptr);
+		license_job_return(job_ptr);
 		slurm_sched_g_schedule();
 	}
 
@@ -2590,7 +2595,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	}
 
 	/* Request asynchronous launch of a prolog for a
-	 * non batch job. */
+	 * non-batch job. */
 	if ((slurmctld_conf.prolog_flags & PROLOG_FLAG_ALLOC) ||
 	    (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN))
 		_launch_prolog(job_ptr);
@@ -2727,27 +2732,8 @@ static void _launch_prolog(struct job_record *job_ptr)
 	/* At least on a Cray we have to treat this as a real step, so
 	 * this is where to do it.
 	 */
-	if (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN) {
-		struct step_record step_rec;
-		slurm_step_layout_t layout;
-
-		memset(&step_rec, 0, sizeof(step_rec));
-		memset(&layout, 0, sizeof(layout));
-
-#ifdef HAVE_FRONT_END
-		layout.node_list = job_ptr->front_end_ptr->name;
-#else
-		layout.node_list = job_ptr->nodes;
-#endif
-		layout.node_cnt = agent_arg_ptr->node_count;
-
-		step_rec.step_layout = &layout;
-		step_rec.step_id = SLURM_EXTERN_CONT;
-		step_rec.job_ptr = job_ptr;
-		step_rec.name = "external";
-
-		select_g_step_start(&step_rec);
-	}
+	if (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN)
+		select_g_step_start(build_extern_step(job_ptr));
 
 	/* Launch the RPC via agent */
 	agent_queue_request(agent_arg_ptr);
@@ -3692,6 +3678,8 @@ extern void re_kill_job(struct job_record *job_ptr)
 	char *host_str = NULL;
 	static uint32_t last_job_id = 0;
 	struct node_record *node_ptr;
+	struct step_record *step_ptr;
+	ListIterator step_iterator;
 #ifdef HAVE_FRONT_END
 	front_end_record_t *front_end_ptr;
 #endif
@@ -3718,6 +3706,25 @@ extern void re_kill_job(struct job_record *job_ptr)
 	kill_job->spank_job_env = xduparray(job_ptr->spank_job_env_size,
 					    job_ptr->spank_job_env);
 	kill_job->spank_job_env_size = job_ptr->spank_job_env_size;
+
+	/* On a Cray system this will start the NHC early so it is
+	 * able to gather any information it can from the apparent
+	 * unkillable processes.
+	 * NOTE: do not do a list_for_each here, that will hold on the list
+	 * lock while processing the entire list which could
+	 * potentially be needed to lock again in
+	 * select_g_step_finish which could potentially call
+	 * post_job_step which calls delete_step_record which locks
+	 * the list to create a list_iterator on the same list and
+	 * could cause deadlock :).
+	 */
+	step_iterator = list_iterator_create(job_ptr->step_list);
+	while ((step_ptr = list_next(step_iterator))) {
+		if (step_ptr->step_id == SLURM_PENDING_STEP)
+			continue;
+		select_g_step_finish(step_ptr, true);
+	}
+	list_iterator_destroy(step_iterator);
 
 #ifdef HAVE_FRONT_END
 	if (job_ptr->batch_host &&
@@ -3812,6 +3819,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 		      job_ptr->job_id, host_str);
 	}
 #endif
+
 	xfree(host_str);
 	last_job_id = job_ptr->job_id;
 	hostlist_destroy(kill_hostlist);
