@@ -78,6 +78,8 @@
 #define _DEBUG 0	/* Detailed debugging information */
 #define TIME_SLOP 5	/* time allowed to synchronize operations between
 			 * threads */
+#define MAX_RETRY_CNT 2	/* Hold job if "pre_run" operation fails more than
+			 * 2 times */
 /*
  * These variables are required by the burst buffer plugin interface.  If they
  * are not found in the plugin, the plugin loader will ignore it.
@@ -1379,23 +1381,25 @@ static int _queue_stage_in(struct job_record *job_ptr, bb_job_t *bb_job)
 	setup_argv[5] = xstrdup("--caller");
 	setup_argv[6] = xstrdup("SLURM");
 	setup_argv[7] = xstrdup("--user");
-	xstrfmtcat(setup_argv[8], "%d", job_ptr->user_id);
-	setup_argv[9] = xstrdup("--capacity");
+	xstrfmtcat(setup_argv[8], "%u", job_ptr->user_id);
+	setup_argv[9] = xstrdup("--groupid");
+	xstrfmtcat(setup_argv[10], "%u", job_ptr->group_id);
+	setup_argv[11] = xstrdup("--capacity");
 	if (bb_job->job_pool)
 		job_pool = bb_job->job_pool;
 	else
 		job_pool = bb_state.bb_config.default_pool;
-	xstrfmtcat(setup_argv[10], "%s:%s",
+	xstrfmtcat(setup_argv[12], "%s:%s",
 		   job_pool, bb_get_size_str(bb_job->total_size));
-	setup_argv[11] = xstrdup("--job");
-	xstrfmtcat(setup_argv[12], "%s/script", job_dir);
+	setup_argv[13] = xstrdup("--job");
+	xstrfmtcat(setup_argv[14], "%s/script", job_dir);
 	if (client_nodes_file_nid) {
 #if defined(HAVE_NATIVE_CRAY)
-		setup_argv[13] = xstrdup("--nidlistfile");
+		setup_argv[15] = xstrdup("--nidlistfile");
 #else
-		setup_argv[13] = xstrdup("--nodehostnamefile");
+		setup_argv[15] = xstrdup("--nodehostnamefile");
 #endif
-		setup_argv[14] = xstrdup(client_nodes_file_nid);
+		setup_argv[16] = xstrdup(client_nodes_file_nid);
 	}
 	bb_limit_add(job_ptr->user_id, bb_job->total_size, job_pool, &bb_state);
 
@@ -2470,6 +2474,13 @@ static int _xlate_interactive(struct job_descriptor *job_desc)
 	if (!job_desc->burst_buffer || (job_desc->burst_buffer[0] == '#'))
 		return rc;
 
+	if (strstr(job_desc->burst_buffer, "create_persistent") ||
+	    strstr(job_desc->burst_buffer, "destroy_persistent")) {
+		/* Create or destroy of persistent burst buffers NOT supported
+		 * via -bb option. Use -bbf or a batch script instead. */
+		return ESLURM_INVALID_BURST_BUFFER_REQUEST;
+	}
+
 	if ((tok = strstr(job_desc->burst_buffer, "access="))) {
 		access = xstrdup(tok + 7);
 		tok = strchr(access, ',');
@@ -3412,12 +3423,13 @@ extern int bb_p_job_begin(struct job_record *job_ptr)
 }
 
 /* Kill job from CONFIGURING state */
-static void _kill_job(struct job_record *job_ptr)
+static void _kill_job(struct job_record *job_ptr, bool hold_job)
 {
 	last_job_update = time(NULL);
 	job_ptr->end_time = last_job_update;
 	job_ptr->job_state = JOB_PENDING | JOB_COMPLETING;
-	job_ptr->priority = 0;	/* Hold job */
+	if (hold_job)
+		job_ptr->priority = 0;
 	build_cg_bitmap(job_ptr);
 	job_ptr->exit_code = 1;
 	job_ptr->state_reason = FAIL_BURST_BUFFER_OP;
@@ -3440,6 +3452,7 @@ static void *_start_pre_run(void *x)
 	struct job_record *job_ptr;
 	bool run_kill_job = false;
 	uint32_t timeout;
+	bool hold_job = false;
 	DEF_TIMERS;
 
 	if (pre_run_args->timeout)
@@ -3477,8 +3490,11 @@ static void *_start_pre_run(void *x)
 			if (IS_JOB_RUNNING(job_ptr))
 				run_kill_job = true;
 			bb_job = _get_bb_job(job_ptr);
-			if (bb_job)
+			if (bb_job) {
 				bb_job->state = BB_STATE_TEARDOWN;
+				if (bb_job->retry_cnt++ > MAX_RETRY_CNT)
+					hold_job = true;
+			}
 		}
 		_queue_teardown(pre_run_args->job_id, pre_run_args->user_id,
 				true);
@@ -3487,7 +3503,7 @@ static void *_start_pre_run(void *x)
 		prolog_running_decr(job_ptr);
 	slurm_mutex_unlock(&bb_state.bb_mutex);
 	if (run_kill_job)
-		_kill_job(job_ptr);
+		_kill_job(job_ptr, hold_job);
 	unlock_slurmctld(job_write_lock);
 
 	xfree(resp_msg);
@@ -4554,7 +4570,7 @@ _json_parse_sessions_array(json_object *jobj, char *key, int *num)
 	json_object_object_get_ex(jobj, key, &jarray);
 
 	*num = json_object_array_length(jarray);
-	ents = xmalloc(*num * sizeof(bb_pools_t));
+	ents = xmalloc(*num * sizeof(bb_sessions_t));
 
 	for (i = 0; i < *num; i++) {
 		jvalue = json_object_array_get_idx(jarray, i);

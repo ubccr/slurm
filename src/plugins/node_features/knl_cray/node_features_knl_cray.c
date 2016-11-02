@@ -53,6 +53,10 @@
 #  include <json/json.h>
 #endif
 
+#if defined(__FreeBSD__) || defined(__NetBSD__)
+#define POLLRDHUP POLLHUP
+#endif
+
 #include "slurm/slurm.h"
 
 #include "src/common/assoc_mgr.h"
@@ -71,12 +75,18 @@
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/node_scheduler.h"
+#include "src/slurmctld/read_config.h"
 #include "src/slurmctld/reservation.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/state_save.h"
 
 /* Maximum poll wait time for child processes, in milliseconds */
 #define MAX_POLL_WAIT 500
+
+/* Default and minimum timeout parameters for the capmc command */
+#define DEFAULT_CAPMC_RETRIES 4
+#define DEFAULT_CAPMC_TIMEOUT 60000	/* 60 seconds */
+#define MIN_CAPMC_TIMEOUT 1000		/* 1 second */
 
 /* Intel Knights Landing Configuration Modes */
 #define KNL_NUMA_CNT	5
@@ -99,8 +109,10 @@
  */
 #if defined (__APPLE__)
 slurmctld_config_t slurmctld_config __attribute__((weak_import));
+bitstr_t *avail_node_bitmap __attribute__((weak_import));
 #else
 slurmctld_config_t slurmctld_config;
+bitstr_t *avail_node_bitmap;
 #endif
 
 /*
@@ -132,10 +144,23 @@ const char plugin_name[]        = "node_features knl_cray plugin";
 const char plugin_type[]        = "node_features/knl_cray";
 const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
+/* These are defined here so when we link with something other than
+ * the slurmctld we will have these symbols defined.  They will get
+ * overwritten when linking with the slurmctld.
+ */
+#if defined (__APPLE__)
+List active_feature_list __attribute__((weak_import));
+#else
+List active_feature_list;
+#endif
+
 /* Configuration Paramters */
 static char *capmc_path = NULL;
 static uint32_t capmc_poll_freq = 45;	/* capmc state polling frequency */
+static uint32_t capmc_retries = DEFAULT_CAPMC_RETRIES;
 static uint32_t capmc_timeout = 0;	/* capmc command timeout in msec */
+static bitstr_t *capmc_node_bitmap = NULL;	/* Nodes found by capmc */
+static bitstr_t *knl_node_bitmap = NULL;	/* KNL nodes found by capmc */
 static char *cnselect_path = NULL;
 static bool  debug_flag = false;
 static uint16_t allow_mcdram = KNL_MCDRAM_FLAG;
@@ -148,8 +173,15 @@ static char *syscfg_path = NULL;
 static pthread_mutex_t config_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool reconfig = false;
 
+static pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char *node_list_queue = NULL;
+static time_t node_time_queue = (time_t) 0;
+static time_t shutdown_time = (time_t) 0;
+static pthread_t queue_thread = 0;
+
 /* Percentage of MCDRAM used for cache by type, updated from capmc */
 static int mcdram_pct[KNL_MCDRAM_CNT];
+static int mcdram_set = 0;
 static uint64_t *mcdram_per_node = NULL;
 
 /* NOTE: New knl_cray.conf parameters added below must also be added to the
@@ -160,6 +192,7 @@ static s_p_options_t knl_conf_file_options[] = {
 	{"AllowUserBoot", S_P_STRING},
 	{"CapmcPath", S_P_STRING},
 	{"CapmcPollFreq", S_P_UINT32},
+	{"CapmcRetries", S_P_UINT32},
 	{"CapmcTimeout", S_P_UINT32},
 	{"CnselectPath", S_P_STRING},
 	{"DefaultMCDRAM", S_P_STRING},
@@ -183,7 +216,7 @@ typedef struct mcdram_cfg {
 } mcdram_cfg_t;
 
 typedef struct mcdram_cfg2 {
-	int hbm_pct;
+	int cache_pct;
 	char *mcdram_cfg;
 	char *nid_str;
 	bitstr_t *node_bitmap;
@@ -205,6 +238,8 @@ typedef struct numa_cfg2 {
 	char *numa_cfg;
 } numa_cfg2_t;
 
+static void _check_node_disabled(void);
+static void _check_node_status(void);
 static s_p_hashtbl_t *_config_make_tbl(char *filename);
 static void _free_script_argv(char **script_argv);
 static mcdram_cap_t *_json_parse_mcdram_cap_array(json_object *jobj, char *key,
@@ -229,7 +264,7 @@ static char *_knl_numa_str(uint16_t numa_num);
 static uint16_t _knl_numa_token(char *token);
 static mcdram_cfg2_t *_load_current_mcdram(int *num);
 static numa_cfg2_t *_load_current_numa(int *num);
-static char *_load_mcdram_type(int hbm_pct);
+static char *_load_mcdram_type(int cache_pct);
 static char *_load_numa_type(char *type);
 static void _log_script_argv(char **script_argv, char *resp_msg);
 static void _mcdram_cap_free(mcdram_cap_t *mcdram_cap, int mcdram_cap_cnt);
@@ -246,6 +281,8 @@ static void _numa_cfg2_free(numa_cfg2_t *numa_cfg, int numa_cfg2_cnt);
 static void _numa_cfg_log(numa_cfg_t *numa_cfg, int numa_cfg_cnt);
 static void _numa_cfg2_log(numa_cfg2_t *numa_cfg, int numa_cfg2_cnt);
 static uint64_t _parse_size(char *size_str);
+extern void *_queue_agent(void *args);
+static int  _queue_node_update(char *node_list);
 static char *_run_script(char *cmd_path, char **script_argv, int *status);
 static void _strip_knl_opts(char **features);
 static int  _tot_wait (struct timeval *start_time);
@@ -260,6 +297,11 @@ static void _update_node_features(struct node_record *node_ptr,
 				  mcdram_cfg_t *mcdram_cfg, int mcdram_cfg_cnt,
 				  numa_cap_t *numa_cap, int numa_cap_cnt,
 				  numa_cfg_t *numa_cfg, int numa_cfg_cnt);
+static int _update_node_state(char *node_list, bool set_locks);
+
+/* Function used both internally and externally */
+extern int node_features_p_node_update(char *active_features,
+				       bitstr_t *node_bitmap);
 
 static s_p_hashtbl_t *_config_make_tbl(char *filename)
 {
@@ -521,7 +563,6 @@ static void _free_script_argv(char **script_argv)
  */
 static void _update_mcdram_pct(char *tok, int mcdram_num)
 {
-	static int mcdram_set = 0;
 	int inx;
 
 	if (mcdram_set == KNL_MCDRAM_CNT)
@@ -716,18 +757,18 @@ static mcdram_cap_t *_json_parse_mcdram_cap_array(json_object *jobj, char *key,
 /* Return NID string for all nodes with specified MCDRAM mode (HBM percentage).
  * NOTE: Information not returned for nodes which are not up
  * NOTE: xfree() the return value. */
-static char *_load_mcdram_type(int hbm_pct)
+static char *_load_mcdram_type(int cache_pct)
 {
 	char **script_argv, *resp_msg;
 	int i, status = 0;
 	DEF_TIMERS;
 
-	if (hbm_pct < 0)	/* Unsupported configuration on this system */
+	if (cache_pct < 0)	/* Unsupported configuration on this system */
 		return NULL;
 	script_argv = xmalloc(sizeof(char *) * 4);	/* NULL terminated */
 	script_argv[0] = xstrdup("cnselect");
 	script_argv[1] = xstrdup("-e");
-	xstrfmtcat(script_argv[2], "hbmcachepct.eq.%d", hbm_pct);
+	xstrfmtcat(script_argv[2], "hbmcachepct.eq.%d", cache_pct);
 	START_TIMER;
 	resp_msg = _run_script(cnselect_path, script_argv, &status);
 	END_TIMER;
@@ -763,9 +804,9 @@ static mcdram_cfg2_t *_load_current_mcdram(int *num)
 	mcdram_cfg = xmalloc(sizeof(mcdram_cfg2_t) * 4);
 
 	for (i = 0; i < 4; i++) {
-		mcdram_cfg[i].hbm_pct = mcdram_pct[i];
+		mcdram_cfg[i].cache_pct = mcdram_pct[i];
 		mcdram_cfg[i].mcdram_cfg = _knl_mcdram_str(KNL_CACHE << i);
-		mcdram_cfg[i].nid_str = _load_mcdram_type(mcdram_cfg[i].hbm_pct);
+		mcdram_cfg[i].nid_str = _load_mcdram_type(mcdram_cfg[i].cache_pct);
 		if (mcdram_cfg[i].nid_str && mcdram_cfg[i].nid_str[0]) {
 			mcdram_cfg[i].node_bitmap = bit_alloc(100000);
 			(void) bit_unfmt(mcdram_cfg[i].node_bitmap,
@@ -997,9 +1038,9 @@ static void _mcdram_cfg2_log(mcdram_cfg2_t *mcdram_cfg2, int mcdram_cfg2_cnt)
 	if (!mcdram_cfg2)
 		return;
 	for (i = 0; i < mcdram_cfg2_cnt; i++) {
-		info("MCDRAM_CFG[%d]: nid_str:%s mcdram_cfg:%s hbm_pct:%d",
+		info("MCDRAM_CFG[%d]: nid_str:%s mcdram_cfg:%s cache_pct:%d",
 		     i, mcdram_cfg2[i].nid_str, mcdram_cfg2[i].mcdram_cfg,
-		     mcdram_cfg2[i].hbm_pct);
+		     mcdram_cfg2[i].cache_pct);
 	}
 }
 
@@ -1226,6 +1267,35 @@ next_tok:	tok1 = strtok_r(NULL, ",", &save_ptr1);
 	xfree(tmp_str1);
 }
 
+/* Remove all KNL MCDRAM and NUMA type GRES from this node (it isn't KNL),
+ * returns count of KNL features found. */
+static int _strip_knl_features(char **node_feature)
+{
+	char *tmp_str1, *tok1, *save_ptr1 = NULL;
+	char *tmp_str2 = NULL, *sep = "";
+	int cnt = 0;
+
+	tmp_str1 = xstrdup(*node_feature);
+	tok1 = strtok_r(tmp_str1, ",", &save_ptr1);
+	while (tok1) {
+		if (_knl_mcdram_token(tok1) || _knl_numa_token(tok1)) {
+			cnt++;
+		} else {
+			xstrfmtcat(tmp_str2, "%s%s", sep, tok1);
+			sep = ",";
+		}
+		tok1 = strtok_r(NULL, ",", &save_ptr1);
+	}
+	if (cnt) {	/* Update the nodes features */
+		xfree(*node_feature);
+		*node_feature = tmp_str2;
+	} else {	/* Discard new feature list */
+		xfree(tmp_str2);
+	}
+	xfree(tmp_str1);
+	return cnt;
+}
+
 /* Update features and features_act fields for ALL nodes based upon
  * its current configuration provided by capmc */
 static void _update_all_node_features(
@@ -1236,7 +1306,7 @@ static void _update_all_node_features(
 {
 	struct node_record *node_ptr;
 	char node_name[32], *prefix;
-	int i, width = 5;
+	int i, node_inx, width = 5;
 	uint64_t mcdram_size;
 
 	if ((node_record_table_ptr == NULL) ||
@@ -1255,11 +1325,15 @@ static void _update_all_node_features(
 		}
 	}
 	if (mcdram_cap) {
+		if (!knl_node_bitmap)
+			knl_node_bitmap = bit_alloc(node_record_count);
 		for (i = 0; i < mcdram_cap_cnt; i++) {
 			snprintf(node_name, sizeof(node_name),
 				 "%s%.*d", prefix, width, mcdram_cap[i].nid);
 			node_ptr = find_node_record(node_name);
 			if (node_ptr) {
+				node_inx = node_ptr - node_record_table_ptr;
+				bit_set(knl_node_bitmap, node_inx);
 				_merge_strings(&node_ptr->features,
 					       mcdram_cap[i].mcdram_cfg,
 					       allow_mcdram);
@@ -1312,6 +1386,23 @@ static void _update_all_node_features(
 			}
 		}
 	}
+
+	/* Make sure that only nodes reported by "capmc get_mcdram_capabilities"
+	 * contain KNL features */
+	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
+	     i++, node_ptr++) {
+		if (bit_test(knl_node_bitmap, i))
+			continue;
+		node_inx = _strip_knl_features(&node_ptr->features) +
+			   _strip_knl_features(&node_ptr->features_act);
+		if (node_inx) {
+			error("Removed KNL features from non-KNL node %s",
+			      node_ptr->name);
+		}
+		gres_plugin_node_feature(node_ptr->name, "hbm", 0,
+					 &node_ptr->gres, &node_ptr->gres_list);
+	}
+
 	xfree(prefix);
 }
 
@@ -1323,9 +1414,11 @@ static void _update_node_features(struct node_record *node_ptr,
 				  numa_cap_t *numa_cap, int numa_cap_cnt,
 				  numa_cfg_t *numa_cfg, int numa_cfg_cnt)
 {
-	int i, nid;
+	int i, nid, node_inx;
 	char *end_ptr = "";
 	uint64_t mcdram_size;
+	bitstr_t *node_bitmap = NULL;
+	bool is_knl = false;
 
 	xassert(node_ptr);
 	nid = strtol(node_ptr->name + 3, &end_ptr, 10);
@@ -1345,10 +1438,12 @@ static void _update_node_features(struct node_record *node_ptr,
 				_merge_strings(&node_ptr->features,
 					       mcdram_cap[i].mcdram_cfg,
 					       allow_mcdram);
+				is_knl = true;
 				break;
 			}
 		}
 	}
+
 	if (mcdram_cfg) {
 		for (i = 0; i < mcdram_cfg_cnt; i++) {
 			if (nid != mcdram_cfg[i].nid)
@@ -1390,6 +1485,27 @@ static void _update_node_features(struct node_record *node_ptr,
 			}
 		}
 	}
+
+	/* Make sure that only nodes reported by "capmc get_mcdram_capabilities"
+	 * contain KNL features */
+	if (!is_knl) {
+		node_inx = _strip_knl_features(&node_ptr->features) +
+			   _strip_knl_features(&node_ptr->features_act);
+		if (node_inx) {
+			error("Removed KNL features from non-KNL node %s",
+			      node_ptr->name);
+		}
+		gres_plugin_node_feature(node_ptr->name, "hbm", 0,
+					 &node_ptr->gres, &node_ptr->gres_list);
+	}
+
+	/* Update bitmaps and lists used by slurmctld for scheduling */
+	node_bitmap = bit_alloc(node_record_count);
+	bit_set(node_bitmap, (node_ptr - node_record_table_ptr));
+	update_feature_list(active_feature_list, node_ptr->features_act,
+			    node_bitmap);
+	(void) node_features_p_node_update(node_ptr->features_act, node_bitmap);
+	FREE_NULL_BITMAP(node_bitmap);
 }
 
 static void _make_uid_array(char *uid_str)
@@ -1456,12 +1572,13 @@ extern int init(void)
 	allowed_uid_cnt = 0;
 	xfree(capmc_path);
 	capmc_poll_freq = 45;
-	capmc_timeout = 1000;
+	capmc_timeout = DEFAULT_CAPMC_TIMEOUT;
 	debug_flag = false;
 	default_mcdram = KNL_CACHE;
 	default_numa = KNL_ALL2ALL;
 	for (i = 0; i < KNL_MCDRAM_CNT; i++)
 		mcdram_pct[i] = -1;
+	mcdram_set = 0;
 
 	knl_conf_file = get_extra_conf_path("knl_cray.conf");
 	if ((stat(knl_conf_file, &stat_buf) == 0) &&
@@ -1488,6 +1605,7 @@ extern int init(void)
 		}
 		(void) s_p_get_string(&capmc_path, "CapmcPath", tbl);
 		(void) s_p_get_uint32(&capmc_poll_freq, "CapmcPollFreq", tbl);
+		(void) s_p_get_uint32(&capmc_retries, "CapmcRetries", tbl);
 		(void) s_p_get_uint32(&capmc_timeout, "CapmcTimeout", tbl);
 		(void) s_p_get_string(&cnselect_path, "CnselectPath", tbl);
 		if (s_p_get_string(&tmp_str, "DefaultMCDRAM", tbl)) {
@@ -1514,7 +1632,7 @@ extern int init(void)
 	xfree(knl_conf_file);
 	if (!capmc_path)
 		capmc_path = xstrdup("/opt/cray/capmc/default/bin/capmc");
-	capmc_timeout = MAX(capmc_timeout, 500);
+	capmc_timeout = MAX(capmc_timeout, MIN_CAPMC_TIMEOUT);
 	if (!cnselect_path)
 		cnselect_path = xstrdup("/opt/cray/sdb/default/bin/cnselect");
 	if (!syscfg_path)
@@ -1534,6 +1652,7 @@ extern int init(void)
 		info("AllowUserBoot=%s", allow_user_str);
 		info("CapmcPath=%s", capmc_path);
 		info("CapmcPollFreq=%u sec", capmc_poll_freq);
+		info("CapmcRetries=%u", capmc_retries);
 		info("CapmcTimeout=%u msec", capmc_timeout);
 		info("CnselectPath=%s", cnselect_path);
 		info("DefaultMCDRAM=%s DefaultNUMA=%s",
@@ -1546,6 +1665,16 @@ extern int init(void)
 		xfree(default_numa_str);
 	}
 	gres_plugin_add("hbm");
+
+	slurm_mutex_lock(&queue_mutex);
+	if (queue_thread == 0) {
+		pthread_attr_t attr;
+		slurm_attr_init(&attr);
+		/* since we do a join on this later we don't make it detached */
+		if (pthread_create(&queue_thread, &attr, _queue_agent, NULL))
+			fatal("Unable to start %s thread: %m", plugin_type);
+	}
+	slurm_mutex_unlock(&queue_mutex);
 
 	return SLURM_SUCCESS;
 }
@@ -1561,6 +1690,17 @@ extern int fini(void)
 	debug_flag = false;
 	xfree(mcdram_per_node);
 	xfree(syscfg_path);
+	FREE_NULL_BITMAP(capmc_node_bitmap);
+	FREE_NULL_BITMAP(knl_node_bitmap);
+
+	shutdown_time = time(NULL);
+	pthread_join(queue_thread, NULL);
+	slurm_mutex_lock(&queue_mutex);
+	xfree(node_list_queue);	/* just drop requessts */
+	shutdown_time = (time_t) 0;
+	queue_thread = 0;
+	slurm_mutex_unlock(&queue_mutex);
+
 	return SLURM_SUCCESS;
 }
 
@@ -1573,13 +1713,196 @@ extern int node_features_p_reconfig(void)
 	return SLURM_SUCCESS;
 }
 
-/* Update active and available features on specified nodes,
- * sets features on all nodes if node_list is NULL */
+/* Put any nodes NOT found by "capmc node_status" into DRAIN state */
+static void _check_node_status(void)
+{
+	json_object *j_obj;
+	json_object_iter iter;
+	json_object *j_array = NULL;
+	json_object *j_value;
+	char *resp_msg, **script_argv;
+	int i, nid, num_ent, retry, status = 0;
+	struct node_record *node_ptr;
+	DEF_TIMERS;
+
+	script_argv = xmalloc(sizeof(char *) * 4); /* NULL terminated */
+	script_argv[0] = xstrdup("capmc");
+	script_argv[1] = xstrdup("node_status");
+	for (retry = 0; ; retry++) {
+		START_TIMER;
+		resp_msg = _run_script(capmc_path, script_argv, &status);
+		END_TIMER;
+		if (debug_flag)
+			info("%s: node_status ran for %s", __func__, TIME_STR);
+		_log_script_argv(script_argv, resp_msg);
+		if (WIFEXITED(status) && (WEXITSTATUS(status) == 0))
+			break;	/* Success */
+		error("%s: node_status status:%u response:%s",
+		      __func__, status, resp_msg);
+		if (resp_msg == NULL) {
+			info("%s: node_status returned no information",
+			     __func__);
+			_free_script_argv(script_argv);
+			return;
+		}
+		if (strstr(resp_msg, "Could not lookup") &&
+		    (retry <= capmc_retries)) {
+			/* State Manager is down. Sleep and retry */
+			sleep(1);
+			xfree(resp_msg);
+		} else {
+			xfree(resp_msg);
+			_free_script_argv(script_argv);
+			return;
+		}
+	}
+	_free_script_argv(script_argv);
+
+	j_obj = json_tokener_parse(resp_msg);
+	if (j_obj == NULL) {
+		error("%s: json parser failed on %s", __func__, resp_msg);
+		xfree(resp_msg);
+		return;
+	}
+
+	FREE_NULL_BITMAP(capmc_node_bitmap);
+	capmc_node_bitmap = bit_alloc(100000);
+	json_object_object_foreachC(j_obj, iter) {
+		/* NOTE: The error number "e" and message "err_msg"
+		 * fields are currently ignored. */
+		if (!xstrcmp(iter.key, "e") ||
+		    !xstrcmp(iter.key, "err_msg"))
+			continue;
+		if (json_object_get_type(iter.val) != json_type_array)
+			continue;
+		json_object_object_get_ex(j_obj, iter.key, &j_array);
+		if (!j_array) {
+			error("%s: Unable to parse nid specification",
+			      __func__);
+			FREE_NULL_BITMAP(capmc_node_bitmap);
+			return;
+		}
+		num_ent = json_object_array_length(j_array);
+		for (i = 0; i < num_ent; i++) {
+			j_value = json_object_array_get_idx(j_array, i);
+			if (json_object_get_type(j_value) !=
+			    json_type_int) {
+				error("%s: Unable to parse nid specification",
+				      __func__);
+			} else {
+				nid = json_object_get_int64(j_value);
+				if ((nid >= 0) && (nid < 100000))
+					bit_set(capmc_node_bitmap, nid);
+			}
+		}
+	}
+	json_object_put(j_obj);	/* Frees json memory */
+
+	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
+	     i++, node_ptr++) {
+		nid = atoi(node_ptr->name + 3);	/* Skip "nid" */
+		if ((nid < 0) || (nid >= 100000) ||
+		    bit_test(capmc_node_bitmap, nid))
+			continue;
+		info("Node %s not found by \'capmc node_status\', draining it",
+		     node_ptr->name);
+		if (IS_NODE_DOWN(node_ptr) || IS_NODE_DRAIN(node_ptr))
+			continue;
+		node_ptr->node_state |= NODE_STATE_DRAIN;
+		xfree(node_ptr->reason);
+		node_ptr->reason = xstrdup("Node not found by capmc");
+		node_ptr->reason_time = time(NULL);
+		node_ptr->reason_uid = slurm_get_slurm_user_id();
+		if (avail_node_bitmap)
+			bit_clear(avail_node_bitmap, i);
+	}
+}
+
+/* Put any disabled nodes into DRAIN state */
+static void _check_node_disabled(void)
+{
+/* FIXME: To be added
+ *
+ * STEP 0 (for testing), disable/enable nodes:
+ * > xtcli disable ${TARGET_NODE}
+ * > xtcli enable ${TARGET_NODE}
+ *
+ * STEP 1: Identify disabled compute nodes
+ * > xtshow --compute --disabled
+ * L1s ...
+ * L0s ...
+ * Nodes ...
+ * c0-0c0s7n0:    -|  disabled  [noflags|]
+ * SeaStars ...
+ * Links ...
+ * c1-0c2s1s1l1:    -|  disabled  [noflags|]
+ *
+ * STEP 2: Map cname to nid name
+ * > rtr -Im ${TARGET_BLADE}
+ *
+ * STEP 3: Drain the disabled compute nodes
+ * See logic in _check_node_status() above.
+ */
+}
+
+/* Periodically update node information for specified nodes. We can't do this
+ * work in real-time since capmc takes multiple seconds to execute. */
+extern void *_queue_agent(void *args)
+{
+	char *node_list;
+
+	while (shutdown_time == 0) {
+		sleep(1);
+		if (shutdown_time)
+			break;
+
+		if (node_list_queue &&
+		    (difftime(time(NULL), node_time_queue) >= 30)) {
+			slurm_mutex_lock(&queue_mutex);
+			node_list = node_list_queue;
+			node_list_queue = NULL;
+			node_time_queue = (time_t) 0;
+			slurm_mutex_unlock(&queue_mutex);
+			(void) _update_node_state(node_list, true);
+		}
+	}
+
+	return NULL;
+}
+
+/* Queue request to update node information */
+static int _queue_node_update(char *node_list)
+{
+	slurm_mutex_lock(&queue_mutex);
+	if (node_time_queue == 0)
+		node_time_queue = time(NULL);
+	if (node_list_queue)
+		xstrcat(node_list_queue, ",");
+	xstrcat(node_list_queue, node_list);
+	slurm_mutex_unlock(&queue_mutex);
+
+	return SLURM_SUCCESS;
+}
+
+/* Update active and available features on specified nodes.
+ * If node_list is NULL then update ALL nodes now.
+ * If node_list is not NULL, then queue a request to update select nodes later.
+ */
 extern int node_features_p_get_node(char *node_list)
+{
+	if (node_list &&		/* Selected node to be update */
+	    mcdram_per_node &&		/* and needed global info is */
+	    (mcdram_pct[0] != -1))	/* already available */
+		return _queue_node_update(node_list);
+
+	return _update_node_state(node_list, false);
+}
+
+static int _update_node_state(char *node_list, bool set_locks)
 {
 	json_object *j;
 	json_object_iter iter;
-	int i, k, status = 0, rc = SLURM_SUCCESS;
+	int i, k, rc = SLURM_SUCCESS, retry, status = 0;
 	DEF_TIMERS;
 	char *resp_msg, **script_argv;
 	mcdram_cap_t *mcdram_cap = NULL;
@@ -1597,9 +1920,13 @@ extern int node_features_p_get_node(char *node_list)
 	slurm_mutex_lock(&config_mutex);
 	if (reconfig) {
 		(void) init();
-		reconfig = true;
+		reconfig = false;
 	}
 	slurm_mutex_unlock(&config_mutex);
+
+	_check_node_status();	/* Drain nodes not found by capmc */
+	_check_node_disabled();	/* Drain disabled nodes */
+
 	if (!mcdram_per_node)
 		mcdram_per_node = xmalloc(sizeof(uint64_t) * node_record_count);
 
@@ -1609,25 +1936,39 @@ extern int node_features_p_get_node(char *node_list)
 	script_argv = xmalloc(sizeof(char *) * 4);	/* NULL terminated */
 	script_argv[0] = xstrdup("capmc");
 	script_argv[1] = xstrdup("get_mcdram_capabilities");
-	START_TIMER;
-	resp_msg = _run_script(capmc_path, script_argv, &status);
-	END_TIMER;
-	if (debug_flag) {
-		info("%s: get_mcdram_capabilities ran for %s",
-		     __func__, TIME_STR);
-	}
-	_log_script_argv(script_argv, resp_msg);
-	_free_script_argv(script_argv);
-	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
+	for (retry = 0; ; retry++) {
+		START_TIMER;
+		resp_msg = _run_script(capmc_path, script_argv, &status);
+		END_TIMER;
+		if (debug_flag) {
+			info("%s: get_mcdram_capabilities ran for %s",
+			     __func__, TIME_STR);
+		}
+		_log_script_argv(script_argv, resp_msg);
+		if (WIFEXITED(status) && (WEXITSTATUS(status) == 0))
+			break;	/* Success */
 		error("%s: get_mcdram_capabilities status:%u response:%s",
 		      __func__, status, resp_msg);
+		if (resp_msg == NULL) {
+			info("%s: get_mcdram_capabilities returned no information",
+			     __func__);
+			_free_script_argv(script_argv);
+			rc = SLURM_ERROR;
+			goto fini;
+		}
+		if (strstr(resp_msg, "Could not lookup") &&
+		    (retry <= capmc_retries)) {
+			/* State Manager is down. Sleep and retry */
+			sleep(1);
+			xfree(resp_msg);
+		} else {
+			xfree(resp_msg);
+			_free_script_argv(script_argv);
+			rc = SLURM_ERROR;
+			goto fini;
+		}
 	}
-	if (resp_msg == NULL) {
-		info("%s: get_mcdram_capabilities returned no information",
-		     __func__);
-		rc = SLURM_ERROR;
-		goto fini;
-	}
+	_free_script_argv(script_argv);
 
 	j = json_tokener_parse(resp_msg);
 	if (j == NULL) {
@@ -1652,22 +1993,39 @@ extern int node_features_p_get_node(char *node_list)
 	script_argv = xmalloc(sizeof(char *) * 4);	/* NULL terminated */
 	script_argv[0] = xstrdup("capmc");
 	script_argv[1] = xstrdup("get_mcdram_cfg");
-	START_TIMER;
-	resp_msg = _run_script(capmc_path, script_argv, &status);
-	END_TIMER;
-	if (debug_flag)
-		info("%s: get_mcdram_cfg ran for %s", __func__, TIME_STR);
-	_log_script_argv(script_argv, resp_msg);
-	_free_script_argv(script_argv);
-	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
+	for (retry = 0; ; retry++) {
+		START_TIMER;
+		resp_msg = _run_script(capmc_path, script_argv, &status);
+		END_TIMER;
+		if (debug_flag) {
+			info("%s: get_mcdram_cfg ran for %s",
+			     __func__, TIME_STR);
+		}
+		_log_script_argv(script_argv, resp_msg);
+		if (WIFEXITED(status) && (WEXITSTATUS(status) == 0))
+			break;	/* Success */
 		error("%s: get_mcdram_cfg status:%u response:%s",
 		      __func__, status, resp_msg);
+		if (resp_msg == NULL) {
+			info("%s: get_mcdram_cfg returned no information",
+			     __func__);
+			_free_script_argv(script_argv);
+			rc = SLURM_ERROR;
+			goto fini;
+		}
+		if (strstr(resp_msg, "Could not lookup") &&
+		    (retry <= capmc_retries)) {
+			/* State Manager is down. Sleep and retry */
+			sleep(1);
+			xfree(resp_msg);
+		} else {
+			xfree(resp_msg);
+			_free_script_argv(script_argv);
+			rc = SLURM_ERROR;
+			goto fini;
+		}
 	}
-	if (resp_msg == NULL) {
-		info("%s: get_mcdram_cfg returned no information", __func__);
-		rc = SLURM_ERROR;
-		goto fini;
-	}
+	_free_script_argv(script_argv);
 
 	j = json_tokener_parse(resp_msg);
 	if (j == NULL) {
@@ -1694,25 +2052,39 @@ extern int node_features_p_get_node(char *node_list)
 	script_argv = xmalloc(sizeof(char *) * 4);	/* NULL terminated */
 	script_argv[0] = xstrdup("capmc");
 	script_argv[1] = xstrdup("get_numa_capabilities");
-	START_TIMER;
-	resp_msg = _run_script(capmc_path, script_argv, &status);
-	END_TIMER;
-	if (debug_flag) {
-		info("%s: get_numa_capabilities ran for %s",
-		     __func__, TIME_STR);
-	}
-	_log_script_argv(script_argv, resp_msg);
-	_free_script_argv(script_argv);
-	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
+	for (retry = 0; ; retry++) {
+		START_TIMER;
+		resp_msg = _run_script(capmc_path, script_argv, &status);
+		END_TIMER;
+		if (debug_flag) {
+			info("%s: get_numa_capabilities ran for %s",
+			     __func__, TIME_STR);
+		}
+		_log_script_argv(script_argv, resp_msg);
+		if (WIFEXITED(status) && (WEXITSTATUS(status) == 0))
+			break;	/* Success */
 		error("%s: get_numa_capabilities status:%u response:%s",
 		      __func__, status, resp_msg);
+		if (resp_msg == NULL) {
+			info("%s: get_numa_capabilities returned no information",
+			     __func__);
+			_free_script_argv(script_argv);
+			rc = SLURM_ERROR;
+			goto fini;
+		}
+		if (strstr(resp_msg, "Could not lookup") &&
+		    (retry <= capmc_retries)) {
+			/* State Manager is down. Sleep and retry */
+			sleep(1);
+			xfree(resp_msg);
+		} else {
+			xfree(resp_msg);
+			_free_script_argv(script_argv);
+			rc = SLURM_ERROR;
+			goto fini;
+		}
 	}
-	if (resp_msg == NULL) {
-		info("%s: get_numa_capabilities returned no information",
-		     __func__);
-		rc = SLURM_ERROR;
-		goto fini;
-	}
+	_free_script_argv(script_argv);
 
 	j = json_tokener_parse(resp_msg);
 	if (j == NULL) {
@@ -1737,22 +2109,37 @@ extern int node_features_p_get_node(char *node_list)
 	script_argv = xmalloc(sizeof(char *) * 4);	/* NULL terminated */
 	script_argv[0] = xstrdup("capmc");
 	script_argv[1] = xstrdup("get_numa_cfg");
-	START_TIMER;
-	resp_msg = _run_script(capmc_path, script_argv, &status);
-	END_TIMER;
-	if (debug_flag)
-		info("%s: get_numa_cfg ran for %s", __func__, TIME_STR);
-	_log_script_argv(script_argv, resp_msg);
-	_free_script_argv(script_argv);
-	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
+	for (retry = 0; ; retry++) {
+		START_TIMER;
+		resp_msg = _run_script(capmc_path, script_argv, &status);
+		END_TIMER;
+		if (debug_flag)
+			info("%s: get_numa_cfg ran for %s", __func__, TIME_STR);
+		_log_script_argv(script_argv, resp_msg);
+		if (WIFEXITED(status) && (WEXITSTATUS(status) == 0))
+			break;	/* Success */
 		error("%s: get_numa_cfg status:%u response:%s",
 		      __func__, status, resp_msg);
+		if (resp_msg == NULL) {
+			info("%s: get_numa_cfg returned no information",
+			     __func__);
+			_free_script_argv(script_argv);
+			rc = SLURM_ERROR;
+			goto fini;
+		}
+		if (strstr(resp_msg, "Could not lookup") &&
+		    (retry <= capmc_retries)) {
+			/* State Manager is down. Sleep and retry */
+			sleep(1);
+			xfree(resp_msg);
+		} else {
+			xfree(resp_msg);
+			_free_script_argv(script_argv);
+			rc = SLURM_ERROR;
+			goto fini;
+		}
 	}
-	if (resp_msg == NULL) {
-		info("%s: get_numa_cfg returned no information", __func__);
-		rc = SLURM_ERROR;
-		goto fini;
-	}
+	_free_script_argv(script_argv);
 
 	j = json_tokener_parse(resp_msg);
 	if (j == NULL) {
@@ -1788,12 +2175,13 @@ extern int node_features_p_get_node(char *node_list)
 				      mcdram_cfg[i].nid))
 				continue;
 			if (mcdram_cfg[i].mcdram_pct !=
-			    mcdram_cfg2[k].hbm_pct) {
-				debug("%s: HBM mismatch between capmc and cnselect for nid %u (%u != %d)",
-				      __func__, mcdram_cfg[i].nid,
-				      mcdram_cfg[i].mcdram_pct,
-				      mcdram_cfg2[k].hbm_pct);
-				mcdram_cfg[i].mcdram_pct=mcdram_cfg2[k].hbm_pct;
+			    mcdram_cfg2[k].cache_pct) {
+				info("%s: HBM mismatch between capmc and cnselect for nid %u (%u != %d)",
+				     __func__, mcdram_cfg[i].nid,
+				     mcdram_cfg[i].mcdram_pct,
+				     mcdram_cfg2[k].cache_pct);
+				mcdram_cfg[i].mcdram_pct =
+					mcdram_cfg2[k].cache_pct;
 				xfree(mcdram_cfg[i].mcdram_cfg);
 				mcdram_cfg[i].mcdram_cfg =
 					xstrdup(mcdram_cfg2[k].mcdram_cfg);
@@ -1809,10 +2197,10 @@ extern int node_features_p_get_node(char *node_list)
 				continue;
 			if (xstrcmp(numa_cfg[i].numa_cfg,
 				    numa_cfg2[k].numa_cfg)) {
-				debug("%s: NUMA mismatch between capmc and cnselect for nid %u (%s != %s)",
-				      __func__, numa_cfg[i].nid,
-				      numa_cfg[i].numa_cfg,
-				      numa_cfg2[k].numa_cfg);
+				info("%s: NUMA mismatch between capmc and cnselect for nid %u (%s != %s)",
+				     __func__, numa_cfg[i].nid,
+				     numa_cfg[i].numa_cfg,
+				     numa_cfg2[k].numa_cfg);
 				xfree(numa_cfg[i].numa_cfg);
 				numa_cfg[i].numa_cfg =
 					xstrdup(numa_cfg2[k].numa_cfg);
@@ -1823,10 +2211,18 @@ extern int node_features_p_get_node(char *node_list)
 
 	START_TIMER;
 	if (node_list) {
+		/* Write nodes */
+		slurmctld_lock_t write_nodes_lock = {
+			NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK};
+
 		if ((host_list = hostlist_create(node_list)) == NULL) {
 			error ("hostlist_create error on %s: %m", node_list);
 			goto fini;
 		}
+		hostlist_uniq(host_list);
+
+		if (set_locks)
+			lock_slurmctld(write_nodes_lock);
 		while ((node_name = hostlist_shift(host_list))) {
 			node_ptr = find_node_record(node_name);
 			if (node_ptr) {
@@ -1836,12 +2232,14 @@ extern int node_features_p_get_node(char *node_list)
 						      numa_cap, numa_cap_cnt,
 						      numa_cfg, numa_cfg_cnt);
 			}
-			xfree(node_name);
+			free(node_name);
 		}
-		hostlist_destroy (host_list);
+		if (set_locks)
+			unlock_slurmctld(write_nodes_lock);
+		hostlist_destroy(host_list);
 	} else {
-		for (i=0, node_ptr=node_record_table_ptr; i<node_record_count;
-		     i++, node_ptr++) {
+		for (i = 0, node_ptr = node_record_table_ptr;
+		     i < node_record_count; i++, node_ptr++) {
 			xfree(node_ptr->features_act);
 			_strip_knl_opts(&node_ptr->features);
 			if (node_ptr->features && !node_ptr->features_act) {
@@ -2040,18 +2438,6 @@ extern int node_features_p_job_valid(char *job_features)
 	if (numa_cnt > 1)			/* Multiple NUMA options */
 		return ESLURM_INVALID_KNL;
 
-	/* snc4 only allowed with cache today due to invalid config information
-	 * reported by kernel to hwloc, then to Slurm */
-	if (!job_numa) {
-	    job_numa = default_numa;
-	}
-	if (!job_mcdram) {
-	    job_mcdram = default_mcdram;
-	}
-	if (job_numa == KNL_SNC4 && job_mcdram != KNL_CACHE) {
-		return ESLURM_INVALID_KNL;
-	}
-
 	return SLURM_SUCCESS;
 }
 
@@ -2112,10 +2498,14 @@ extern bool node_features_p_node_power(void)
 	return true;
 }
 
-/* Return true if the plugin requires RebootProgram for booting nodes */
-extern bool node_features_p_node_reboot(void)
+/* Set's the node's active features based upon job constraints.
+ * NOTE: Executed by the slurmd daemon.
+ * NOTE: Not applicable for knl_cray plugin, reconfiguration done by slurmctld
+ * IN active_features - New active features
+ * RET error code */
+extern int node_features_p_node_set(char *active_features)
 {
-	return false;
+	return SLURM_SUCCESS;
 }
 
 /* Note the active features associated with a set of nodes have been updated.
@@ -2176,11 +2566,16 @@ extern int node_features_p_node_update(char *active_features,
 /* Translate a node's feature specification by replacing any features associated
  * with this plugin in the original value with the new values, preserving any
  * features that are not associated with this plugin
+ * IN new_features - newly specific features (active or available)
+ * IN orig_features - original features (active or available)
+ * IN mode - 1=registration, 2=update
  * RET node's new merged features, must be xfreed */
-extern char *node_features_p_node_xlate(char *new_features, char *orig_features)
+extern char *node_features_p_node_xlate(char *new_features, char *orig_features,
+					int mode)
 {
 	char *node_features = NULL;
 	char *tmp, *save_ptr = NULL, *sep = "", *tok;
+	bool non_knl_features = false;
 
 	if (new_features) {
 		tmp = xstrdup(new_features);
@@ -2190,10 +2585,20 @@ extern char *node_features_p_node_xlate(char *new_features, char *orig_features)
 			    (_knl_numa_token(tok)   != 0)) {
 				xstrfmtcat(node_features, "%s%s", sep, tok);
 				sep = ",";
-			}
+			} else
+				non_knl_features = true;
 			tok = strtok_r(NULL, ",", &save_ptr);
 		}
 		xfree(tmp);
+	}
+
+	if ((mode == 2) &&
+	    (non_knl_features || (new_features && (new_features[0] == '\0')))) {
+		/* Complete replacement of active features if node update RPC
+		 * and specified features empty or contain non-KNL values */
+		xfree(node_features);
+		node_features = xstrdup(new_features);
+		return node_features;
 	}
 
 	if (!node_features) {	/* No new info from compute node */

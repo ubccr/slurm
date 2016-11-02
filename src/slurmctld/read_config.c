@@ -1076,8 +1076,6 @@ int read_slurm_conf(int recover, bool reconfig)
 	_purge_old_node_state(old_node_table_ptr, old_node_record_count);
 	_purge_old_part_state(old_part_list, old_def_part_name);
 
-	if ((rc = _build_bitmaps()))
-		fatal("_build_bitmaps failure");
 	mpi_params = slurm_get_mpi_params();
 	reserve_port_config(mpi_params);
 	xfree(mpi_params);
@@ -1093,6 +1091,12 @@ int read_slurm_conf(int recover, bool reconfig)
 	if (node_features_g_count() > 0) {
 		if (node_features_g_get_node(NULL) != SLURM_SUCCESS)
 			error("failed to initialize node features");
+	}
+	if ((rc = _build_bitmaps())) /* must follow node_features_g_get_node()
+				      * and preceed build_features_list_*() */
+		fatal("_build_bitmaps failure");
+
+	if (node_features_g_count() > 0) {
 		build_feature_list_ne();
 	} else {
 		/* Copy node's available_features to active_features */
@@ -1146,8 +1150,10 @@ int read_slurm_conf(int recover, bool reconfig)
 	error_code = MAX(error_code, rc);	/* not fatal */
 	rc = switch_g_reconfig();
 	error_code = MAX(error_code, rc);	/* not fatal */
-	rc = node_features_g_reconfig();
-	error_code = MAX(error_code, rc);	/* not fatal */
+	if (reconfig) {
+		rc = node_features_g_reconfig();
+		error_code = MAX(error_code, rc); /* not fatal */
+	}
 	rc = _preserve_select_type_param(&slurmctld_conf, old_select_type_p);
 	error_code = MAX(error_code, rc);	/* not fatal */
 	if (reconfig)
@@ -2017,7 +2023,7 @@ static int  _preserve_plugins(slurm_ctl_conf_t * ctl_conf_ptr,
 	}
 
 	if (ctl_conf_ptr->backup_controller == NULL)
-		info("read_slurm_conf: backup_controller not specified.");
+		info("%s: backup_controller not specified", __func__);
 
 	return rc;
 }

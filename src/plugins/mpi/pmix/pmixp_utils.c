@@ -2,7 +2,7 @@
  **	pmix_utils.c - Various PMIx utility functions
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2016 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
@@ -50,6 +50,9 @@
 #include "pmixp_common.h"
 #include "pmixp_utils.h"
 #include "pmixp_debug.h"
+
+/* must come after the above pmixp includes */
+#include "src/common/forward.h"
 
 void pmixp_xfree_xmalloced(void *x)
 {
@@ -304,6 +307,96 @@ int pmixp_stepd_send(char *nodelist, const char *address, char *data,
 	return rc;
 }
 
+static int _pmix_p2p_send_core(char *nodename, const char *address, char *data,
+				uint32_t len)
+{
+	int rc, timeout;
+	slurm_msg_t msg;
+	forward_data_msg_t req;
+	List ret_list;
+	ret_data_info_t *ret_data_info = NULL;
+
+	slurm_msg_t_init(&msg);
+
+	PMIXP_DEBUG("nodelist=%s, address=%s, len=%u", nodename, address, len);
+	req.address = (char *)address;
+	req.len = len;
+	req.data = data;
+
+	msg.msg_type = REQUEST_FORWARD_DATA;
+	msg.data = &req;
+
+	if (slurm_conf_get_addr(nodename, &msg.address) == SLURM_ERROR) {
+		PMIXP_ERROR("Can't find address for host "
+			    "%s, check slurm.conf", nodename);
+		return SLURM_ERROR;
+	}
+
+	timeout = slurm_get_msg_timeout() * 1000;
+	msg.forward.timeout = timeout;
+	msg.forward.cnt = 0;
+	msg.forward.nodelist = NULL;
+	ret_list = slurm_send_addr_recv_msgs(&msg, nodename, timeout);
+	if (!ret_list) {
+		/* This should never happen (when this was
+		 * written slurm_send_addr_recv_msgs always
+		 * returned a list */
+		PMIXP_ERROR("No return list given from "
+			    "slurm_send_addr_recv_msgs spawned for %s",
+			    nodename);
+		return SLURM_ERROR;
+	} else if ((errno != SLURM_COMMUNICATIONS_CONNECTION_ERROR) &&
+		   !list_count(ret_list)) {
+		PMIXP_ERROR("failed to send to %s, errno=%d", nodename, errno);
+		return SLURM_ERROR;
+	}
+
+	rc = SLURM_SUCCESS;
+	while ((ret_data_info = list_pop(ret_list))) {
+		int temp_rc = slurm_get_return_code(ret_data_info->type,
+						    ret_data_info->data);
+		if (temp_rc != SLURM_SUCCESS)
+			rc = temp_rc;
+		destroy_data_info(ret_data_info);
+	}
+
+	FREE_NULL_LIST(ret_list);
+
+	return rc;
+}
+
+int pmixp_p2p_send(char *nodename, const char *address, char *data,
+		     uint32_t len, unsigned int start_delay,
+		     unsigned int retry_cnt, int silent)
+{
+
+	int retry = 0, rc;
+	unsigned int delay = start_delay; /* in milliseconds */
+
+	while (1) {
+		if (!silent && retry >= 1) {
+			PMIXP_ERROR("send failed, rc=%d, try #%d", rc, retry);
+		}
+
+		rc = _pmix_p2p_send_core(nodename, address, data, len);
+
+		if (rc == SLURM_SUCCESS)
+			break;
+
+		retry++;
+		if (retry >= retry_cnt)
+			break;
+
+		/* wait with constantly increasing delay */
+		struct timespec ts =
+			{(delay / 1000), ((delay % 1000) * 1000000)};
+		nanosleep(&ts, NULL);
+		delay *= 2;
+	}
+
+	return rc;
+}
+
 static int _is_dir(char *path)
 {
 	struct stat stat_buf;
@@ -415,5 +508,40 @@ int pmixp_fixrights(char *path, uid_t uid, mode_t mode)
 		}
 	}
 	closedir(dp);
+	return 0;
+}
+
+int pmixp_mkdir(char *path, mode_t rights)
+{
+	/* NOTE: we need user who owns the job to access PMIx usock
+	 * file. According to 'man 7 unix':
+	 * "... In the Linux implementation, sockets which are visible in the
+	 * file system honor the permissions of the directory  they are in... "
+	 * Our case is the following: slurmstepd is usually running as root,
+	 * user application will be "sudo'ed". To provide both of them with
+	 * access to the unix socket we do the following:
+	 * 1. Owner ID is set to the job owner.
+	 * 2. Group ID corresponds to slurmstepd.
+	 * 3. Set 0770 access mode
+	 */
+
+	if (0 != mkdir(path, rights) ) {
+		PMIXP_ERROR_STD("Cannot create directory \"%s\"",
+				pmixp_info_tmpdir_lib());
+		return errno;
+	}
+
+	/* There might be umask that will drop essential rights.
+	 * Fix it explicitly.
+	 * TODO: is there more elegant solution? */
+	if (chmod(path, rights) < 0) {
+		error("%s: chown(%s): %m", __func__, path);
+		return errno;
+	}
+
+	if (chown(path, (uid_t) pmixp_info_jobuid(), (gid_t) -1) < 0) {
+		error("%s: chown(%s): %m", __func__, pmixp_info_tmpdir_lib());
+		return errno;
+	}
 	return 0;
 }
