@@ -80,10 +80,11 @@ typedef struct node_features_ops {
 	int	(*job_valid)	(char *job_features);
 	char *	(*job_xlate)	(char *job_features);
 	bool	(*node_power)	(void);
-	bool	(*node_reboot)	(void);
+	int	(*node_set)	(char *active_features);
 	void	(*node_state)	(char **avail_modes, char **current_mode);
 	int	(*node_update)	(char *active_features, bitstr_t *node_bitmap);
-	char *	(*node_xlate)	(char *new_features, char *orig_features);
+	char *	(*node_xlate)	(char *new_features, char *orig_features,
+				 int mode);
 	int	(*reconfig)	(void);
 	bool	(*user_update)	(uid_t uid);
 } node_features_ops_t;
@@ -97,7 +98,7 @@ static const char *syms[] = {
 	"node_features_p_job_valid",
 	"node_features_p_job_xlate",
 	"node_features_p_node_power",
-	"node_features_p_node_reboot",
+	"node_features_p_node_set",
 	"node_features_p_node_state",
 	"node_features_p_node_update",
 	"node_features_p_node_xlate",
@@ -308,25 +309,25 @@ extern bool node_features_g_node_power(void)
 	return node_power;
 }
 
-/* Return true if the plugin requires RebootProgram for booting nodes */
-extern bool node_features_g_node_reboot(void)
+/* Set's the node's active features based upon job constraints.
+ * NOTE: Executed by the slurmd daemon.
+ * IN active_features - New active features
+ * RET error code */
+extern int node_features_g_node_set(char *active_features)
 {
 	DEF_TIMERS;
-	bool node_reboot = false;
-	int i;
+	int i, rc = SLURM_SUCCESS;
 
 	START_TIMER;
 	(void) node_features_g_init();
 	slurm_mutex_lock(&g_context_lock);
-	for (i = 0; i < g_context_cnt; i++) {
-		node_reboot = (*(ops[i].node_reboot))();
-		if (node_reboot)
-			break;
+	for (i = 0; ((i < g_context_cnt) && (rc == SLURM_SUCCESS)); i++) {
+		rc = (*(ops[i].node_set))(active_features);
 	}
 	slurm_mutex_unlock(&g_context_lock);
-	END_TIMER2("node_features_g_node_reboot");
+	END_TIMER2("node_features_g_node_set");
 
-	return node_reboot;
+	return rc;
 }
 
 /* Get this node's current and available MCDRAM and NUMA settings from BIOS.
@@ -373,8 +374,12 @@ extern int node_features_g_node_update(char *active_features,
 /* Translate a node's feature specification by replacing any features associated
  * with this plugin in the original value with the new values, preserving any
  * features that are not associated with this plugin
+ * IN new_features - newly specific features (active or available)
+ * IN orig_features - original features (active or available)
+ * IN mode - 1=registration, 2=update
  * RET node's new merged features, must be xfreed */
-extern char *node_features_g_node_xlate(char *new_features, char *orig_features)
+extern char *node_features_g_node_xlate(char *new_features, char *orig_features,
+					int mode)
 {
 	DEF_TIMERS;
 	char *new_value = NULL, *tmp_str;
@@ -390,7 +395,7 @@ extern char *node_features_g_node_xlate(char *new_features, char *orig_features)
 			tmp_str = xstrdup(orig_features);
 		else
 			tmp_str = NULL;
-		new_value = (*(ops[i].node_xlate))(new_features, tmp_str);
+		new_value = (*(ops[i].node_xlate))(new_features, tmp_str, mode);
 		xfree(tmp_str);
 
 	}

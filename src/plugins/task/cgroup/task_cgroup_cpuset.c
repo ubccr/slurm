@@ -1058,6 +1058,32 @@ extern int task_cgroup_cpuset_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 
 extern int task_cgroup_cpuset_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 {
+	xcgroup_t cpuset_cg;
+
+	/* Similarly to task_cgroup_memory_fini(), we must lock the
+	 * root cgroup so we don't race with another job step that is
+	 * being started.  */
+        if (xcgroup_create(&cpuset_ns, &cpuset_cg,"",0,0) == XCGROUP_SUCCESS) {
+                if (xcgroup_lock(&cpuset_cg) == XCGROUP_SUCCESS) {
+			/* First move slurmstepd to the root cpuset cg
+			 * so we can remove the step/job/user cpuset
+			 * cg's.  */
+			xcgroup_move_process(&cpuset_cg, getpid());
+                        if (xcgroup_delete(&step_cpuset_cg) != SLURM_SUCCESS)
+                                debug2("task/cgroup: unable to remove step "
+                                       "cpuset : %m");
+                        if (xcgroup_delete(&job_cpuset_cg) != XCGROUP_SUCCESS)
+                                debug2("task/cgroup: not removing "
+                                       "job cpuset : %m");
+                        if (xcgroup_delete(&user_cpuset_cg) != XCGROUP_SUCCESS)
+                                debug2("task/cgroup: not removing "
+                                       "user cpuset : %m");
+                        xcgroup_unlock(&cpuset_cg);
+                } else
+                        error("task/cgroup: unable to lock root cpuset : %m");
+                xcgroup_destroy(&cpuset_cg);
+        } else
+                error("task/cgroup: unable to create root cpuset : %m");
 
 	if (user_cgroup_path[0] != '\0')
 		xcgroup_destroy(&user_cpuset_cg);
@@ -1242,7 +1268,7 @@ again:
 		/* initialize the cpusets as it was non-existent */
 		if (_xcgroup_cpuset_init(&user_cpuset_cg) !=
 		    XCGROUP_SUCCESS) {
-			xcgroup_delete(&user_cpuset_cg);
+			(void)xcgroup_delete(&user_cpuset_cg);
 			xcgroup_destroy(&user_cpuset_cg);
 			goto error;
 		}
@@ -1300,7 +1326,7 @@ again:
 	if (_xcgroup_cpuset_init(&step_cpuset_cg) != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&user_cpuset_cg);
 		xcgroup_destroy(&job_cpuset_cg);
-		xcgroup_delete(&step_cpuset_cg);
+		(void)xcgroup_delete(&step_cpuset_cg);
 		xcgroup_destroy(&step_cpuset_cg);
 		goto error;
 	}

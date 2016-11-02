@@ -65,11 +65,6 @@
 /* Define to 1 if you have the <sys/socket.h> header file. */
 #undef HAVE_SYS_SOCKET_H
 
-/* Default value for job's --wait-all-nodes option */
-#ifndef DEFAULT_WAIT_ALL_NODES
-#define DEFAULT_WAIT_ALL_NODES 0	/* don't wait */
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -245,6 +240,9 @@ enum job_states {
 #define	JOB_COMPLETING	  0x00008000 /* Waiting for epilog completion */
 #define JOB_STOPPED       0x00010000 /* Job is stopped state (holding resources,
 					but sent SIGSTOP */
+#define JOB_RECONFIG_FAIL 0x00020000 /* Node configuration for job failed,
+					not job state, just job requeue flag */
+
 
 #define READY_JOB_FATAL	   -2	/* fatal error */
 #define READY_JOB_ERROR    -1	/* ordinary error */
@@ -504,6 +502,8 @@ enum job_state_reason {
 	/********************/
 	WAIT_QOS_MAX_JOB_PER_ACCT,    /* QOS MaxJobPerAccount exceeded */
 	WAIT_QOS_MAX_SUB_JOB_PER_ACCT,/* QOS MaxJobSubmitSPerAccount exceeded */
+	WAIT_PART_CONFIG,	      /* Generic partition configuration reason */
+	WAIT_ACCOUNT_POLICY,          /* Generic accounting policy reason */
 };
 
 enum job_acct_types {
@@ -880,7 +880,8 @@ enum node_states {
 					 * new work */
 #define NODE_STATE_POWER_UP   0x4000	/* restore power or otherwise
 					 * configure a node */
-#define NODE_STATE_MAINT      0x8000	/* node in maintenance reservation */
+#define NODE_STATE_MAINT      0x8000	/* node in maintenance reservation OR
+					 * node reboot requested */
 
 /* used to define the size of the credential.signature size
  * used to define the key size of the io_stream_header_t
@@ -943,6 +944,8 @@ enum ctx_keys {
  * across available nodes */
 #define CR_PACK_NODES  0x0200
 
+#define CR_NHC_ABSOLUTELY_NO 0x0400 /* Completely disable NHC on Native Cray */
+
 /* By default, distribute cores using a block approach inside the nodes */
 #define CR_CORE_DEFAULT_DIST_BLOCK 0x1000
 
@@ -991,7 +994,7 @@ enum ctx_keys {
 #define PRIORITY_FLAGS_FAIR_TREE	0x0020	/* Prioritize by level in
 						 * account hierarchy. */
 
-/* These bits are set in the flags field of job_desc_msg_t */
+/* These bits are set in the bitflags field of job_desc_msg_t */
 #define KILL_INV_DEP       0x00000001	/* Kill job on invalid dependency */
 #define NO_KILL_INV_DEP    0x00000002	/* Don't kill job on invalid dependency */
 #define HAS_STATE_DIR      0x00000004	/* Used by slurmctld to track state dir */
@@ -1000,6 +1003,7 @@ enum ctx_keys {
 #define TEST_NOW_ONLY      0x00000020	/* Test for immediately start only */
 #define NODE_MEM_CALC      0x00000040	/* Per-node memory limit calculated */
 #define NODE_REBOOT        0x00000080	/* Waiting for node reboot */
+#define USE_MIN_NODES      0x00000200	/* Prefer minimum node count */
 
 /*****************************************************************************\
  *      SLURM HOSTLIST FUNCTIONS
@@ -4461,9 +4465,10 @@ extern void slurm_free_job_array_resp(job_array_resp_msg_t *resp);
  *            valid values are:
  *            0 - if the job has to be requeued in JOB_PENDING state
  *            JOB_SPECIAL_EXIT - if the job has to be requeued in
- *            the special exit state and be held.
+ *                the special exit state and be held.
  *            JOB_REQUEUE_HOLD - if the job has to be requeued in
- *            JOB_PENDING and held state.
+ *                JOB_PENDING and held state.
+ *            JOB_RECONFIG_FAIL - Node configuration for job failed
  * RET 0 or a slurm error code
  */
 extern int slurm_requeue(uint32_t job_id, uint32_t state);
@@ -4477,9 +4482,10 @@ extern int slurm_requeue(uint32_t job_id, uint32_t state);
  *            valid values are:
  *            0 - if the job has to be requeued in JOB_PENDING state
  *            JOB_SPECIAL_EXIT - if the job has to be requeued in
- *            the special exit state and be held.
+ *                the special exit state and be held.
  *            JOB_REQUEUE_HOLD - if the job has to be requeued in
- *            JOB_PENDING and held state.
+ *                JOB_PENDING and held state.
+ *            JOB_RECONFIG_FAIL - Node configuration for job failed
  * OUT resp - per task response to the request,
  *	      free using slurm_free_job_array_resp()
  * RET 0 or a slurm error code

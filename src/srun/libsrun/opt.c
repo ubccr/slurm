@@ -73,6 +73,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include "slurm/slurm.h"
 #include "src/common/cpu_frequency.h"
 #include "src/common/list.h"
 #include "src/common/log.h"
@@ -133,6 +134,7 @@
 #define OPT_PROFILE     0x20
 #define OPT_EXPORT	0x21
 #define OPT_HINT	0x22
+#define OPT_USE_MIN_NODES 0x23
 
 /* generic getopt_long flags, integers and *not* valid characters */
 #define LONG_OPT_HELP        0x100
@@ -211,6 +213,7 @@
 #define LONG_OPT_EXPORT          0x158
 #define LONG_OPT_PRIORITY        0x160
 #define LONG_OPT_ACCEL_BIND      0x161
+#define LONG_OPT_USE_MIN_NODES   0x162
 #define LONG_OPT_MCS_LABEL       0x165
 #define LONG_OPT_DEADLINE        0x166
 
@@ -649,6 +652,7 @@ env_vars_t env_vars[] = {
 {"SLURM_THREADS",       OPT_INT,        &opt.max_threads,   NULL             },
 {"SLURM_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL             },
 {"SLURM_UNBUFFEREDIO",  OPT_INT,        &opt.unbuffered,    NULL             },
+{"SLURM_USE_MIN_NODES", OPT_USE_MIN_NODES, NULL,            NULL             },
 {"SLURM_WAIT",          OPT_INT,        &opt.max_wait,      NULL             },
 {"SLURM_WAIT4SWITCH",   OPT_TIME_VAL,   NULL,               NULL             },
 {"SLURM_WCKEY",         OPT_STRING,     &opt.wckey,         NULL             },
@@ -876,6 +880,9 @@ _process_env_var(env_vars_t *e, const char *val)
 		opt.core_spec = _get_int(val, "thread_spec", true) |
 					 CORE_SPEC_THREAD;
 		break;
+	case OPT_USE_MIN_NODES:
+		opt.job_flags |= USE_MIN_NODES;
+		break;
 	default:
 		/* do nothing */
 		break;
@@ -1021,6 +1028,7 @@ static void _set_options(const int argc, char **argv)
 		{"threads-per-core", required_argument, 0, LONG_OPT_THREADSPERCORE},
 		{"tmp",              required_argument, 0, LONG_OPT_TMP},
 		{"uid",              required_argument, 0, LONG_OPT_UID},
+		{"use-min-nodes",    no_argument,       0, LONG_OPT_USE_MIN_NODES},
 		{"usage",            no_argument,       0, LONG_OPT_USAGE},
 		{"wckey",            required_argument, 0, LONG_OPT_WCKEY},
 		{NULL,               0,                 0, 0}
@@ -1528,32 +1536,45 @@ static void _set_options(const int argc, char **argv)
 			xfree(opt.task_epilog);
 			opt.task_epilog = xstrdup(optarg);
 			break;
-		case LONG_OPT_NICE:
+		case LONG_OPT_NICE: {
+			long long tmp_nice;
 			if (optarg)
-				opt.nice = strtol(optarg, NULL, 10);
+				tmp_nice = strtoll(optarg, NULL, 10);
 			else
-				opt.nice = 100;
-			if (opt.nice < 0) {
+				tmp_nice = 100;
+			if (llabs(tmp_nice) > (NICE_OFFSET - 3)) {
+				error("Nice value out of range (+/- %u). Value "
+				      "ignored", NICE_OFFSET - 3);
+				tmp_nice = 0;
+			}
+			if (tmp_nice < 0) {
 				uid_t my_uid = getuid();
 				if ((my_uid != 0) &&
 				    (my_uid != slurm_get_slurm_user_id())) {
-					error("Nice value must be non-negative, "
-					      "value ignored");
-					opt.nice = 0;
+					error("Nice value must be "
+					      "non-negative, value ignored");
+					tmp_nice = 0;
 				}
 			}
+			opt.nice = (int) tmp_nice;
 			break;
+		}
 		case LONG_OPT_PRIORITY: {
-			long long priority = strtoll(optarg, NULL, 10);
-			if (priority < 0) {
-				error("Priority must be >= 0");
-				exit(error_exit);
+			long long priority;
+			if (strcasecmp(optarg, "TOP") == 0) {
+				opt.priority = NO_VAL - 1;
+			} else {
+				priority = strtoll(optarg, NULL, 10);
+				if (priority < 0) {
+					error("Priority must be >= 0");
+					exit(error_exit);
+				}
+				if (priority >= NO_VAL) {
+					error("Priority must be < %i", NO_VAL);
+					exit(error_exit);
+				}
+				opt.priority = priority;
 			}
-			if (priority >= NO_VAL) {
-				error("Priority must be < %i", NO_VAL);
-				exit(error_exit);
-			}
-			opt.priority = priority;
 			break;
 		}
 		case LONG_OPT_MULTI:
@@ -1768,6 +1789,9 @@ static void _set_options(const int argc, char **argv)
 			break;
 		case LONG_OPT_COMPRESS:
 			opt.compress = parse_compress_type(optarg);
+			break;
+		case LONG_OPT_USE_MIN_NODES:
+			opt.job_flags |= USE_MIN_NODES;
 			break;
 		default:
 			if (spank_process_option (opt_char, optarg) < 0) {
@@ -2170,6 +2194,7 @@ static bool _opt_verify(void)
 			opt.min_nodes = MAX(hl_cnt, opt.min_nodes);
 		else
 			opt.min_nodes = hl_cnt;
+		opt.nodes_set = true;
 	}
 
 	if ((opt.nodes_set || opt.extra_set)				&&
@@ -2249,11 +2274,13 @@ static bool _opt_verify(void)
 
 		if ((opt.ntasks_per_node != NO_VAL) &&
 		    (opt.ntasks_per_node != (opt.ntasks / opt.min_nodes))) {
-			info("Warning: can't honor --ntasks-per-node set to %u "
-			     "which doesn't match the requested tasks %u with "
-			     "the number of requested nodes %u.  "
-			     "Ignoring --ntasks-per-node.",
-			      opt.ntasks_per_node, opt.ntasks, opt.min_nodes);
+			if (opt.ntasks > opt.ntasks_per_node)
+				info("Warning: can't honor --ntasks-per-node "
+				     "set to %u which doesn't match the "
+				     "requested tasks %u with the number of "
+				     "requested nodes %u. Ignoring "
+				     "--ntasks-per-node.", opt.ntasks_per_node,
+				     opt.ntasks, opt.min_nodes);
 			opt.ntasks_per_node = NO_VAL;
 		}
 
@@ -2737,7 +2764,8 @@ static void _usage(void)
 "            [--bb=burst_buffer_spec] [--bbf=burst_buffer_file]\n"
 "            [--bcast=<dest_path>] [--compress[=library]]\n"
 "            [--acctg-freq=<datatype>=<interval>]\n"
-"            [-w hosts...] [-x hosts...] executable [args...]\n");
+"            [-w hosts...] [-x hosts...] [--use-min-nodes]\n"
+"            executable [args...]\n");
 
 }
 
@@ -2837,6 +2865,8 @@ static void _help(void)
 "  -t, --time=minutes          time limit\n"
 "      --time-min=minutes      minimum time limit (if distinct)\n"
 "  -u, --unbuffered            do not line-buffer stdout/err\n"
+"      --use-min-nodes         if a range of node counts is given, prefer the\n"
+"                              smaller count\n"
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
 "  -W, --wait=sec              seconds to wait after first task exits\n"
 "                              before killing job\n"
@@ -2901,7 +2931,7 @@ static void _help(void)
 #endif
 #ifdef HAVE_NATIVE_CRAY			/* Native Cray specific options */
 "Cray related options:\n"
-"      --network=type          Use network performace counters\n"
+"      --network=type          Use network performance counters\n"
 "                              (system, network, or processor)\n"
 "\n"
 #endif

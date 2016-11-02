@@ -98,17 +98,13 @@ applications having less than 10,000 tasks.
 
 .TP
 \fB\-B\fR \fB\-\-extra\-node\-info\fR=<\fIsockets\fR[:\fIcores\fR[:\fIthreads\fR]]>
-Request a specific allocation of resources with details as to the
-number and type of computational resources within a cluster:
-number of sockets (or physical processors) per node,
-cores per socket, and threads per core.
-The total amount of resources being requested is the product of all of
-the terms.
+Restrict node selection to nodes with at least the specified number of
+sockets, cores per socket and/or threads per core.
+NOTE: These options do not specify the resource allocation size.
 Each value specified is considered a minimum.
 An asterisk (*) can be used as a placeholder indicating that all available
 resources of that type are to be utilized.
-As with nodes, the individual levels can also be specified in separate
-options if desired:
+The individual levels can also be specified in separate options if desired:
 .nf
     \fB\-\-sockets\-per\-node\fR=<\fIsockets\fR>
     \fB\-\-cores\-per\-socket\fR=<\fIcores\fR>
@@ -500,7 +496,7 @@ Examples of use include "\-\-gres=gpu:2,mic=1", "\-\-gres=gpu:kepler:2", and
 .TP
 \fB\-\-gres\-flags\fR=enforce\-binding
 If set, the only CPUs available to the job will be those bound to the selected
-GRES (i.e. the CPUs identifed in the gres.conf file will be strictly enforced
+GRES (i.e. the CPUs identified in the gres.conf file will be strictly enforced
 rather than advisory). This option may result in delayed initiation of a job.
 For example a job requiring two GPUs and one CPU will be delayed until both
 GPUs on a single socket are available rather than using GPUs bound to separate
@@ -723,7 +719,8 @@ Default value is calculated by the Plugin mcs if it's enabled.
 
 .TP
 \fB\-\-mem\fR=<\fIMB\fR>
-Specify the real memory required per node in MegaBytes.
+Specify the real memory required per node in megabytes.
+Different units can be specified using the suffix [K|M|G|T].
 Default value is \fBDefMemPerNode\fR and the maximum value is
 \fBMaxMemPerNode\fR. If configured, both of parameters can be
 seen using the \fBscontrol show config\fR command.
@@ -746,7 +743,8 @@ the next periodic accounting sample.
 
 .TP
 \fB\-\-mem\-per\-cpu\fR=<\fIMB\fR>
-Mimimum memory required per allocated CPU in MegaBytes.
+Minimum memory required per allocated CPU in megabytes.
+Different units can be specified using the suffix [K|M|G|T].
 Default value is \fBDefMemPerCPU\fR and the maximum value is \fBMaxMemPerCPU\fR
 (see exception below). If configured, both of parameters can be
 seen using the \fBscontrol show config\fR command.
@@ -773,10 +771,13 @@ and the NUMA memory functions are available.
 may differ on some architectures.\fR For example, CPU binding may be performed
 at the level of the cores within a processor while memory binding will
 be performed at the level of nodes, where the definition of "nodes"
-may differ from system to system. \fBThe use of any type other than
+may differ from system to system.
+By default no memory binding is performed; any task using any CPU can use
+any memory. This option is typically used to insure that each task is bound to
+the memory closest to it's assigned CPU. \fBThe use of any type other than
 "none" or "local" is not recommended.\fR
 If you want greater control, try running a simple test code with the
-options "\-\-mem_bind=verbose,none" to determine
+options "\-\-cpu_bind=verbose,none \-\-mem_bind=verbose,none" to determine
 the specific configuration.
 
 NOTE: To have Slurm always report on the selected memory binding for
@@ -814,18 +815,31 @@ bind by task rank (not recommended)
 Use memory local to the processor in use
 .TP
 .B map_mem:<list>
-bind by mapping a node's memory to tasks as specified
-where <list> is <cpuid1>,<cpuid2>,...<cpuidN>.
-CPU IDs are interpreted as decimal values unless they are preceded
-with '0x' in which case they interpreted as hexadecimal values
-(not recommended)
+Bind by setting memory masks on tasks (or ranks) as specified where <list> is
+<numa_id_for_task_0>,<numa_id_for_task_1>,...
+The mapping is specified for a node and identical mapping is applied to the
+tasks on every node (i.e. the lowest task ID on each node is mapped to the
+first ID specified in the list, etc.).
+NUMA IDs are interpreted as decimal values unless they are preceded
+with '0x' in which case they interpreted as hexadecimal values.
+If the number of tasks (or ranks) exceeds the number of elements in this list,
+elements in the list will be reused as needed starting from the beginning of
+the list.
+Not supported unless the entire node is allocated to the job.
 .TP
 .B mask_mem:<list>
-bind by setting memory masks on tasks as specified
-where <list> is <mask1>,<mask2>,...<maskN>.
-memory masks are \fBalways\fR interpreted as hexadecimal values.
+Bind by setting memory masks on tasks (or ranks) as specified where <list> is
+<numa_mask_for_task_0>,<numa_mask_for_task_1>,...
+The mapping is specified for a node and identical mapping is applied to the
+tasks on every node (i.e. the lowest task ID on each node is mapped to the
+first mask specified in the list, etc.).
+NUMA masks are \fBalways\fR interpreted as hexadecimal values.
 Note that masks must be preceded with a '0x' if they don't begin
-with [0-9] so they are seen as numerical values by srun.
+with [0-9] so they are seen as numerical values.
+If the number of tasks (or ranks) exceeds the number of elements in this list,
+elements in the list will be reused as needed starting from the beginning of
+the list.
+Not supported unless the entire node is allocated to the job.
 .TP
 .B help
 show this help message
@@ -874,7 +888,7 @@ that the \fB\-\-cpus\-per\-task\fR option will change this default.
 Specify information pertaining to the switch or network.
 The interpretation of \fItype\fR is system dependent.
 This option is supported when running Slurm on a Cray natively.  It is
-used to request using Network Performace Counters.
+used to request using Network Performance Counters.
 Only one value per request is valid.
 All options are case in\-sensitive.
 In this configuration supported values include:
@@ -1013,12 +1027,11 @@ of 32 connections are established (2 instances x 2 protocols x 2 networks x
 
 .TP
 \fB\-\-nice\fR[=\fIadjustment\fR]
-Run the job with an adjusted scheduling priority within Slurm.
-With no adjustment value the scheduling priority is decreased
-by 100. The adjustment range is from \-10000 (highest priority)
-to 10000 (lowest priority). Only privileged users can specify
-a negative adjustment. NOTE: This option is presently
-ignored if \fISchedulerType=sched/wiki\fR or
+Run the job with an adjusted scheduling priority within Slurm. With no
+adjustment value the scheduling priority is decreased by 100. A negative nice
+value increases the priority, otherwise decreases it. The adjustment range is
++/\- 2147483645. Only privileged users can specify a negative adjustment.
+NOTE: This option is presently ignored if \fISchedulerType=sched/wiki\fR or
 \fISchedulerType=sched/wiki2\fR.
 
 .TP
@@ -1027,19 +1040,9 @@ Request the maximum \fIntasks\fR be invoked on each core.
 Meant to be used with the \fB\-\-ntasks\fR option.
 Related to \fB\-\-ntasks\-per\-node\fR except at the core level
 instead of the node level.
-NOTE: This option is not supported unless
-\fISelectTypeParameters=CR_Core\fR or
-\fISelectTypeParameters=CR_Core_Memory\fR is configured.
-
-.TP
-\fB\-\-ntasks\-per\-socket\fR=<\fIntasks\fR>
-Request the maximum \fIntasks\fR be invoked on each socket.
-Meant to be used with the \fB\-\-ntasks\fR option.
-Related to \fB\-\-ntasks\-per\-node\fR except at the socket level
-instead of the node level.
-NOTE: This option is not supported unless
-\fISelectTypeParameters=CR_Socket\fR or
-\fISelectTypeParameters=CR_Socket_Memory\fR is configured.
+NOTE: This option is not supported unless \fISelectType=cons_res\fR is
+configured (either directly or indirectly on Cray systems)
+along with the node's core count.
 
 .TP
 \fB\-\-ntasks\-per\-node\fR=<\fIntasks\fR>
@@ -1058,6 +1061,16 @@ assigned to each node while allowing the OpenMP portion to utilize
 all of the parallelism present in the node, or submitting a single
 setup/cleanup/monitoring job to each node of a pre\-existing
 allocation as one step in a larger job script.
+
+.TP
+\fB\-\-ntasks\-per\-socket\fR=<\fIntasks\fR>
+Request the maximum \fIntasks\fR be invoked on each socket.
+Meant to be used with the \fB\-\-ntasks\fR option.
+Related to \fB\-\-ntasks\-per\-node\fR except at the socket level
+instead of the node level.
+NOTE: This option is not supported unless \fISelectType=cons_res\fR is
+configured (either directly or indirectly on Cray systems)
+along with the node's socket count.
 
 .TP
 \fB\-\-no\-bell\fR
@@ -1095,6 +1108,17 @@ defined in the file \fIslurm.h\fR and is not a variable, it is set at
 Slurm build time.
 
 .TP
+\fB\-p\fR, \fB\-\-partition\fR=<\fIpartition_names\fR>
+Request a specific partition for the resource allocation.  If not specified,
+the default behavior is to allow the slurm controller to select the default
+partition as designated by the system administrator. If the job can use more
+than one partition, specify their names in a comma separate list and the one
+offering earliest initiation will be used with no regard given to the partition
+name ordering (although higher priority partitions will be considered first).
+When the job is initiated, the name of the partition used will be placed first
+in the job record partition string.
+
+.TP
 \fB\-\-power\fR=<\fIflags\fR>
 Comma separated list of power management plugin options.
 Currently available flags include:
@@ -1102,9 +1126,10 @@ level (all nodes allocated to the job should have identical power caps,
 may be disabled by the Slurm configuration option PowerParameters=job_no_level).
 
 .TP
-\fB\-\-priority\fR=<value>
+\fB\-\-priority\fR=<\fIvalue\fR>
 Request a specific job priority.
 May be subject to configuration specific constraints.
+\fIvalue\fR should either be a numeric value or "TOP" (for highest possible value).
 Only Slurm operators and administrators can set the priority of a job.
 
 .TP
@@ -1139,16 +1164,6 @@ Lustre data is collected.
 \fBNetwork\fR
 Network (InfiniBand) data is collected.
 .RE
-.TP
-\fB\-p\fR, \fB\-\-partition\fR=<\fIpartition_names\fR>
-Request a specific partition for the resource allocation.  If not specified,
-the default behavior is to allow the slurm controller to select the default
-partition as designated by the system administrator. If the job can use more
-than one partition, specify their names in a comma separate list and the one
-offering earliest initiation will be used with no regard given to the partition
-name ordering (although higher priority partitions will be considered first).
-When the job is initiated, the name of the partition used will be placed first
-in the job record partition string.
 
 .TP
 \fB\-Q\fR, \fB\-\-quiet\fR
@@ -1297,6 +1312,10 @@ its permissions to the uid specified after node allocation is
 successful. \fIuser\fR may be the user name or numerical user ID.
 
 .TP
+\fB\-\-use-min-nodes\fR
+If a range of node counts is given, prefer the smaller count.
+
+.TP
 \fB\-V\fR, \fB\-\-version\fR
 Display version information and exit.
 
@@ -1323,8 +1342,11 @@ will be sorted by Slurm.
 
 .TP
 \fB\-\-wait\-all\-nodes\fR=<\fIvalue\fR>
-Controls when the execution of the command begins.
-By default the job will begin execution as soon as the allocation is made.
+Controls when the execution of the command begins with respect to when nodes
+are ready for use (i.e. booted).
+By default, the salloc command will return as soon as the allocation is made.
+This default can be altered using the \fBsalloc_wait_nodes\fR option to the
+\fBSchedulerParameters\fR parameter in the slurm.conf file.
 .RS
 .TP 5
 0
@@ -1502,6 +1524,9 @@ Same as \fB\-\-thread\-spec\fR
 \fBSALLOC_TIMELIMIT\fR
 Same as \fB\-t, \-\-time\fR
 .TP
+\fBSALLOC_USE_MIN_NODES\fR
+Same as \fB\-\-use\-min\-nodes\fR
+.TP
 \fBSALLOC_WAIT_ALL_NODES\fR
 Same as \fB\-\-wait\-all\-nodes\fR
 .TP
@@ -1555,6 +1580,9 @@ Only set if the \fB\-\-cpus\-per\-task\fR option is specified.
 \fBSLURM_DISTRIBUTION\fR
 Same as \fB\-m, \-\-distribution\fR
 .TP
+\fBSLURM_JOB_ACCOUNT\fR
+Account name associated of the job allocation.
+.TP
 \fBSLURM_JOB_ID\fR (and \fBSLURM_JOBID\fR for backwards compatibility)
 The ID of the job allocation.
 .TP
@@ -1575,8 +1603,20 @@ Total number of nodes in the job allocation.
 \fBSLURM_JOB_PARTITION\fR
 Name of the partition in which the job is running.
 .TP
+\fBSLURM_JOB_QOS\fR
+Quality Of Service (QOS) of the job allocation.
+.TP
+\fBSLURM_JOB_RESERVATION\fR
+Advanced reservation containing the job allocation, if any.
+.TP
 \fBSLURM_MEM_BIND\fR
 Set to value of the \-\-mem_bind\fR option.
+.TP
+\fBSLURM_MEM_PER_CPU\fR
+Same as \fB\-\-mem\-per\-cpu\fR
+.TP
+\fBSLURM_MEM_PER_NODE\fR
+Same as \fB\-\-mem\fR
 .TP
 \fBSLURM_SUBMIT_DIR\fR
 The directory from which \fBsalloc\fR was invoked.

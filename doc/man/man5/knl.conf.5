@@ -93,10 +93,16 @@ The default value is 45 seconds.
 This parameter is used only by the "knl_cray" plugin.
 
 .TP
+\fBCapmcRetries\fR
+Number of times to retry failed operations of the \fBcapmc\fR program.
+Default value is 4.
+
+.TP
 \fBCapmcTimeout\fR
 Time limit for the \fBcapmc\fR program to return status information milliseconds.
-The default value is 10000 milliseconds and the minumum value is 1000 milliseconds.
-This parameter is used only by the "knl_cray" plugin.
+The default value is 60000 milliseconds and the minimum value is 1000 milliseconds.
+This parameter is used by the "knl_cray" plugin, plus the capmc_suspend and
+capmc_resume programs used for suspending and resuming nodes.
 
 .TP
 \fBCnselectPath\fR
@@ -134,7 +140,8 @@ This is option is used only by the campc_suspend and campc_resume programs
 Fully qualified path to Intel's \fBsyscfg\fR program, which identifies current
 KNL configuration by viewing BIOS settings.
 If not defined, the current BIOS setting will not be available.
-This parameter is not used by the "knl_cray" plugin.
+The default value is "/usr/bin/syscfg".
+This parameter is used only by the "knl_generic" plugin.
 
 .SH "EXAMPLE"
 .LP

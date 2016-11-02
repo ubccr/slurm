@@ -247,6 +247,12 @@ static int _run_nhc(nhc_info_t *nhc_info)
 	if (scheduling_disabled)
 		return 0;
 
+	if (slurmctld_conf.select_type_param & CR_NHC_ABSOLUTELY_NO) {
+		error("%s: disabled by NHC_Absolutely_No setting, skipping.",
+		      __func__);
+		return 0;
+	}
+
 #ifdef HAVE_NATIVE_CRAY
 	int argc = 13, status = 1, wait_rc, i = 0;
 	char *argv[argc];
@@ -1614,10 +1620,6 @@ extern int select_p_job_init(List job_list)
 
 		while ((job_ptr = list_next(itr))) {
 			jobinfo = job_ptr->select_jobinfo->data;
-			if ((IS_CLEANING_STARTED(jobinfo) &&
-			     !IS_CLEANING_COMPLETE(jobinfo)) ||
-			    IS_JOB_RUNNING(job_ptr))
-				_set_job_running_restore(jobinfo);
 
 			/* We need to resize bitmaps if the
 			 * blades change in count.  We must increase
@@ -1632,6 +1634,11 @@ extern int select_p_job_init(List job_list)
 			    && (bit_size(jobinfo->used_blades) < blade_cnt))
 				jobinfo->used_blades = bit_realloc(
 					jobinfo->used_blades, blade_cnt);
+
+			if ((IS_CLEANING_STARTED(jobinfo) &&
+			     !IS_CLEANING_COMPLETE(jobinfo)) ||
+			    IS_JOB_RUNNING(job_ptr))
+				_set_job_running_restore(jobinfo);
 
 			if (!(slurmctld_conf.select_type_param & CR_NHC_STEP_NO)
 			    && job_ptr->step_list

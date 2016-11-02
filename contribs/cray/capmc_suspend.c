@@ -70,7 +70,9 @@
 /* Maximum poll wait time for child processes, in milliseconds */
 #define MAX_POLL_WAIT 500
 
-#define DEFAULT_CAPMC_TIMEOUT 10000	/* 10 seconds */
+/* Default and minimum timeout parameters for the capmc command */
+#define DEFAULT_CAPMC_RETRIES 4
+#define DEFAULT_CAPMC_TIMEOUT 60000	/* 60 seconds */
 #define MIN_CAPMC_TIMEOUT 1000		/* 1 second */
 
 /* Number of times to try performing "node_off" operation */
@@ -82,13 +84,10 @@
 /* Static variables */
 static char *capmc_path = NULL;
 static uint32_t capmc_poll_freq = 45;   /* capmc state polling frequency */
+static uint32_t capmc_retries = DEFAULT_CAPMC_RETRIES;
 static uint32_t capmc_timeout = DEFAULT_CAPMC_TIMEOUT;
 static char *log_file = NULL;
 static char *prog_name = NULL;
-
-static pthread_mutex_t thread_cnt_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  thread_cnt_cond  = PTHREAD_COND_INITIALIZER;
-static int thread_cnt = 0;
 
 /* NOTE: Keep this table synchronized with the table in
  * src/plugins/node_features/knl_cray/node_features_knl_cray.c */
@@ -98,6 +97,7 @@ static s_p_options_t knl_conf_file_options[] = {
 	{"AllowUserBoot", S_P_STRING},
 	{"CapmcPath", S_P_STRING},
 	{"CapmcPollFreq", S_P_UINT32},
+	{"CapmcRetries", S_P_UINT32},
 	{"CapmcTimeout", S_P_UINT32},
 	{"CnselectPath", S_P_STRING},
 	{"DefaultMCDRAM", S_P_STRING},
@@ -107,10 +107,7 @@ static s_p_options_t knl_conf_file_options[] = {
 	{NULL}
 };
 
-static bool _check_node_state(int nid, char *nid_str, char *state);
 static s_p_hashtbl_t *_config_make_tbl(char *filename);
-static uint32_t *_json_parse_nids(json_object *jobj, char *key, int *num);
-static void *_node_update(void *args);
 static void _read_config(void);
 static char *_run_script(char **script_argv, int *status);
 static int _tot_wait(struct timeval *start_time);
@@ -148,6 +145,7 @@ static void _read_config(void)
 	if ((tbl = _config_make_tbl(knl_conf_file))) {
 		(void) s_p_get_string(&capmc_path, "CapmcPath", tbl);
 		(void) s_p_get_uint32(&capmc_poll_freq, "CapmcPollFreq", tbl);
+		(void) s_p_get_uint32(&capmc_retries, "CapmcRetries", tbl);
 		(void) s_p_get_uint32(&capmc_timeout, "CapmcTimeout", tbl);
 		(void) s_p_get_string(&log_file, "LogFile", tbl);
 	}
@@ -276,137 +274,6 @@ static char *_run_script(char **script_argv, int *status)
 	return resp;
 }
 
-static uint32_t *_json_parse_nids(json_object *jobj, char *key, int *num)
-{
-	json_object *j_array = NULL;
-	json_object *j_value = NULL;
-	enum json_type j_type;
-	uint32_t *ents;
-	int i, cnt;
-
-	*num = 0;
-        json_object_object_get_ex(jobj, key, &j_array);
-	if (!j_array) {
-		debug("%s: key=%s not found in nid specification",
-		      prog_name, key);
-		return NULL;
-	}
-
-	cnt = json_object_array_length(j_array);
-	ents = xmalloc(sizeof(uint32_t) * cnt);
-	for (i = 0; i < cnt; i++) {
-		j_value = json_object_array_get_idx(j_array, i);
-		j_type = json_object_get_type(j_value);
-		if (j_type != json_type_int) {
-			error("%s: Unable to parse nid specification",
-			      prog_name);
-			break;
-		} else {
-			ents[i] = (uint32_t) json_object_get_int64(j_value);
-			*num = i + 1;
-		}
-	}
-	return ents;
-}
-
-static bool _check_node_state(int nid, char *nid_str, char *state)
-{
-	bool node_state_ok = false;
-	char *argv[10], *resp_msg;
-	int i, nid_cnt, status = 0;
-	uint32_t *nid_array;
-	json_object *j;
-
-	argv[0] = "capmc";
-	argv[1] = "node_status";
-	argv[2] = "-n";
-	argv[3] = nid_str;
-	argv[4] = NULL;
-	resp_msg = _run_script(argv, &status);
-	if (status != 0) {
-		error("%s: capmc(%s,%s,%s): %d %s", prog_name,
-			argv[1], argv[2], argv[3], status, resp_msg);
-		xfree(resp_msg);
-		return node_state_ok;
-	}
-	j = json_tokener_parse(resp_msg);
-	if (j == NULL) {
-		error("%s: json parser failed on %s", prog_name, resp_msg);
-		xfree(resp_msg);
-		return node_state_ok;
-	}
-	xfree(resp_msg);
-
-	nid_cnt = 0;
-	nid_array = _json_parse_nids(j, "off", &nid_cnt);
-	json_object_put(j);	/* Frees json memory */
-	for (i = 0; i < nid_cnt; i++) {
-		if (nid_array[i] == nid) {
-			node_state_ok = true;
-			break;
-		}
-	}
-	xfree(nid_array);
-
-	return node_state_ok;
-}
-
-static void *_node_update(void *args)
-{
-	char *node_name = (char *) args;
-	char *argv[10], nid_str[32], *resp_msg;
-	int i, nid = -1, status = 0;
-	bool node_state_ok, node_off_sent = false;
-	time_t poll_start;
-
-	for (i = 0; node_name[i]; i++) {
-		if ((node_name[i] >= '0') && (node_name[i] <= '9')) {
-			nid = strtol(node_name + i, NULL, 10);
-			break;
-		}
-	}
-	if (nid < 0) {
-		error("%s: No valid NID: %s", prog_name, node_name);
-		return NULL;
-	}
-	snprintf(nid_str, sizeof(nid_str), "%d", nid);
-
-	/* Request node power down.
-	 * Example: "capmc node_off –n 43" */
-	argv[0] = "capmc";
-	argv[1] = "node_off";
-	argv[2] = "-n";
-	argv[3] = nid_str;
-	argv[4] = NULL;
-	for (i = 0; ((i < NODE_OFF_RETRIES) && !node_off_sent); i++) {
-		resp_msg = _run_script(argv, &status);
-		if ((status == 0) ||
-		    (resp_msg && strcasestr(resp_msg, "Success"))) {
-			debug("%s: node_off sent to %s", prog_name, argv[3]);
-			node_off_sent = true;
-		} else {
-			error("%s: capmc(%s,%s,%s): %d %s", prog_name,
-			      argv[1], argv[2], argv[3], status, resp_msg);
-			sleep(1);
-		}
-		xfree(resp_msg);
-	}
-
-	/* Wait for node in "off" state */
-	poll_start = time(NULL);
-	while (!node_state_ok &&
-	      (difftime(time(NULL), poll_start) < NODE_OFF_STATE_WAIT)) {
-		sleep(capmc_poll_freq);
-		node_state_ok = _check_node_state(nid, nid_str, "off");
-	}
-
-	slurm_mutex_lock(&thread_cnt_mutex);
-	thread_cnt--;
-	pthread_cond_signal(&thread_cnt_cond);
-	slurm_mutex_unlock(&thread_cnt_mutex);
-	return NULL;
-}
-
 /* Convert node name string to equivalent nid string */
 static char *_node_names_2_nid_list(char *node_names)
 {
@@ -454,7 +321,7 @@ static char *_node_names_2_nid_list(char *node_names)
 static int _update_all_nodes(char *node_names)
 {
 	char *argv[10], *nid_list, *resp_msg;
-	int rc = -1, status = 0;
+	int rc = 0, retry, status = 0;
 
 	nid_list = _node_names_2_nid_list(node_names);
 	if (nid_list == NULL)
@@ -467,15 +334,31 @@ static int _update_all_nodes(char *node_names)
 	argv[2] = "-n";
 	argv[3] = nid_list;
 	argv[4] = NULL;
-	resp_msg = _run_script(argv, &status);
-	if ((status == 0) ||
-	    (resp_msg && strcasestr(resp_msg, "Success"))) {
-		debug("%s: node_off sent to %s", prog_name, argv[3]);
-		rc = 0;
-	} else {
+	for (retry = 0; ; retry++) {
+		resp_msg = _run_script(argv, &status);
+		if ((status == 0) ||
+		    (resp_msg && strcasestr(resp_msg, "Success"))) {
+			debug("%s: node_off sent to %s", prog_name, argv[3]);
+			xfree(resp_msg);
+			break;
+		}
 		error("%s: capmc(%s,%s,%s): %d %s", prog_name,
 		      argv[1], argv[2], argv[3], status, resp_msg);
+		if (resp_msg && strstr(resp_msg, "Could not lookup") &&
+		    (retry <= capmc_retries)) {
+			/* State Manager is down. Sleep and retry */
+			error("Cray State Manager is down, retrying request");
+			sleep(1);
+			xfree(resp_msg);
+		} else {
+			/* Non-recoverable error */
+			error("Aborting capmc_suspend for %s", nid_list);
+			rc = -1;
+			xfree(resp_msg);
+			break;
+		}
 	}
+
 	xfree(resp_msg);
 	xfree(nid_list);
 	return rc;
@@ -484,60 +367,20 @@ static int _update_all_nodes(char *node_names)
 int main(int argc, char *argv[])
 {
 	log_options_t log_opts = LOG_OPTS_INITIALIZER;
-	hostlist_t hl = NULL;
-	char *node_name;
-	pthread_attr_t attr_work;
-	pthread_t thread_work = 0;
 
 	xstrfmtcat(prog_name, "%s[%u]", argv[0], (uint32_t) getpid());
 	_read_config();
 	log_opts.stderr_level = LOG_LEVEL_QUIET;
 	log_opts.syslog_level = LOG_LEVEL_QUIET;
 	if (slurm_get_debug_flags() && DEBUG_FLAG_NODE_FEATURES)
-		log_opts.logfile_level += 3;
+		log_opts.logfile_level = LOG_LEVEL_DEBUG;
+	else
+		log_opts.logfile_level = LOG_LEVEL_ERROR;
 	(void) log_init(argv[0], log_opts, LOG_DAEMON, log_file);
 
-	/* Attempt to shutdown all nodes in a single capmc call,
-	 * attempt to shutdown individual nodes only if that fails. */
-	if (_update_all_nodes(argv[1]) != 0) {
-		if ((hl = hostlist_create(argv[1])) == NULL) {
-			error("%s: Invalid hostlist (%s)", prog_name, argv[1]);
-			exit(2);
-		}
-		while ((node_name = hostlist_pop(hl))) {
-			slurm_mutex_lock(&thread_cnt_mutex);
-			while (1) {
-				if (thread_cnt <= MAX_THREADS) {
-					thread_cnt++;
-					break;
-				} else {   /* wait for state change and retry */
-					pthread_cond_wait(&thread_cnt_cond,
-							  &thread_cnt_mutex);
-				}
-			}
-			slurm_mutex_unlock(&thread_cnt_mutex);
-
-			slurm_attr_init(&attr_work);
-			(void) pthread_attr_setdetachstate
-				(&attr_work, PTHREAD_CREATE_DETACHED);
-			if (pthread_create(&thread_work, &attr_work,
-					    _node_update, (void *) node_name)) {
-				_node_update((void *) node_name);
-			}
-			slurm_attr_destroy(&attr_work);
-		}
-		hostlist_destroy(hl);
-	}
-
-	/* Wait for work threads to complete */
-	slurm_mutex_lock(&thread_cnt_mutex);
-	while (1) {
-		if (thread_cnt == 0)
-			break;
-		else	/* wait for state change and retry */
-			pthread_cond_wait(&thread_cnt_cond, &thread_cnt_mutex);
-	}
-	slurm_mutex_unlock(&thread_cnt_mutex);
+	/* Attempt to shutdown all nodes in a single capmc call. */
+	if (_update_all_nodes(argv[1]) != 0)
+		exit(1);
 
 	xfree(prog_name);
 	exit(0);
