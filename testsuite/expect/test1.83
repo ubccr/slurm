@@ -72,6 +72,10 @@ if {$available < 3} {
 	exit 0
 }
 
+if {[string length $partition] == 0} {
+	set partition [default_partition]
+}
+
 #
 # Submit a 3 contiguous node job
 #
@@ -82,7 +86,7 @@ set host_0_num       0
 set host_1_num       0
 set host_2_num       0
 set timeout $max_job_delay
-set srun_pid [spawn $srun -N3-3 --contiguous -l -t1 $bin_printenv $node_name_env]
+set srun_pid [spawn $srun -N3-3 -p $partition --contiguous -l -t1 $bin_printenv $node_name_env]
 expect {
 	-re "Required node not available|Node count specification invalid|configuration not available" {
 		send_user "\nWARNING: can't test srun task distribution\n"
@@ -114,15 +118,6 @@ expect {
 	}
 }
 
-#
-# Verify node count
-#
-if {[test_front_end] != 0} {
-	send_user "\nWARNING: Additional testing is incompatible "
-	send_user "with front-end systems\n"
-	exit $exit_code
-}
-
 if {[string compare $host_0_name ""] == 0} {
 	send_user "\nFAILURE: Did not get hostname of task 0\n"
 	exit 1
@@ -136,26 +131,9 @@ if {[string compare $host_2_name ""] == 0} {
 	exit 1
 }
 
-#
-# Verify node sequence number
-#
-set host_0_num [get_suffix $host_0_name]
-set host_1_num [get_suffix $host_1_name]
-set host_2_num [get_suffix $host_2_name]
+lappend check_hosts_list $host_0_name $host_1_name $host_2_name
 
-if {$host_0_num == -1 || $host_1_num == -1 || $host_2_num == -1} {
-	send_user "\nWARNING: node names lack numeric suffix\n"
-	exit $exit_code
-}
-
-if {$host_1_num != [expr $host_0_num + 1]} {
-	send_user "\nFAILURE: node sequence number not contiguous\n"
-	set exit_code   1
-}
-if {$host_2_num != [expr $host_1_num + 1]} {
-	send_user "\nFAILURE: node sequence number not contiguous\n"
-	set exit_code   1
-}
+set exit_code [check_hosts_contiguous $partition $check_hosts_list]
 
 if {$exit_code == 0} {
 	send_user "\nSUCCESS\n"

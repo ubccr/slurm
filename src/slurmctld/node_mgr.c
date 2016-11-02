@@ -768,6 +768,7 @@ static bool _node_is_hidden(struct node_record *node_ptr, uid_t uid)
  * NOTE: the caller must xfree the buffer at *buffer_ptr
  * NOTE: change slurm_load_node() in api/node_info.c when data format changes
  * NOTE: READ lock_slurmctld config before entry
+ * NOTE: WRITE lock_slurmctld part before entry for part_filter_set
  */
 extern void pack_all_node (char **buffer_ptr, int *buffer_size,
 			   uint16_t show_flags, uid_t uid,
@@ -859,6 +860,7 @@ extern void pack_all_node (char **buffer_ptr, int *buffer_size,
  * NOTE: the caller must xfree the buffer at *buffer_ptr
  * NOTE: change slurm_load_node() in api/node_info.c when data format changes
  * NOTE: READ lock_slurmctld config before entry
+ * NOTE: WRITE lock_slurmctld part before entry for part_filter_set
  */
 extern void pack_one_node (char **buffer_ptr, int *buffer_size,
 			   uint16_t show_flags, uid_t uid, char *node_name,
@@ -1394,12 +1396,10 @@ int update_node ( update_node_msg_t * update_node_msg )
 			node_ptr->features_act =
 				node_features_g_node_xlate(
 					update_node_msg->features_act,
-					node_ptr->features);
-			xfree(update_node_msg->features_act);
-			update_node_msg->features_act =
-				xstrdup(node_ptr->features_act);
-			/* _update_node_active_features() logs and updates
-			 * active_feature_list */
+					node_ptr->features, 2);
+			error_code = _update_node_active_features(
+						node_ptr->name,
+						node_ptr->features_act);
 		}
 
 		if (update_node_msg->gres) {
@@ -1533,10 +1533,12 @@ int update_node ( update_node_msg_t * update_node_msg )
 					bit_set (avail_node_bitmap, node_inx);
 				bit_set (idle_node_bitmap, node_inx);
 				bit_set (up_node_bitmap, node_inx);
-				if (IS_NODE_POWER_SAVE(node_ptr))
-					node_ptr->last_idle = 0;
-				else
+				if (IS_NODE_POWER_SAVE(node_ptr)) {
+					if (node_ptr->last_idle > 0)
+						node_ptr->last_idle = 1;
+				} else {
 					node_ptr->last_idle = now;
+				}
 			} else if (state_val == NODE_STATE_ALLOCATED) {
 				if (!IS_NODE_DRAIN(node_ptr) &&
 				    !IS_NODE_FAIL(node_ptr)  &&
@@ -1562,7 +1564,6 @@ int update_node ( update_node_msg_t * update_node_msg )
 					(nonstop_ops.node_fail)(NULL, node_ptr);
 			} else if (state_val == NODE_STATE_POWER_SAVE) {
 				if (IS_NODE_POWER_SAVE(node_ptr)) {
-					node_ptr->last_idle = 0;
 					node_ptr->node_state &=
 						(~NODE_STATE_POWER_SAVE);
 					info("power down request repeating "
@@ -1584,10 +1585,12 @@ int update_node ( update_node_msg_t * update_node_msg )
 					node_ptr->node_state |=
 						NODE_STATE_NO_RESPOND;
 #endif
-					node_ptr->last_idle = 0;
+
 					info("powering down node %s",
 					     this_node_name);
 				}
+				if (node_ptr->last_idle > 0)
+					node_ptr->last_idle = 1;
 				free(this_node_name);
 				continue;
 			} else if (state_val == NODE_STATE_POWER_UP) {
@@ -1611,13 +1614,20 @@ int update_node ( update_node_msg_t * update_node_msg )
 				}
 				free(this_node_name);
 				continue;
+			} else if ((state_val & NODE_STATE_POWER_SAVE) &&
+				   (state_val & NODE_STATE_POWER_UP) &&
+				   (IS_NODE_POWER_UP(node_ptr))) {
+				/* Clear any reboot operation in progress */
+				node_ptr->node_state &= (~NODE_STATE_POWER_UP);
+				node_ptr->last_response = now;
+				state_val = base_state;
 			} else if (state_val == NODE_STATE_NO_RESPOND) {
 				node_ptr->node_state |= NODE_STATE_NO_RESPOND;
 				state_val = base_state;
 				bit_clear(avail_node_bitmap, node_inx);
 			} else {
-				info ("Invalid node state specified %u",
-					state_val);
+				info("Invalid node state specified %u",
+				     state_val);
 				err_code = 1;
 				error_code = ESLURM_INVALID_NODE_STATE;
 			}
@@ -1650,11 +1660,6 @@ int update_node ( update_node_msg_t * update_node_msg )
 	FREE_NULL_HOSTLIST(hostname_list);
 	last_node_update = now;
 
-	if ((error_code == 0) && (update_node_msg->features_act)) {
-		error_code = _update_node_active_features(
-					update_node_msg->node_names,
-					update_node_msg->features_act);
-	}
 	if ((error_code == 0) && (update_node_msg->features)) {
 		error_code = _update_node_avail_features(
 					update_node_msg->node_names,
@@ -2115,6 +2120,7 @@ static bool _valid_node_state_change(uint32_t old, uint32_t new)
 		case NODE_STATE_NO_RESPOND:
 		case NODE_STATE_POWER_SAVE:
 		case NODE_STATE_POWER_UP:
+		case (NODE_STATE_POWER_SAVE | NODE_STATE_POWER_UP):
 		case NODE_STATE_UNDRAIN:
 			return true;
 
@@ -2252,7 +2258,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 	int error_code, i, node_inx;
 	struct config_record *config_ptr;
 	struct node_record *node_ptr;
-	char *reason_down = NULL, *tmp_str;
+	char *reason_down = NULL, *tmp_str, *orig_act;
 	uint32_t node_flags;
 	time_t boot_req_time, now = time(NULL);
 	bool gang_flag = false;
@@ -2294,21 +2300,25 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 	if (slurm_get_preempt_mode() != PREEMPT_MODE_OFF)
 		gang_flag = true;
 
-	if (reg_msg->features_active) {
-		tmp_str = node_features_g_node_xlate(reg_msg->features_active,
-						     node_ptr->features_act);
-		xfree(node_ptr->features_act);
-		node_ptr->features_act = tmp_str;
-		(void) _update_node_active_features(node_ptr->name,
-						    node_ptr->features_act);
-	}
 	if (reg_msg->features_avail) {
 		tmp_str = node_features_g_node_xlate(reg_msg->features_avail,
-						     node_ptr->features);
+						     node_ptr->features, 1);
 		xfree(node_ptr->features);
 		node_ptr->features = tmp_str;
 		(void) _update_node_avail_features(node_ptr->name,
 						   node_ptr->features);
+	}
+	if (reg_msg->features_active) {
+		if (node_ptr->features_act)
+			orig_act = node_ptr->features_act;
+		else
+			orig_act = node_ptr->features;
+		tmp_str = node_features_g_node_xlate(reg_msg->features_active,
+						     orig_act, 1);
+		xfree(node_ptr->features_act);
+		node_ptr->features_act = tmp_str;
+		(void) _update_node_active_features(node_ptr->name,
+						    node_ptr->features_act);
 	}
 
 	if (gres_plugin_node_config_unpack(reg_msg->gres_info,
@@ -2362,6 +2372,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			      reg_msg->node_name, sockets1, cores1, threads1,
 			      sockets2, cores2, threads2);
 			/* Preserve configured values */
+			reg_msg->boards  = config_ptr->boards;
 			reg_msg->sockets = config_ptr->sockets;
 			reg_msg->cores   = config_ptr->cores;
 			reg_msg->threads = config_ptr->threads;
@@ -2391,6 +2402,11 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		     (config_ptr->sockets * config_ptr->cores))) {
 			_split_node_config(node_ptr, reg_msg);
 		}
+	}
+	if (reg_msg->boards > reg_msg->sockets) {
+		error("Node %s has more boards than sockets (%u > %u), setting board count to 1",
+		      reg_msg->node_name, reg_msg->boards, reg_msg->sockets);
+		reg_msg->boards = 1;
 	}
 
 	/* reset partition and node config (in that order) */
@@ -2492,6 +2508,12 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 	}
 
 	node_flags = node_ptr->node_state & NODE_STATE_FLAGS;
+
+	if (node_ptr->last_response &&
+	    (node_ptr->boot_time > node_ptr->last_response) &&
+	    !IS_NODE_UNKNOWN(node_ptr)) {	/* Node just rebooted */
+		(void) node_features_g_get_node(node_ptr->name);
+	}
 
 	if (error_code) {
 		if (!IS_NODE_DOWN(node_ptr)
@@ -3105,11 +3127,16 @@ static void _node_did_resp(struct node_record *node_ptr)
 	time_t boot_req_time, now = time(NULL);
 
 	node_inx = node_ptr - node_record_table_ptr;
-	/* Do not change last_response value (in the future) for nodes being
-	 *  booted so unexpected reboots are recognized */
-	if (IS_NODE_POWER_UP(node_ptr) ||
-	    (IS_NODE_DOWN(node_ptr) &&
-	     !xstrcmp(node_ptr->reason, "Scheduled reboot"))) {
+	if (IS_NODE_POWER_UP(node_ptr) && (node_ptr->last_response == 0)) {
+		/* slurmctld restart while reboot in progress, assume compute
+		 * node actually rebooted, add boot time to node state in
+		 * slurm version 17.02 to be more robust */
+		node_ptr->last_response = now + slurm_get_resume_timeout();
+	} else if (IS_NODE_POWER_UP(node_ptr) ||
+		   (IS_NODE_DOWN(node_ptr) &&
+		    !xstrcmp(node_ptr->reason, "Scheduled reboot"))) {
+		/* Do not change last_response value (in the future) for nodes
+		 * being booted so unexpected reboots are recognized */
 		boot_req_time = node_ptr->last_response -
 				slurm_get_resume_timeout();
 		if (node_ptr->boot_time < boot_req_time) {

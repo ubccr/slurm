@@ -81,6 +81,12 @@
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_strcasestr.h"
 
+strong_alias(convert_num_unit2, slurm_convert_num_unit2);
+strong_alias(convert_num_unit, slurm_convert_num_unit);
+strong_alias(revert_num_unit, slurm_revert_num_unit);
+strong_alias(get_convert_unit_val, slurm_get_convert_unit_val);
+strong_alias(get_unit_type, slurm_get_unit_type);
+
 /* EXTERNAL VARIABLES */
 
 /* #DEFINES */
@@ -940,6 +946,24 @@ uint16_t slurm_get_private_data(void)
 		slurm_conf_unlock();
 	}
 	return private_data;
+}
+
+/* slurm_get_resume_program
+ * returns the ResumeProgram from slurmctld_conf object
+ * RET char *    - ResumeProgram, MUST be xfreed by caller
+ */
+char *slurm_get_resume_program(void)
+{
+	char *resume_program = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		resume_program = xstrdup(conf->resume_program);
+		slurm_conf_unlock();
+	}
+	return resume_program;
 }
 
 /* slurm_get_state_save_location

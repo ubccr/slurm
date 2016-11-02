@@ -75,6 +75,7 @@
 #include <sys/types.h>
 #include <sys/utsname.h>
 
+#include "slurm/slurm.h"
 #include "src/common/cpu_frequency.h"
 #include "src/common/list.h"
 #include "src/common/log.h"
@@ -133,12 +134,12 @@ enum wrappers {
 #define OPT_ARRAY_INX     0x20
 #define OPT_PROFILE       0x21
 #define OPT_HINT	  0x22
+#define OPT_USE_MIN_NODES 0x23
 
 /* generic getopt_long flags, integers and *not* valid characters */
 #define LONG_OPT_PROPAGATE   0x100
 #define LONG_OPT_MEM_BIND    0x102
 #define LONG_OPT_POWER       0x103
-#define LONG_OPT_WAIT        0x104
 #define LONG_OPT_JOBID       0x105
 #define LONG_OPT_TMP         0x106
 #define LONG_OPT_MEM         0x107
@@ -199,6 +200,7 @@ enum wrappers {
 #define LONG_OPT_GRES_FLAGS      0x15a
 #define LONG_OPT_PRIORITY        0x160
 #define LONG_OPT_KILL_INV_DEP    0x161
+#define LONG_OPT_USE_MIN_NODES   0x162
 #define LONG_OPT_MCS_LABEL       0x165
 #define LONG_OPT_DEADLINE        0x166
 
@@ -494,6 +496,7 @@ env_vars_t env_vars[] = {
   {"SBATCH_SIGNAL",        OPT_SIGNAL,     NULL,               NULL          },
   {"SBATCH_THREAD_SPEC",   OPT_THREAD_SPEC,NULL,               NULL          },
   {"SBATCH_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL          },
+  {"SBATCH_USE_MIN_NODES", OPT_USE_MIN_NODES ,NULL,            NULL          },
   {"SBATCH_WAIT",          OPT_BOOL,       &opt.wait,          NULL          },
   {"SBATCH_WAIT_ALL_NODES",OPT_INT,        &opt.wait_all_nodes,NULL          },
   {"SBATCH_WAIT4SWITCH",   OPT_TIME_VAL,   NULL,               NULL          },
@@ -704,6 +707,9 @@ _process_env_var(env_vars_t *e, const char *val)
 		opt.core_spec = parse_int("thread_spec", val, false) |
 					 CORE_SPEC_THREAD;
 		break;
+	case OPT_USE_MIN_NODES:
+		opt.job_flags |= USE_MIN_NODES;
+		break;
 	default:
 		/* do nothing */
 		break;
@@ -718,7 +724,7 @@ static struct option long_options[] = {
 	{"array",         required_argument, 0, 'a'},
 	{"batch",         no_argument,       0, 'b'}, /* batch option
 							 is only here for
-							 moab tansition
+							 moab translation
 							 doesn't do anything */
 	{"extra-node-info", required_argument, 0, 'B'},
 	{"cpus-per-task", required_argument, 0, 'c'},
@@ -729,7 +735,7 @@ static struct option long_options[] = {
 	{"nodefile",      required_argument, 0, 'F'},
 	{"geometry",      required_argument, 0, 'g'},
 	{"help",          no_argument,       0, 'h'},
-	{"hold",          no_argument,       0, 'H'}, /* undocumented */
+	{"hold",          no_argument,       0, 'H'},
 	{"input",         required_argument, 0, 'i'},
 	{"immediate",     no_argument,       0, 'I'},
 	{"job-name",      required_argument, 0, 'J'},
@@ -755,6 +761,7 @@ static struct option long_options[] = {
 	{"verbose",       no_argument,       0, 'v'},
 	{"version",       no_argument,       0, 'V'},
 	{"nodelist",      required_argument, 0, 'w'},
+	{"wait",          no_argument,       0, 'W'},
 	{"exclude",       required_argument, 0, 'x'},
 	{"acctg-freq",    required_argument, 0, LONG_OPT_ACCTG_FREQ},
 	{"bb",            required_argument, 0, LONG_OPT_BURST_BUFFER},
@@ -819,7 +826,7 @@ static struct option long_options[] = {
 	{"threads-per-core", required_argument, 0, LONG_OPT_THREADSPERCORE},
 	{"tmp",           required_argument, 0, LONG_OPT_TMP},
 	{"uid",           required_argument, 0, LONG_OPT_UID},
-	{"wait",          no_argument,       0, LONG_OPT_WAIT},
+	{"use-min-nodes", no_argument,       0, LONG_OPT_USE_MIN_NODES},
 	{"wait-all-nodes",required_argument, 0, LONG_OPT_WAIT_ALL_NODES},
 	{"wckey",         required_argument, 0, LONG_OPT_WCKEY},
 	{"wrap",          required_argument, 0, LONG_OPT_WRAP},
@@ -1453,6 +1460,9 @@ static void _set_options(int argc, char **argv)
 			xfree(opt.nodelist);
 			opt.nodelist = xstrdup(optarg);
 			break;
+		case 'W':
+			opt.wait = true;
+			break;
 		case 'x':
 			xfree(opt.exc_nodes);
 			opt.exc_nodes = xstrdup(optarg);
@@ -1604,32 +1614,45 @@ static void _set_options(int argc, char **argv)
 			xfree(opt.burst_buffer);
 			opt.burst_buffer = xstrdup(optarg);
 			break;
-		case LONG_OPT_NICE:
+		case LONG_OPT_NICE: {
+			long long tmp_nice;
 			if (optarg)
-				opt.nice = strtol(optarg, NULL, 10);
+				tmp_nice = strtoll(optarg, NULL, 10);
 			else
-				opt.nice = 100;
-			if (opt.nice < 0) {
+				tmp_nice = 100;
+			if (llabs(tmp_nice) > (NICE_OFFSET - 3)) {
+				error("Nice value out of range (+/- %u). Value "
+				      "ignored", NICE_OFFSET - 3);
+				tmp_nice = 0;
+			}
+			if (tmp_nice < 0) {
 				uid_t my_uid = getuid();
 				if ((my_uid != 0) &&
 				    (my_uid != slurm_get_slurm_user_id())) {
 					error("Nice value must be "
 					      "non-negative, value ignored");
-					opt.nice = 0;
+					tmp_nice = 0;
 				}
 			}
+			opt.nice = (int) tmp_nice;
 			break;
+		}
 		case LONG_OPT_PRIORITY: {
-			long long priority = strtoll(optarg, NULL, 10);
-			if (priority < 0) {
-				error("Priority must be >= 0");
-				exit(error_exit);
+			long long priority;
+			if (strcasecmp(optarg, "TOP") == 0) {
+				opt.priority = NO_VAL - 1;
+			} else {
+				priority = strtoll(optarg, NULL, 10);
+				if (priority < 0) {
+					error("Priority must be >= 0");
+					exit(error_exit);
+				}
+				if (priority >= NO_VAL) {
+					error("Priority must be < %i", NO_VAL);
+					exit(error_exit);
+				}
+				opt.priority = priority;
 			}
-			if (priority >= NO_VAL) {
-				error("Priority must be < %i", NO_VAL);
-				exit(error_exit);
-			}
-			opt.priority = priority;
 			break;
 		}
 		case LONG_OPT_NO_REQUEUE:
@@ -1766,9 +1789,6 @@ static void _set_options(int argc, char **argv)
 			xfree(opt.network);
 			opt.network = xstrdup(optarg);
 			break;
-		case LONG_OPT_WAIT:
-			opt.wait = true;
-			break;
 		case LONG_OPT_WCKEY:
 			xfree(opt.wckey);
 			opt.wckey = xstrdup(optarg);
@@ -1816,6 +1836,11 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_WAIT_ALL_NODES:
+			if ((optarg[0] < '0') || (optarg[0] > '9')) {
+				error("Invalid --wait-all-nodes argument: %s",
+				      optarg);
+				exit(1);
+			}
 			opt.wait_all_nodes = strtol(optarg, NULL, 10);
 			break;
 		case LONG_OPT_EXPORT:
@@ -1867,6 +1892,9 @@ static void _set_options(int argc, char **argv)
 				opt.job_flags |= KILL_INV_DEP;
 			if (xstrcasecmp(optarg, "no") == 0)
 				opt.job_flags |= NO_KILL_INV_DEP;
+			break;
+		case LONG_OPT_USE_MIN_NODES:
+			opt.job_flags |= USE_MIN_NODES;
 			break;
 		default:
 			if (spank_process_option (opt_char, optarg) < 0) {
@@ -2112,21 +2140,29 @@ static void _set_pbs_options(int argc, char **argv)
 			else
 				opt.ofname = xstrdup(optarg);
 			break;
-		case 'p':
+		case 'p': {
+			long long tmp_nice;
 			if (optarg)
-				opt.nice = strtol(optarg, NULL, 10);
+				tmp_nice = strtoll(optarg, NULL, 10);
 			else
-				opt.nice = 100;
-			if (opt.nice < 0) {
+				tmp_nice = 100;
+			if (llabs(tmp_nice) > (NICE_OFFSET - 3)) {
+				error("Nice value out of range (+/- %u). Value "
+				      "ignored", NICE_OFFSET - 3);
+				tmp_nice = 0;
+			}
+			if (tmp_nice < 0) {
 				uid_t my_uid = getuid();
 				if ((my_uid != 0) &&
 				    (my_uid != slurm_get_slurm_user_id())) {
 					error("Nice value must be "
 					      "non-negative, value ignored");
-					opt.nice = 0;
+					tmp_nice = 0;
 				}
 			}
+			opt.nice = (int) tmp_nice;
 			break;
+		}
 		case 'q':
 			xfree(opt.partition);
 			opt.partition = xstrdup(optarg);
@@ -2423,21 +2459,28 @@ static void _parse_pbs_resource_list(char *rl)
 				xfree(temp);
 			}
 		} else if (!xstrncmp(rl+i, "nice=", 5)) {
+			long long tmp_nice;
 			i += 5;
 			temp = _get_pbs_option_value(rl, &i, ',');
 			if (temp)
-				opt.nice = strtol(temp, NULL, 10);
+				tmp_nice = strtoll(temp, NULL, 10);
 			else
-				opt.nice = 100;
-			if (opt.nice < 0) {
+				tmp_nice = 100;
+			if (llabs(tmp_nice) > (NICE_OFFSET - 3)) {
+				error("Nice value out of range (+/- %u). Value "
+				      "ignored", NICE_OFFSET - 3);
+				tmp_nice = 0;
+			}
+			if (tmp_nice < 0) {
 				uid_t my_uid = getuid();
 				if ((my_uid != 0) &&
 				    (my_uid != slurm_get_slurm_user_id())) {
 					error("Nice value must be "
 					      "non-negative, value ignored");
-					opt.nice = 0;
+					tmp_nice = 0;
 				}
 			}
+			opt.nice = (int) tmp_nice;
 			xfree(temp);
 		} else if (!xstrncmp(rl+i, "nodes=", 6)) {
 			i+=6;
@@ -3227,7 +3270,8 @@ static void _usage(void)
 "              [--switches=max-switches{@max-time-to-wait}] [--reboot]\n"
 "              [--core-spec=cores] [--thread-spec=threads] [--bb=burst_buffer_spec]\n"
 "              [--array=index_values] [--profile=...] [--ignore-pbs]\n"
-"              [--export[=names]] [--export-file=file|fd] executable [args...]\n");
+"              [--export[=names]] [--export-file=file|fd] [--use-min-nodes]\n"
+"              executable [args...]\n");
 }
 
 static void _help(void)
@@ -3305,6 +3349,8 @@ static void _help(void)
 "  -t, --time=minutes          time limit\n"
 "      --time-min=minutes      minimum time limit (if distinct)\n"
 "      --uid=user_id           user ID to run job as (user root only)\n"
+"      --use-min-nodes         if a range of node counts is given, prefer the\n"
+"                              smaller count\n"
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
 "  -W, --wait                  wait for completion of submitted job\n"
 "      --wckey=wckey           wckey to run job under\n"
@@ -3364,7 +3410,7 @@ static void _help(void)
 #endif
 #ifdef HAVE_NATIVE_CRAY			/* Native Cray specific options */
 "Cray related options:\n"
-"      --network=type          Use network performace counters\n"
+"      --network=type          Use network performance counters\n"
 "                              (system, network, or processor)\n"
 "\n"
 #endif

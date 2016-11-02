@@ -1376,9 +1376,10 @@ _pick_step_nodes (struct job_record  *job_ptr,
 			 */
 			node_cnt = bit_set_count(selected_nodes);
 			if (node_cnt > step_spec->max_nodes) {
-				info("_pick_step_nodes: requested nodes %s "
-				     "exceed max node count for job step %u",
-				     step_spec->node_list, job_ptr->job_id);
+				info("%s: requested nodes %s exceed max node count for job step %u (%d > %u)",
+				     __func__, step_spec->node_list,
+				     job_ptr->job_id, node_cnt,
+				     step_spec->max_nodes);
 				FREE_NULL_BITMAP(selected_nodes);
 				goto cleanup;
 			} else if (step_spec->min_nodes &&
@@ -1465,8 +1466,9 @@ _pick_step_nodes (struct job_record  *job_ptr,
 		step_spec->min_nodes = (i > step_spec->min_nodes) ?
 					i : step_spec->min_nodes ;
 		if (step_spec->max_nodes < step_spec->min_nodes) {
-			info("Job step %u max node count incompatible with CPU "
-			     "count", job_ptr->job_id);
+			info("%s: Job step %u max node count incompatible with CPU count (%u < %u)",
+			     __func__, job_ptr->job_id, step_spec->max_nodes,
+			     step_spec->min_nodes);
 			*return_code = ESLURM_TOO_MANY_REQUESTED_CPUS;
 			goto cleanup;
 		}
@@ -1990,6 +1992,8 @@ static void _step_dealloc_lps(struct step_record *step_ptr)
 	if (step_ptr->step_layout == NULL)	/* batch step */
 		return;
 
+	if (job_resrcs_ptr == NULL)
+		return;
 	i_first = bit_ffs(job_resrcs_ptr->node_bitmap);
 	i_last  = bit_fls(job_resrcs_ptr->node_bitmap);
 	if (i_first == -1)	/* empty bitmap */
@@ -2195,7 +2199,7 @@ step_create(job_step_create_request_msg_t *step_specs,
 	}
 
 	if (IS_JOB_FINISHED(job_ptr) ||
-	    (job_ptr->end_time <= time(NULL)))
+	    ((job_ptr->end_time <= time(NULL)) && !IS_JOB_CONFIGURING(job_ptr)))
 		return ESLURM_ALREADY_DONE;
 
 	task_dist = step_specs->task_dist & SLURM_DIST_STATE_BASE;

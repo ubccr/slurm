@@ -1,6 +1,225 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 16.05.6
+==========================
+ -- Docs - the correct default value for GroupUpdateForce is 0.
+ -- mpi/pmix - improve point to point communication performance.
+ -- SlurmDB - include pending jobs in search during 'sacctmgr show runawayjobs'.
+ -- Add client side out-of-range checks to --nice flag.
+ -- Fix support for sbatch "-W" option, previously eeded to use "--wait".
+ -- node_features/knl_cray plugin and capmc_suspend/resume programs modified to
+    sleep and retry capmc operations if the Cray State Manager is down. Added
+    CapmcRetries configuration parameter to knl_cray.conf.
+ -- node_features/knl_cray plugin: Remove any KNL MCDRAM or NUMA features from
+    node's configuration if capmc does NOT report the node as being KNL.
+ -- node_features/knl_cray plugin: drain any node not reported by
+    "capmc node_status" on startup or reconfig.
+ -- node_features/knl_cray plugin: Substantially streamline and speed up logic
+    to load current node state on reconfigure failure or unexpected node boot.
+ -- node_features/knl_cray plugin: Add separate thread to interact with capmc
+    in response to unexpected node reboots.
+ -- node_features plugin - Add "mode" argument to node_features_p_node_xlate()
+    function to fix some bugs updating a node's features using the node update
+    RPC.
+ -- node_features/knl_cray plugin: If the reconfiguration of nodes for an
+    interactive job fails, kill the job (it can't be requeued like a batch job).
+ -- Testsuite - Added srun/salloc/sbatch tests with --use-min-nodes option.
+ -- Fix typo when an error occurs when discovering pmix version on
+    configure.
+ -- Fix configuring pmix support when you have your lib dir symlinked to lib64.
+ -- Fix waiting reason if a job is waiting for a specific limit instead of
+    always just AccountingPolicy.
+ -- Correct SchedulerParameters=bf_busy_nodes logic with respect to the job's
+    minimum node count. Previous logic would not decremement counter in some
+    locations and reject valid job request for not reaching minimum node count.
+ -- Fix FreeBSD-11 build by using llabs() function in place of abs().
+ -- Cray: The slurmd can manipulate the socket/core/thread values reported based
+    upon the configuration. The logic failed to consider select/cray with
+    SelectTypeParameters=other_cons_res as equivalent to select/cons_res.
+ -- If a node's socket or core count are changed at registration time (e.g. a
+    KNL node's NUMA mode is changed), change it's board count to match.
+ -- Prevent possible divide by zero in select/cons_res if a node's board count
+    is higher than it's socket count.
+ -- Allow an advanced reservation to contain a license count of zero.
+ -- Preserve non-KNL node features when updating the KNL node features for a
+    multi-node job in which the non-KNL node features vary by node.
+ -- task/affinity plugin: Honor a job's --ntasks-per-socket and
+    --ntasks-per-core options in task binding.
+ -- slurmd - do not print ClusterName when using 'slurmd -C'.
+ -- Correct a bitmap test function (used only by the select/bluegene plugin).
+ -- Do not propagate SLURM_UMASK environment variable to batch script.
+ -- Added node_features/knl_generic plugin for KNL support on non-Cray systems.
+ -- Cray: Prevent abort in backfill scheduling logic for requeued job that has
+    been cancelled while NHC is running.
+ -- Improve reported estimates of start and end times for pending jobs.
+ -- pbsnodes: Show OS value as "unknown" for down nodes.
+ -- BlueGene - correctly scale node counts when enforcing MaxNodes limit take 2.
+ -- Fix "sbatch --hold" to set JobHeldUser correctly instead of JobHeldAdmin.
+ -- Cray - print warning that task/cgroup is required, and must be after
+    task/cray in the TaskPlugin settings.
+ -- Document that node Weight takes precedence over load with LLN scheduling.
+ -- Fix issue where gang scheduling could happen even with OverSubscribe=NO.
+ -- Expose JOB_SHARED_* values to job_submit/lua plugin.
+ -- Fix issue where number of nodes is not properly allocated when srun is
+    requested with -n tasks < hosts from -w hostlist.
+ -- Update srun documentation for -N, -w and -m arbitrary.
+ -- Fix bug that was clearing MAINT mode on nodes scheduled for reboot (bug
+    introduced in version 16.05.5 to address bug in overlapping reservations).
+ -- Add logging of node reboot requests.
+ -- Docs - remove recommendation for ReleaseAgent setting in cgroup.conf.
+ -- Make sure a job cleans up completely if it has a node fail.  Mostly an
+    issue with gang scheduling.
+
+* Changes in Slurm 16.05.5
+==========================
+ -- Fix accounting for jobs requeued after the previous job was finished.
+ -- slurmstepd modified to pre-load all relevant plugins at startup to avoid
+    the possibility of modified plugins later resulting in inconsistent API
+    or data structures and a failure of slurmstepd.
+ -- Export functions from parse_time.c in libslurm.so.
+ -- Export unit convert functions from slurm_protocol_api.c in libslurm.so.
+ -- Fix scancel to allow multiple steps from a job to be cancelled at once.
+ -- Update and expand upgrade guide (in Quick Start Administrator web page).
+ -- burst_buffer/cray: Requeue, but do not hold a job which fails the pre_run
+    operation.
+ -- Insure reported expected job start time is not in the past for pending jobs.
+ -- Add support for PMIx v2.
+ -- mpi/pmix: support for passing TMPDIR path through info key
+ -- Cray: update slurmconfgen_smw.py script to correctly identify service nodes
+    versus compute nodes.
+ -- FreeBSD - fix build issue in knl_cray plugin.
+ -- Corrections to gres.conf parsing logic.
+ -- Make partition State independent of EnforcePartLimits value.
+ -- Fix multipart srun submission with EnforcePartLimits=NO and job violating
+    the partition limits.
+ -- Fix problem updating job state_reason.
+ -- pmix - Provide HWLOC topology in the job-data if Slurm was configured
+    with hwloc.
+ -- Cray - Fix issue restoring jobs when blade count increases due to hardware
+    reconfiguration.
+ -- burst_buffer/cray - Hold job after 3 failed pre-run operations.
+ -- sched/backfill - Check that a user's QOS is allowed to use a partition
+    before trying to schedule resources on that partition for the job.
+ -- sacctmgr - Fix displaying nodenames when printing out events or
+    reservations.
+ -- Fix mpiexec wrapper to accept task count with more than one digit.
+ -- Add mpiexec man page to the script.
+ -- Add salloc_wait_nodes option to the SchedulerParameters parameter in the
+    slurm.conf file controlling when the salloc command returns in relation to
+    when nodes are ready for use (i.e. booted).
+ -- Handle case when slurmctld daemon restart while compute node reboot in
+    progress. Return node to service rather than setting DOWN.
+ -- Preserve node "RESERVATION" state when one of multiple overlapping
+    reservations ends.
+ -- Restructure srun command locking for task_exit processing logic for improved
+    parallelism.
+ -- Modify srun task completion handling to only build the task/node string for
+    logging purposes if it is needed. Modified for performance purposes.
+ -- Docs - update salloc/sbatch/srun man pages to mention corresponding
+    environment variables for --mem/--mem-per-cpu and allowed suffixes.
+ -- Silence srun warning when overriding the job ntasks-per-node count
+    with a lower task count for the step.
+ -- Docs - assorted spelling fixes.
+ -- node_features/knl_cray: Fix bug where MCDRAM state could be taken from
+    capmc rather than cnselect.
+ -- node_features/knl_cray: If a node is rebooted outside of Slurm's direction,
+    update it's active features with current MCDRAM and NUMA mode information.
+ -- Restore ability to manually power down nodes, broken in 15.08.12.
+ -- Don't log error for job end_time being zero if node health check is still
+    running.
+ -- When powering up a node to change it's state (e.g. KNL NUMA or MCDRAM mode)
+    then pass to the ResumeProgram the job ID assigned to the nodes in the
+    SLURM_JOB_ID environment variable.
+ -- Allow a node's PowerUp state flag to be cleared using update_node RPC.
+ -- capmc_suspend/resume - If a request modify NUMA or MCDRAM state on a set of
+    nodes or reboot a set of nodes fails then just requeue the job and abort the
+    entire operation rather than trying to operate on individual nodes.
+ -- node_features/knl_cray plugin: Increase default CapmcTimeout parameter from
+    10 to 60 seconds.
+ -- Fix squeue filter by job license when a job has requested more than 1
+    license of a certain type.
+ -- Fix bug in PMIX_Ring in the pmi2 plugin so that it supports singleton mode.
+    It also updates the testpmixring.c test program so it can be used to check
+    singleton runs.
+ -- Automically cleanup task/cgroup cpuset and devices cgroups after steps are
+    done.
+ -- Testsuite - Fix test1.83 to handle gaps in node names properly.
+ -- BlueGene - correctly scale node counts when enforcing MaxNodes limit.
+ -- Make sure no attempt is made to schedule a requeued job until all steps are
+    cleaned (Node Health Check completes for all steps on a Cray).
+ -- KNL: Correct task affinity logic for some NUMA modes.
+ -- Add salloc/sbatch/srun --priority option of "TOP" to set job priority to
+    the highest possible value. This option is only available to Slurm operators
+    and administrators.
+ -- Add salloc/sbatch/srun option --use-min-nodes to prefer smaller node counts
+    when a range of node counts is specified (e.g. "-N 2-4").
+ -- Validate salloc/sbatch --wait-all-nodes argument.
+ -- Add "sbatch_wait_nodes" to SchedulerParameters to control default sbatch
+    behaviour with respect to waiting for all allocated nodes to be ready for
+    use. Job can override the configuration option using the --wait-all-nodes=#
+    option.
+ -- Prevent partition group access updates from resetting last_part_update when
+    no changes have been made. Prevents backfill scheduler from restarting
+    mid-cycle unnecessarily.
+ -- Cray - add NHC_ABSOLUTELY_NO to never run NHC, even on certain edge cases
+    that it would otherwise be run on with NHC_NO.
+ -- Ignore GRES/QOS updates that maintain the same value as before.
+ -- mpi/pmix - prepare temp directory for application.
+ -- Fix display for the nice and priority values in sprio/scontrol/squeue.
+
+* Changes in Slurm 16.05.4
+==========================
+ -- Fix potential deadlock if running with message aggregation.
+ -- Streamline when schedule() is called when running with message aggregation
+    on batch script completes.
+ -- Fix incorrect casting when [un]packing derived_ec on slurmdb_job_rec_t.
+ -- Document that persistent burst buffers can not be created or destroyed using
+    the salloc or srun --bb options.
+ -- Add support for setting the SLURM_JOB_ACCOUNT, SLURM_JOB_QOS and
+    SLURM_JOB_RESERVAION environment variables are set for the salloc command.
+    Document the same environment variables for the salloc, sbatch and srun
+    commands in their man pages.
+ -- Fix issue where sacctmgr load cluster.cfg wouldn't load associations
+    that had a partition in them.
+ -- Don't return the extern step from sstat by default.
+ -- In sstat print 'extern' instead of 4294967295 for the extern step.
+ -- Make advanced reservations work properly with core specialization.
+ -- Fix race condition in the account_gather plugin that could result in job
+    stuck in COMPLETING state.
+ -- Regression test fixes if SelectTypePlugin not managing memory and no node
+    memory size set (defaults to 1 MB per node).
+ -- Add missing partition write locks to _slurm_rpc_dump_nodes/node_single to
+    prevent a race condition leading to inconsistent sinfo results.
+ -- Fix task:CPU binding logic for some processors. This bug was introduced
+    in version 16.05.1 to address KNL bunding problem.
+ -- Fix two minor memory leaks in slurmctld.
+ -- Improve partition-specific limit logging from slurmctld daemon.
+ -- Fix incorrect access check when using MaxNodes setting on the partition.
+ -- Fix issue with sacctmgr when specifying a list of clusters to query.
+ -- Fix issue when calculating future StartTime for a job.
+ -- Make EnforcePartLimit support logic work with any ordering of partitions
+    in job submit request.
+ -- Prevent restoration of wrong CPU governor and frequency when using
+    multiple task plugins.
+ -- Prevent slurmd abort if hwloc library fails to populate the "children"
+    arrays (observed with hwloc version "dev-333-g85ea6e4").
+ -- burst_buffer/cray: Add "--groupid" to DataWarp "setup" command.
+ -- Fix lustre profiling putting it in the Filesystem dataset instead of the
+    Network dataset.
+ -- Fix profiling documentation and code to match be consistent with
+    Filesystem instead of Lustre.
+ -- Correct the way watts is calculated in the rapl plugin when using a poll
+    frequency other than AcctGatherNodeFreq.
+ -- Don't about step launch if job reaches expected end time while node is
+    configuring/booting (NOTE: The job end time will be adjusted after node
+    becomes ready for use).
+ -- Fix several print routines to respect a custom output delimiter when
+    printing NO_VAL or INFINITE.
+ -- Correct documented configurations where --ntasks-per-core and
+    --ntasks-per-socket are supported.
+ -- task/affinity plugin buffer allocated too small, can corrupt memory.
+
 * Changes in Slurm 16.05.3
 ==========================
  -- Make it so the extern step uses a reverse tree when cleaning up.
@@ -69,7 +288,6 @@ documents those changes that are of interest to users and administrators.
  -- Always report a 0 exit code for the extern step instead of being canceled
     or failed based on the signal that would always be killing it.
  -- Fix to allow users to update QOS of pending jobs.
- -- Print correct cluster name in "slurmd -C" output.
  -- CRAY - Fix minor memory leak in switch plugin.
  -- CRAY - Change slurmconfgen_smw.py to skip over disabled nodes.
  -- Fix eligible_time for elasticsearch as well as add queue_wait
@@ -425,6 +643,10 @@ documents those changes that are of interest to users and administrators.
     allocations span heterogeneous nodes (differing core or socket counts).
  -- Fix for sstat to print correct info when requesting jobid.batch as part of
     a comma-separated list.
+ -- Cray - Fix issue restoring jobs when blade count increases due to hardware
+    reconfiguration.
+ -- Ignore warnings about depricated functions. This is primarily there for
+    new glibc 2.24+ that depricates readdir_r.
 
 * Changes in Slurm 15.08.12
 ===========================

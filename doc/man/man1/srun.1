@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "March 2016" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "October 2016" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -103,17 +103,13 @@ applications having less than 10,000 tasks. This option applies job allocations.
 
 .TP
 \fB\-B\fR \fB\-\-extra\-node\-info\fR=<\fIsockets\fR[:\fIcores\fR[:\fIthreads\fR]]>
-Request a specific allocation of resources with details as to the
-number and type of computational resources within a cluster:
-number of sockets (or physical processors) per node,
-cores per socket, and threads per core.
-The total amount of resources being requested is the product of all of
-the terms.
+Restrict node selection to nodes with at least the specified number of
+sockets, cores per socket and/or threads per core.
+NOTE: These options do not specify the resource allocation size.
 Each value specified is considered a minimum.
 An asterisk (*) can be used as a placeholder indicating that all available
 resources of that type are to be utilized.
-As with nodes, the individual levels can also be specified in separate
-options if desired:
+The individual levels can also be specified in separate options if desired:
 .nf
     \fB\-\-sockets\-per\-node\fR=<\fIsockets\fR>
     \fB\-\-cores\-per\-socket\fR=<\fIcores\fR>
@@ -375,24 +371,25 @@ The lowest numbered task on each node is bound to socket (or core or thread) zer
 Not supported unless the entire node is allocated to the job.
 .TP
 .B map_cpu:<list>
-Bind by mapping CPU IDs to tasks as specified
-where <list> is <cpuid1>,<cpuid2>,...<cpuidN>.
-The mapping is specified for a node and identical mapping is applied to the
-tasks on every node (i.e. the lowest task ID on each node is mapped to the
-first CPU ID specified in the list, etc.).
+Bind by setting CPU masks on tasks (or ranks) as specified where <list> is
+<cpu_id_for_task_0>,<cpu_id_for_task_1>,...
 CPU IDs are interpreted as decimal values unless they are preceded
-with '0x' in which case they are interpreted as hexadecimal values.
+with '0x' in which case they interpreted as hexadecimal values.
+If the number of tasks (or ranks) exceeds the number of elements in this list,
+elements in the list will be reused as needed starting from the beginning of
+the list.
 Not supported unless the entire node is allocated to the job.
 .TP
 .B mask_cpu:<list>
-Bind by setting CPU masks on tasks as specified
-where <list> is <mask1>,<mask2>,...<maskN>.
+Bind by setting CPU masks on tasks (or ranks) as specified where <list> is
+<cpu_mask_for_task_0>,<cpu_mask_for_task_1>,...
 The mapping is specified for a node and identical mapping is applied to the
 tasks on every node (i.e. the lowest task ID on each node is mapped to the
 first mask specified in the list, etc.).
 CPU masks are \fBalways\fR interpreted as hexadecimal values but can be
 preceded with an optional '0x'. Not supported unless the entire node is
 allocated to the job.
+Not supported unless the entire node is allocated to the job.
 .TP
 .B rank_ldom
 Bind to a NUMA locality domain by rank. Not supported unless the entire
@@ -757,7 +754,7 @@ to "none".
 .TP
 \fB\-\-gres\-flags\fR=enforce\-binding
 If set, the only CPUs available to the job will be those bound to the selected
-GRES (i.e. the CPUs identifed in the gres.conf file will be strictly enforced
+GRES (i.e. the CPUs identified in the gres.conf file will be strictly enforced
 rather than advisory). This option may result in delayed initiation of a job.
 For example a job requiring two GPUs and one CPU will be delayed until both
 GPUs on a single socket are available rather than using GPUs bound to separate
@@ -980,6 +977,11 @@ will be laid out on the nodes in the order of the file.
 controls the nodes to be allocated to the job and not the allocation of
 CPUs on those nodes. This option is meant primarily to control a job step's
 task layout in an existing job allocation for the srun command.
+.br
+\fBNOTE:\fR If number of tasks is given and a list of requested nodes is also
+given the number of nodes used from that list will be reduced to match that of
+the number of tasks if the number of nodes in the list is greater than the
+number of tasks.
 
 .TP
 Second distribution method (distribution of CPUs across sockets for binding):
@@ -1074,7 +1076,8 @@ applies to job allocations.
 
 .TP
 \fB\-\-mem\fR=<\fIMB\fR>
-Specify the real memory required per node in MegaBytes.
+Specify the real memory required per node in megabytes.
+Different units can be specified using the suffix [K|M|G|T].
 Default value is \fBDefMemPerNode\fR and the maximum value is
 \fBMaxMemPerNode\fR. If configured, both of parameters can be
 seen using the \fBscontrol show config\fR command.
@@ -1102,7 +1105,8 @@ This option applies to job and step allocations.
 
 .TP
 \fB\-\-mem\-per\-cpu\fR=<\fIMB\fR>
-Minimum memory required per allocated CPU in MegaBytes.
+Minimum memory required per allocated CPU in megabytes.
+Different units can be specified using the suffix [K|M|G|T].
 Default value is \fBDefMemPerCPU\fR and the maximum value is \fBMaxMemPerCPU\fR
 (see exception below). If configured, both of parameters can be
 seen using the \fBscontrol show config\fR command.
@@ -1133,7 +1137,10 @@ and the NUMA memory functions are available.
 may differ on some architectures.\fR For example, CPU binding may be performed
 at the level of the cores within a processor while memory binding will
 be performed at the level of nodes, where the definition of "nodes"
-may differ from system to system. \fBThe use of any type other than
+may differ from system to system.
+By default no memory binding is performed; any task using any CPU can use
+any memory. This option is typically used to insure that each task is bound to
+the memory closest to it's assigned CPU. \fBThe use of any type other than
 "none" or "local" is not recommended.\fR
 If you want greater control, try running a simple test code with the
 options "\-\-cpu_bind=verbose,none \-\-mem_bind=verbose,none" to determine
@@ -1174,18 +1181,31 @@ bind by task rank (not recommended)
 Use memory local to the processor in use
 .TP
 .B map_mem:<list>
-bind by mapping a node's memory to tasks as specified
-where <list> is <cpuid1>,<cpuid2>,...<cpuidN>.
-CPU IDs are interpreted as decimal values unless they are preceded
-with '0x' in which case they interpreted as hexadecimal values
-(not recommended)
+Bind by setting memory masks on tasks (or ranks) as specified where <list> is
+<numa_id_for_task_0>,<numa_id_for_task_1>,...
+The mapping is specified for a node and identical mapping is applied to the
+tasks on every node (i.e. the lowest task ID on each node is mapped to the
+first ID specified in the list, etc.).
+NUMA IDs are interpreted as decimal values unless they are preceded
+with '0x' in which case they interpreted as hexadecimal values.
+If the number of tasks (or ranks) exceeds the number of elements in this list,
+elements in the list will be reused as needed starting from the beginning of
+the list.
+Not supported unless the entire node is allocated to the job.
 .TP
 .B mask_mem:<list>
-bind by setting memory masks on tasks as specified
-where <list> is <mask1>,<mask2>,...<maskN>.
-memory masks are \fBalways\fR interpreted as hexadecimal values.
+Bind by setting memory masks on tasks (or ranks) as specified where <list> is
+<numa_mask_for_task_0>,<numa_mask_for_task_1>,...
+The mapping is specified for a node and identical mapping is applied to the
+tasks on every node (i.e. the lowest task ID on each node is mapped to the
+first mask specified in the list, etc.).
+NUMA masks are \fBalways\fR interpreted as hexadecimal values.
 Note that masks must be preceded with a '0x' if they don't begin
-with [0-9] so they are seen as numerical values by srun.
+with [0-9] so they are seen as numerical values.
+If the number of tasks (or ranks) exceeds the number of elements in this list,
+elements in the list will be reused as needed starting from the beginning of
+the list.
+Not supported unless the entire node is allocated to the job.
 .TP
 .B help
 show this help message
@@ -1293,6 +1313,10 @@ behavior is to allocate enough nodes to satisfy the requirements of
 the \fB\-n\fR and \fB\-c\fR options.
 The job will be allocated as many nodes as possible within the range specified
 and without delaying the initiation of the job.
+If number of tasks is given and a number of requested nodes is also given the
+number of nodes used from that request will be reduced to match that of the
+number of tasks if the number of nodes in the request is greater than the number
+of tasks.
 The node count specification may include a numeric value followed by a suffix
 of "k" (multiplies numeric value by 1,024) or "m" (multiplies numeric value by
 1,048,576). This option applies to job and step allocations.
@@ -1310,7 +1334,7 @@ applies to job and step allocations.
 Specify information pertaining to the switch or network.
 The interpretation of \fItype\fR is system dependent.
 This option is supported when running Slurm on a Cray natively.  It is
-used to request using Network Performace Counters.
+used to request using Network Performance Counters.
 Only one value per request is valid.
 All options are case in\-sensitive.
 In this configuration supported values include:
@@ -1455,13 +1479,12 @@ This option applies to job and step allocations.
 
 .TP
 \fB\-\-nice\fR[=\fIadjustment\fR]
-Run the job with an adjusted scheduling priority within Slurm.
-With no adjustment value the scheduling priority is decreased
-by 100. The adjustment range is from \-10000 (highest priority)
-to 10000 (lowest priority). Only privileged users can specify
-a negative adjustment. NOTE: This option is presently
-ignored if \fISchedulerType=sched/wiki\fR or
-\fISchedulerType=sched/wiki2\fR. This option applies to job allocations.
+Run the job with an adjusted scheduling priority within Slurm. With no
+adjustment value the scheduling priority is decreased by 100. A negative nice
+value increases the priority, otherwise decreases it. The adjustment range is
++/\- 2147483645. Only privileged users can specify a negative adjustment.
+NOTE: This option is presently ignored if \fISchedulerType=sched/wiki\fR or
+\fISchedulerType=sched/wiki2\fR.
 
 .TP
 \fB\-\-ntasks\-per\-core\fR=<\fIntasks\fR>
@@ -1472,10 +1495,9 @@ Related to \fB\-\-ntasks\-per\-node\fR except at the core level
 instead of the node level.  Masks will automatically be generated
 to bind the tasks to specific core unless \fB\-\-cpu_bind=none\fR
 is specified.
-NOTE: This option is not supported unless
-\fISelectTypeParameters=CR_Core\fR or
-\fISelectTypeParameters=CR_Core_Memory\fR is configured. This option applies to
-job allocations.
+NOTE: This option is not supported unless \fISelectType=cons_res\fR is
+configured (either directly or indirectly on Cray systems)
+along with the node's core count.
 
 .TP
 \fB\-\-ntasks\-per\-node\fR=<\fIntasks\fR>
@@ -1505,10 +1527,9 @@ Related to \fB\-\-ntasks\-per\-node\fR except at the socket level
 instead of the node level.  Masks will automatically be generated
 to bind the tasks to specific sockets unless \fB\-\-cpu_bind=none\fR
 is specified.
-NOTE: This option is not supported unless
-\fISelectTypeParameters=CR_Socket\fR or
-\fISelectTypeParameters=CR_Socket_Memory\fR is configured. This option applies
-to job allocations.
+NOTE: This option is not supported unless \fISelectType=cons_res\fR is
+configured (either directly or indirectly on Cray systems)
+along with the node's socket count.
 
 .TP
 \fB\-O\fR, \fB\-\-overcommit\fR
@@ -1567,11 +1588,12 @@ may be disabled by the Slurm configuration option PowerParameters=job_no_level).
 This option applies to job allocations.
 
 .TP
-\fB\-\-priority\fR=<value>
+\fB\-\-priority\fR=<\fIvalue\fR>
 Request a specific job priority.
 May be subject to configuration specific constraints.
-Only Slurm operators and administrators can set the priority of a job. This
-option applies to job allocations.
+\fIvalue\fR should either be a numeric value or "TOP" (for highest possible value).
+Only Slurm operators and administrators can set the priority of a job.
+This option applies to job allocations only.
 
 .TP
 \fB\-\-profile\fR=<all|none|[energy[,|task[,|filesystem[,|network]]]]>
@@ -1946,6 +1968,10 @@ successful. \fIuser\fR may be the user name or numerical user ID. This option
 applies to job and step allocations.
 
 .TP
+\fB\-\-use-min-nodes\fR
+If a range of node counts is given, prefer the smaller count.
+
+.TP
 \fB\-V\fR, \fB\-\-version\fR
 Display version information and exit.
 
@@ -1980,8 +2006,11 @@ by the supplied host list, additional resources will be allocated on other
 nodes as needed.
 Rather than repeating a host name multiple times, an asterisk and
 a repetition count may be appended to a host name. For example
-"host1,host1" and "host1*2" are equivalent. This option applies to job and step
-allocations.
+"host1,host1" and "host1*2" are equivalent. If number of tasks is given and a
+list of requested nodes is also given the number of nodes used from that list
+will be reduced to match that of the number of tasks if the number of nodes in
+the list is greater than the number of tasks. This option applies to job and
+step allocations.
 
 .TP
 \fB\-\-wckey\fR=<\fIwckey\fR>
@@ -2536,6 +2565,9 @@ Same as \fB\-t, \-\-time\fR
 \fBSLURM_UNBUFFEREDIO\fR
 Same as \fB\-u, \-\-unbuffered\fR
 .TP
+\fBSLURM_USE_MIN_NODES\fR
+Same as \fB\-\-use\-min\-nodes\fR
+.TP
 \fBSLURM_WAIT\fR
 Same as \fB\-W, \-\-wait\fR
 .TP
@@ -2602,6 +2634,9 @@ with \-m, \-\-distribution.
 Global task IDs running on this node.
 Zero origin and comma separated.
 .TP
+\fBSLURM_JOB_ACCOUNT\fR
+Account name associated of the job allocation.
+.TP
 \fBSLURM_JOB_CPUS_PER_NODE\fR
 Number of CPUS per node.
 .TP
@@ -2620,6 +2655,13 @@ create a job step (i.e. within an existing job allocation).
 .TP
 \fBSLURM_JOB_PARTITION\fR
 Name of the partition in which the job is running.
+
+.TP
+\fBSLURM_JOB_QOS\fR
+Quality Of Service (QOS) of the job allocation.
+.TP
+\fBSLURM_JOB_RESERVATION\fR
+Advanced reservation containing the job allocation, if any.
 
 .TP
 \fBSLURM_LAUNCH_NODE_IPADDR\fR

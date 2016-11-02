@@ -97,6 +97,7 @@
 #include "src/common/plugstack.h"
 #include "src/common/safeopen.h"
 #include "src/common/slurm_acct_gather_profile.h"
+#include "src/common/slurm_cred.h"
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_mpi.h"
 #include "src/common/switch.h"
@@ -667,6 +668,7 @@ _random_sleep(stepd_step_rec_t *job)
 	long int delay = 0;
 	long int max   = (slurm_get_tcp_timeout() * job->nnodes);
 
+	max = MIN(max, 5000);
 	srand48((long int) (job->jobid + job->nodeid));
 
 	delay = lrand48() % ( max + 1 );
@@ -700,7 +702,7 @@ _send_exit_msg(stepd_step_rec_t *job, uint32_t *tid, int n, int status)
 
 	/*
 	 *  Hack for TCP timeouts on exit of large, synchronized job
-	 *  termination. Delay a random amount if job->nnodes > 100
+	 *  termination. Delay a random amount if job->nnodes > 500
 	 */
 	if (job->nnodes > 500)
 		_random_sleep(job);
@@ -1126,14 +1128,19 @@ job_manager(stepd_step_rec_t *job)
 	acct_gather_conf_init();
 
 	/*
-	 * Preload plugins.
+	 * Preload all plugins at start time to avoid plugin changes
+	 * (i.e. due to a Slurm upgrade) after the process starts.
 	 */
-	if ((core_spec_g_init()!= SLURM_SUCCESS)		||
+	if ((core_spec_g_init() != SLURM_SUCCESS)		||
 	    (switch_init() != SLURM_SUCCESS)			||
 	    (slurmd_task_init() != SLURM_SUCCESS)		||
 	    (slurm_proctrack_init() != SLURM_SUCCESS)		||
 	    (checkpoint_init(ckpt_type) != SLURM_SUCCESS)	||
-	    (jobacct_gather_init() != SLURM_SUCCESS)) {
+	    (jobacct_gather_init() != SLURM_SUCCESS)		||
+	    (acct_gather_profile_init() != SLURM_SUCCESS)	||
+	    (slurm_crypto_init() != SLURM_SUCCESS)		||
+	    (job_container_init() != SLURM_SUCCESS)		||
+	    (gres_plugin_init() != SLURM_SUCCESS)) {
 		rc = SLURM_PLUGIN_NAME_INVALID;
 		goto fail1;
 	}

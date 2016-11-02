@@ -612,11 +612,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 	if ((agent_args->node_count - down_node_cnt) == 0) {
 		/* Can not wait for epilog completet to release licenses and
 		 * update gang scheduling table */
-		delete_step_records(job_ptr);
-		job_ptr->job_state &= (~JOB_COMPLETING);
-		(void) gs_job_fini(job_ptr);
-		license_job_return(job_ptr);
-		slurm_sched_g_schedule();
+		cleanup_completing(job_ptr);
 	}
 
 	if (agent_args->node_count == 0) {
@@ -1633,8 +1629,14 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 				}
 			}
 			if ((i >= 0) && (job_ptr->details->core_spec >= j)) {
-				info("_pick_best_nodes: job %u never runnable",
-				     job_ptr->job_id);
+				if (part_ptr->name) {
+					info("%s: job %u never runnable in partition %s",
+					     __func__, job_ptr->job_id,
+					     part_ptr->name);
+				} else {
+					info("%s: job %u never runnable",
+					     __func__, job_ptr->job_id);
+				}
 				return ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
 			}
 		}
@@ -2001,9 +2003,14 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		return error_code;
 	}
 	if (!runable_ever) {
+		if (part_ptr->name) {
+			info("%s: job %u never runnable in partition %s",
+			     __func__, job_ptr->job_id, part_ptr->name);
+		} else {
+			info("%s: job %u never runnable",
+			     __func__, job_ptr->job_id);
+		}
 		error_code = ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
-		info("_pick_best_nodes: job %u never runnable",
-		     job_ptr->job_id);
 	} else if (!runable_avail && !nodes_busy) {
 		error_code = ESLURM_NODE_NOT_AVAIL;
 	}
@@ -2294,7 +2301,8 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 
 	max_nodes = MIN(max_nodes, 500000);	/* prevent overflows */
 	if (!job_ptr->limit_set.tres[TRES_ARRAY_NODE] &&
-	    job_ptr->details->max_nodes)
+	    (job_ptr->details->max_nodes != 0) &&
+	    ((job_ptr->bit_flags & USE_MIN_NODES) == 0))
 		req_nodes = max_nodes;
 	else
 		req_nodes = min_nodes;
@@ -3743,9 +3751,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 				if ((job_ptr->node_cnt > 0) &&
 				    ((--job_ptr->node_cnt) == 0)) {
 					last_node_update = time(NULL);
-					delete_step_records(job_ptr);
-					job_ptr->job_state &= (~JOB_COMPLETING);
-					slurm_sched_g_schedule();
+					cleanup_completing(job_ptr);
 					batch_requeue_fini(job_ptr);
 					last_node_update = time(NULL);
 				}
@@ -3772,9 +3778,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 				(node_ptr->comp_job_cnt)--;
 			if ((job_ptr->node_cnt > 0) &&
 			    ((--job_ptr->node_cnt) == 0)) {
-				delete_step_records(job_ptr);
-				job_ptr->job_state &= (~JOB_COMPLETING);
-				slurm_sched_g_schedule();
+				cleanup_completing(job_ptr);
 				batch_requeue_fini(job_ptr);
 				last_node_update = time(NULL);
 			}

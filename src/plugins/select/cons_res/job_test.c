@@ -911,13 +911,20 @@ clear_bit:	/* This node is not usable by this job */
 	return SLURM_SUCCESS;
 }
 
-
-/* given an "avail" node_bitmap, return a corresponding "avail" core_bitmap */
-bitstr_t *_make_core_bitmap(bitstr_t *node_map, uint16_t core_spec)
+/*
+ * Given an available node_bitmap, return a corresponding available core_bitmap,
+ *	excluding all specialized cores.
+ *
+ * node_map IN - Bitmap of available nodes
+ * core_spec IN - Count of specialized cores requested by the job or NO_VAL
+ * RET bitmap of cores available for use by this job or reservation
+ * NOTE: Call bit_free() on return value to avoid memory leak.
+ */
+extern bitstr_t *make_core_bitmap(bitstr_t *node_map, uint16_t core_spec)
 {
-	uint32_t n, c, nodes, size;
+	uint32_t c, nodes, size;
 	int spec_cores, res_core, res_sock, res_off;
-	int n_first, n_last;
+	int n, n_first, n_last;
 	uint32_t coff;
 	uint16_t i;
 	struct node_record *node_ptr;
@@ -1683,6 +1690,7 @@ static int _eval_nodes_busy(struct job_record *job_ptr, bitstr_t *node_map,
 			total_cpus += avail_cpus;
 			rem_cpus   -= avail_cpus;
 			rem_nodes--;
+			min_rem_nodes--;
 			max_nodes--;
 			if ((max_nodes <= 0) ||
 			    ((rem_cpus <= 0) && (rem_nodes <= 0)))
@@ -1701,6 +1709,7 @@ static int _eval_nodes_busy(struct job_record *job_ptr, bitstr_t *node_map,
 			total_cpus += avail_cpus;
 			rem_cpus   -= avail_cpus;
 			rem_nodes--;
+			min_rem_nodes--;
 			max_nodes--;
 			if ((max_nodes <= 0) ||
 			    ((rem_cpus <= 0) && (rem_nodes <= 0)))
@@ -3093,8 +3102,8 @@ extern int cr_job_test(struct job_record *job_ptr, bitstr_t *node_bitmap,
 		job_ptr->bit_flags |= NODE_MEM_CALC;	/* To be calculated */
 
 	orig_map = bit_copy(node_bitmap);
-	avail_cores = _make_core_bitmap(node_bitmap,
-					job_ptr->details->core_spec);
+	avail_cores = make_core_bitmap(node_bitmap,
+				       job_ptr->details->core_spec);
 
 	/* test to make sure that this job can succeed with all avail_cores
 	 * if 'no' then return FAIL
@@ -3361,6 +3370,10 @@ extern int cr_job_test(struct job_record *job_ptr, bitstr_t *node_bitmap,
 			bit_and(free_cores, tmpcore);
 		}
 	}
+
+	if (job_ptr->details->whole_node == 1)
+		_block_whole_nodes(node_bitmap, avail_cores, free_cores);
+
 	cpu_count = _select_nodes(job_ptr, min_nodes, max_nodes, req_nodes,
 				  node_bitmap, cr_node_cnt, free_cores,
 				  node_usage, cr_type, test_only,
@@ -3427,6 +3440,11 @@ extern int cr_job_test(struct job_record *job_ptr, bitstr_t *node_bitmap,
 		bit_copybits(tmpcore, jp_ptr->row[i].row_bitmap);
 		bit_not(tmpcore);
 		bit_and(free_cores, tmpcore);
+
+		if (job_ptr->details->whole_node == 1)
+			_block_whole_nodes(node_bitmap, avail_cores,
+					   free_cores);
+
 		cpu_count = _select_nodes(job_ptr, min_nodes, max_nodes,
 					  req_nodes, node_bitmap, cr_node_cnt,
 					  free_cores, node_usage, cr_type,
