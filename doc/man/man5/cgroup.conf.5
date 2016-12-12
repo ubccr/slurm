@@ -1,4 +1,4 @@
-.TH "cgroup.conf" "5" "Slurm Configuration File" "October 2016" "Slurm Configuration File"
+.TH "cgroup.conf" "5" "Slurm Configuration File" "December 2016" "Slurm Configuration File"
 
 .SH "NAME"
 cgroup.conf \- Slurm configuration file for the cgroup support
@@ -21,7 +21,7 @@ of the command "scontrol reconfigure" unless otherwise noted.
 
 .LP
 For general Slurm Cgroups information, see the Cgroups Guide at
-<http://slurm.schedmd.com/cgroups.html>.
+<https://slurm.schedmd.com/cgroups.html>.
 
 .LP
 The following cgroup.conf parameters are defined to control the general behavior
@@ -86,7 +86,9 @@ Also see \fBConstrainSwapSpace\fR.
 .TP
 \fBConstrainCores\fR=<yes|no>
 If configured to "yes" then constrain allowed cores to the subset of
-allocated resources. It uses the cpuset subsystem.
+allocated resources. This functionality makes use of the cpuset subsystem.
+Due to a bug fixed in version 1.11.5 of HWLOC, the task/affinity plugin may be
+required in addition to task/cgroup for this to function properly.
 The default value is "no".
 
 .TP
@@ -178,10 +180,10 @@ ConstrainCores=yes
 Copyright (C) 2010\-2012 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
-Copyright (C) 2010\-2015 SchedMD LLC.
+Copyright (C) 2010\-2016 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
-For details, see <http://slurm.schedmd.com/>.
+For details, see <https://slurm.schedmd.com/>.
 .LP
 Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

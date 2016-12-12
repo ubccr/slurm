@@ -76,7 +76,7 @@
 #include "src/plugins/burst_buffer/common/burst_buffer_common.h"
 
 #define _DEBUG 0	/* Detailed debugging information */
-#define TIME_SLOP 5	/* time allowed to synchronize operations between
+#define TIME_SLOP 60	/* Time allowed to synchronize operations between
 			 * threads */
 #define MAX_RETRY_CNT 2	/* Hold job if "pre_run" operation fails more than
 			 * 2 times */
@@ -140,7 +140,7 @@ typedef struct bb_configs {
 typedef struct bb_instances {
 	uint32_t id;
 	uint64_t bytes;
-	char *label;
+	uint32_t session;
 } bb_instances_t;
 
 /* Description of each Cray DW pool entry
@@ -241,6 +241,8 @@ static int	_parse_bb_opts(struct job_descriptor *job_desc,
 static void	_parse_config_links(json_object *instance, bb_configs_t *ent);
 static void	_parse_instance_capacity(json_object *instance,
 					 bb_instances_t *ent);
+static void	_parse_instance_links(json_object *instance,
+				      bb_instances_t *ent);
 static void	_pick_alloc_account(bb_alloc_t *bb_alloc);
 static void	_purge_bb_files(uint32_t job_id, struct job_record *job_ptr);
 static void	_purge_vestigial_bufs(void);
@@ -691,15 +693,19 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
  * update that user's limit */
 static void _apply_limits(void)
 {
+	bool emulate_cray = false;
 	bb_alloc_t *bb_alloc;
 	int i;
+
+	if (bb_state.bb_config.flags & BB_FLAG_EMULATE_CRAY)
+		emulate_cray = true;
 
 	for (i = 0; i < BB_HASH_SIZE; i++) {
 		bb_alloc = bb_state.bb_ahash[i];
 		while (bb_alloc) {
 			_set_assoc_mgr_ptrs(bb_alloc);
 			bb_limit_add(bb_alloc->user_id, bb_alloc->size,
-				     bb_alloc->pool, &bb_state);
+				     bb_alloc->pool, &bb_state, emulate_cray);
 			bb_alloc = bb_alloc->next;
 		}
 	}
@@ -1094,7 +1100,6 @@ static void _load_state(bool init_config)
 	char *end_ptr = NULL;
 	time_t now = time(NULL);
 	uint32_t timeout;
-	uint64_t used_space;
 	assoc_mgr_lock_t assoc_locks = { READ_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
 					 NO_LOCK, NO_LOCK, NO_LOCK };
 	bool found_pool;
@@ -1129,14 +1134,9 @@ static void _load_state(bool init_config)
 			bb_state.bb_config.granularity = pools[i].granularity;
 			bb_state.total_space = pools[i].quantity *
 					       pools[i].granularity;
-			if (bb_state.bb_config.flags & BB_FLAG_EMULATE_CRAY)
-				continue;
-			/* Don't decrease used_space in case buffer allocation
-			 * in progress */
-			used_space = pools[i].quantity - pools[i].free;
-			used_space *= pools[i].granularity;
-			bb_state.used_space = MAX(bb_state.used_space,
-						  used_space);
+			bb_state.unfree_space = pools[i].quantity -
+						pools[i].free;
+			bb_state.unfree_space *= pools[i].granularity;
 
 			/* Everything else is an alternate pool */
 			bb_state.bb_config.pool_cnt = 0;
@@ -1163,15 +1163,10 @@ static void _load_state(bool init_config)
 		}
 
 		pool_ptr->total_space = pools[i].quantity *
-				        pools[i].granularity;
+					pools[i].granularity;
 		pool_ptr->granularity = pools[i].granularity;
-		if (bb_state.bb_config.flags & BB_FLAG_EMULATE_CRAY)
-			continue;
-		/* Don't decrease used_space in case buffer allocation
-		 * in progress */
-		used_space = pools[i].quantity - pools[i].free;
-		used_space *= pools[i].granularity;
-		pool_ptr->used_space = MAX(pool_ptr->used_space, used_space);
+		pool_ptr->unfree_space = pools[i].quantity - pools[i].free;
+		pool_ptr->unfree_space *= pools[i].granularity;
 	}
 	slurm_mutex_unlock(&bb_state.bb_mutex);
 	_bb_free_pools(pools, num_pools);
@@ -1210,14 +1205,14 @@ static void _load_state(bool init_config)
 					     sessions[i].user_id);
 		bb_alloc->create_time = sessions[i].created;
 		bb_alloc->id = sessions[i].id;
-		if ((sessions[i].token != NULL)  &&
-		    (sessions[i].token[0] >='0') &&
-		    (sessions[i].token[0] <='9')) {
+		if ((sessions[i].token != NULL)   &&
+		    (sessions[i].token[0] >= '0') &&
+		    (sessions[i].token[0] <= '9')) {
 			bb_alloc->job_id =
 				strtol(sessions[i].token, &end_ptr, 10);
 		}
 		for (j = 0; j < num_instances; j++) {
-			if (xstrcmp(sessions[i].token, instances[j].label))
+			if (sessions[i].id != instances[j].session)
 				continue;
 			bb_alloc->size += instances[j].bytes;
 		}
@@ -1226,7 +1221,7 @@ static void _load_state(bool init_config)
 		if (!init_config) {	/* Newly found buffer */
 			_pick_alloc_account(bb_alloc);
 			bb_limit_add(bb_alloc->user_id, bb_alloc->size,
-				     bb_alloc->pool, &bb_state);
+				     bb_alloc->pool, &bb_state, false);
 		}
 		if (bb_alloc->job_id == 0)
 			bb_post_persist_create(NULL, bb_alloc, &bb_state);
@@ -1401,7 +1396,8 @@ static int _queue_stage_in(struct job_record *job_ptr, bb_job_t *bb_job)
 #endif
 		setup_argv[16] = xstrdup(client_nodes_file_nid);
 	}
-	bb_limit_add(job_ptr->user_id, bb_job->total_size, job_pool, &bb_state);
+	bb_limit_add(job_ptr->user_id, bb_job->total_size, job_pool, &bb_state,
+		     true);
 
 	data_in_argv = xmalloc(sizeof(char *) * 10);	/* NULL terminated */
 	data_in_argv[0] = xstrdup("dw_wlm_cli");
@@ -1978,6 +1974,7 @@ static int _test_size_limit(struct job_record *job_ptr, bb_job_t *bb_job)
 {
 	int64_t *add_space = NULL, *avail_space = NULL, *granularity = NULL;
 	int64_t *preempt_space = NULL, *resv_space = NULL, *total_space = NULL;
+	uint64_t unfree_space;
 	burst_buffer_info_msg_t *resv_bb = NULL;
 	struct preempt_bb_recs *preempt_ptr = NULL;
 	char **pool_name, *my_pool;
@@ -2005,15 +2002,17 @@ static int _test_size_limit(struct job_record *job_ptr, bb_job_t *bb_job)
 	total_space = xmalloc(sizeof(int64_t) * ds_len);
 	for (i = 0, pool_ptr = bb_state.bb_config.pool_ptr;
 	     i < bb_state.bb_config.pool_cnt; i++, pool_ptr++) {
-		if (pool_ptr->total_space >= pool_ptr->used_space)
-			avail_space[i] = pool_ptr->total_space -
-					 pool_ptr->used_space;
+		unfree_space = MAX(pool_ptr->used_space,
+				   pool_ptr->unfree_space);
+		if (pool_ptr->total_space >= unfree_space)
+			avail_space[i] = pool_ptr->total_space - unfree_space;
 		granularity[i] = pool_ptr->granularity;
 		pool_name[i] = pool_ptr->name;
 		total_space[i] = pool_ptr->total_space;
 	}
-	if (bb_state.total_space - bb_state.used_space)
-		avail_space[i] = bb_state.total_space - bb_state.used_space;
+	unfree_space = MAX(bb_state.used_space, bb_state.unfree_space);
+	if (bb_state.total_space - unfree_space)
+		avail_space[i] = bb_state.total_space - unfree_space;
 	granularity[i] = bb_state.bb_config.granularity;
 	pool_name[i] = bb_state.bb_config.default_pool;
 	total_space[i] = bb_state.total_space;
@@ -2059,11 +2058,13 @@ static int _test_size_limit(struct job_record *job_ptr, bb_job_t *bb_job)
 					my_pool =
 						bb_state.bb_config.default_pool;
 				}
+				unfree_space = MAX(pool_ptr->used_space,
+						   pool_ptr->unfree_space);
 				for (k = 0; k < ds_len; k++) {
 					if (xstrcmp(my_pool, pool_name[k]))
 						continue;
 					resv_space[k] += bb_granularity(
-							pool_ptr->used_space,
+							unfree_space,
 							granularity[k]);
 					break;
 				}
@@ -2650,21 +2651,40 @@ extern int fini(void)
 }
 
 /* Identify and purge any vestigial buffers (i.e. we have a job buffer, but
- * the matching job is either gone or completed) */
+ * the matching job is either gone or completed OR we have a job buffer and a
+ * pending job, but don't know the status of stage-in) */
 static void _purge_vestigial_bufs(void)
 {
 	bb_alloc_t *bb_alloc = NULL;
+	time_t defer_time = time(NULL) + 60;
 	int i;
 
 	for (i = 0; i < BB_HASH_SIZE; i++) {
 		bb_alloc = bb_state.bb_ahash[i];
 		while (bb_alloc) {
-			if (bb_alloc->job_id &&
-			    !find_job_record(bb_alloc->job_id)) {
+			struct job_record *job_ptr = NULL;
+			if (bb_alloc->job_id)
+				job_ptr = find_job_record(bb_alloc->job_id);
+			if (bb_alloc->job_id == 0) {
+				/* Persistent buffer, do not purge */
+			} else if (!job_ptr) {
 				info("%s: Purging vestigial buffer for job %u",
 				     plugin_type, bb_alloc->job_id);
 				_queue_teardown(bb_alloc->job_id,
 						bb_alloc->user_id, false);
+			} else if (!IS_JOB_STARTED(job_ptr)) {
+				/* We do not know the state of file staging,
+				 * so teardown the buffer and defer the job
+				 * for at least 60 seconds (for the teardown) */
+				debug("%s: Purging buffer for pending job %u",
+				      plugin_type, bb_alloc->job_id);
+				_queue_teardown(bb_alloc->job_id,
+						bb_alloc->user_id, true);
+				if (job_ptr->details &&
+				    (job_ptr->details->begin_time <defer_time)){
+					job_ptr->details->begin_time =
+						defer_time;
+				}
 			}
 			bb_alloc = bb_alloc->next;
 		}
@@ -3730,7 +3750,7 @@ static int _create_bufs(struct job_record *job_ptr, bb_job_t *bb_job,
 					xstrdup(bb_state.bb_config.default_pool);
 			}
 			bb_limit_add(job_ptr->user_id, buf_ptr->size,
-				     buf_ptr->pool, &bb_state);
+				     buf_ptr->pool, &bb_state, true);
 			bb_job->state = BB_STATE_ALLOCATING;
 			buf_ptr->state = BB_STATE_ALLOCATING;
 			create_args = xmalloc(sizeof(create_buf_data_t));
@@ -4446,12 +4466,6 @@ _bb_free_configs(bb_configs_t *ents, int num_ent)
 static void
 _bb_free_instances(bb_instances_t *ents, int num_ent)
 {
-	int i;
-
-	for (i = 0; i < num_ent; i++) {
-		xfree(ents[i].label);
-	}
-
 	xfree(ents);
 }
 
@@ -4652,6 +4666,28 @@ _parse_instance_capacity(json_object *instance, bb_instances_t *ent)
 	}
 }
 
+/* Parse "links" object in the "instance" object */
+static void
+_parse_instance_links(json_object *instance, bb_instances_t *ent)
+{
+	enum json_type type;
+	struct json_object_iter iter;
+	int64_t x;
+
+	json_object_object_foreachC(instance, iter) {
+		type = json_object_get_type(iter.val);
+		switch (type) {
+		case json_type_int:
+			x = json_object_get_int64(iter.val);
+			if (!xstrcmp(iter.key, "session"))
+				ent->session = x;
+			break;
+		default:
+			break;
+		}
+	}
+}
+
 /* _json_parse_instances_object()
  */
 static void
@@ -4660,7 +4696,6 @@ _json_parse_instances_object(json_object *jobj, bb_instances_t *ent)
 	enum json_type type;
 	struct json_object_iter iter;
 	int64_t x;
-	const char *p;
 
 	json_object_object_foreachC(jobj, iter) {
 		type = json_object_get_type(iter.val);
@@ -4668,17 +4703,13 @@ _json_parse_instances_object(json_object *jobj, bb_instances_t *ent)
 		case json_type_object:
 			if (xstrcmp(iter.key, "capacity") == 0)
 				_parse_instance_capacity(iter.val, ent);
+			if (xstrcmp(iter.key, "links") == 0)
+				_parse_instance_links(iter.val, ent);
 			break;
 		case json_type_int:
 			x = json_object_get_int64(iter.val);
 			if (xstrcmp(iter.key, "id") == 0) {
 				ent->id = x;
-			}
-			break;
-		case json_type_string:
-			p = json_object_get_string(iter.val);
-			if (xstrcmp(iter.key, "label") == 0) {
-				ent->label = xstrdup(p);
 			}
 			break;
 		default:

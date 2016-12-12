@@ -522,11 +522,20 @@ extern int launch_p_create_job_step(srun_job_t *job, bool use_all_cpus,
 				if (opt.launch_cmd)
 					xstrfmtcat(poe_cmd_line,
 						   " -euilib us");
-			/* protocol options */
+			/* protocol options
+			 *
+			 *  NOTE: Slurm supports the values listed below, and
+			 *        does not support poe user_defined_parallelAPI
+			 *        values. If you add to this list please add to
+			 *        the list in
+			 *        src/plugins/switch/net/switch_nrt.c
+			 */
 			} else if ((!strncasecmp(token, "lapi", 4)) ||
 				   (!strncasecmp(token, "mpi",  3)) ||
 				   (!strncasecmp(token, "pami", 4)) ||
+				   (!strncasecmp(token, "pgas", 4)) ||
 				   (!strncasecmp(token, "shmem",5)) ||
+				   (!strncasecmp(token, "test", 4)) ||
 				   (!strncasecmp(token, "upc",  3))) {
 				if (!protocol_set) {
 					protocol_set = true;
@@ -535,7 +544,7 @@ extern int launch_p_create_job_step(srun_job_t *job, bool use_all_cpus,
 				if (protocol)
 					xstrcat(protocol, ",");
 				xstrcat(protocol, token);
-				setenv("MP_MSG_API", protocol, 0);
+				setenv("MP_MSG_API", protocol, 1);
 			/* adapter options */
 			} else if (!xstrcasecmp(token, "sn_all")) {
 				setenv("MP_EUIDEVICE", "sn_all", 1);
