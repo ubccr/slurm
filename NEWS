@@ -1,6 +1,89 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 16.05.7
+==========================
+ -- Fix issue in the priority/multifactor plugin where on a slurmctld restart,
+    where more time is accounted for than should be allowed.
+ -- cray/busrt_buffer - If total_space in a pool decreases, reset used_space
+    rather than trying to account for buffer allocations in progress.
+ -- cray/busrt_buffer - Fix for double counting of used_space at slurmctld
+    startup.
+ -- Fix regression in 16.05.6 where if you request multiple cpus per task (-c2)
+    and request --ntasks-per-core=1 and only 1 task on the node
+    the slurmd would abort on an infinite loop fatal.
+ -- cray/busrt_buffer - Internally track both allocated and unusable space.
+    The reported UsedSpace in a pool is now the allocated space (previously was
+    unusable space). Base available space on whichever value leaves least free
+    space.
+ -- cray/burst_buffer - Preserve job ID and don't translate to job array ID.
+ -- cray/burst_buffer - Update "instance" parsing to match updated dw_wlm_cli
+    output.
+ -- sched/backfill - Insure we don't try to start a job that was already started
+    and requeued by the main scheduling logic.
+ -- job_submit/lua - add access to the job features field in job_record.
+ -- select/linear plugin modified to better support heterogeneous clusters when
+    topology/none is also configured.
+ -- Permit cancellation of jobs in configuring state.
+ -- acct_gather_energy/rapl - prevent segfault in slurmd from race to gather
+    data at slurmd startup.
+ -- Integrate node_feature/knl_generic with "hbm" GRES information.
+ -- Fix output routines to prevent rounding the TRES values for memory or BB.
+ -- switch/cray plugin - fix use after free error.
+ -- docs - elaborate on how way to clear TRES limits in sacctmgr.
+ -- knl_cray plugin - Avoid abort from backup slurmctld at start time.
+ -- cgroup plugins - fix two minor memory leaks.
+ -- If a node is booting for some job, don't allocate additional jobs to the
+    node until the boot completes.
+ -- testsuite - fix job id output in test17.39.
+ -- Modify backfill algorithm to improve performance with large numbers of
+    running jobs. Group running jobs that end in a "similar" time frame using a
+    time window that grows exponentially rather than linearly. After one second
+    of wall time, simulate the termination of all remaining running jobs in
+    order to respond in a reasonable time frame.
+ -- Fix slurm_job_cpus_allocated_str_on_node_id() API call.
+ -- sched/backfill plugin: Make malloc match data type (defined as uint32_t and
+    allocated as int).
+ -- srun - prevent segfault when terminating job step before step has launched.
+ -- sacctmgr - prevent segfault when trying to reset usage for an invalid
+    account name.
+ -- Make the openssl crypto plugin compile with openssl >= 1.1.
+ -- Fix SuspendExcNodes and SuspendExcParts on slurmctld reconfiguration.
+ -- sbcast - prevent segfault in slurmd due to race condition between file
+    transfers from separate jobs using zlib compression
+ -- cray/burst_buffer - Increase time to synchronize operations between threads
+    from 5 to 60 seconds ("setup" operation time observed over 17 seconds).
+ -- node_features/knl_cray - Fix possible race condition when changing node
+    state that could result in old KNL mode as an active features.
+ -- Make sure if a job can't run because of resources we also check accounting
+    limits after the node selection to make sure it doesn't violate those limits
+    and if it does change the reason for waiting so we don't reserve resources
+    on jobs violating accounting limits.
+ -- NRT - Make it so a system running against IBM's PE will work with PE
+    version 1.3.
+ -- NRT - Make it so protocols pgas and test are allowed to be used.
+ -- NRT - Make it so you can have more than 1 protocol listed in MP_MSG_API.
+ -- cray/burst_buffer - If slurmctld daemon restarts with pending job and burst
+    buffer having unknown file stage-in status, teardown the buffer, defer the
+    job, and start stage-in over again.
+ -- On state restore in the slurmctld don't overwrite the mem_spec_limit given
+    from the slurm.conf when using FastSchedule=0.
+ -- Recognize a KNL's proper NUMA count (rather than setting it to the value
+    in slurm.conf) when using FastSchedule=0.
+ -- Fix parsing in regression test1.92 for some prompts.
+ -- sbcast - use slurmd's gid cache rather than a separate lookup.
+ -- slurmd - return error if setgroups() call fails in _drop_privileges().
+ -- Remove error messages about gres counts changing when a job is resized on
+    a slurmctld restart or reconfig, as they aren't really error messages.
+ -- Fix possible memory corruption if a job is using GRES and changing size.
+ -- jobcomp/elasticsearch - fix printf format for a value on 32-bit builds.
+ -- task/cgroup - Change error message if CPU binding can not take place to
+    better identify the root cause of the problem.
+ -- Fix issue where task/cgroup would not always honor --cpu_bind=threads.
+ -- Fix race condition in with getgrouplist() in slurmd that can lead to
+    user accounts being granted access to incorrect group memberships during
+    job launch.
+
 * Changes in Slurm 16.05.6
 ==========================
  -- Docs - the correct default value for GroupUpdateForce is 0.

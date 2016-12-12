@@ -95,6 +95,7 @@
 
 /* Global variables */
 bitstr_t *avail_node_bitmap = NULL;	/* bitmap of available nodes */
+bitstr_t *booting_node_bitmap = NULL;	/* bitmap of booting nodes */
 bitstr_t *cg_node_bitmap    = NULL;	/* bitmap of completing nodes */
 bitstr_t *idle_node_bitmap  = NULL;	/* bitmap of idle nodes */
 bitstr_t *power_node_bitmap = NULL;	/* bitmap of powered down nodes */
@@ -233,6 +234,12 @@ _dump_node_state (struct node_record *dump_node_ptr, Buf buffer)
 	pack16  (dump_node_ptr->core_spec_cnt, buffer);
 	pack16  (dump_node_ptr->threads, buffer);
 	pack32  (dump_node_ptr->real_memory, buffer);
+	/* mem_spec_limit which should have never been packed in the first
+	 * place.  We don't need to keep state as the value is always read
+	 * from the slurm.conf.  If we used this value it would over write that
+	 * value so we will throw it away when unpacked.  In 17.02 this will be
+	 * removed.
+	 */
 	pack32  (dump_node_ptr->mem_spec_limit, buffer);
 	pack32  (dump_node_ptr->tmp_disk, buffer);
 	pack32  (dump_node_ptr->reason_uid, buffer);
@@ -381,6 +388,12 @@ extern int load_all_node_state ( bool state_only )
 			safe_unpack16 (&core_spec_cnt, buffer);
 			safe_unpack16 (&threads,     buffer);
 			safe_unpack32 (&real_memory, buffer);
+			/* Following unpack was for mem_spec_limit which should
+			 * have never been packed in the first place.  We
+			 * don't need to keep state as the value is always read
+			 * from the slurm.conf.  If we used this value it would
+			 * over write that value so we will throw it away here.
+			 */
 			safe_unpack32 (&mem_spec_limit, buffer);
 			safe_unpack32 (&tmp_disk,    buffer);
 			safe_unpack32 (&reason_uid,  buffer);
@@ -410,6 +423,12 @@ extern int load_all_node_state ( bool state_only )
 			safe_unpack16 (&core_spec_cnt, buffer);
 			safe_unpack16 (&threads,     buffer);
 			safe_unpack32 (&real_memory, buffer);
+			/* Following unpack was for mem_spec_limit which should
+			 * have never been packed in the first place.  We
+			 * don't need to keep state as the value is always read
+			 * from the slurm.conf.  If we used this value it would
+			 * over write that value so we will throw it away here.
+			 */
 			safe_unpack32 (&mem_spec_limit, buffer);
 			safe_unpack32 (&tmp_disk,    buffer);
 			safe_unpack32 (&reason_uid,  buffer);
@@ -438,6 +457,12 @@ extern int load_all_node_state ( bool state_only )
 			safe_unpack16 (&core_spec_cnt, buffer);
 			safe_unpack16 (&threads,     buffer);
 			safe_unpack32 (&real_memory, buffer);
+			/* Following unpack was for mem_spec_limit which should
+			 * have never been packed in the first place.  We
+			 * don't need to keep state as the value is always read
+			 * from the slurm.conf.  If we used this value it would
+			 * over write that value so we will throw it away here.
+			 */
 			safe_unpack32 (&mem_spec_limit, buffer);
 			safe_unpack32 (&tmp_disk,    buffer);
 			safe_unpack32 (&reason_uid,  buffer);
@@ -547,8 +572,6 @@ extern int load_all_node_state ( bool state_only )
 							     /* to free */
 					node_ptr->threads       = threads;
 					node_ptr->real_memory   = real_memory;
-					node_ptr->mem_spec_limit =
-						mem_spec_limit;
 					node_ptr->tmp_disk      = tmp_disk;
 				}
 				if (node_state & NODE_STATE_MAINT)
@@ -587,8 +610,6 @@ extern int load_all_node_state ( bool state_only )
 				cpu_spec_list = NULL; /* Nothing to free */
 				node_ptr->threads       = threads;
 				node_ptr->real_memory   = real_memory;
-				node_ptr->mem_spec_limit =
-					mem_spec_limit;
 				node_ptr->tmp_disk      = tmp_disk;
 			}
 
@@ -650,7 +671,6 @@ extern int load_all_node_state ( bool state_only )
 			node_ptr->core_spec_cnt = core_spec_cnt;
 			node_ptr->threads       = threads;
 			node_ptr->real_memory   = real_memory;
-			node_ptr->mem_spec_limit = mem_spec_limit;
 			node_ptr->tmp_disk      = tmp_disk;
 			node_ptr->last_response = (time_t) 0;
 			xfree(node_ptr->mcs_label);
@@ -1917,7 +1937,10 @@ static int _update_node_avail_features(char *node_names, char *avail_features)
 		FREE_NULL_BITMAP(tmp_bitmap);
 	}
 	list_iterator_destroy(config_iterator);
-	update_feature_list(avail_feature_list, avail_features, node_bitmap);
+	if (avail_feature_list) {	/* List not set at startup */
+		update_feature_list(avail_feature_list, avail_features,
+				    node_bitmap);
+	}
 	FREE_NULL_BITMAP(node_bitmap);
 
 	info("%s: nodes %s available features set to: %s",
@@ -2289,6 +2312,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			return SLURM_SUCCESS;
 		}
 	}
+	bit_clear(booting_node_bitmap, node_inx);
 
 	if (cr_flag == NO_VAL) {
 		cr_flag = 0;  /* call is no-op for select/linear and bluegene */
@@ -2339,6 +2363,17 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		int sockets1, sockets2;	/* total sockets on node */
 		int cores1, cores2;	/* total cores on node */
 		int threads1, threads2;	/* total threads on node */
+		char *node_features_plugin = slurm_get_node_features_plugins();
+		bool validate_socket_cnt = true;
+
+		if (node_features_plugin &&
+		    strstr(node_features_plugin, "knl")) {
+			/* KNL reboots can change the NUMA count (treated like
+			 * a socket count) without changing the total core
+			 * count, which Slurm will support. */
+			validate_socket_cnt = false;
+		}
+		xfree(node_features_plugin);
 
 		sockets1 = reg_msg->sockets;
 		cores1   = sockets1 * reg_msg->cores;
@@ -2365,13 +2400,17 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			xstrcat(reason_down, "Low socket*core count");
 		} else if ((slurmctld_conf.fast_schedule == 0) &&
 			   ((cr_flag == 1) || gang_flag) &&
-			   ((sockets1 > sockets2) || (cores1 > cores2) ||
-			    (threads1 > threads2))) {
+			   ((validate_socket_cnt && (sockets1 > sockets2)) ||
+			    (cores1 > cores2) || (threads1 > threads2))) {
 			error("Node %s has high socket,core,thread count "
 			      "(%d,%d,%d > %d,%d,%d), extra resources ignored",
-			      reg_msg->node_name, sockets1, cores1, threads1,
-			      sockets2, cores2, threads2);
-			/* Preserve configured values */
+			      reg_msg->node_name, reg_msg->sockets,
+			      reg_msg->cores, reg_msg->threads,
+			      config_ptr->sockets, config_ptr->cores,
+			      config_ptr->threads);
+			/* Preserve configured values as we can't change the
+			 * total core count on the node without the core_bitmaps
+			 * in select/cons_res or gang scheduler being rebuilt */
 			reg_msg->boards  = config_ptr->boards;
 			reg_msg->sockets = config_ptr->sockets;
 			reg_msg->cores   = config_ptr->cores;
@@ -3848,6 +3887,7 @@ extern void node_fini (void)
 	FREE_NULL_LIST(active_feature_list);
 	FREE_NULL_LIST(avail_feature_list);
 	FREE_NULL_BITMAP(avail_node_bitmap);
+	FREE_NULL_BITMAP(booting_node_bitmap);
 	FREE_NULL_BITMAP(cg_node_bitmap);
 	FREE_NULL_BITMAP(idle_node_bitmap);
 	FREE_NULL_BITMAP(power_node_bitmap);

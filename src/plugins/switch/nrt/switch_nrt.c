@@ -545,11 +545,15 @@ extern int switch_p_build_jobinfo(switch_jobinfo_t *switch_job,
 				dev_type = NRT_HFI;
 			} else if (!xstrcasecmp(type_ptr, "iponly")) {
 				dev_type = NRT_IPONLY;
-			} else if (!xstrcasecmp(type_ptr, "hpce")) {
+			}
+#if NRT_VERSION < 1300
+			else if (!xstrcasecmp(type_ptr, "hpce")) {
 				dev_type = NRT_HPCE;
 			} else if (!xstrcasecmp(type_ptr, "kmux")) {
 				dev_type = NRT_KMUX;
-			} else if (!xstrcasecmp(type_ptr, "sn_all")) {
+			}
+#endif
+			else if (!xstrcasecmp(type_ptr, "sn_all")) {
 				sn_all = true;
 			} else if (!xstrcasecmp(type_ptr, "sn_single")) {
 				sn_all = false;
@@ -582,16 +586,23 @@ extern int switch_p_build_jobinfo(switch_jobinfo_t *switch_job,
 		} else if (!xstrcasecmp(token, "us")) {
 			user_space = true;
 
-		/* protocol options */
+		/* protocol options
+		 *
+		 *  NOTE: Slurm supports the values listed below, and
+		 *        does not support poe user_defined_parallelAPI values.
+		 *        If you add to this list please add to the list in
+		 *        src/plugins/launch/poe/launch_poe.c
+		 */
 		} else if ((!strncasecmp(token, "lapi",  4)) ||
 			   (!strncasecmp(token, "mpi",   3)) ||
 			   (!strncasecmp(token, "pami",  4)) ||
+			   (!strncasecmp(token, "pgas", 4)) ||
 			   (!strncasecmp(token, "shmem", 5)) ||
+			   (!strncasecmp(token, "test", 4)) ||
 			   (!strncasecmp(token, "upc",   3))) {
 			if (protocol)
 				xstrcat(protocol, ",");
 			xstrcat(protocol, token);
-
 		/* adapter options */
 		} else if (!xstrcasecmp(token, "sn_all")) {
 			sn_all = true;
@@ -781,7 +792,7 @@ extern char *switch_p_sprint_jobinfo(switch_jobinfo_t *switch_jobinfo,
  */
 static bool _nrt_version_ok(void)
 {
-	if ((NRT_VERSION >= 1100) && (NRT_VERSION <= 1200))
+	if ((NRT_VERSION >= 1100) && (NRT_VERSION <= 1300))
 		return true;
 	error("switch/nrt: Incompatable NRT version");
 	return false;
