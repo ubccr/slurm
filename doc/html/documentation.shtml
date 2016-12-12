@@ -4,7 +4,7 @@
 
 <p><b>NOTE: This documentation is for Slurm version @SLURM_VERSION@.<br>
 Documentation for older versions of Slurm are distributed with the source, or
-may be found in the <a href="http://slurm.schedmd.com/archive/">archive</a>.
+may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 </b></p>
 
 <p>Also see <a href="tutorials.html">Tutorials</a> and
@@ -81,8 +81,6 @@ may be found in the <a href="http://slurm.schedmd.com/archive/">archive</a>.
 </ul>
 <li>External Schedulers</li>
 <ul>
-<li><a href="maui.html">Maui Scheduler Integration Guide</a></li>
-<li><a href="moab.html">Moab Cluster Suite Integration Guide</a></li>
 <li><a href="http://docs.hp.com/en/5991-4847/ch09s02.html">Submitting Jobs through LSF</a></li>
 </ul>
 <li>Specific Systems</li>
@@ -142,6 +140,6 @@ may be found in the <a href="http://slurm.schedmd.com/archive/">archive</a>.
 </li>
 </ul>
 
-<p style="text-align:center;">Last modified 11 February 2016</p>
+<p style="text-align:center;">Last modified 2 November 2016</p>
 
 <!--#include virtual="footer.txt"-->

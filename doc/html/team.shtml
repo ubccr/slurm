@@ -3,10 +3,11 @@
 <h1>Slurm Team</h1>
 <p>Slurm development has been a joint effort of many companies and
 organizations around the world.
-Over 170 individuals have contributed to the project.
+Over 200 individuals have contributed to the project.
 Lead Slurm developers are:
 <ul>
 <li>Danny Auble (SchedMD)</li>
+<li>Dominik Bartkiewicz (SchedMD)</li>
 <li>Brian Christiansen (SchedMD)</li>
 <li>Morris Jette (SchedMD)</li>
 <li>Alejandro (Alex) Sanchez (SchedMD)</li>
@@ -32,7 +33,7 @@ Lead Slurm developers are:
   Technology (NUDT, China)</a></li>
 <li><a href="http://www.nvidia.com">NVIDIA</a></li>
 <li><a href="http://www.ornl.gov">Oak Ridge National Laboratory</a></li>
-<li><a href="http://www.schedmd.com">SchedMD</a></li>
+<li><a href="https://www.schedmd.com">SchedMD</a></li>
 <li><a href="http://www.sgi.com">SGI</a></li>
 <li><a href="http://www.cscs.ch">Swiss National Supercomputing Centre</a></li>
 <br><!-- INDIVIDUALS, PLEASE KEEP IN ALPHABETICAL ORDER --><br>
@@ -254,6 +255,6 @@ Lead Slurm developers are:
 <!-- INDIVIDUALS, PLEASE KEEP IN ALPHABETICAL ORDER -->
 </ul>
 
-<p style="text-align:center;">Last modified 13 May 2016</p>
+<p style="text-align:center;">Last modified 10 November 2016</p>
 
 <!--#include virtual="footer.txt"-->

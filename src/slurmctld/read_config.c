@@ -266,8 +266,11 @@ static void _reorder_nodes_by_rank(void)
  */
 static void _build_bitmaps_pre_select(void)
 {
+	struct config_record *config_ptr;
 	struct part_record   *part_ptr;
-	ListIterator part_iterator;
+	struct node_record   *node_ptr;
+	ListIterator config_iterator, part_iterator;
+	int i;
 
 	/* scan partition table and identify nodes in each */
 	part_iterator = list_iterator_create(part_list);
@@ -277,6 +280,24 @@ static void _build_bitmaps_pre_select(void)
 					part_ptr->name);
 	}
 	list_iterator_destroy(part_iterator);
+
+	/* initialize the configuration bitmaps */
+	config_iterator = list_iterator_create(config_list);
+	while ((config_ptr = (struct config_record *)
+				      list_next(config_iterator))) {
+		FREE_NULL_BITMAP(config_ptr->node_bitmap);
+		config_ptr->node_bitmap =
+		    (bitstr_t *) bit_alloc(node_record_count);
+	}
+	list_iterator_destroy(config_iterator);
+
+
+	for (i = 0, node_ptr = node_record_table_ptr;
+	     i < node_record_count; i++, node_ptr++) {
+		if (node_ptr->config_ptr)
+			bit_set(node_ptr->config_ptr->node_bitmap, i);
+	}
+
 	return;
 }
 
@@ -293,8 +314,6 @@ static void _build_bitmaps_pre_select(void)
 static int _build_bitmaps(void)
 {
 	int i, error_code = SLURM_SUCCESS;
-	ListIterator config_iterator;
-	struct config_record *config_ptr;
 	struct job_record    *job_ptr;
 	struct node_record   *node_ptr;
 	ListIterator job_iterator;
@@ -304,27 +323,19 @@ static int _build_bitmaps(void)
 
 	/* initialize the idle and up bitmaps */
 	FREE_NULL_BITMAP(avail_node_bitmap);
+	FREE_NULL_BITMAP(booting_node_bitmap);
 	FREE_NULL_BITMAP(cg_node_bitmap);
 	FREE_NULL_BITMAP(idle_node_bitmap);
 	FREE_NULL_BITMAP(power_node_bitmap);
 	FREE_NULL_BITMAP(share_node_bitmap);
 	FREE_NULL_BITMAP(up_node_bitmap);
 	avail_node_bitmap = (bitstr_t *) bit_alloc(node_record_count);
+	booting_node_bitmap = (bitstr_t *) bit_alloc(node_record_count);
 	cg_node_bitmap    = (bitstr_t *) bit_alloc(node_record_count);
 	idle_node_bitmap  = (bitstr_t *) bit_alloc(node_record_count);
 	power_node_bitmap = (bitstr_t *) bit_alloc(node_record_count);
 	share_node_bitmap = (bitstr_t *) bit_alloc(node_record_count);
 	up_node_bitmap    = (bitstr_t *) bit_alloc(node_record_count);
-
-	/* initialize the configuration bitmaps */
-	config_iterator = list_iterator_create(config_list);
-	while ((config_ptr = (struct config_record *)
-				      list_next(config_iterator))) {
-		FREE_NULL_BITMAP(config_ptr->node_bitmap);
-		config_ptr->node_bitmap =
-		    (bitstr_t *) bit_alloc(node_record_count);
-	}
-	list_iterator_destroy(config_iterator);
 
 	/* Set all bits, all nodes initially available for sharing */
 	bit_nset(share_node_bitmap, 0, (node_record_count-1));
@@ -360,6 +371,8 @@ static int _build_bitmaps(void)
 		if ((IS_NODE_IDLE(node_ptr) && (job_cnt == 0)) ||
 		    IS_NODE_DOWN(node_ptr))
 			bit_set(idle_node_bitmap, i);
+		if (IS_NODE_POWER_UP(node_ptr))
+			bit_set(booting_node_bitmap, i);
 		if (IS_NODE_COMPLETING(node_ptr))
 			bit_set(cg_node_bitmap, i);
 		if (IS_NODE_IDLE(node_ptr) || IS_NODE_ALLOCATED(node_ptr)) {
@@ -370,8 +383,6 @@ static int _build_bitmaps(void)
 		}
 		if (IS_NODE_POWER_SAVE(node_ptr))
 			bit_set(power_node_bitmap, i);
-		if (node_ptr->config_ptr)
-			bit_set(node_ptr->config_ptr->node_bitmap, i);
 	}
 
 	return error_code;
