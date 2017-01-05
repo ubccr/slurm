@@ -284,7 +284,7 @@ _run_script_and_set_env(const char *name, const char *path,
 /* Given a program name, translate it to a fully qualified pathname as needed
  * based upon the PATH environment variable and current working directory
  * Returns xmalloc()'d string that must be xfree()'d */
-extern char *build_path(char *fname, char **prog_env, char *cwd)
+extern char *_build_path(char *fname, char **prog_env, char *cwd)
 {
 	char *path_env = NULL, *dir;
 	char *file_name;
@@ -360,7 +360,7 @@ extern void block_daemon(void);
 void
 exec_task(stepd_step_rec_t *job, int i)
 {
-	uint32_t *gtids;		/* pointer to arrary of ranks */
+	uint32_t *gtids;		/* pointer to array of ranks */
 	int fd, j;
 	stepd_step_task_info_t *task = job->task[i];
 	char **tmp_env;
@@ -416,7 +416,7 @@ exec_task(stepd_step_rec_t *job, int i)
 		 * is left up to the server to search the PATH for the
 		 * executable.
 		 */
-		task->argv[0] = build_path(task->argv[0], job->env, NULL);
+		task->argv[0] = _build_path(task->argv[0], job->env, NULL);
 	}
 
 	if (!job->batch) {
@@ -515,11 +515,10 @@ exec_task(stepd_step_rec_t *job, int i)
 		int sz;
 		sz = read(fd, buf, sizeof(buf));
 		if ((sz >= 3) && (xstrncmp(buf, "#!", 2) == 0)) {
+			buf[sizeof(buf)-1] = '\0';
 			eol = strchr(buf, '\n');
 			if (eol)
 				eol[0] = '\0';
-			else
-				buf[sizeof(buf)-1] = '\0';
 			slurm_seterrno(saved_errno);
 			error("execve(): bad interpreter(%s): %m", buf+2);
 			exit(errno);
