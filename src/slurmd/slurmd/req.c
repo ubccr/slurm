@@ -168,6 +168,7 @@ static void _note_batch_job_finished(uint32_t job_id);
 static int  _prolog_is_running (uint32_t jobid);
 static int  _step_limits_match(void *x, void *key);
 static int  _terminate_all_steps(uint32_t jobid, bool batch);
+static int  _receive_fd(int socket);
 static void _rpc_launch_tasks(slurm_msg_t *);
 static void _rpc_abort_job(slurm_msg_t *);
 static void _rpc_batch_job(slurm_msg_t *msg, bool new_msg);
@@ -214,6 +215,7 @@ static void _sync_messages_kill(kill_job_msg_t *req);
 static int  _waiter_init (uint32_t jobid);
 static int  _waiter_complete (uint32_t jobid);
 
+static void _send_back_fd(int socket, int fd);
 static bool _steps_completed_now(uint32_t jobid);
 static int  _valid_sbcast_cred(file_bcast_msg_t *req, uid_t req_uid,
 			       uint16_t block_no, uint32_t *job_id);
@@ -1383,6 +1385,111 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 		send_registration_msg(errnum, false);
 }
 
+/*
+ * Open file based upon permissions of a different user
+ * IN path_name - name of file to open
+ * IN uid - User ID to use for file access check
+ * IN gid - Group ID to use for file access check
+ * RET -1 on error, file descriptor otherwise
+ */
+static int _open_as_other(char *path_name, batch_job_launch_msg_t *req)
+{
+	pid_t child;
+	gids_t *gids;
+	int pipe[2];
+	int fd = -1, rc = 0;
+
+	if (!(gids = _gids_cache_lookup(req->user_name, req->gid))) {
+		error("%s: gids_cache_lookup for %s failed",
+		      __func__, req->user_name);
+		return -1;
+	}
+
+	if ((rc = container_g_create(req->job_id))) {
+		error("%s: container_g_create(%u): %m", __func__, req->job_id);
+		_dealloc_gids(gids);
+		return -1;
+	}
+
+	/* child process will setuid to the user, register the process
+	 * with the container, and open the file for us. */
+	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pipe) != 0) {
+		error("%s: Failed to open pipe: %m", __func__);
+		_dealloc_gids(gids);
+		return -1;
+	}
+
+	child = fork();
+	if (child == -1) {
+		error("%s: fork failure", __func__);
+		_dealloc_gids(gids);
+		close(pipe[0]);
+		close(pipe[1]);
+		return -1;
+	} else if (child > 0) {
+		close(pipe[0]);
+		(void) waitpid(child, &rc, 0);
+		_dealloc_gids(gids);
+		if (WIFEXITED(rc) && (WEXITSTATUS(rc) == 0))
+			fd = _receive_fd(pipe[1]);
+		close(pipe[1]);
+		return fd;
+	}
+
+	/* child process below here */
+
+	close(pipe[1]);
+
+	/* container_g_add_pid needs to be called in the
+	 * forked process part of the fork to avoid a race
+	 * condition where if this process makes a file or
+	 * detacts itself from a child before we add the pid
+	 * to the container in the parent of the fork. */
+	if (container_g_add_pid(req->job_id, getpid(), req->uid)) {
+		error("%s container_g_add_pid(%u): %m", __func__, req->job_id);
+		exit(SLURM_ERROR);
+	}
+
+	/* The child actually performs the I/O and exits with
+	 * a return code, do not return! */
+
+	/*********************************************************************\
+	 * NOTE: It would be best to do an exec() immediately after the fork()
+	 * in order to help prevent a possible deadlock in the child process
+	 * due to locks being set at the time of the fork and being freed by
+	 * the parent process, but not freed by the child process. Performing
+	 * the work inline is done for simplicity. Note that the logging
+	 * performed by error() should be safe due to the use of
+	 * atfork_install_handlers() as defined in src/common/log.c.
+	 * Change the code below with caution.
+	\*********************************************************************/
+
+	if (setgroups(gids->ngids, gids->gids) < 0) {
+		error("%s: uid: %u setgroups failed: %m", __func__, req->uid);
+		exit(errno);
+	}
+	_dealloc_gids(gids);
+
+	if (setgid(req->gid) < 0) {
+		error("%s: uid:%u setgid(%u): %m", __func__, req->uid,req->gid);
+		exit(errno);
+	}
+	if (setuid(req->uid) < 0) {
+		error("%s: getuid(%u): %m", __func__, req->uid);
+		exit(errno);
+	}
+
+	fd = open(path_name, (O_CREAT|O_APPEND|O_WRONLY), 0644);
+	if (fd == -1) {
+		error("%s: uid:%u can't open `%s`: %m",
+		      __func__, req->uid, path_name);
+		exit(errno);
+	}
+	_send_back_fd(pipe[0], fd);
+	close(fd);
+	exit(SLURM_SUCCESS);
+}
+
 static void
 _prolog_error(batch_job_launch_msg_t *req, int rc)
 {
@@ -1415,10 +1522,8 @@ _prolog_error(batch_job_launch_msg_t *req, int rc)
 			req->work_dir, err_name_ptr);
 	else
 		snprintf(path_name, MAXPATHLEN, "/%s", err_name_ptr);
-
-	if ((fd = open(path_name, (O_CREAT|O_APPEND|O_WRONLY), 0644)) == -1) {
-		error("Unable to open %s: %s", path_name,
-		      slurm_strerror(errno));
+	if ((fd = _open_as_other(path_name, req)) == -1) {
+		error("Unable to open %s: Permission denied", path_name);
 		return;
 	}
 	snprintf(err_name, sizeof(err_name),
@@ -1867,8 +1972,20 @@ static void _rpc_prolog(slurm_msg_t *msg)
 	if (!(slurmctld_conf.prolog_flags & PROLOG_FLAG_NOHOLD))
 		_notify_slurmctld_prolog_fini(req->job_id, rc);
 
-	if (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN)
-		_spawn_prolog_stepd(msg);
+	if (rc == SLURM_SUCCESS) {
+		if (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN)
+			_spawn_prolog_stepd(msg);
+	} else {
+		_launch_job_fail(req->job_id, rc);
+		/*
+		 *  If job prolog failed or we could not reply,
+		 *  initiate message to slurmctld with current state
+		 */
+		if ((rc == ESLURMD_PROLOG_FAILED) ||
+		    (rc == SLURM_COMMUNICATIONS_SEND_ERROR) ||
+		    (rc == ESLURMD_SETUP_ENVIRONMENT_ERROR))
+			send_registration_msg(rc, false);
+	}
 }
 
 static void
@@ -2188,9 +2305,19 @@ _launch_job_fail(uint32_t job_id, uint32_t slurm_rc)
 
 	rpc_rc = slurm_send_recv_controller_rc_msg(&resp_msg, &rc);
 	if ((resp_msg.msg_type == REQUEST_JOB_REQUEUE) &&
-	    (rc == ESLURM_DISABLED)) {
+	    ((rc == ESLURM_DISABLED) || (rc == ESLURM_BATCH_ONLY))) {
 		info("Could not launch job %u and not able to requeue it, "
 		     "cancelling job", job_id);
+
+		if ((slurm_rc == ESLURMD_PROLOG_FAILED) &&
+		    (rc == ESLURM_BATCH_ONLY)) {
+			char *buf = NULL;
+			xstrfmtcat(buf, "Prolog failure on node %s",
+				   conf->node_name);
+			slurm_notify_job(job_id, buf);
+			xfree(buf);
+		}
+
 		comp_msg.job_id = job_id;
 		comp_msg.job_rc = INFINITE;
 		comp_msg.slurm_rc = slurm_rc;
@@ -3843,16 +3970,22 @@ static int _file_bcast_register_file(slurm_msg_t *msg,
 	child = fork();
 	if (child == -1) {
 		error("sbcast: fork failure");
+		_dealloc_gids(gids);
+		close(pipe[0]);
+		close(pipe[1]);
 		return errno;
 	} else if (child > 0) {
 		/* get fd back from pipe */
 		close(pipe[0]);
 		waitpid(child, &rc, 0);
 		_dealloc_gids(gids);
-		if (rc)
+		if (rc) {
+			close(pipe[1]);
 			return WEXITSTATUS(rc);
+		}
 
 		fd = _receive_fd(pipe[1]);
+		close(pipe[1]);
 
 		file_info = xmalloc(sizeof(file_bcast_info_t));
 		file_info->fd = fd;
