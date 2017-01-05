@@ -690,7 +690,7 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 }
 
 /* At slurmctld start up time, for every currently active burst buffer,
- * update that user's limit */
+ * update that user's limit. Also log every recovered buffer */
 static void _apply_limits(void)
 {
 	bool emulate_cray = false;
@@ -703,6 +703,9 @@ static void _apply_limits(void)
 	for (i = 0; i < BB_HASH_SIZE; i++) {
 		bb_alloc = bb_state.bb_ahash[i];
 		while (bb_alloc) {
+			info("Recovered buffer Name:%s User:%u Pool:%s Size:%"PRIu64,
+			     bb_alloc->name, bb_alloc->user_id,
+			     bb_alloc->pool, bb_alloc->size);
 			_set_assoc_mgr_ptrs(bb_alloc);
 			bb_limit_add(bb_alloc->user_id, bb_alloc->size,
 				     bb_alloc->pool, &bb_state, emulate_cray);
@@ -851,6 +854,23 @@ static int _open_part_state_file(char **state_file)
 	return state_fd;
 }
 
+/* Return true if the burst buffer name is that of a job (i.e. numeric) and
+ * and that job is complete. Otherwise return false. */
+static bool _is_complete_job(char *name)
+{
+	char *end_ptr = NULL;
+	uint32_t job_id = 0;
+	struct job_record *job_ptr;
+
+	if (name && (name[0] >='0') && (name[0] <='9')) {
+		job_id = strtol(name, &end_ptr, 10);
+		job_ptr = find_job_record(job_id);
+		if (!job_ptr || IS_JOB_COMPLETED(job_ptr))
+			return true;
+	}
+	return false;
+}
+
 /* Recover saved burst buffer state and use it to preserve account, partition,
  * and QOS information for persistent burst buffers. */
 static void _recover_bb_state(void)
@@ -931,7 +951,12 @@ static void _recover_bb_state(void)
 			pool = xstrdup(bb_state.bb_config.default_pool);
 		}
 
-		if (bb_state.bb_config.flags & BB_FLAG_EMULATE_CRAY) {
+		if ((bb_state.bb_config.flags & BB_FLAG_EMULATE_CRAY) &&
+		    _is_complete_job(name)) {
+			info("%s, Ignoring burst buffer state for completed job %s",
+			     __func__, name);
+			bb_alloc = NULL;
+		} else if (bb_state.bb_config.flags & BB_FLAG_EMULATE_CRAY) {
 			bb_alloc = bb_alloc_name_rec(&bb_state, name, user_id);
 			bb_alloc->id = id;
 			last_persistent_id = MAX(last_persistent_id, id);
