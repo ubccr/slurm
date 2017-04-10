@@ -4,13 +4,13 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2016 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2016 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -39,13 +39,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#ifdef HAVE_SYS_SYSLOG_H
-#  include <sys/syslog.h>
-#endif
+#include "config.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -92,7 +86,6 @@
 #include "src/slurmctld/slurmctld_plugstack.h"
 
 #define MAX_FEATURES  32	/* max exclusive features "[fs1|fs2]"=2 */
-#define MAX_RETRIES   10
 
 struct node_set {		/* set of nodes with same configuration */
 	uint16_t cpus_per_node;	/* NOTE: This is the minimum count,
@@ -100,7 +93,7 @@ struct node_set {		/* set of nodes with same configuration */
 				 * nodes within the same configuration
 				 * line (in slurm.conf) can actually
 				 * have different CPU counts */
-	uint32_t real_memory;
+	uint64_t real_memory;
 	uint32_t nodes;
 	uint32_t weight;
 	char     *features;
@@ -463,7 +456,7 @@ extern void set_job_alias_list(struct job_record *job_ptr)
  * IN job_ptr - pointer to terminating job (already in some COMPLETING state)
  * IN timeout - true if job exhausted time limit, send REQUEST_KILL_TIMELIMIT
  *	RPC instead of REQUEST_TERMINATE_JOB
- * IN suspended - true if job was already suspended (node's job_run_cnt
+ * IN suspended - true if job was already suspended (node's run_job_cnt
  *	already decremented);
  * IN preempted - true if job is being preempted
  */
@@ -778,7 +771,7 @@ extern void build_active_feature_bitmap(struct job_record *job_ptr,
 		    (node_feat_ptr->node_bitmap == NULL)) {
 			if (!tmp_bitmap)
 				tmp_bitmap = bit_alloc(node_record_count);
-			bit_nset(tmp_bitmap, 0, node_record_count-1);
+			bit_nset(tmp_bitmap, 0, node_record_count - 1);
 			continue;
 		}
 		if (!tmp_bitmap) {
@@ -842,8 +835,10 @@ extern void build_active_feature_bitmap(struct job_record *job_ptr,
  *	1		= share=yes
  *
  * job_ptr->details->whole_node:
- *	0		= default
- *	1		= exclusive
+ *				  0	= default
+ *	WHOLE_NODE_REQUIRED	= 1	= exclusive
+ *	WHOLE_NODE_USER		= 2	= user
+ *	WHOLE_NODE_MCS		= 3	= mcs
  *
  * Return values:
  *	0 = requires idle nodes
@@ -874,13 +869,13 @@ _resolve_shared_status(struct job_record *job_ptr, uint16_t part_max_share,
 
 	if (cons_res_flag) {
 		if ((job_ptr->details->share_res  == 0) ||
-		    (job_ptr->details->whole_node == 1)) {
+		    (job_ptr->details->whole_node == WHOLE_NODE_REQUIRED)) {
 			job_ptr->details->share_res = 0;
 			return 0;
 		}
 		return 1;
 	} else {
-		job_ptr->details->whole_node = 1;
+		job_ptr->details->whole_node = WHOLE_NODE_REQUIRED;
 		if (part_max_share == 1) { /* partition configured Shared=NO */
 			job_ptr->details->share_res = 0;
 			return 0;
@@ -908,9 +903,9 @@ extern void filter_by_node_owner(struct job_record *job_ptr,
 
 	if ((job_ptr->details->whole_node == 0) &&
 	    (job_ptr->part_ptr->flags & PART_FLAG_EXCLUSIVE_USER))
-		job_ptr->details->whole_node = 2;
+		job_ptr->details->whole_node = WHOLE_NODE_USER;
 
-	if (job_ptr->details->whole_node == 2) {
+	if (job_ptr->details->whole_node == WHOLE_NODE_USER) {
 		/* Need to remove all nodes allocated to any active job from
 		 * any other user */
 		job_iterator = list_iterator_create(job_list);
@@ -949,11 +944,8 @@ extern void filter_by_node_mcs(struct job_record *job_ptr, int mcs_select,
 	struct node_record *node_ptr;
 	int i;
 
-	if (mcs_select != 1)
-		return;
-
 	/* Need to filter out any nodes allocated with other mcs */
-	if (job_ptr->mcs_label != NULL) {
+	if (job_ptr->mcs_label && (mcs_select == 1)) {
 		for (i = 0, node_ptr = node_record_table_ptr;
 		     i < node_record_count; i++, node_ptr++) {
 			/* if there is a mcs_label -> OK if it's the same */
@@ -977,6 +969,29 @@ extern void filter_by_node_mcs(struct job_record *job_ptr, int mcs_select,
 	}
 }
 
+/* Remove nodes from the "avail_node_bitmap" which need to be rebooted in order
+ * to be used if the job's "delay_boot" time has not yet been reached. */
+static void _filter_by_node_feature(struct job_record *job_ptr,
+				    struct node_set *node_set_ptr,
+				    int node_set_size)
+{
+	int i;
+
+	if ((job_ptr->details == NULL) ||
+	    ((job_ptr->details->begin_time != 0) &&
+ 	     ((job_ptr->details->begin_time + job_ptr->delay_boot) <=
+	      time(NULL))))
+		return;
+
+	for (i = 0; i < node_set_size; i++) {
+		if (node_set_ptr[i].weight != INFINITE)
+			continue;
+		bit_not(node_set_ptr[i].my_bitmap);
+		bit_and(avail_node_bitmap, node_set_ptr[i].my_bitmap);
+		bit_not(node_set_ptr[i].my_bitmap);
+	}
+}
+
 /*
  * If the job has required feature counts, then accumulate those
  * required resources using multiple calls to _pick_best_nodes()
@@ -992,7 +1007,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 		  uint32_t min_nodes, uint32_t max_nodes, uint32_t req_nodes,
 		  bool test_only, List *preemptee_job_list, bool can_reboot)
 {
-	uint32_t saved_min_nodes, saved_job_min_nodes;
+	uint32_t saved_min_nodes, saved_job_min_nodes, saved_job_num_tasks;
 	bitstr_t *saved_req_node_bitmap = NULL;
 	bitstr_t *inactive_bitmap = NULL;
 	uint32_t saved_min_cpus, saved_req_nodes;
@@ -1011,11 +1026,12 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 
 	/* Mark nodes reserved for other jobs as off limit for this job.
 	 * If the job has a reservation, we've already limited the contents
-	 * of select_bitmap to those nodes */
+	 * of select_bitmap to those nodes. Assume node reboot required
+	 * since we have not selected the compute nodes yet. */
 	if (job_ptr->resv_name == NULL) {
 		time_t start_res = time(NULL);
 		rc = job_test_resv(job_ptr, &start_res, false, &resv_bitmap,
-				   &exc_core_bitmap, &resv_overlap);
+				   &exc_core_bitmap, &resv_overlap, true);
 		if (rc == ESLURM_NODES_BUSY) {
 			save_avail_node_bitmap = avail_node_bitmap;
 			avail_node_bitmap = bit_alloc(node_record_count);
@@ -1048,7 +1064,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 		/* We do not care about return value.
 		 * We are just interested in exc_core_bitmap creation */
 		(void) job_test_resv(job_ptr, &start_res, false, &resv_bitmap,
-				     &exc_core_bitmap, &resv_overlap);
+				     &exc_core_bitmap, &resv_overlap, true);
 		FREE_NULL_BITMAP(resv_bitmap);
 	}
 
@@ -1058,6 +1074,8 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 	bit_and(avail_node_bitmap, booting_node_bitmap);
 	bit_not(booting_node_bitmap);
 	filter_by_node_owner(job_ptr, avail_node_bitmap);
+	if (can_reboot && !test_only)
+		_filter_by_node_feature(job_ptr, node_set_ptr, node_set_size);
 
 	/* get mcs_select */
 	mcs_select = slurm_mcs_get_select(job_ptr);
@@ -1073,21 +1091,18 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 		job_ptr->details->req_node_bitmap = NULL;
 	}
 	saved_min_cpus = job_ptr->details->min_cpus;
-	/* Don't mess with max_cpus here since it is only set (as of
-	 * 2.2 to be a limit and not user configurable. */
+	/* Don't mess with max_cpus here since it is only set to be a limit
+	 * and not user configurable. */
 	job_ptr->details->min_cpus = 1;
 	tmp_node_set_ptr = xmalloc(sizeof(struct node_set) * node_set_size * 2);
 
-	/* Accumulate nodes with required feature counts.
-	 * Ignored if job_ptr->details->req_node_layout is set (by wiki2).
-	 * Selected nodes become part of job's required node list. */
+	/* Accumulate nodes with required feature counts. */
 	preemptee_candidates = slurm_find_preemptable_jobs(job_ptr);
-	if (job_ptr->details->feature_list &&
-	    (job_ptr->details->req_node_layout == NULL)) {
+	if (job_ptr->details->feature_list) {
 		ListIterator feat_iter;
 		job_feature_t *feat_ptr;
-		uint32_t smallest_min_mem = INFINITE;
-		uint32_t orig_req_mem = job_ptr->details->pn_min_memory;
+		uint64_t smallest_min_mem = INFINITE64;
+		uint64_t orig_req_mem = job_ptr->details->pn_min_memory;
 
 		feat_iter = list_iterator_create(
 				job_ptr->details->feature_list);
@@ -1171,8 +1186,14 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 			feature_bitmap = NULL;
 			min_nodes = feat_ptr->count;
 			req_nodes = feat_ptr->count;
+			saved_job_num_tasks = job_ptr->details->num_tasks;
 			job_ptr->details->min_nodes = feat_ptr->count;
 			job_ptr->details->min_cpus = feat_ptr->count;
+			if (job_ptr->details->ntasks_per_node &&
+			    job_ptr->details->num_tasks) {
+				job_ptr->details->num_tasks = min_nodes *
+					job_ptr->details->ntasks_per_node;
+			}
 			FREE_NULL_LIST(*preemptee_job_list);
 			job_ptr->details->pn_min_memory = orig_req_mem;
 			if (sort_again) {
@@ -1186,6 +1207,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 					preemptee_candidates,
 					preemptee_job_list, false,
 					exc_core_bitmap, resv_overlap);
+			job_ptr->details->num_tasks = saved_job_num_tasks;
 			if (job_ptr->details->pn_min_memory) {
 				if (job_ptr->details->pn_min_memory <
 				    smallest_min_mem)
@@ -1321,8 +1343,9 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 		uint32_t cur_max_watts, tmp_max_watts = 0;
 		uint32_t cpus_per_node, *tmp_max_watts_dvfs = NULL;
 		bitstr_t *tmp_bitmap;
-		int k = 1, *allowed_freqs;
+		int k = 1, *allowed_freqs = NULL;
 		float ratio = 0;
+		bool reboot;
 
 		/*
 		 *centralized synchronization of all key/values
@@ -1377,7 +1400,8 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 		 * powercap or the max_wattswill be returned.
 		 * select the return code based on the impact of
 		 * reservations on the failure */
-		job_cap = powercap_get_job_cap(job_ptr, time(NULL));
+		reboot = node_features_reboot_test(job_ptr, *select_bitmap);
+		job_cap = powercap_get_job_cap(job_ptr, time(NULL), reboot);
 
 		if ((layout_power == 1) ||
 		    ((layout_power == 2) && (allowed_freqs[0] == 0))) {
@@ -1448,6 +1472,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 						  job_ptr->time_min);
 			}
 		}
+		xfree(allowed_freqs);
 		xfree(tmp_max_watts_dvfs);
 
 		debug2("powercapping: checking job %u : min=%u cur=%u "
@@ -1515,7 +1540,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
  *	5) If request can't be satisfied now, execute select_g_job_test()
  *	   against the list of nodes that exist in any state (perhaps DOWN
  *	   DRAINED or ALLOCATED) to determine if the request can
- *         ever be satified.
+ *         ever be satisfied.
  */
 static int
 _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
@@ -1557,8 +1582,8 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	 * will fail.  We have to keep track of the
 	 * memory for accounting, these next 2 variables do this for us.
 	 */
-	uint32_t smallest_min_mem = INFINITE;
-	uint32_t orig_req_mem = job_ptr->details->pn_min_memory;
+	uint64_t smallest_min_mem = INFINITE64;
+	uint64_t orig_req_mem = job_ptr->details->pn_min_memory;
 
 	if (test_only)
 		select_mode = SELECT_MODE_TEST_ONLY;
@@ -1998,6 +2023,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		if (error_code != SLURM_SUCCESS)
 			break;
 	}
+	FREE_NULL_BITMAP(avail_bitmap);
 
 	/* The job is not able to start right now, return a
 	 * value indicating when the job can start */
@@ -2028,7 +2054,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 }
 
 static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
-			  int *error_code)
+			  int *error_code, uint32_t preemptor)
 {
 	ListIterator iter;
 	struct job_record *job_ptr;
@@ -2044,12 +2070,14 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 			job_cnt++;
 			if (!kill_pending)
 				continue;
-			if (slurm_job_check_grace(job_ptr) == SLURM_SUCCESS)
+			if (slurm_job_check_grace(job_ptr, preemptor)
+			    == SLURM_SUCCESS)
 				continue;
 			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0, true);
 			if (rc == SLURM_SUCCESS) {
-				info("preempted job %u has been killed",
-				     job_ptr->job_id);
+				info("preempted job %u has been killed to "
+				     "reclaim resources for job %u",
+				     job_ptr->job_id, preemptor);
 			}
 		} else if (mode == PREEMPT_MODE_CHECKPOINT) {
 			job_cnt++;
@@ -2068,23 +2096,25 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 						    (uint16_t) NO_VAL);
 			}
 			if (rc == SLURM_SUCCESS) {
-				info("preempted job %u has been checkpointed",
-				     job_ptr->job_id);
+				info("preempted job %u has been checkpointed to"
+				     " reclaim resources for job %u",
+				     job_ptr->job_id, preemptor);
 			}
 		} else if (mode == PREEMPT_MODE_REQUEUE) {
 			job_cnt++;
 			if (!kill_pending)
 				continue;
-			rc = job_requeue(0, job_ptr->job_id, -1,
-					 (uint16_t)NO_VAL, true, 0);
+			rc = job_requeue(0, job_ptr->job_id, NULL, true, 0);
 			if (rc == SLURM_SUCCESS) {
-				info("preempted job %u has been requeued",
-				     job_ptr->job_id);
+				info("preempted job %u has been requeued to "
+				     "reclaim resources for job %u",
+				     job_ptr->job_id, preemptor);
 			}
 		} else if ((mode == PREEMPT_MODE_SUSPEND) &&
 			   (slurmctld_conf.preempt_mode & PREEMPT_MODE_GANG)) {
-			debug("preempted job %u suspended by gang scheduler",
-			      job_ptr->job_id);
+			debug("preempted job %u suspended by gang scheduler "
+			      "to reclaim resources for job %u",
+			      job_ptr->job_id, preemptor);
 		} else if (mode == PREEMPT_MODE_OFF) {
 			error("%s: Invalid preempt_mode %u for job %u",
 			      __func__, mode, job_ptr->job_id);
@@ -2093,7 +2123,7 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 
 		if (rc != SLURM_SUCCESS) {
 			if ((mode != PREEMPT_MODE_CANCEL)
-			    && (slurm_job_check_grace(job_ptr)
+			    && (slurm_job_check_grace(job_ptr, preemptor)
 				== SLURM_SUCCESS))
 				continue;
 
@@ -2224,7 +2254,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		    && (job_ptr->state_reason != FAIL_BURST_BUFFER_OP)
 		    && (job_ptr->state_reason != WAIT_HELD)
 		    && (job_ptr->state_reason != WAIT_HELD_USER)
-		    && job_ptr->state_reason != WAIT_MAX_REQUEUE) {
+		    && (job_ptr->state_reason != WAIT_MAX_REQUEUE)) {
 			job_ptr->state_reason = WAIT_HELD;
 		}
 		return ESLURM_JOB_HELD;
@@ -2402,7 +2432,8 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 			 * do not cancel or requeue any more jobs yet */
 			kill_pending = false;
 		}
-		_preempt_jobs(preemptee_job_list, kill_pending, &error_code);
+		_preempt_jobs(preemptee_job_list, kill_pending, &error_code,
+			      job_ptr->job_id);
 		if ((error_code == ESLURM_NODES_BUSY) &&
 		    (detail_ptr->preempt_start_time == 0)) {
   			detail_ptr->preempt_start_time = now;
@@ -2495,6 +2526,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	/* This job may be getting requeued, clear vestigial state information
 	 * before over-writing and leaking memory or referencing old GRES or
 	 * step data. */
+	job_ptr->job_state &= ~JOB_POWER_UP_NODE;
 	FREE_NULL_BITMAP(job_ptr->node_bitmap);
 	xfree(job_ptr->nodes);
 	xfree(job_ptr->sched_nodes);
@@ -2534,6 +2566,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		job_ptr->node_bitmap = NULL;
 		job_ptr->priority = 0;
 		job_ptr->state_reason = WAIT_HELD;
+		last_job_update = now;
 		goto cleanup;
 	}
 	if (select_g_job_begin(job_ptr) != SLURM_SUCCESS) {
@@ -2544,6 +2577,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		job_ptr->time_last_active = 0;
 		job_ptr->end_time = 0;
 		job_ptr->node_bitmap = NULL;
+		last_job_update = now;
 		goto cleanup;
 	}
 
@@ -2608,9 +2642,11 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	slurm_sched_g_newalloc(job_ptr);
 	power_g_job_start(job_ptr);
 
-	if (configuring ||
-	    bit_overlap(job_ptr->node_bitmap, power_node_bitmap) ||
+	if (bit_overlap(job_ptr->node_bitmap, power_node_bitmap))
+		job_ptr->job_state |= JOB_POWER_UP_NODE;
+	if (configuring || IS_JOB_POWER_UP_NODE(job_ptr) ||
 	    !bit_super_set(job_ptr->node_bitmap, avail_node_bitmap)) {
+		/* This handles nodes explicitly requesting node reboot */
 		job_ptr->job_state |= JOB_CONFIGURING;
 	}
 
@@ -3107,10 +3143,13 @@ static int _build_node_list(struct job_record *job_ptr,
 	}
 
 	if (job_ptr->resv_name) {
-		/* Limit node selection to those in selected reservation */
+		/* Limit node selection to those in selected reservation.
+		 * Assume node reboot required since we have not selected the
+		 * compute nodes yet. */
 		time_t start_res = time(NULL);
 		rc = job_test_resv(job_ptr, &start_res, false,
-				   &usable_node_mask, NULL, &resv_overlap);
+				   &usable_node_mask, NULL, &resv_overlap,
+				   true);
 		if (rc != SLURM_SUCCESS) {
 			job_ptr->state_reason = WAIT_RESERVATION;
 			xfree(job_ptr->state_desc);

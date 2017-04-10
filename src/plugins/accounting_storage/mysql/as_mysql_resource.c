@@ -7,7 +7,7 @@
  *  Written by Bill Brophy <bill.brophy@bull.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com>.
+ *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -312,6 +312,7 @@ static uint32_t _get_res_used(mysql_conn_t *mysql_conn, uint32_t res_id,
 
 	if (!(row = mysql_fetch_row(result))) {
 		error("Resource id %u is not known on the system", res_id);
+		mysql_free_result(result);
 		return percent_used;
 	}
 
@@ -383,6 +384,7 @@ static int _fill_in_res_rec(mysql_conn_t *mysql_conn, slurmdb_res_rec_t *res)
 
 	if (!(row = mysql_fetch_row(result))) {
 		error("Resource id %u is not known on the system", res->id);
+		mysql_free_result(result);
 		return SLURM_ERROR;
 	}
 
@@ -447,7 +449,7 @@ static int _add_res(mysql_conn_t *mysql_conn, slurmdb_res_rec_t *object,
 
 	if (debug_flags & DEBUG_FLAG_DB_RES)
 		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-	object->id = mysql_db_insert_ret_id(mysql_conn, query);
+	object->id = (uint32_t)mysql_db_insert_ret_id(mysql_conn, query);
 	xfree(query);
 	if (!object->id) {
 		error("Couldn't add server resource %s", object->name);
@@ -1100,6 +1102,8 @@ extern List as_mysql_modify_res(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	if (!query_clusters && !vals) {
 		xfree(clus_vals);
+		if (result)
+			mysql_free_result(result);
 		errno = SLURM_NO_CHANGE_IN_DATA;
 		error("Nothing to change");
 		return NULL;

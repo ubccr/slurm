@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -138,11 +138,11 @@ extern void
 scontrol_pid_info(pid_t job_pid)
 {
 	int error_code;
-	uint32_t job_id;
+	uint32_t job_id = 0;
 	time_t end_time;
 	long rem_time;
 
-	error_code = slurm_pid2jobid (job_pid, &job_id);
+	error_code = slurm_pid2jobid(job_pid, &job_id);
 	if (error_code) {
 		exit_code = 1;
 		if (quiet_flag != 1)
@@ -545,8 +545,8 @@ static void
 _list_pids_one_step(const char *node_name, uint32_t jobid, uint32_t stepid)
 {
 	int fd;
-	slurmstepd_task_info_t *task_info;
-	uint32_t *pids;
+	slurmstepd_task_info_t *task_info = NULL;
+	uint32_t *pids = NULL;
 	uint32_t count = 0;
 	uint32_t tcount = 0;
 	int i;
@@ -598,10 +598,8 @@ _list_pids_one_step(const char *node_name, uint32_t jobid, uint32_t stepid)
 		}
 	}
 
-	if (count > 0)
-		xfree(pids);
-	if (tcount > 0)
-		xfree(task_info);
+	xfree(pids);
+	xfree(task_info);
 	close(fd);
 }
 
@@ -774,6 +772,7 @@ scontrol_encode_hostlist(char *hostlist, bool sorted)
 		if (buf_read >= buf_size) {
 			/* If over 1MB, the file is almost certainly invalid */
 			fprintf(stderr, "File %s is too large\n", hostlist);
+			xfree(io_buf);
 			return SLURM_ERROR;
 		}
 		io_buf[buf_read] = '\0';
@@ -785,6 +784,7 @@ scontrol_encode_hostlist(char *hostlist, bool sorted)
 	hl = hostlist_create(tmp_list);
 	if (hl == NULL) {
 		fprintf(stderr, "Invalid hostlist: %s\n", tmp_list);
+		xfree(io_buf);
 		return SLURM_ERROR;
 	}
 	if (sorted)

@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -45,5 +45,7 @@ extern int msg_thr_create(stepd_step_rec_t *job);
 
 /* Delay until a job is resumed */
 extern void wait_for_resumed(uint16_t msg_type);
+
+extern void set_msg_node_id(stepd_step_rec_t *job);
 
 #endif /* _STEP_REQ_H */

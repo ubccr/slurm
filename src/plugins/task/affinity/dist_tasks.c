@@ -5,7 +5,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -1181,7 +1181,6 @@ static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 			if ((req->ntasks_per_socket != 0) &&
 			    (socket_tasks[sock_inx] >= req->ntasks_per_socket))
 				continue;
-			socket_tasks[sock_inx]++;
 
 			if (!masks[taskcount])
 				masks[taskcount] = bit_alloc(
@@ -1195,7 +1194,11 @@ static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 
 			if (++c < req->cpus_per_task)
 				continue;
+
+			/* We found one! Increment the count on each unit */
 			core_tasks[core_inx]++;
+			socket_tasks[sock_inx]++;
+
 			/* Binding to cores, skip remaining of the threads */
 			if (!(req->cpu_bind_type & CPU_BIND_ONE_THREAD_PER_CORE)
 			    && ((req->cpu_bind_type & CPU_BIND_TO_CORES)
@@ -1248,9 +1251,9 @@ static bitstr_t *_lllp_map_abstract_mask(bitstr_t *bitmask)
 			if (bit < bit_size(newmask))
 				bit_set(newmask, bit);
 			else
-				error("_lllp_map_abstract_mask: can't go from "
-				      "%d -> %d since we only have %d bits",
-				      i, bit, bit_size(newmask));
+				error("%s: can't go from %d -> %d since we "
+				      "only have %"BITSTR_FMT" bits",
+				      __func__, i, bit, bit_size(newmask));
 		}
 	}
 	return newmask;
@@ -1308,7 +1311,7 @@ static void _lllp_generate_cpu_bind(launch_tasks_request_msg_t *req,
 	charsize += 3;				/* "0x" and trailing "," */
 	masks_len = maxtasks * charsize + 1;	/* number of masks + null */
 
-	debug3("_lllp_generate_cpu_bind %d %d %d", maxtasks, charsize,
+	debug3("%s %d %"BITSTR_FMT" %d", __func__, maxtasks, charsize,
 		masks_len);
 
 	masks_str = xmalloc(masks_len);

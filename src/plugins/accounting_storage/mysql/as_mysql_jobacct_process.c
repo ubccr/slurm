@@ -10,7 +10,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -55,6 +55,7 @@ typedef struct {
  * enum below also t1 is job_table */
 char *job_req_inx[] = {
 	"t1.account",
+	"t1.admin_comment",
 	"t1.array_max_tasks",
 	"t1.array_task_str",
 	"t1.cpus_req",
@@ -102,6 +103,7 @@ char *job_req_inx[] = {
 
 enum {
 	JOB_REQ_ACCOUNT1,
+	JOB_REQ_ADMIN_COMMENT,
 	JOB_REQ_ARRAY_MAX,
 	JOB_REQ_ARRAY_STR,
 	JOB_REQ_REQ_CPUS,
@@ -119,7 +121,7 @@ enum {
 	JOB_REQ_RESV_NAME,
 	JOB_REQ_UID,
 	JOB_REQ_WCKEYID,
-	JOB_REQ_ID,
+	JOB_REQ_DB_INX,
 	JOB_REQ_NAME,
 	JOB_REQ_KILL_REQUID,
 	JOB_REQ_REQ_MEM,
@@ -502,13 +504,14 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 		local_cluster_list = setup_cluster_list_with_inx(
 			mysql_conn, job_cond, (void **)&curr_cluster);
 		if (!local_cluster_list) {
+			mysql_free_result(result);
 			rc = SLURM_ERROR;
 			goto end_it;
 		}
 	}
 
 	while ((row = mysql_fetch_row(result))) {
-		char *id = row[JOB_REQ_ID];
+		char *db_inx_char = row[JOB_REQ_DB_INX];
 		bool job_ended = 0;
 		int start = slurm_atoul(row[JOB_REQ_START]);
 
@@ -631,7 +634,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 					cluster_name, suspend_table,
 					job_cond->usage_end,
 					job_cond->usage_start,
-					id);
+					db_inx_char);
 
 				debug4("%d(%s:%d) query\n%s",
 				       mysql_conn->conn, THIS_FILE,
@@ -695,6 +698,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 		job->exitcode = slurm_atoul(row[JOB_REQ_EXIT_CODE]);
 		job->derived_ec = slurm_atoul(row[JOB_REQ_DERIVED_EC]);
 		job->derived_es = xstrdup(row[JOB_REQ_DERIVED_ES]);
+		job->admin_comment = xstrdup(row[JOB_REQ_ADMIN_COMMENT]);
 
 		if (row[JOB_REQ_PARTITION])
 			job->partition = xstrdup(row[JOB_REQ_PARTITION]);
@@ -772,7 +776,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 		query =	xstrdup_printf("select %s from \"%s_%s\" as t1 "
 				       "where t1.job_db_inx=%s",
 				       step_fields, cluster_name,
-				       step_table, id);
+				       step_table, db_inx_char);
 		if (extra) {
 			xstrcat(query, extra);
 			xfree(extra);
@@ -785,6 +789,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 			      mysql_conn, query, 0))) {
 			xfree(query);
 			rc = SLURM_ERROR;
+			mysql_free_result(result);
 			goto end_it;
 		}
 		xfree(query);
@@ -1379,30 +1384,52 @@ extern int setup_job_cond_limits(slurmdb_job_cond_t *job_cond,
 	}
 
 	if (job_cond->step_list && list_count(job_cond->step_list)) {
-		set = 0;
+		char *job_ids = NULL, *array_job_ids = NULL;
+		char *array_task_ids = NULL;
+
 		if (*extra)
 			xstrcat(*extra, " && (");
 		else
 			xstrcat(*extra, " where (");
+
 		itr = list_iterator_create(job_cond->step_list);
 		while ((selected_step = list_next(itr))) {
-			if (set)
-				xstrcat(*extra, " || ");
-			if (selected_step->array_task_id == NO_VAL)
-				xstrfmtcat(*extra, "(t1.id_job=%u || "
-					   "t1.id_array_job=%u)",
-					   selected_step->jobid,
+			if (selected_step->array_task_id == NO_VAL) {
+				if (job_ids)
+					xstrcat(job_ids, " ,");
+				if (array_job_ids)
+					xstrcat(array_job_ids, " ,");
+				xstrfmtcat(job_ids, "%u",
 					   selected_step->jobid);
-			else {
-				xstrfmtcat(*extra, "(t1.id_array_job=%u && "
-					   "t1.id_array_task=%u)",
-					   selected_step->jobid,
+				xstrfmtcat(array_job_ids, "%u",
+					   selected_step->jobid);
+			} else {
+				if (array_job_ids)
+					xstrcat(array_job_ids, " ,");
+				if (array_task_ids)
+					xstrcat(array_task_ids, " ,");
+				xstrfmtcat(array_job_ids, "%u",
+					   selected_step->jobid);
+				xstrfmtcat(array_task_ids, "%u",
 					   selected_step->array_task_id);
 			}
-			set = 1;
 		}
 		list_iterator_destroy(itr);
+
+		if (job_ids)
+			xstrfmtcat(*extra, "t1.id_job in (%s) || ", job_ids);
+		if (array_job_ids) {
+			xstrfmtcat(*extra, "t1.id_array_job in (%s)", array_job_ids);
+			if (array_task_ids)
+				xstrfmtcat(*extra,
+					   " && t1.id_array_task in (%s)",
+					   array_task_ids);
+		}
+
 		xstrcat(*extra, ")");
+		xfree(job_ids);
+		xfree(array_job_ids);
+		xfree(array_task_ids);
 	}
 
 	if (job_cond->cpus_min) {

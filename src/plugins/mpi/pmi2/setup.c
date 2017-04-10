@@ -9,7 +9,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -38,23 +38,19 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if     HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
 #if defined(__FreeBSD__)
 #include <sys/socket.h>	/* AF_INET */
 #endif
 
+#include <dlfcn.h>
 #include <fcntl.h>
-#include <signal.h>
-#include <sys/types.h>
-#include <sys/un.h>
 #include <poll.h>
-#include <unistd.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dlfcn.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 #include "src/common/slurm_xlator.h"
 #include "src/common/net.h"
@@ -276,7 +272,16 @@ _setup_stepd_sockets(const stepd_step_rec_t *job, char ***env)
 	}
 	sa.sun_family = PF_UNIX;
 
-	spool = slurm_get_slurmd_spooldir();
+	/* tree_sock_addr has to remain unformatted since the formatting
+	 * happens on the slurmd side */
+	spool = slurm_get_slurmd_spooldir(NULL);
+	snprintf(tree_sock_addr, sizeof(tree_sock_addr), PMI2_SOCK_ADDR_FMT,
+		 spool, job->jobid, job->stepid);
+	/* Make sure we adjust for the spool dir coming in on the address to
+	 * point to the right spot.
+	 */
+	xstrsubstitute(spool, "%n", job->node_name);
+	xstrsubstitute(spool, "%h", job->node_name);
 	snprintf(sa.sun_path, sizeof(sa.sun_path), PMI2_SOCK_ADDR_FMT,
 		 spool, job->jobid, job->stepid);
 	unlink(sa.sun_path);    /* remove possible old socket */
@@ -292,9 +297,6 @@ _setup_stepd_sockets(const stepd_step_rec_t *job, char ***env)
 		unlink(sa.sun_path);
 		return SLURM_ERROR;
 	}
-
-	/* remove the tree socket file on exit */
-	strncpy(tree_sock_addr, sa.sun_path, 128);
 
 	task_socks = xmalloc(2 * job->node_tasks * sizeof(int));
 	for (i = 0; i < job->node_tasks; i ++) {
@@ -632,7 +634,9 @@ _setup_srun_tree_info(const mpi_plugin_client_info_t *job)
 	} else
 		tree_info.srun_addr = NULL;
 
-	spool = slurm_get_slurmd_spooldir();
+	/* FIXME: We need to handle %n and %h in the spool dir, but don't have
+	 * the node name here */
+	spool = slurm_get_slurmd_spooldir(NULL);
 	snprintf(tree_sock_addr, 128, PMI2_SOCK_ADDR_FMT,
 		 spool, job->jobid, job->stepid);
 	xfree(spool);

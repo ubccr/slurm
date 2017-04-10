@@ -5,13 +5,13 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2015 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2016 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,16 +40,9 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#if HAVE_STDLIB_H
-#  include <stdlib.h>
-#endif
-
-#include <stdio.h>
 #include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "src/common/forward.h"
 #include "src/common/job_options.h"
@@ -213,6 +206,7 @@ extern int slurm_addto_char_list(List char_list, char *names)
 	bool brack_not = false;
 	bool first_brack = false;
 	char *this_node_name;
+	char *tmp_this_node_name;
 	hostlist_t host_list;
 
 	if (!char_list) {
@@ -293,9 +287,15 @@ extern int slurm_addto_char_list(List char_list, char *names)
 				//info("got %s %d", name, i-start);
 
 				if ((host_list = hostlist_create(name))) {
+					/* FIXME: hostlist_shift returns
+					 * a malloc'd string, but we need
+					 * an xmalloc'd string to add to the
+					 * list. cleanup when hostlist uses
+					 * xmalloc */
 					while ((this_node_name =
-						xstrdup(hostlist_shift
-							(host_list)))) {
+						xstrdup((tmp_this_node_name =
+						hostlist_shift (host_list))))) {
+						free(tmp_this_node_name);
 						/* If we get a duplicate
 						 * remove the first one and tack
 						 * this on the end. This is
@@ -319,6 +319,7 @@ extern int slurm_addto_char_list(List char_list, char *names)
 					}
 				}
 				hostlist_destroy(host_list);
+				xfree(name);
 			}
 			i++;
 		}
@@ -343,6 +344,148 @@ endit:
 	list_iterator_destroy(itr);
 	return count;
 }
+
+/* Parses strings such as stra,+strb,-strc and appends the default mode to each
+ * string in the list if no specific mode is listed. */
+extern int slurm_addto_mode_char_list(List char_list, char *names, int mode)
+{
+	int i=0, start=0;
+	char *m_name = NULL, *name = NULL, *tmp_char = NULL;
+	ListIterator itr = NULL;
+	char quote_c = '\0';
+	int quote = 0;
+	int count = 0;
+	int equal_set = 0;
+	int add_set = 0;
+	char *err_msg = "You can't use '=' and '+' or '-' in the same line";
+
+	if (!char_list) {
+		error("No list was given to fill in");
+		return 0;
+	}
+
+	if (!names) {
+		error("You gave me an empty name list");
+		return 0;
+	}
+
+	itr = list_iterator_create(char_list);
+	if (names[i] == '\"' || names[i] == '\'') {
+		quote_c = names[i];
+		quote = 1;
+		i++;
+	}
+	start = i;
+	while(names[i]) {
+		if (quote && names[i] == quote_c)
+			break;
+		else if (names[i] == '\"' || names[i] == '\'')
+			names[i] = '`';
+		else if (names[i] == ',') {
+			if ((i-start) > 0) {
+				int tmp_mode = mode;
+				if (names[start] == '+' ||
+				    names[start] == '-') {
+					tmp_mode = names[start];
+					start++;
+				}
+				name = xstrndup(names+start, (i-start));
+				if (tmp_mode) {
+					if (equal_set) {
+						count = 0;
+						error("%s", err_msg);
+						goto end_it;
+					}
+					add_set = 1;
+					m_name = xstrdup_printf(
+						  "%c%s", tmp_mode, name);
+				} else {
+					if (add_set) {
+						count = 0;
+						error("%s", err_msg);
+						goto end_it;
+					}
+					equal_set = 1;
+					m_name = xstrdup_printf("%s", name);
+				}
+				while((tmp_char = list_next(itr))) {
+					if (!strcasecmp(tmp_char, m_name))
+						break;
+				}
+				list_iterator_reset(itr);
+
+				if (!tmp_char) {
+					list_append(char_list, m_name);
+					count++;
+				} else
+					xfree(m_name);
+				xfree(name);
+			} else if (!(i-start)) {
+				list_append(char_list, xstrdup(""));
+				count++;
+			}
+
+			i++;
+			start = i;
+			if (!names[i]) {
+				error("There is a problem with "
+				      "your request.  It appears you "
+				      "have spaces inside your list.");
+				break;
+			}
+		}
+		i++;
+	}
+	if ((i-start) > 0) {
+		int tmp_mode = mode;
+		if (names[start] == '+' ||
+		    names[start] == '-') {
+			tmp_mode = names[start];
+			start++;
+		}
+		name = xstrndup(names+start, (i-start));
+		if (tmp_mode) {
+			if (equal_set) {
+				count = 0;
+				error("%s", err_msg);
+				goto end_it;
+			}
+			m_name = xstrdup_printf(
+				  "%c%s", tmp_mode, name);
+		} else {
+			if (add_set) {
+				count = 0;
+				error("%s", err_msg);
+				goto end_it;
+			}
+			m_name = xstrdup_printf("%s", name);
+		}
+		while((tmp_char = list_next(itr))) {
+			if (!strcasecmp(tmp_char, m_name))
+				break;
+		}
+		list_iterator_reset(itr);
+
+		if (!tmp_char) {
+			list_append(char_list, m_name);
+			count++;
+		} else
+			xfree(m_name);
+		xfree(name);
+	} else if (!(i-start)) {
+		list_append(char_list, xstrdup(""));
+		count++;
+	}
+	if (!count) {
+		error("You gave me an empty name list");
+	}
+
+end_it:
+	xfree(name);
+	list_iterator_destroy(itr);
+	return count;
+}
+
 
 static int _addto_step_list_internal(List step_list, char *names,
 				     int start, int end)
@@ -544,8 +687,10 @@ extern void slurm_free_job_id_response_msg(job_id_response_msg_t * msg)
 
 extern void slurm_free_job_step_kill_msg(job_step_kill_msg_t * msg)
 {
-	xfree(msg->sjob_id);
-	xfree(msg);
+	if (msg) {
+		xfree(msg->sjob_id);
+		xfree(msg);
+	}
 }
 
 extern void slurm_free_job_info_request_msg(job_info_request_msg_t *msg)
@@ -589,6 +734,7 @@ extern void slurm_free_job_desc_msg(job_desc_msg_t * msg)
 	if (msg) {
 		xfree(msg->account);
 		xfree(msg->acctg_freq);
+		xfree(msg->admin_comment);
 		xfree(msg->alloc_node);
 		if (msg->argv) {
 			for (i = 0; i < msg->argc; i++)
@@ -624,6 +770,9 @@ extern void slurm_free_job_desc_msg(job_desc_msg_t * msg)
 		xfree(msg->qos);
 		xfree(msg->std_out);
 		xfree(msg->partition);
+		for (i = 0; i < msg->pelog_env_size; i++)
+			xfree(msg->pelog_env[i]);
+		xfree(msg->pelog_env);
 		xfree(msg->ramdiskimage);
 		xfree(msg->req_nodes);
 		xfree(msg->reservation);
@@ -642,6 +791,24 @@ extern void slurm_free_job_desc_msg(job_desc_msg_t * msg)
 	}
 }
 
+extern void slurm_free_sib_msg(sib_msg_t *msg)
+{
+	if (msg) {
+		free_buf(msg->data_buffer);
+		if (msg->data)
+			slurm_free_msg_data(msg->data_type, msg->data);
+		xfree(msg);
+	}
+}
+
+extern void slurm_free_event_log_msg(slurm_event_log_msg_t * msg)
+{
+	if (msg) {
+		xfree(msg->string);
+		xfree(msg);
+	}
+}
+
 extern void slurm_free_prolog_launch_msg(prolog_launch_msg_t * msg)
 {
 	int i;
@@ -650,6 +817,9 @@ extern void slurm_free_prolog_launch_msg(prolog_launch_msg_t * msg)
 		xfree(msg->alias_list);
 		xfree(msg->nodes);
 		xfree(msg->partition);
+		for (i = 0; i < msg->pelog_env_size; i++)
+			xfree(msg->pelog_env[i]);
+		xfree(msg->pelog_env);
 		xfree(msg->std_err);
 		xfree(msg->std_out);
 		xfree(msg->work_dir);
@@ -699,6 +869,12 @@ extern void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg)
 			xfree(msg->argv);
 		}
 
+		if (msg->pelog_env) {
+			for (i = 0; i < msg->pelog_env_size; i++)
+				xfree(msg->pelog_env[i]);
+			xfree(msg->pelog_env);
+		}
+
 		if (msg->spank_job_env) {
 			for (i = 0; i < msg->spank_job_env_size; i++)
 				xfree(msg->spank_job_env[i]);
@@ -716,6 +892,7 @@ extern void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg)
 
 		slurm_cred_destroy(msg->cred);
 		xfree(msg->resv_name);
+		xfree(msg->resv_ports);
 		xfree(msg);
 	}
 }
@@ -730,6 +907,8 @@ extern void slurm_free_job_info(job_info_t * job)
 
 extern void slurm_free_job_info_members(job_info_t * job)
 {
+	int i;
+
 	if (job) {
 		xfree(job->account);
 		xfree(job->alloc_node);
@@ -739,6 +918,7 @@ extern void slurm_free_job_info_members(job_info_t * job)
 		xfree(job->batch_host);
 		xfree(job->batch_script);
 		xfree(job->burst_buffer);
+		xfree(job->burst_buffer_state);
 		xfree(job->command);
 		xfree(job->comment);
 		xfree(job->dependency);
@@ -746,6 +926,9 @@ extern void slurm_free_job_info_members(job_info_t * job)
 		xfree(job->exc_node_inx);
 		xfree(job->features);
 		xfree(job->gres);
+		for (i = 0; i < job->gres_detail_cnt; i++)
+			xfree(job->gres_detail_str[i]);
+		xfree(job->gres_detail_str);
 		xfree(job->licenses);
 		xfree(job->mcs_label);
 		xfree(job->name);
@@ -917,13 +1100,13 @@ extern void slurm_free_job_step_create_request_msg(
 		job_step_create_request_msg_t *msg)
 {
 	if (msg) {
+		xfree(msg->ckpt_dir);
 		xfree(msg->features);
 		xfree(msg->gres);
 		xfree(msg->host);
 		xfree(msg->name);
 		xfree(msg->network);
 		xfree(msg->node_list);
-		xfree(msg->ckpt_dir);
 		xfree(msg);
 	}
 }
@@ -961,6 +1144,9 @@ extern void slurm_free_kill_job_msg(kill_job_msg_t * msg)
 	if (msg) {
 		int i;
 		xfree(msg->nodes);
+		for (i=0; i<msg->pelog_env_size; i++)
+			xfree(msg->pelog_env[i]);
+		xfree(msg->pelog_env);
 		select_g_select_jobinfo_free(msg->select_jobinfo);
 		msg->select_jobinfo = NULL;
 
@@ -1016,6 +1202,9 @@ extern void slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg
 		}
 		xfree(msg->argv);
 	}
+	for (i = 0; i < msg->pelog_env_size; i++)
+		xfree(msg->pelog_env[i]);
+	xfree(msg->pelog_env);
 	for (i = 0; i < msg->spank_job_env_size; i++) {
 		xfree(msg->spank_job_env[i]);
 	}
@@ -1631,6 +1820,10 @@ extern char *job_reason_string(enum job_state_reason inx)
 		return "PartitionConfig";
 	case WAIT_ACCOUNT_POLICY:
 		return "AccountingPolicy";
+	case WAIT_FED_JOB_LOCK:
+		return "FedJobLock";
+	case FAIL_OOM:
+		return "OutOfMemory";
 	default:
 		snprintf(val, sizeof(val), "%d", inx);
 		return val;
@@ -1857,12 +2050,16 @@ extern char *job_state_string(uint32_t inx)
 		return "RESIZING";
 	if (inx & JOB_REQUEUE)
 		return "REQUEUED";
+	if (inx & JOB_REQUEUE_FED)
+		return "REQUEUE_FED";
 	if (inx & JOB_REQUEUE_HOLD)
 		return "REQUEUE_HOLD";
 	if (inx & JOB_SPECIAL_EXIT)
 		return "SPECIAL_EXIT";
 	if (inx & JOB_STOPPED)
 		return "STOPPED";
+	if (inx & JOB_REVOKED)
+		return "REVOKED";
 
 
 	/* Process JOB_STATE_BASE */
@@ -1889,6 +2086,8 @@ extern char *job_state_string(uint32_t inx)
 		return "BOOT_FAIL";
 	case JOB_DEADLINE:
 		return "DEADLINE";
+	case JOB_OOM:
+		return "OUT_OF_MEMORY";
 	default:
 		return "?";
 	}
@@ -1905,12 +2104,16 @@ extern char *job_state_string_compact(uint32_t inx)
 		return "RS";
 	if (inx & JOB_REQUEUE)
 		return "RQ";
+	if (inx & JOB_REQUEUE_FED)
+		return "RF";
 	if (inx & JOB_REQUEUE_HOLD)
 		return "RH";
 	if (inx & JOB_SPECIAL_EXIT)
 		return "SE";
 	if (inx & JOB_STOPPED)
 		return "ST";
+	if (inx & JOB_REVOKED)
+		return "RV";
 
 	/* Process JOB_STATE_BASE */
 	switch (inx & JOB_STATE_BASE) {
@@ -1936,6 +2139,8 @@ extern char *job_state_string_compact(uint32_t inx)
 		return "BF";
 	case JOB_DEADLINE:
 		return "DL";
+	case JOB_OOM:
+		return "OOM";
 	default:
 		return "?";
 	}
@@ -1965,6 +2170,8 @@ extern uint32_t job_state_num(const char *state_name)
 		return JOB_CONFIGURING;
 	if (_job_name_test(JOB_RESIZING, state_name))
 		return JOB_RESIZING;
+	if (_job_name_test(JOB_REVOKED, state_name))
+		return JOB_REVOKED;
 	if (_job_name_test(JOB_SPECIAL_EXIT, state_name))
 		return JOB_SPECIAL_EXIT;
 
@@ -1985,6 +2192,8 @@ extern char *trigger_res_type(uint16_t res_type)
 		return "database";
 	else if (res_type == TRIGGER_RES_TYPE_FRONT_END)
 		return "front_end";
+	else if (res_type == TRIGGER_RES_TYPE_OTHER)
+		return "other";
 	else
 		return "unknown";
 }
@@ -2067,6 +2276,8 @@ extern char *trigger_type(uint32_t trig_type)
 		return "primary_database_resumed_operation";
 	else if (trig_type == TRIGGER_TYPE_BLOCK_ERR)
 		return "block_err";
+	else if (trig_type == TRIGGER_TYPE_BURST_BUFFER)
+		return "burst_buffer";
 	else
 		return "unknown";
 }
@@ -2203,6 +2414,11 @@ extern char *priority_flags_string(uint16_t priority_flags)
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "FAIR_TREE");
 	}
+	if (priority_flags & PRIORITY_FLAGS_INCR_ONLY) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "INCR_ONLY");
+	}
 	if (priority_flags & PRIORITY_FLAGS_MAX_TRES) {
 		if (flag_str[0])
 			xstrcat(flag_str, ",");
@@ -2279,6 +2495,7 @@ extern char *node_state_string(uint32_t inx)
 	bool fail_flag       = (inx & NODE_STATE_FAIL);
 	bool maint_flag      = (inx & NODE_STATE_MAINT);
 	bool net_flag        = (inx & NODE_STATE_NET);
+	bool reboot_flag     = (inx & NODE_STATE_REBOOT);
 	bool res_flag        = (inx & NODE_STATE_RES);
 	bool resume_flag     = (inx & NODE_RESUME);
 	bool no_resp_flag    = (inx & NODE_STATE_NO_RESPOND);
@@ -2293,6 +2510,15 @@ extern char *node_state_string(uint32_t inx)
 			return "MAINT*";
 		else
 			return "MAINT";
+	}
+	if (reboot_flag) {
+		if ((base == NODE_STATE_ALLOCATED) ||
+		    (base == NODE_STATE_MIXED))
+			;
+		else if (no_resp_flag)
+			return "REBOOT*";
+		else
+			return "REBOOT";
 	}
 	if (drain_flag) {
 		if (comp_flag
@@ -2336,6 +2562,8 @@ extern char *node_state_string(uint32_t inx)
 	if (base == NODE_STATE_ALLOCATED) {
 		if (maint_flag)
 			return "ALLOCATED$";
+		if (reboot_flag)
+			return "ALLOCATED@";
 		if (power_up_flag)
 			return "ALLOCATED#";
 		if (power_down_flag)
@@ -2354,6 +2582,8 @@ extern char *node_state_string(uint32_t inx)
 	if (base == NODE_STATE_IDLE) {
 		if (maint_flag)
 			return "IDLE$";
+		if (reboot_flag)
+			return "IDLE@";
 		if (power_up_flag)
 			return "IDLE#";
 		if (power_down_flag)
@@ -2369,6 +2599,8 @@ extern char *node_state_string(uint32_t inx)
 	if (base == NODE_STATE_ERROR) {
 		if (maint_flag)
 			return "ERROR$";
+		if (reboot_flag)
+			return "ERROR@";
 		if (power_up_flag)
 			return "ERROR#";
 		if (power_down_flag)
@@ -2380,6 +2612,8 @@ extern char *node_state_string(uint32_t inx)
 	if (base == NODE_STATE_MIXED) {
 		if (maint_flag)
 			return "MIXED$";
+		if (reboot_flag)
+			return "MIXED@";
 		if (power_up_flag)
 			return "MIXED#";
 		if (power_down_flag)
@@ -2410,6 +2644,7 @@ extern char *node_state_string_compact(uint32_t inx)
 	bool fail_flag       = (inx & NODE_STATE_FAIL);
 	bool maint_flag      = (inx & NODE_STATE_MAINT);
 	bool net_flag        = (inx & NODE_STATE_NET);
+	bool reboot_flag     = (inx & NODE_STATE_REBOOT);
 	bool res_flag        = (inx & NODE_STATE_RES);
 	bool resume_flag     = (inx & NODE_RESUME);
 	bool no_resp_flag    = (inx & NODE_STATE_NO_RESPOND);
@@ -2425,6 +2660,14 @@ extern char *node_state_string_compact(uint32_t inx)
 			return "MAINT*";
 		else
 			return "MAINT";
+	}
+	if (reboot_flag) {
+		if ((inx == NODE_STATE_ALLOCATED) || (inx == NODE_STATE_MIXED))
+			;
+		else if (no_resp_flag)
+			return "BOOT*";
+		else
+			return "BOOT";
 	}
 	if (drain_flag) {
 		if (comp_flag
@@ -2466,6 +2709,10 @@ extern char *node_state_string_compact(uint32_t inx)
 	}
 
 	if (inx == NODE_STATE_ALLOCATED) {
+		if (maint_flag)
+			return "ALLOC$";
+		if (reboot_flag)
+			return "ALLOC@";
 		if (power_up_flag)
 			return "ALLOC#";
 		if (power_down_flag)
@@ -2484,6 +2731,8 @@ extern char *node_state_string_compact(uint32_t inx)
 	if (inx == NODE_STATE_IDLE) {
 		if (maint_flag)
 			return "IDLE$";
+		if (reboot_flag)
+			return "IDLE@";
 		if (power_up_flag)
 			return "IDLE#";
 		if (power_down_flag)
@@ -2499,6 +2748,8 @@ extern char *node_state_string_compact(uint32_t inx)
 	if (inx == NODE_STATE_ERROR) {
 		if (maint_flag)
 			return "ERR$";
+		if (reboot_flag)
+			return "ERR@";
 		if (power_up_flag)
 			return "ERR#";
 		if (power_down_flag)
@@ -2510,6 +2761,8 @@ extern char *node_state_string_compact(uint32_t inx)
 	if (inx == NODE_STATE_MIXED) {
 		if (maint_flag)
 			return "MIX$";
+		if (reboot_flag)
+			return "MIX@";
 		if (power_up_flag)
 			return "MIX#";
 		if (power_down_flag)
@@ -2854,10 +3107,12 @@ extern void slurm_free_resource_allocation_response_msg_members (
 		for (i = 0; i < msg->env_size; i++)
 			xfree(msg->environment[i]);
 		xfree(msg->environment);
+		xfree(msg->node_addr);
 		xfree(msg->node_list);
 		xfree(msg->partition);
 		xfree(msg->qos);
 		xfree(msg->resv_name);
+		slurmdb_destroy_cluster_rec(msg->working_cluster_rec);
 	}
 }
 
@@ -3047,6 +3302,7 @@ extern void slurm_free_job_step_info_members (job_step_info_t * msg)
 		xfree(msg->resv_ports);
 		select_g_select_jobinfo_free(msg->select_jobinfo);
 		msg->select_jobinfo = NULL;
+		xfree(msg->srun_host);
 		xfree(msg->tres_alloc_str);
 	}
 }
@@ -3136,11 +3392,12 @@ extern void slurm_free_node_info_members(node_info_t * node)
 		xfree(node->node_addr);
 		xfree(node->node_hostname);
 		xfree(node->os);
+		xfree(node->partitions);
 		xfree(node->reason);
 		select_g_select_nodeinfo_free(node->select_nodeinfo);
 		node->select_nodeinfo = NULL;
-		xfree(node->version);
 		xfree(node->tres_fmt_str);
+		xfree(node->version);
 		/* Do NOT free node, it is an element of an array */
 	}
 }
@@ -3592,6 +3849,10 @@ extern void slurm_free_composite_msg(composite_msg_t *msg)
 
 extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 {
+	/* this message was never loaded */
+	if ((uint16_t)type == (uint16_t)NO_VAL)
+		return SLURM_SUCCESS;
+
 	switch (type) {
 	case RESPONSE_LAUNCH_TASKS:
 		slurm_free_launch_tasks_response_msg(data);
@@ -3649,6 +3910,23 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_SUBMIT_BATCH_JOB:
 	case REQUEST_UPDATE_JOB:
 		slurm_free_job_desc_msg(data);
+		break;
+	case REQUEST_SIB_JOB_START:
+	case REQUEST_SIB_JOB_CANCEL:
+	case REQUEST_SIB_JOB_REQUEUE:
+	case REQUEST_SIB_JOB_COMPLETE:
+	case REQUEST_SIB_JOB_LOCK:
+	case REQUEST_SIB_JOB_UNLOCK:
+	case REQUEST_SIB_JOB_WILL_RUN:
+	case REQUEST_SIB_SUBMIT_BATCH_JOB:
+	case REQUEST_SIB_RESOURCE_ALLOCATION:
+		slurm_free_sib_msg(data);
+		break;
+	case RESPONSE_JOB_WILL_RUN:
+		slurm_free_will_run_response_msg(data);
+		break;
+	case RESPONSE_SUBMIT_BATCH_JOB:
+		slurm_free_submit_response_response_msg(data);
 		break;
 	case RESPONSE_ACCT_GATHER_UPDATE:
 		slurm_free_acct_gather_node_resp_msg(data);
@@ -3826,7 +4104,17 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_BURST_BUFFER_INFO:
 	case REQUEST_POWERCAP_INFO:
 	case ACCOUNTING_REGISTER_CTLD:
+	case REQUEST_FED_INFO:
 		/* No body to free */
+		break;
+	case RESPONSE_FED_INFO:
+		slurmdb_destroy_federation_rec(data);
+		break;
+	case REQUEST_PERSIST_INIT:
+		slurm_persist_free_init_req_msg(data);
+		break;
+	case PERSIST_RC:
+		slurm_persist_free_rc_msg(data);
 		break;
 	case REQUEST_REBOOT_NODES:
 		slurm_free_reboot_msg(data);
@@ -3923,6 +4211,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		break;
 	case REQUEST_ASSOC_MGR_INFO:
 		slurm_free_assoc_mgr_info_request_msg(data);
+		break;
+	case REQUEST_EVENT_LOG:
+		slurm_free_event_log_msg(data);
 		break;
 	default:
 		error("invalid type trying to be freed %u", type);
@@ -4169,12 +4460,17 @@ rpc_num2string(uint16_t opcode)
 		return "REQUEST_ASSOC_MGR_INFO";
 	case RESPONSE_ASSOC_MGR_INFO:
 		return "RESPONSE_ASSOC_MGR_INFO";
-	/* case REQUEST_SICP_INFO_DEFUNCT:			DEFUNCT */
+	case REQUEST_EVENT_LOG:
+		return "REQUEST_EVENT_LOG";
 	/* case RESPONSE_SICP_INFO_DEFUNCT:			DEFUNCT */
 	case REQUEST_LAYOUT_INFO:
 		return "REQUEST_LAYOUT_INFO";
 	case RESPONSE_LAYOUT_INFO:
 		return "RESPONSE_LAYOUT_INFO";
+	case REQUEST_FED_INFO:
+		return "REQUEST_FED_INFO";
+	case RESPONSE_FED_INFO:
+		return "RESPONSE_FED_INFO";
 
 	case REQUEST_UPDATE_JOB:				/* 3001 */
 		return "REQUEST_UPDATE_JOB";
@@ -4227,6 +4523,24 @@ rpc_num2string(uint16_t opcode)
 		return "RESPONSE_JOB_ATTACH";
 	case REQUEST_JOB_WILL_RUN:
 		return "REQUEST_JOB_WILL_RUN";
+	case REQUEST_SIB_JOB_START:
+		return "REQUEST_SIB_JOB_START";
+	case REQUEST_SIB_JOB_CANCEL:
+		return "REQUEST_SIB_JOB_CANCEL";
+	case REQUEST_SIB_JOB_REQUEUE:
+		return "REQUEST_SIB_JOB_REQUEUE";
+	case REQUEST_SIB_JOB_COMPLETE:
+		return "REQUEST_SIB_JOB_COMPLETE";
+	case REQUEST_SIB_JOB_LOCK:
+		return "REQUEST_SIB_JOB_LOCK";
+	case REQUEST_SIB_JOB_UNLOCK:
+		return "REQUEST_SIB_JOB_UNLOCK";
+	case REQUEST_SIB_JOB_WILL_RUN:
+		return "REQUEST_SIB_JOB_WILL_RUN";
+	case REQUEST_SIB_SUBMIT_BATCH_JOB:
+		return "REQUEST_SIB_SUBMIT_BATCH_JOB";
+	case REQUEST_SIB_RESOURCE_ALLOCATION:
+		return "REQUEST_SIB_RESOURCE_ALLOCATION";
 	case RESPONSE_JOB_WILL_RUN:
 		return "RESPONSE_JOB_WILL_RUN";
 	case REQUEST_JOB_ALLOCATION_INFO:
@@ -4414,6 +4728,11 @@ rpc_num2string(uint16_t opcode)
 		return "MESSAGE_COMPOSITE";
 	case RESPONSE_MESSAGE_COMPOSITE:
 		return "RESPONSE_MESSAGE_COMPOSITE";
+
+	case REQUEST_PERSIST_INIT:
+		return "REQUEST_PERSIST_INIT";
+	case PERSIST_RC:
+		return "PERSIST_RC";
 
 	default:
 		(void) snprintf(buf, sizeof(buf), "%u", opcode);
