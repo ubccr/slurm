@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -327,7 +327,7 @@ error:
  * RET 0 on success, -1 on err and prints message
  */
 extern int
-scontrol_parse_res_options(int argc, char *argv[], const char *msg,
+scontrol_parse_res_options(int argc, char **argv, const char *msg,
 			   resv_desc_msg_t  *resv_msg_ptr,
 			   int *free_user_str, int *free_acct_str,
 			   int *free_tres_license, int *free_tres_bb,
@@ -364,10 +364,7 @@ scontrol_parse_res_options(int argc, char *argv[], const char *msg,
 		}
 		val++;
 
-		if (strncasecmp(tag, "ReservationName", MAX(taglen, 1)) == 0) {
-			resv_msg_ptr->name = val;
-
-		} else if (strncasecmp(tag, "Accounts", MAX(taglen, 1)) == 0) {
+		if (!strncasecmp(tag, "Accounts", MAX(taglen, 1))) {
 			if (plus_minus) {
 				resv_msg_ptr->accounts =
 					_process_plus_minus(plus_minus, val);
@@ -375,9 +372,45 @@ scontrol_parse_res_options(int argc, char *argv[], const char *msg,
 			} else {
 				resv_msg_ptr->accounts = val;
 			}
+
+		} else if (!strncasecmp(tag, "Flags", MAX(taglen, 2))) {
+			uint32_t f;
+			if (plus_minus) {
+				char *tmp =
+					_process_plus_minus(plus_minus, val);
+				f = parse_resv_flags(tmp, msg);
+				xfree(tmp);
+			} else {
+				f = parse_resv_flags(val, msg);
+			}
+			if (f == 0xffffffff) {
+				return SLURM_ERROR;
+			} else {
+				resv_msg_ptr->flags = f;
+			}
+
+		} else if (!strncasecmp(tag, "Users", MAX(taglen, 1))) {
+			if (plus_minus) {
+				resv_msg_ptr->users =
+					_process_plus_minus(plus_minus, val);
+				*free_user_str = 1;
+			} else {
+				resv_msg_ptr->users = val;
+			}
+
+		} else if (plus_minus) {
+			exit_code = 1;
+			error("The +=/-= notation is not supported when "
+			      "updating %.*s.  %s", taglen, tag, msg);
+			return SLURM_ERROR;
+
+		} else if (!strncasecmp(tag, "ReservationName", MAX(taglen, 1))) {
+			resv_msg_ptr->name = val;
+
 		} else if (strncasecmp(tag, "BurstBuffer", MAX(taglen, 2))
 			   == 0) {
 			resv_msg_ptr->burst_buffer = val;
+
 		} else if (strncasecmp(tag, "StartTime", MAX(taglen, 1)) == 0){
 			time_t  t = parse_time(val, 0);
 			if (errno == ESLURM_INVALID_TIME_VALUE) {
@@ -407,21 +440,6 @@ scontrol_parse_res_options(int argc, char *argv[], const char *msg,
 			}
 			resv_msg_ptr->duration = (uint32_t)duration;
 
-		} else if (strncasecmp(tag, "Flags", MAX(taglen, 2)) == 0) {
-			uint32_t f;
-			if (plus_minus) {
-				char *tmp =
-					_process_plus_minus(plus_minus, val);
-				f = parse_resv_flags(tmp, msg);
-				xfree(tmp);
-			} else {
-				f = parse_resv_flags(val, msg);
-			}
-			if (f == 0xffffffff) {
-				return SLURM_ERROR;
-			} else {
-				resv_msg_ptr->flags = f;
-			}
 		} else if (strncasecmp(tag, "NodeCnt", MAX(taglen,5)) == 0 ||
 			   strncasecmp(tag, "NodeCount", MAX(taglen,5)) == 0) {
 
@@ -458,14 +476,6 @@ scontrol_parse_res_options(int argc, char *argv[], const char *msg,
 					     free_tres_nodecnt) == SLURM_ERROR)
 				return SLURM_ERROR;
 
-		} else if (strncasecmp(tag, "Users", MAX(taglen, 1)) == 0) {
-			if (plus_minus) {
-				resv_msg_ptr->users =
-					_process_plus_minus(plus_minus, val);
-				*free_user_str = 1;
-			} else {
-				resv_msg_ptr->users = val;
-			}
 		} else if (strncasecmp(tag, "Watts", MAX(taglen, 1)) == 0) {
 			if (parse_uint32(val, &(resv_msg_ptr->resv_watts))) {
 				error("Invalid Watts value: %s", val);
@@ -493,7 +503,7 @@ scontrol_parse_res_options(int argc, char *argv[], const char *msg,
  *     error message and returns 0.
  */
 extern int
-scontrol_update_res(int argc, char *argv[])
+scontrol_update_res(int argc, char **argv)
 {
 	resv_desc_msg_t   resv_msg;
 	int err, ret = 0;
@@ -549,7 +559,7 @@ SCONTROL_UPDATE_RES_CLEANUP:
  *     error message and returns 0.
  */
 extern int
-scontrol_create_res(int argc, char *argv[])
+scontrol_create_res(int argc, char **argv)
 {
 	resv_desc_msg_t resv_msg;
 	char *new_res_name = NULL;

@@ -6,7 +6,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -35,26 +35,14 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#   include "config.h"
-#endif
-
-#if HAVE_STDINT_H
-#  include <stdint.h>
-#endif
-
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>
-#endif
-
-#include <stdio.h>
-
-#include <sys/types.h>
-#include <signal.h>
-#include <stdlib.h>
-#include <unistd.h>
 #include <dlfcn.h>
+#include <inttypes.h>
 #include <pthread.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -314,7 +302,7 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid)
 	char *std_out, *tok;
 	uint32_t my_job_id;
 
-	my_job_id = get_next_job_id();
+	my_job_id = get_next_job_id(true);
 	_xlate_dependency(job_desc, submit_uid, my_job_id);
 
 	if (job_desc->account)

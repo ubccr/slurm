@@ -11,7 +11,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,9 +40,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if     HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
 #define _GNU_SOURCE	/* For POLLRDHUP */
 #include <fcntl.h>
@@ -320,7 +318,7 @@ extern bb_user_t *bb_find_user_rec(uint32_t user_id, bb_state_t *state_ptr)
 		user_ptr = user_ptr->next;
 	}
 	user_ptr = xmalloc(sizeof(bb_user_t));
-	xassert((user_ptr->magic = BB_USER_MAGIC));	/* Sets value */
+	user_ptr->magic = BB_USER_MAGIC;
 	user_ptr->next = state_ptr->bb_uhash[inx];
 	/* user_ptr->size = 0;	initialized by xmalloc */
 	user_ptr->user_id = user_id;
@@ -652,7 +650,35 @@ extern void bb_pack_state(bb_state_t *state_ptr, Buf buffer,
 	bb_config_t *config_ptr = &state_ptr->bb_config;
 	int i;
 
-	if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_17_02_PROTOCOL_VERSION) {
+		packstr(config_ptr->allow_users_str, buffer);
+		packstr(config_ptr->create_buffer,   buffer);
+		packstr(config_ptr->default_pool,    buffer);
+		packstr(config_ptr->deny_users_str,  buffer);
+		packstr(config_ptr->destroy_buffer,  buffer);
+		pack32(config_ptr->flags,            buffer);
+		packstr(config_ptr->get_sys_state,   buffer);
+		pack64(config_ptr->granularity,      buffer);
+		pack32(config_ptr->pool_cnt,         buffer);
+		for (i = 0; i < config_ptr->pool_cnt; i++) {
+			packstr(config_ptr->pool_ptr[i].name, buffer);
+			pack64(config_ptr->pool_ptr[i].total_space, buffer);
+			pack64(config_ptr->pool_ptr[i].granularity, buffer);
+			pack64(config_ptr->pool_ptr[i].unfree_space, buffer);
+			pack64(config_ptr->pool_ptr[i].used_space, buffer);
+		}
+		pack32(config_ptr->other_timeout,    buffer);
+		packstr(config_ptr->start_stage_in,  buffer);
+		packstr(config_ptr->start_stage_out, buffer);
+		packstr(config_ptr->stop_stage_in,   buffer);
+		packstr(config_ptr->stop_stage_out,  buffer);
+		pack32(config_ptr->stage_in_timeout, buffer);
+		pack32(config_ptr->stage_out_timeout,buffer);
+		pack64(state_ptr->total_space,       buffer);
+		pack64(state_ptr->unfree_space,      buffer);
+		pack64(state_ptr->used_space,        buffer);
+		pack32(config_ptr->validate_timeout, buffer);
+	} else if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
 		packstr(config_ptr->allow_users_str, buffer);
 		packstr(config_ptr->create_buffer,   buffer);
 		packstr(config_ptr->default_pool,    buffer);
@@ -923,8 +949,8 @@ extern void bb_sleep(bb_state_t *state_ptr, int add_secs)
 	ts.tv_nsec = tv.tv_usec * 1000;
 	slurm_mutex_lock(&state_ptr->term_mutex);
 	if (!state_ptr->term_flag) {
-		pthread_cond_timedwait(&state_ptr->term_cond,
-				       &state_ptr->term_mutex, &ts);
+		slurm_cond_timedwait(&state_ptr->term_cond,
+				     &state_ptr->term_mutex, &ts);
 	}
 	slurm_mutex_unlock(&state_ptr->term_mutex);
 }
@@ -944,7 +970,7 @@ extern bb_alloc_t *bb_alloc_name_rec(bb_state_t *state_ptr, char *name,
 	state_ptr->last_update_time = now;
 	bb_alloc = xmalloc(sizeof(bb_alloc_t));
 	i = user_id % BB_HASH_SIZE;
-	xassert((bb_alloc->magic = BB_ALLOC_MAGIC));	/* Sets value */
+	bb_alloc->magic = BB_ALLOC_MAGIC;
 	bb_alloc->next = state_ptr->bb_ahash[i];
 	state_ptr->bb_ahash[i] = bb_alloc;
 	bb_alloc->array_task_id = NO_VAL;
@@ -976,7 +1002,7 @@ extern bb_alloc_t *bb_alloc_job_rec(bb_state_t *state_ptr,
 	bb_alloc->array_task_id = job_ptr->array_task_id;
 	bb_alloc->assoc_ptr = job_ptr->assoc_ptr;
 	bb_alloc->job_id = job_ptr->job_id;
-	xassert((bb_alloc->magic = BB_ALLOC_MAGIC));	/* Sets value */
+	bb_alloc->magic = BB_ALLOC_MAGIC;
 	i = job_ptr->user_id % BB_HASH_SIZE;
 	xstrfmtcat(bb_alloc->name, "%u", job_ptr->job_id);
 	bb_alloc->next = state_ptr->bb_ahash[i];
@@ -1002,8 +1028,6 @@ extern bb_alloc_t *bb_alloc_job(bb_state_t *state_ptr,
 	bb_alloc_t *bb_alloc;
 
 	bb_alloc = bb_alloc_job_rec(state_ptr, job_ptr, bb_job);
-	bb_limit_add(bb_alloc->user_id, bb_alloc->size, bb_alloc->pool,
-		     state_ptr, true);
 
 	return bb_alloc;
 }
@@ -1153,11 +1177,7 @@ extern char *bb_run_script(char *script_type, char *script_path,
 			else if (cpid > 0)
 				exit(0);
 		}
-#ifdef SETPGRP_TWO_ARGS
-		setpgrp(0, 0);
-#else
-		setpgrp();
-#endif
+		setpgid(0, 0);
 		execv(script_path, script_argv);
 		error("%s: execv(%s): %m", __func__, script_path);
 		exit(127);
@@ -1245,7 +1265,7 @@ extern bb_job_t *bb_job_alloc(bb_state_t *state_ptr, uint32_t job_id)
 	bb_job_t *bb_job = xmalloc(sizeof(bb_job_t));
 
 	xassert(state_ptr);
-	xassert((bb_job->magic = BB_JOB_MAGIC));	/* Sets value */
+	bb_job->magic = BB_JOB_MAGIC;
 	bb_job->next = state_ptr->bb_jhash[inx];
 	bb_job->job_id = job_id;
 	state_ptr->bb_jhash[inx] = bb_job;

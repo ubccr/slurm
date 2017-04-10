@@ -5,7 +5,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -34,17 +34,15 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
 #define _GNU_SOURCE	/* For POLLRDHUP */
 #include <ctype.h>
 #include <poll.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #if HAVE_JSON_C_INC
 #  include <json-c/json.h>
@@ -56,6 +54,7 @@
 
 #include "src/common/list.h"
 #include "src/common/log.h"
+#include "src/common/macros.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/timers.h"
 #include "src/common/xmalloc.h"
@@ -394,7 +393,7 @@ static void _get_capabilities(void)
 {
 	/* Write nodes */
 	slurmctld_lock_t write_node_lock = {
-		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK };
+		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
 	char *cmd_resp, *script_argv[3], node_names[128];
 	power_config_nodes_t *ents = NULL;
 	int i, j, num_ent = 0, status = 0;
@@ -665,7 +664,7 @@ static void _build_full_nid_string(void)
 {
 	/* Read nodes */
 	slurmctld_lock_t read_node_lock = {
-		NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK };
+		NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 	struct node_record *node_ptr;
 	hostset_t hs = NULL;
 	char *sep, *tmp_str;
@@ -677,6 +676,8 @@ static void _build_full_nid_string(void)
 	lock_slurmctld(read_node_lock);
 	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
 	     i++, node_ptr++) {
+		if (IS_NODE_DOWN(node_ptr))
+			continue;
 		if (!hs)
 			hs = hostset_create(_node_name2nid(node_ptr->name));
 		else
@@ -704,7 +705,7 @@ static void _get_caps(void)
 {
 	/* Write nodes */
 	slurmctld_lock_t write_node_lock = {
-		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK };
+		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
 	char *cmd_resp, *script_argv[5];
 	power_config_nodes_t *ents = NULL;
 	int i, num_ent = 0, status = 0;
@@ -924,7 +925,7 @@ static void _get_nodes_ready(void)
 {
 	/* Write nodes */
 	slurmctld_lock_t write_node_lock = {
-		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK };
+		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
 	char *cmd_resp, *script_argv[5];
 	struct node_record *node_ptr;
 	power_config_nodes_t *ents = NULL;
@@ -1052,7 +1053,7 @@ static void _get_node_energy_counter(void)
 {
 	/* Write nodes */
 	slurmctld_lock_t write_node_lock = {
-		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK };
+		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
 	char *cmd_resp, *script_argv[5];
 	power_config_nodes_t *ents = NULL;
 	int i, j, num_ent = 0, status = 0;
@@ -1253,7 +1254,7 @@ static void _my_sleep(int add_secs)
 	ts.tv_nsec = tv.tv_usec * 1000;
 	slurm_mutex_lock(&term_lock);
 	if (!stop_power)
-		pthread_cond_timedwait(&term_cond, &term_lock, &ts);
+		slurm_cond_timedwait(&term_cond, &term_lock, &ts);
 	slurm_mutex_unlock(&term_lock);
 }
 
@@ -1265,7 +1266,7 @@ extern void *_power_agent(void *args)
 	static time_t last_balance_time = 0;
 	/* Read jobs and nodes */
 	slurmctld_lock_t read_locks = {
-		NO_LOCK, READ_LOCK, READ_LOCK, NO_LOCK };
+		NO_LOCK, READ_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 
 	last_balance_time = time(NULL);
 	while (!stop_power) {
@@ -1317,6 +1318,8 @@ static void _clear_node_caps(void)
 
 	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
 	     i++, node_ptr++) {
+		if (IS_NODE_DOWN(node_ptr))
+			continue;
 		if (!node_ptr->power)
 			continue;
 		if (node_ptr->power->state != 1)  /* Not ready, no change */
@@ -1333,6 +1336,8 @@ static void _set_node_caps(void)
 
 	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
 	     i++, node_ptr++) {
+		if (IS_NODE_DOWN(node_ptr))
+			continue;
 		if (!node_ptr->power)
 			continue;
 		if (node_ptr->power->state != 1)  /* Not ready, no change */
@@ -1430,7 +1435,8 @@ static void _rebalance_node_power(void)
 	     i++, node_ptr++) {
 		if (!node_ptr->power)
 			continue;
-		if (node_ptr->power->state != 1) {  /* Not ready -> no change */
+		if (IS_NODE_DOWN(node_ptr) ||
+		    (node_ptr->power->state != 1)) {/* Not ready -> no change */
 			if (node_ptr->power->cap_watts == 0) {
 				node_ptr->power->new_cap_watts =
 					node_ptr->power->max_watts;
@@ -1499,6 +1505,8 @@ static void _rebalance_node_power(void)
 		red1 /= node_num;
 		for (i = 0, node_ptr = node_record_table_ptr;
 		     i < node_record_count; i++, node_ptr++) {
+			if (IS_NODE_DOWN(node_ptr))
+				continue;
 			if (!node_ptr->power || !node_ptr->power->new_cap_watts)
 				continue;
 			tmp_u32 = node_ptr->power->new_cap_watts -
@@ -1519,6 +1527,8 @@ static void _rebalance_node_power(void)
 		ave_power = avail_power / node_power_raise_cnt;
 		for (i = 0, node_ptr = node_record_table_ptr;
 		     i < node_record_count; i++, node_ptr++) {
+			if (IS_NODE_DOWN(node_ptr))
+				continue;
 			if (!node_ptr->power || (node_ptr->power->state != 1))
 				continue;
 			if (node_ptr->power->new_cap_watts)    /* Already set */
@@ -1619,7 +1629,8 @@ static void _set_power_caps(void)
 	/* Pass 1, decrease power for select nodes */
 	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
 	     i++, node_ptr++) {
-		if (!node_ptr->power ||
+		if (IS_NODE_DOWN(node_ptr) ||
+		    !node_ptr->power ||
 		    (node_ptr->power->state != 1) ||
 		    (node_ptr->power->cap_watts <=
 		     node_ptr->power->new_cap_watts))
@@ -1660,7 +1671,8 @@ static void _set_power_caps(void)
 	/* Pass 2, increase power for select nodes */
 	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
 	     i++, node_ptr++) {
-		if (!node_ptr->power ||
+		if (IS_NODE_DOWN(node_ptr) ||
+		    !node_ptr->power ||
 		    (node_ptr->power->state != 1) ||
 		    (node_ptr->power->cap_watts >=
 		     node_ptr->power->new_cap_watts))
@@ -1704,7 +1716,7 @@ static void _stop_power_agent(void)
 {
 	slurm_mutex_lock(&term_lock);
 	stop_power = true;
-	pthread_cond_signal(&term_cond);
+	slurm_cond_signal(&term_cond);
 	slurm_mutex_unlock(&term_lock);
 }
 

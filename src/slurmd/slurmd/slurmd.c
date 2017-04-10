@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,9 +40,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
+
 #if HAVE_HWLOC
 #  include <hwloc.h>
 #endif
@@ -54,7 +53,6 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/param.h>
 #include <sys/resource.h>
@@ -79,7 +77,6 @@
 #include "src/common/node_features.h"
 #include "src/common/node_select.h"
 #include "src/common/pack.h"
-#include "src/common/parse_spec.h"
 #include "src/common/parse_time.h"
 #include "src/common/plugstack.h"
 #include "src/common/proc_args.h"
@@ -91,7 +88,6 @@
 #include "src/common/slurm_mcs.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_route.h"
-#include "src/common/slurm_strcasestr.h"
 #include "src/common/slurm_topology.h"
 #include "src/common/stepd_api.h"
 #include "src/common/switch.h"
@@ -140,7 +136,7 @@ static pthread_cond_t  active_cond    = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t fork_mutex     = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct connection {
-	slurm_fd_t fd;
+	int fd;
 	slurm_addr_t *cli_addr;
 } conn_t;
 
@@ -174,7 +170,7 @@ static void      _destroy_conf(void);
 static int       _drain_node(char *reason);
 static void      _fill_registration_msg(slurm_node_registration_status_msg_t *);
 static uint64_t  _get_int(const char *my_str);
-static void      _handle_connection(slurm_fd_t fd, slurm_addr_t *client);
+static void      _handle_connection(int fd, slurm_addr_t *client);
 static void      _hup_handler(int);
 static void      _increment_thd_count(void);
 static void      _init_conf(void);
@@ -210,7 +206,7 @@ static void      _wait_for_all_threads(int secs);
 static void      _wait_health_check(void);
 
 int
-main (int argc, char *argv[])
+main (int argc, char **argv)
 {
 	int i, pidfd;
 	int blocked_signals[] = {SIGPIPE, 0};
@@ -455,7 +451,7 @@ static void
 _msg_engine(void)
 {
 	slurm_addr_t *cli;
-	slurm_fd_t sock;
+	int sock;
 
 	msg_pthread = pthread_self();
 	slurmd_req(NULL);	/* initialize timer */
@@ -490,7 +486,7 @@ _decrement_thd_count(void)
 	slurm_mutex_lock(&active_mutex);
 	if (active_threads > 0)
 		active_threads--;
-	pthread_cond_signal(&active_cond);
+	slurm_cond_signal(&active_cond);
 	slurm_mutex_unlock(&active_mutex);
 }
 
@@ -506,7 +502,7 @@ _increment_thd_count(void)
 			     MAX_THREADS);
 			logged = true;
 		}
-		pthread_cond_wait(&active_cond, &active_mutex);
+		slurm_cond_wait(&active_cond, &active_mutex);
 	}
 	active_threads++;
 	slurm_mutex_unlock(&active_mutex);
@@ -530,18 +526,17 @@ _wait_for_all_threads(int secs)
 		if (rc == ETIMEDOUT) {
 			error("Timeout waiting for completion of %d threads",
 			      active_threads);
-			pthread_cond_signal(&active_cond);
+			slurm_cond_signal(&active_cond);
 			slurm_mutex_unlock(&active_mutex);
 			return;
 		}
 	}
-	pthread_cond_signal(&active_cond);
+	slurm_cond_signal(&active_cond);
 	slurm_mutex_unlock(&active_mutex);
 	verbose("all threads complete");
 }
 
-static void
-_handle_connection(slurm_fd_t fd, slurm_addr_t *cli)
+static void _handle_connection(int fd, slurm_addr_t *cli)
 {
 	int            rc;
 	pthread_attr_t attr;
@@ -702,7 +697,7 @@ _fill_registration_msg(slurm_node_registration_status_msg_t *msg)
 	if (first_msg) {
 		first_msg = false;
 		info("CPUs=%u Boards=%u Sockets=%u Cores=%u Threads=%u "
-		     "Memory=%u TmpDisk=%u Uptime=%u CPUSpecList=%s "
+		     "Memory=%"PRIu64" TmpDisk=%u Uptime=%u CPUSpecList=%s "
 		     "FeaturesAvail=%s FeaturesActive=%s",
 		     msg->cpus, msg->boards, msg->sockets, msg->cores,
 		     msg->threads, msg->real_memory, msg->tmp_disk,
@@ -710,7 +705,7 @@ _fill_registration_msg(slurm_node_registration_status_msg_t *msg)
 		     msg->features_active);
 	} else {
 		debug3("CPUs=%u Boards=%u Sockets=%u Cores=%u Threads=%u "
-		       "Memory=%u TmpDisk=%u Uptime=%u CPUSpecList=%s "
+		       "Memory=%"PRIu64" TmpDisk=%u Uptime=%u CPUSpecList=%s "
 		       "FeaturesAvail=%s FeaturesActive=%s",
 		       msg->cpus, msg->boards, msg->sockets, msg->cores,
 		       msg->threads, msg->real_memory, msg->tmp_disk,
@@ -1192,7 +1187,7 @@ _print_conf(void)
 	str[strlen(str)-1] = '\0';		/* trim trailing "," */
 	debug3("Inverse Map = %s", str);
 	xfree(str);
-	debug3("RealMemory  = %u",       conf->real_memory_size);
+	debug3("RealMemory  = %"PRIu64"",conf->real_memory_size);
 	debug3("TmpDisk     = %u",       conf->tmp_disk_space);
 	debug3("Epilog      = `%s'",     conf->epilog);
 	debug3("Logfile     = `%s'",     cf->slurmd_logfile);
@@ -1239,10 +1234,10 @@ _init_conf(void)
 
 	conf->starting_steps = list_create(destroy_starting_step);
 	slurm_mutex_init(&conf->starting_steps_lock);
-	pthread_cond_init(&conf->starting_steps_cond, NULL);
+	slurm_cond_init(&conf->starting_steps_cond, NULL);
 	conf->prolog_running_jobs = list_create(slurm_destroy_uint32_ptr);
 	slurm_mutex_init(&conf->prolog_running_lock);
-	pthread_cond_init(&conf->prolog_running_cond, NULL);
+	slurm_cond_init(&conf->prolog_running_cond, NULL);
 	return;
 }
 
@@ -1285,10 +1280,10 @@ _destroy_conf(void)
 		slurm_mutex_destroy(&conf->config_mutex);
 		FREE_NULL_LIST(conf->starting_steps);
 		slurm_mutex_destroy(&conf->starting_steps_lock);
-		pthread_cond_destroy(&conf->starting_steps_cond);
+		slurm_cond_destroy(&conf->starting_steps_cond);
 		FREE_NULL_LIST(conf->prolog_running_jobs);
 		slurm_mutex_destroy(&conf->prolog_running_lock);
-		pthread_cond_destroy(&conf->prolog_running_cond);
+		slurm_cond_destroy(&conf->prolog_running_cond);
 		slurm_cred_ctx_destroy(conf->vctx);
 		xfree(conf);
 	}
@@ -1321,7 +1316,7 @@ _print_config(void)
 
 	get_memory(&conf->real_memory_size);
 	get_tmp_disk(&conf->tmp_disk_space, "/tmp");
-	printf("RealMemory=%u TmpDisk=%u\n",
+	printf("RealMemory=%"PRIu64" TmpDisk=%u\n",
 	       conf->real_memory_size, conf->tmp_disk_space);
 
 	get_up_time(&conf->up_time);
@@ -1414,8 +1409,8 @@ _create_msg_socket(void)
 {
 	char* node_addr;
 
-	slurm_fd_t ld = slurm_init_msg_engine_addrname_port(conf->node_addr,
-							  conf->port);
+	int ld = slurm_init_msg_engine_addrname_port(conf->node_addr,
+						     conf->port);
 	if (conf->node_addr == NULL)
 		node_addr = "*";
 	else
@@ -1502,7 +1497,7 @@ _slurmd_init(void)
 	 * build_all_nodeline_info() to be called with proper argument. */
 	if (slurm_select_init(1) != SLURM_SUCCESS )
 		return SLURM_FAILURE;
-	build_all_nodeline_info(true);
+	build_all_nodeline_info(true, 0);
 	build_all_frontend_info(true);
 
 	/*
@@ -1637,7 +1632,11 @@ _slurmd_init(void)
 		}
 	}
 
-	if ((devnull = open_cloexec("/dev/null", O_RDWR)) < 0) {
+#ifdef O_CLOEXEC
+	if ((devnull = open("/dev/null", O_RDWR | O_CLOEXEC)) < 0) {
+#else
+	if ((devnull = open("/dev/null", O_RDWR)) < 0) {
+#endif
 		error("Unable to open /dev/null: %m");
 		return SLURM_FAILURE;
 	}
@@ -1789,7 +1788,7 @@ cleanup:
 	xfree(new_file);
 	if (buffer)
 		free_buf(buffer);
-	if (cred_fd > 0)
+	if (cred_fd >= 0)
 		close(cred_fd);
 	return error_code;
 }
@@ -2040,11 +2039,11 @@ static uint64_t _parse_msg_aggr_params(int type, char *params)
 
 	switch (type) {
 	case WINDOW_TIME:
-		if ((sub_str = slurm_strcasestr(params, "WindowTime=")))
+		if ((sub_str = xstrcasestr(params, "WindowTime=")))
 			value = _get_int(sub_str + 11);
 		break;
 	case WINDOW_MSGS:
-		if ((sub_str = slurm_strcasestr(params, "WindowMsgs=")))
+		if ((sub_str = xstrcasestr(params, "WindowMsgs=")))
 			value = _get_int(sub_str + 11);
 		break;
 	default:
@@ -2084,7 +2083,7 @@ static int _resource_spec_init(void)
 	return SLURM_SUCCESS;
 }
 
-/* Return TRUE if CoreSpecPlugin=core_spec/cray */
+/* Return true if CoreSpecPlugin=core_spec/cray */
 static bool _is_core_spec_cray(void)
 {
 	bool use_core_spec_cray = false;
@@ -2190,8 +2189,14 @@ static int _memory_spec_init(void)
 		return SLURM_SUCCESS;
 	}
 	if (!check_memspec_cgroup_job_confinement()) {
+		if (slurm_get_select_type_param() & CR_MEMORY) {
+			error("Resource spec: Limited MemSpecLimit support. "
+			     "Slurmd daemon not memory constrained. "
+			     "Reserved %"PRIu64" MB", conf->mem_spec_limit);
+			return SLURM_SUCCESS;
+		}
 		error("Resource spec: cgroup job confinement not configured. "
-		      "MemSpecLimit requires TaskPlugin=task/cgroup and "
+		      "Full MemSpecLimit support requires task/cgroup and "
 		      "ConstrainRAMSpace=yes in cgroup.conf");
 		return SLURM_ERROR;
 	}
@@ -2217,7 +2222,7 @@ static int _memory_spec_init(void)
 		      "system memory cgroup");
 		return SLURM_ERROR;
 	}
-	info("Resource spec: system cgroup memory limit set to %u MB",
+	info("Resource spec: system cgroup memory limit set to %"PRIu64" MB",
 	     conf->mem_spec_limit);
 	return SLURM_SUCCESS;
 }
@@ -2236,19 +2241,44 @@ static int _memory_spec_init(void)
 static void _select_spec_cores(void)
 {
 	int spec_cores, res_core, res_sock, res_off, core_off, thread_off;
+	int from_core, to_core, incr_core, from_sock, to_sock, incr_sock;
+	char *sched_params;
+	bool spec_cores_first;
 
+	sched_params = slurm_get_sched_params();
+	if (sched_params && strstr(sched_params, "spec_cores_first"))
+		spec_cores_first = true;
+	else
+		spec_cores_first = false;
+	xfree(sched_params);
+	if (spec_cores_first) {
+		from_core = 0;
+		to_core   = conf->cores;
+		incr_core = 1;
+		from_sock = 0;
+		to_sock   = conf->sockets;
+		incr_sock = 1;
+	} else {
+		from_core = conf->cores - 1;
+		to_core   = -1;
+		incr_core = -1;
+		from_sock = conf->sockets - 1;
+		to_sock   = -1;
+		incr_sock = -1;
+	}
 	spec_cores = conf->core_spec_cnt;
-	for (res_core = conf->cores - 1;
-	     (spec_cores && (res_core >= 0)); res_core--) {
-		for (res_sock = conf->sockets - 1;
-		     (spec_cores && (res_sock >= 0)); res_sock--) {
+	for (res_core = from_core;
+	     (spec_cores && (res_core != to_core)); res_core += incr_core) {
+		for (res_sock = from_sock;
+		     (spec_cores && (res_sock != to_sock));
+		      res_sock += incr_sock) {
 			core_off = ((res_sock*conf->cores) + res_core) *
 					conf->threads;
 			for (thread_off = 0; thread_off < conf->threads;
 			     thread_off++) {
 				bit_set(res_cpu_bitmap, core_off + thread_off);
 			}
-			res_off = (res_sock*conf->cores) + res_core;
+			res_off = (res_sock * conf->cores) + res_core;
 			bit_set(res_core_bitmap, res_off);
 			spec_cores--;
 		}

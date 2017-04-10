@@ -5,7 +5,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -34,16 +34,14 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
 #define _GNU_SOURCE
 
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 
 #include "src/common/slurm_xlator.h"
 #include "src/api/pmi_server.h"
@@ -299,7 +297,7 @@ static void _task_finish(task_exit_msg_t *msg)
 	uint32_t rc = 0;
 	int normal_exit = 0;
 	static int reduce_task_exit_msg = -1;
-	static int msg_printed = 0, last_task_exit_rc;
+	static int msg_printed = 0, oom_printed = 0, last_task_exit_rc;
 
 	const char *task_str = _taskstr(msg->num_tasks);
 
@@ -316,7 +314,9 @@ static void _task_finish(task_exit_msg_t *msg)
 
 	/* Only build the "tasks" and "hosts" strings as needed. Buidling them
 	 * can take multiple milliseconds */
-	if (WIFEXITED(msg->return_code)) {
+	if (((msg->return_code & 0xff) == SIG_OOM) && !oom_printed) {
+		build_task_string = true;
+	} else if (WIFEXITED(msg->return_code)) {
 		if ((rc = WEXITSTATUS(msg->return_code)) == 0) {
 			if (get_log_level() >= LOG_LEVEL_VERBOSE)
 				build_task_string = true;
@@ -340,7 +340,13 @@ static void _task_finish(task_exit_msg_t *msg)
 	}
 
 	slurm_mutex_lock(&launch_lock);
-	if (WIFEXITED(msg->return_code)) {
+	if ((msg->return_code & 0xff) == SIG_OOM) {
+		if (!oom_printed)
+			error("%s: %s %s: Out Of Memory", hosts, task_str, tasks);
+		oom_printed = 1;
+		if (*local_global_rc == NO_VAL)
+			*local_global_rc = msg->return_code;
+	} else if (WIFEXITED(msg->return_code)) {
 		if ((rc = WEXITSTATUS(msg->return_code)) == 0) {
 			verbose("%s: %s %s: Completed", hosts, task_str, tasks);
 			normal_exit = 1;
@@ -570,7 +576,7 @@ extern int launch_p_step_launch(
 	launch_params.multi_prog = opt.multi_prog ? true : false;
 	launch_params.cwd = opt.cwd;
 	launch_params.slurmd_debug = opt.slurmd_debug;
-	launch_params.buffered_stdio = opt.unbuffered;
+	launch_params.buffered_stdio = !opt.unbuffered;
 	launch_params.labelio = opt.labelio ? true : false;
 	launch_params.remote_output_filename =fname_remote_string(job->ofname);
 	launch_params.remote_input_filename = fname_remote_string(job->ifname);

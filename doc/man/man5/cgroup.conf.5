@@ -41,13 +41,6 @@ Specify the \fIPATH\fR under which cgroups should be mounted. This
 should be a writable directory which will contain cgroups mounted
 one per subsystem. The default \fIPATH\fR is /sys/fs/cgroup.
 
-.TP
-\fBCgroupReleaseAgentDir\fR=<path_to_release_agent_directory>
-Used to tune the cgroup system behavior. This parameter identifies the location
-of the directory containing Slurm cgroup release_agent files. As of 16.05.5
-the release_agents are no longer required for proper cleanup of the cgroup
-hierarchy.
-
 .SH "TASK/CGROUP PLUGIN"
 
 .LP
@@ -98,6 +91,13 @@ allocated resources. It uses the devices subsystem for that.
 The default value is "no".
 
 .TP
+\fBConstrainKmemSpace\fR=<yes|no>
+If configured to "yes" then constrain the job's Kmem RAM usage. In addition to
+RAM usage. Only takes effect if ConstrainRAMSpace is set to "yes". The default
+value is "yes", in which case the job's Kmem limit will be set to its RAM limit.
+Also see \fBAllowedKmemSpace\fR.
+
+.TP
 \fBConstrainRAMSpace\fR=<yes|no>
 If configured to "yes" then constrain the job's RAM usage by setting
 the memory soft limit to the allocated memory and the hard limit to
@@ -134,6 +134,16 @@ that may be used for a job. This will be the swap limit applied to jobs
 on systems where memory is not being explicitly allocated to job. The
 \fIPERCENT\fR may be an arbitrary floating point number between 0 and 100.
 The default value is 100.
+
+.TP
+\fBMaxKmemPercent\fR=\fIPERCENT\fR
+Set an upper bound in percent of total Kmem for a job. The \fIPERCENT\fR may be an
+arbitrary floating point number. The default value is 100.
+
+.TP
+\fBMinKmemSpace\fR=<number>
+Set a lower bound (in MB) on the memory limits defined by
+\fBAllowedKmemSpace\fR. The default limit is 30M.
 
 .TP
 \fBMinRAMSpace\fR=<number>

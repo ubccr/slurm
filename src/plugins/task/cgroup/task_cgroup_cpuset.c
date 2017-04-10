@@ -7,7 +7,7 @@
  *  Written by Martin Perry <martin.perry@atos.net>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -37,12 +37,11 @@
 \*****************************************************************************/
 
 #if !(defined(__FreeBSD__) || defined(__NetBSD__))
-#if HAVE_CONFIG_H
 #include "config.h"
-#endif
 
 #define _GNU_SOURCE
 #include <ctype.h>
+#include <limits.h>
 #include <sched.h>
 #include <sys/types.h>
 
@@ -121,10 +120,6 @@ static uint16_t bind_mode_ldom =
 
 #endif
 
-#ifndef PATH_MAX
-#define PATH_MAX 256
-#endif
-
 static bool cpuset_prefix_set = false;
 static char *cpuset_prefix = "";
 
@@ -178,30 +173,32 @@ static int _xcgroup_cpuset_init(xcgroup_t* cg)
 	char cpuset_meta[PATH_MAX];
 	char* cpuset_conf;
 	size_t csize;
-
 	xcgroup_t acg;
-	char* acg_name;
-	char* p;
+	char *acg_name, *p;
 
 	fstatus = XCGROUP_ERROR;
 
 	/* load ancestor cg */
-	acg_name = (char*) xstrdup(cg->name);
-	p = rindex(acg_name,'/');
+	acg_name = (char *)xstrdup(cg->name);
+	p = rindex(acg_name, '/');
 	if (p == NULL) {
 		debug2("task/cgroup: unable to get ancestor path for "
-		       "cpuset cg '%s' : %m",cg->path);
+		       "cpuset cg '%s' : %m", cg->path);
+		xfree(acg_name);
 		return fstatus;
-	} else
+	} else {
 		*p = '\0';
-	if (xcgroup_load(cg->ns,&acg, acg_name) != XCGROUP_SUCCESS) {
+	}
+	if (xcgroup_load(cg->ns, &acg, acg_name) != XCGROUP_SUCCESS) {
 		debug2("task/cgroup: unable to load ancestor for "
-		       "cpuset cg '%s' : %m",cg->path);
+		       "cpuset cg '%s' : %m", cg->path);
+		xfree(acg_name);
 		return fstatus;
 	}
+	xfree(acg_name);
 
 	/* inherits ancestor params */
-	for (i = 0 ; i < 2 ; i++) {
+	for (i = 0; i < 2; i++) {
 	again:
 		snprintf(cpuset_meta, sizeof(cpuset_meta), "%s%s",
 			 cpuset_prefix, cpuset_metafiles[i]);
@@ -1126,9 +1123,7 @@ extern int task_cgroup_cpuset_create(stepd_step_rec_t *job)
 {
 	int rc;
 	int fstatus = SLURM_ERROR;
-
 	xcgroup_t cpuset_cg;
-
 	uint32_t jobid = job->jobid;
 	uint32_t stepid = job->stepid;
 	uid_t uid = job->uid;
@@ -1137,8 +1132,7 @@ extern int task_cgroup_cpuset_create(stepd_step_rec_t *job)
 	char* job_alloc_cores = NULL;
 	char* step_alloc_cores = NULL;
 	char cpuset_meta[PATH_MAX];
-
-	char* cpus = NULL;
+	char *cpus = NULL;
 	size_t cpus_size;
 
 	char* slurm_cgpath;
@@ -1150,30 +1144,29 @@ extern int task_cgroup_cpuset_create(stepd_step_rec_t *job)
 
 	/* create slurm root cg in this cg namespace */
 	slurm_cgpath = task_cgroup_create_slurm_cg(&cpuset_ns);
-	if ( slurm_cgpath == NULL ) {
+	if (slurm_cgpath == NULL)
 		return SLURM_ERROR;
-	}
 
 	/* check that this cgroup has cpus allowed or initialize them */
-	if (xcgroup_load(&cpuset_ns,&slurm_cg,slurm_cgpath)
-	    != XCGROUP_SUCCESS) {
+	if (xcgroup_load(&cpuset_ns,&slurm_cg,slurm_cgpath) != XCGROUP_SUCCESS){
 		error("task/cgroup: unable to load slurm cpuset xcgroup");
 		xfree(slurm_cgpath);
 		return SLURM_ERROR;
 	}
 again:
 	snprintf(cpuset_meta, sizeof(cpuset_meta), "%scpus", cpuset_prefix);
-	rc = xcgroup_get_param(&slurm_cg, cpuset_meta, &cpus,&cpus_size);
-	if (rc != XCGROUP_SUCCESS || cpus_size == 1) {
+	rc = xcgroup_get_param(&slurm_cg, cpuset_meta, &cpus, &cpus_size);
+	if ((rc != XCGROUP_SUCCESS) || (cpus_size == 1)) {
 		if (!cpuset_prefix_set && (rc != XCGROUP_SUCCESS)) {
 			cpuset_prefix_set = 1;
 			cpuset_prefix = "cpuset.";
+			xfree(cpus);
 			goto again;
 		}
 
 		/* initialize the cpusets as it was non-existent */
-		if (_xcgroup_cpuset_init(&slurm_cg) !=
-		    XCGROUP_SUCCESS) {
+		if (_xcgroup_cpuset_init(&slurm_cg) != XCGROUP_SUCCESS) {
+			xfree(cpus);
 			xfree(slurm_cgpath);
 			xcgroup_destroy(&slurm_cg);
 			return SLURM_ERROR;
@@ -1236,7 +1229,7 @@ again:
 	 * a task. The release_agent will have to lock the root cpuset cgroup
 	 * to avoid this scenario.
 	 */
-	if (xcgroup_create(&cpuset_ns,&cpuset_cg,"",0,0) != XCGROUP_SUCCESS) {
+	if (xcgroup_create(&cpuset_ns, &cpuset_cg, "", 0,0) != XCGROUP_SUCCESS){
 		error("task/cgroup: unable to create root cpuset xcgroup");
 		return SLURM_ERROR;
 	}
@@ -1271,9 +1264,8 @@ again:
 	/*
 	 * create user cgroup in the cpuset ns (it could already exist)
 	 */
-	if (xcgroup_create(&cpuset_ns,&user_cpuset_cg,
-			   user_cgroup_path,
-			   getuid(),getgid()) != XCGROUP_SUCCESS) {
+	if (xcgroup_create(&cpuset_ns,&user_cpuset_cg, user_cgroup_path,
+			   getuid(), getgid()) != XCGROUP_SUCCESS) {
 		goto error;
 	}
 	if (xcgroup_instantiate(&user_cpuset_cg) != XCGROUP_SUCCESS) {
@@ -1284,21 +1276,21 @@ again:
 	/*
 	 * check that user's cpuset cgroup is consistant and add the job cores
 	 */
-	rc = xcgroup_get_param(&user_cpuset_cg, cpuset_meta, &cpus,&cpus_size);
+	rc = xcgroup_get_param(&user_cpuset_cg, cpuset_meta, &cpus, &cpus_size);
 	if (rc != XCGROUP_SUCCESS || cpus_size == 1) {
 		/* initialize the cpusets as it was non-existent */
-		if (_xcgroup_cpuset_init(&user_cpuset_cg) !=
-		    XCGROUP_SUCCESS) {
+		if (_xcgroup_cpuset_init(&user_cpuset_cg) != XCGROUP_SUCCESS) {
 			(void)xcgroup_delete(&user_cpuset_cg);
 			xcgroup_destroy(&user_cpuset_cg);
+			xfree(cpus);
 			goto error;
 		}
 	}
 	user_alloc_cores = xstrdup(job_alloc_cores);
-	if (cpus != NULL && cpus_size > 1) {
+	if ((cpus != NULL) && (cpus_size > 1)) {
 		cpus[cpus_size-1]='\0';
-		xstrcat(user_alloc_cores,",");
-		xstrcat(user_alloc_cores,cpus);
+		xstrcat(user_alloc_cores, ",");
+		xstrcat(user_alloc_cores, cpus);
 	}
 	xcgroup_set_param(&user_cpuset_cg, cpuset_meta, user_alloc_cores);
 	xfree(cpus);
@@ -1576,13 +1568,20 @@ extern int task_cgroup_cpuset_set_task_affinity(stepd_step_rec_t *job)
 	if (hwloc_compare_types(hwtype, HWLOC_OBJ_MACHINE) == 0) {
 		info("task/cgroup: task[%u] disabling affinity because of %s "
 		     "granularity",taskid, hwloc_obj_type_string(hwtype));
-
+		if (job->cpu_bind_type & CPU_BIND_VERBOSE)
+			fprintf(stderr,"task/cgroup: task[%u] disabling "
+				"affinity because of %s granularity\n",
+				taskid, hwloc_obj_type_string(hwtype));
 	} else if ((hwloc_compare_types(hwtype, HWLOC_OBJ_CORE) >= 0) &&
 		   (nobj < jnpus)) {
 		info("task/cgroup: task[%u] not enough %s objects (%d < %d), "
 		     "disabling affinity",
 		     taskid, hwloc_obj_type_string(hwtype), nobj, jnpus);
-
+		if (job->cpu_bind_type & CPU_BIND_VERBOSE)
+			fprintf(stderr, "task/cgroup: task[%u] not enough %s "
+				"objects (%d < %d), disabling affinity\n",
+				taskid, hwloc_obj_type_string(hwtype),
+				nobj, jnpus);
 	} else if (bind_type & bind_mode) {
 		/* Explicit binding mode specified by the user
 		 * Bind the taskid in accordance with the specified mode

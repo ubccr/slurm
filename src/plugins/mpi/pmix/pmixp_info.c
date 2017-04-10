@@ -6,7 +6,7 @@
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -52,7 +52,7 @@ static int _env_set(char ***env);
 /* stepd global contact information */
 void pmixp_info_srv_contacts(char *path, int fd)
 {
-	_server_addr = xstrdup(path);
+	_server_addr = _pmixp_job_info.server_addr_unfmt;
 	_server_fd = fd;
 }
 
@@ -286,26 +286,35 @@ err_exit:
 static int _env_set(char ***env)
 {
 	char *p = NULL;
-	char *spool = slurm_get_slurmd_spooldir();
+
+	xassert(_pmixp_job_info.hostname);
+
+	_pmixp_job_info.server_addr_unfmt = slurm_get_slurmd_spooldir(NULL);
+
+	_pmixp_job_info.lib_tmpdir = slurm_conf_expand_slurmd_path(
+		_pmixp_job_info.server_addr_unfmt, _pmixp_job_info.hostname);
+
+	xstrfmtcat(_pmixp_job_info.server_addr_unfmt, "/stepd.slurm.pmix.%d.%d",
+		   pmixp_info_jobid(), pmixp_info_stepid());
+
+	_pmixp_job_info.spool_dir = xstrdup(_pmixp_job_info.lib_tmpdir);
 
 	/* ----------- Temp directories settings ------------- */
-	_pmixp_job_info.lib_tmpdir = xstrdup_printf("%s/pmix.%d.%d/", spool,
-			pmixp_info_jobid(), pmixp_info_stepid());
-	xfree(spool);
+	xstrfmtcat(_pmixp_job_info.lib_tmpdir, "/pmix.%d.%d/",
+		   pmixp_info_jobid(), pmixp_info_stepid());
 
 	/* save client temp directory if requested
 	 * TODO: We want to get TmpFS value as well if exists.
 	 * Need to sync with SLURM developers.
 	 */
 	p = getenvp(*env, PMIXP_TMPDIR_CLI);
-	if (NULL != p) {
+
+	if (p)
 		_pmixp_job_info.cli_tmpdir_base = xstrdup(p);
-	} else {
-		p = slurm_get_tmp_fs();
-		if (NULL != p) {
-			_pmixp_job_info.cli_tmpdir_base = p;
-		}
-	}
+	else
+		_pmixp_job_info.cli_tmpdir_base = slurm_get_tmp_fs(
+			_pmixp_job_info.hostname);
+
 	_pmixp_job_info.cli_tmpdir =
 		xstrdup_printf("%s/spmix_appdir_%d.%d",
 			       _pmixp_job_info.cli_tmpdir_base,

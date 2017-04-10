@@ -7,7 +7,7 @@
  *  Written by Danny Auble <auble1@llnl.gov> et. al.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -333,7 +333,7 @@ extern void bg_requeue_job(uint32_t job_id, bool wait_for_start,
 {
 	int rc;
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
+		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK, READ_LOCK };
 
 	/* Wait for the slurmd to begin the batch script, slurm_fail_job()
 	   is a no-op if issued prior to the script initiation do
@@ -343,7 +343,7 @@ extern void bg_requeue_job(uint32_t job_id, bool wait_for_start,
 
 	if (!slurmctld_locked)
 		lock_slurmctld(job_write_lock);
-	rc = job_requeue(0, job_id, -1, (uint16_t)NO_VAL, preempted, 0);
+	rc = job_requeue(0, job_id, NULL, preempted, 0);
 	if (rc == ESLURM_JOB_PENDING) {
 		error("%s: Could not requeue pending job %u", __func__, job_id);
 	} else if (rc != SLURM_SUCCESS) {

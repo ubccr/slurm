@@ -164,8 +164,6 @@ The subject line of the email will be of this form:</p>
 SLURM Job_id=12 Name=my_app Staged Out, StageOut time 00:05:07
 </pre>
 
-<p><b>NOTE:</b> Burst buffer support is currently not available for job arrays.</p>
-
 <h2><a name="persist">Persistent Burst Buffer Creation and Deletion Directives</a></h2>
 
 <p>These options are used for both the <u>burst_buffer/cray</u> and

@@ -6,7 +6,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -39,11 +39,19 @@
 
 #define _GNU_SOURCE	/* For POLLRDHUP */
 #include <ctype.h>
+#include <fcntl.h>
+#ifdef HAVE_NUMA
+#undef NUMA_VERSION1_COMPATIBILITY
+#include <numa.h>
+#endif
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #if defined(__FreeBSD__) || defined(__NetBSD__)
@@ -60,8 +68,8 @@
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/parse_config.h"
+#include "src/common/read_config.h"
 #include "src/common/slurm_protocol_api.h"
-#include "src/common/slurm_strcasestr.h"
 #include "src/common/timers.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
@@ -72,10 +80,11 @@
 #include "src/slurmctld/reservation.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/state_save.h"
+#include "src/slurmd/slurmd/req.h"
 
 /* Maximum poll wait time for child processes, in milliseconds */
 #define MAX_POLL_WAIT   500
-#define SYSCFG_TIMEOUT 1000
+#define DEFAULT_SYSCFG_TIMEOUT 1000
 
 /* Intel Knights Landing Configuration Modes */
 #define KNL_NUMA_CNT	5
@@ -92,6 +101,12 @@
 #define KNL_HYBRID	0x0400
 #define KNL_FLAT	0x0800
 #define KNL_AUTO	0x1000
+
+#ifndef MODPROBE_PATH
+#define MODPROBE_PATH	"/sbin/modprobe"
+#endif
+#define ZONE_SORT_PATH	"/sys/kernel/zone_sort_free_pages/nodeid"
+//#define ZONE_SORT_PATH	"/tmp/nodeid"	/* For testing */
 
 #ifndef DEFAULT_MCDRAM_SIZE
 #define DEFAULT_MCDRAM_SIZE ((uint64_t) 16 * 1024 * 1024 * 1024)
@@ -137,16 +152,23 @@ const char plugin_type[]        = "node_features/knl_generic";
 const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 /* Configuration Paramters */
-static bool  debug_flag = false;
 static uint16_t allow_mcdram = KNL_MCDRAM_FLAG;
 static uint16_t allow_numa = KNL_NUMA_FLAG;
 static uid_t *allowed_uid = NULL;
 static int allowed_uid_cnt = 0;
+static uint32_t boot_time = (5 * 60);	/* 5 minute estimated boot time */
+static pthread_mutex_t config_mutex = PTHREAD_MUTEX_INITIALIZER;
+static bool debug_flag = false;
 static uint16_t default_mcdram = KNL_CACHE;
 static uint16_t default_numa = KNL_ALL2ALL;
-static char *syscfg_path = NULL;
-static pthread_mutex_t config_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char *mc_path = NULL;
+static uint32_t syscfg_timeout = 0;
 static bool reconfig = false;
+static time_t shutdown_time = 0;
+static char *syscfg_path = NULL;
+static uint32_t ume_check_interval = 0;
+static pthread_mutex_t ume_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t ume_thread = 0;
 
 /* Percentage of MCDRAM used for cache by type, updated from syscfg */
 static int mcdram_pct[KNL_MCDRAM_CNT];
@@ -156,10 +178,14 @@ static s_p_options_t knl_conf_file_options[] = {
 	{"AllowMCDRAM", S_P_STRING},
 	{"AllowNUMA", S_P_STRING},
 	{"AllowUserBoot", S_P_STRING},
+	{"BootTime", S_P_UINT32},
 	{"DefaultMCDRAM", S_P_STRING},
 	{"DefaultNUMA", S_P_STRING},
 	{"LogFile", S_P_STRING},
+	{"McPath", S_P_STRING},
 	{"SyscfgPath", S_P_STRING},
+	{"SyscfgTimeout", S_P_UINT32},
+	{"UmeCheckInterval", S_P_UINT32},
 	{NULL}
 };
 
@@ -476,10 +502,10 @@ static char *_run_script(char *cmd_path, char **script_argv, int *status)
 			fds.fd = pfd[0];
 			fds.events = POLLIN | POLLHUP | POLLRDHUP;
 			fds.revents = 0;
-			new_wait = SYSCFG_TIMEOUT - _tot_wait(&tstart);
+			new_wait = syscfg_timeout - _tot_wait(&tstart);
 			if (new_wait <= 0) {
 				error("%s: %s poll timeout @ %d msec",
-				      __func__, script_argv[1], SYSCFG_TIMEOUT);
+				      __func__, script_argv[1], syscfg_timeout);
 				break;
 			}
 			new_wait = MIN(new_wait, MAX_POLL_WAIT);
@@ -566,6 +592,73 @@ static char *_make_uid_str(uid_t *uid_array, int uid_cnt)
 	return uid_str;
 }
 
+/* Watch for Uncorrectable Memory Errors. Notify jobs if any detected */
+static void *_ume_agent(void *args)
+{
+	struct timespec req;
+	int i, mc_num, csrow_num, ue_count, last_ue_count = -1;
+	int *fd = NULL, fd_cnt = 0, fd_size = 0, ume_path_size;
+	char buf[8], *ume_path;
+	ssize_t rd_size;
+
+	/* Identify and open array of UME file descriptors */
+	ume_path_size = strlen(mc_path) + 32;
+	ume_path = xmalloc(ume_path_size);
+	for (mc_num = 0; ; mc_num++) {
+		for (csrow_num = 0; ; csrow_num++) {
+			if (fd_cnt == fd_size) {
+				fd_size += 64;
+				fd = xrealloc(fd, sizeof(int) * fd_size);
+			}
+			snprintf(ume_path, ume_path_size,
+				 "%s/mc%d/csrow%d/ue_count",
+				 mc_path, mc_num, csrow_num);
+			if ((fd[fd_cnt] = open(ume_path, 0)) >= 0)
+				fd_cnt++;
+			else
+				break;
+		}
+		if (csrow_num == 0)
+			break;
+	}
+	xfree(ume_path);
+
+	while (!shutdown_time) {
+		/* Get current UME count */
+		ue_count = 0;
+		for (i = 0; i < fd_cnt; i++) {
+			(void) lseek(fd[i], 0, SEEK_SET);
+			rd_size = read(fd[i], buf, 7);
+			if (rd_size <= 0)
+				continue;
+			buf[rd_size] = '\0';
+			ue_count += atoi(buf);
+		}
+
+		if (shutdown_time)
+			break;
+		/* If UME count changed, notify all steps */
+		if ((last_ue_count < ue_count) && (last_ue_count != -1)) {
+			i = ume_notify();
+			error("UME error detected. Notified %d job steps", i);
+		}
+		last_ue_count = ue_count;
+
+		if (shutdown_time)
+			break;
+		/* Sleep before retry */
+		req.tv_sec  =  ume_check_interval / 1000000;
+		req.tv_nsec = (ume_check_interval % 1000000) * 1000;
+		(void) nanosleep(&req, NULL);
+	}
+
+	for (i = 0; i < fd_cnt; i++)
+		(void) close(fd[i]);
+	xfree(fd);
+
+	return NULL;
+}
+
 /* Load configuration */
 extern int init(void)
 {
@@ -581,6 +674,7 @@ extern int init(void)
 	allow_numa = KNL_NUMA_FLAG;
 	xfree(allowed_uid);
 	allowed_uid_cnt = 0;
+	syscfg_timeout = DEFAULT_SYSCFG_TIMEOUT;
 	debug_flag = false;
 	default_mcdram = KNL_CACHE;
 	default_numa = KNL_ALL2ALL;
@@ -617,6 +711,7 @@ extern int init(void)
 			_make_uid_array(tmp_str);
 			xfree(tmp_str);
 		}
+		(void) s_p_get_uint32(&boot_time, "BootTime", tbl);
 		if (s_p_get_string(&tmp_str, "DefaultMCDRAM", tbl)) {
 			default_mcdram = _knl_mcdram_parse(tmp_str, ",");
 			if (_knl_mcdram_bits_cnt(default_mcdram) != 1) {
@@ -633,13 +728,20 @@ extern int init(void)
 			}
 			xfree(tmp_str);
 		}
+		(void) s_p_get_string(&mc_path, "McPath", tbl);
 		(void) s_p_get_string(&syscfg_path, "SyscfgPath", tbl);
+		(void) s_p_get_uint32(&syscfg_timeout, "SyscfgTimeout", tbl);
+		(void) s_p_get_uint32(&ume_check_interval, "UmeCheckInterval",
+				      tbl);
+
 		s_p_hashtbl_destroy(tbl);
 	} else if (errno != ENOENT) {
 		error("Error opening/reading knl_generic.conf: %m");
 		rc = SLURM_ERROR;
 	}
 	xfree(knl_conf_file);
+	if (!mc_path)
+		mc_path = xstrdup("/sys/devices/system/edac/mc");
 	if (!syscfg_path)
 		syscfg_path = xstrdup("/usr/bin/syscfg");
 
@@ -662,9 +764,13 @@ extern int init(void)
 		info("AllowMCDRAM=%s AllowNUMA=%s",
 		     allow_mcdram_str, allow_numa_str);
 		info("AllowUserBoot=%s", allow_user_str);
+		info("BootTIme=%u", boot_time);
 		info("DefaultMCDRAM=%s DefaultNUMA=%s",
 		     default_mcdram_str, default_numa_str);
+		info("McPath=%s", mc_path);
 		info("SyscfgPath=%s", syscfg_path);
+		info("SyscfgTimeout=%u msec", syscfg_timeout);
+		info("UmeCheckInterval=%u", ume_check_interval);
 		xfree(allow_mcdram_str);
 		xfree(allow_numa_str);
 		xfree(allow_user_str);
@@ -673,17 +779,38 @@ extern int init(void)
 	}
 	gres_plugin_add("hbm");
 
+	if (ume_check_interval && run_in_daemon("slurmd")) {
+		pthread_attr_t attr;
+		slurm_attr_init(&attr);
+		slurm_mutex_lock(&ume_mutex);
+		if (pthread_create(&ume_thread, &attr, _ume_agent, NULL)) {
+			error("%s: Unable to start UME monitor thread: %m",
+			       __func__);
+		}
+		slurm_mutex_unlock(&ume_mutex);
+		slurm_attr_destroy(&attr);
+	}
+
 	return rc;
 }
 
 /* Release allocated memory */
 extern int fini(void)
 {
+	shutdown_time = time(NULL);
+	slurm_mutex_lock(&ume_mutex);
+	if (ume_thread) {
+		pthread_join(ume_thread, NULL);
+		ume_thread = 0;
+	}
+	slurm_mutex_unlock(&ume_mutex);
 	xfree(allowed_uid);
 	allowed_uid_cnt = 0;
 	debug_flag = false;
 	xfree(mcdram_per_node);
+	xfree(mc_path);
 	xfree(syscfg_path);
+	xfree(syscfg_timeout);
 	return SLURM_SUCCESS;
 }
 
@@ -766,23 +893,23 @@ extern void node_features_p_node_state(char **avail_modes, char **current_mode)
 				cur_sep = ",";
 			}
 		}
-		if (slurm_strcasestr(resp_msg, "All2All")) {
+		if (xstrcasestr(resp_msg, "All2All")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "a2a");
 			avail_sep = ",";
 		}
-		if (slurm_strcasestr(resp_msg, "Hemisphere")) {
+		if (xstrcasestr(resp_msg, "Hemisphere")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "hemi");
 			avail_sep = ",";
 		}
-		if (slurm_strcasestr(resp_msg, "Quadrant")) {
+		if (xstrcasestr(resp_msg, "Quadrant")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "quad");
 			avail_sep = ",";
 		}
-		if (slurm_strcasestr(resp_msg, "SNC-2")) {
+		if (xstrcasestr(resp_msg, "SNC-2")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "snc2");
 			avail_sep = ",";
 		}
-		if (slurm_strcasestr(resp_msg, "SNC-4")) {
+		if (xstrcasestr(resp_msg, "SNC-4")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "snc4");
 			avail_sep = ",";
 		}
@@ -818,23 +945,23 @@ extern void node_features_p_node_state(char **avail_modes, char **current_mode)
 				xstrfmtcat(cur_state, "%s%s", cur_sep, "auto");
 			}
 		}
-		if (slurm_strcasestr(resp_msg, "Cache")) {
+		if (xstrcasestr(resp_msg, "Cache")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "cache");
 			avail_sep = ",";
 		}
-		if (slurm_strcasestr(resp_msg, "Flat")) {
+		if (xstrcasestr(resp_msg, "Flat")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "flat");
 			avail_sep = ",";
 		}
-		if (slurm_strcasestr(resp_msg, "Hybrid")) {
+		if (xstrcasestr(resp_msg, "Hybrid")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "hybrid");
 			avail_sep = ",";
 		}
-		if (slurm_strcasestr(resp_msg, "Equal")) {
+		if (xstrcasestr(resp_msg, "Equal")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "equal");
 			avail_sep = ",";
 		}
-		if (slurm_strcasestr(resp_msg, "Auto")) {
+		if (xstrcasestr(resp_msg, "Auto")) {
 			xstrfmtcat(avail_states, "%s%s", avail_sep, "auto");
 			/* avail_sep = ",";	CLANG error: Dead assignment */
 		}
@@ -1214,6 +1341,43 @@ extern char *node_features_p_node_xlate(char *new_features, char *orig_features)
 	return node_features;
 }
 
+/* Perform set up for step launch
+ * mem_sort IN - Trigger sort of memory pages (KNL zonesort)
+ * numa_bitmap IN - NUMA nodes allocated to this job */
+extern void node_features_p_step_config(bool mem_sort, bitstr_t *numa_bitmap)
+{
+#ifdef HAVE_NUMA
+	if (mem_sort && (numa_available() != -1)) {
+//FIXME: after reboot of SchedMD KNL nodes, run:
+// insmod /home/tim/kmod/xppsl-addons/zonesort_module.ko
+		struct stat sb;
+		int buf_len, fd, i, len;
+		char buf[8];
+
+		if (stat(ZONE_SORT_PATH, &sb) == -1)
+			(void) system(MODPROBE_PATH " zonesort_module");
+		if ((fd = open(ZONE_SORT_PATH, O_WRONLY | O_SYNC)) == -1) {
+			error("%s: Could not open file %s: %m",
+			      __func__, ZONE_SORT_PATH);
+		} else {
+			len = numa_max_node() + 1;
+			for (i = 0; i < len; i++) {
+				if (numa_bitmap && !bit_test(numa_bitmap, i))
+					continue;
+				snprintf(buf, sizeof(buf), "%d", i);
+				buf_len = strlen(buf) + 1;
+				// info("SORT NUMA %s", buf);
+				if (write(fd, buf, buf_len) != buf_len) {
+					error("%s: Could not write file %s: %m",
+					      __func__, ZONE_SORT_PATH);
+				}
+			}
+			(void) close(fd);
+		}
+	}
+#endif
+}
+
 /* Determine if the specified user can modify the currently available node
  * features */
 extern bool node_features_p_user_update(uid_t uid)
@@ -1229,4 +1393,10 @@ extern bool node_features_p_user_update(uid_t uid)
 	}
 
 	return false;
+}
+
+/* Return estimated reboot time, in seconds */
+extern uint32_t node_features_p_boot_time(void)
+{
+	return boot_time;
 }

@@ -6,7 +6,7 @@
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -69,6 +69,8 @@ typedef struct {
 	int timeout;
 	char *cli_tmpdir, *cli_tmpdir_base;
 	char *lib_tmpdir;
+	char *server_addr_unfmt;
+	char *spool_dir;
 	uid_t uid;
 	gid_t gid;
 } pmix_jobinfo_t;
@@ -103,7 +105,7 @@ static inline char *pmixp_info_tmpdir_cli_base(void)
 	return _pmixp_job_info.cli_tmpdir_base;
 }
 
-/* Cli tempdir */
+/* Lib tempdir */
 static inline char *pmixp_info_tmpdir_lib(void)
 {
 	return _pmixp_job_info.lib_tmpdir;
@@ -272,12 +274,11 @@ static inline char *pmixp_info_job_host(int nodeid)
 /* namespaces list operations */
 static inline char *pmixp_info_nspace_usock(const char *nspace)
 {
-	char *spool, *usock = NULL;
+	char *spool;
 	debug("mpi/pmix: setup sockets");
-	spool = slurm_get_slurmd_spooldir();
-	xstrfmtcat(usock, "%s/stepd.%s", spool, nspace);
-	xfree(spool);
-	return usock;
+	spool = xstrdup_printf("%s/stepd.%s",
+			       _pmixp_job_info.spool_dir, nspace);
+	return spool;
 }
 
 #endif /* PMIXP_INFO_H */
