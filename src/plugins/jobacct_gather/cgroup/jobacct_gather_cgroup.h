@@ -43,8 +43,8 @@
 #include "src/common/xcgroup_read_config.h"
 #include "src/slurmd/common/xcgroup.h"
 
-extern xcgroup_t task_memory_cg;
-extern xcgroup_t task_cpuacct_cg;
+extern xcgroup_t step_memory_cg;
+extern xcgroup_t step_cpuacct_cg;
 
 extern int jobacct_gather_cgroup_cpuacct_init(
 	slurm_cgroup_conf_t *slurm_cgroup_conf);
