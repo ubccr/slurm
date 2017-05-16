@@ -770,6 +770,16 @@ int dump_all_job_state(void)
 	return error_code;
 }
 
+static int _find_resv_part(void *x, void *key)
+{
+	slurmctld_resv_t *resv_ptr = (slurmctld_resv_t *) x;
+
+	if (resv_ptr->part_ptr != (struct part_record *) key)
+		return 0;
+	else
+		return 1;	/* match */
+}
+
 /* Open the job state save file, or backup if necessary.
  * state_file IN - the name of the state save file used
  * RET the file description to read from or error code
@@ -2189,7 +2199,7 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 			job_ptr->qos_id = qos_rec.id;
 	}
 
-	/* do this after the format string just incase for some
+	/* do this after the format string just in case for some
 	 * reason the tres_alloc_str is NULL but not the fmt_str */
 	if (job_ptr->tres_alloc_str)
 		assoc_mgr_set_tres_cnt_array(
@@ -3246,7 +3256,7 @@ extern int kill_job_by_front_end_name(char *node_name)
 
 /*
  * partition_in_use - determine whether a partition is in use by a RUNNING
- *	PENDING or SUSPENDED job
+ *	PENDING or SUSPENDED job or reservations
  * IN part_name - name of a partition
  * RET true if the partition is in use, else false
  */
@@ -3260,6 +3270,7 @@ extern bool partition_in_use(char *part_name)
 	if (part_ptr == NULL)	/* No such partition */
 		return false;
 
+	/* check jobs */
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
 		if (job_ptr->part_ptr == part_ptr) {
@@ -3270,6 +3281,11 @@ extern bool partition_in_use(char *part_name)
 		}
 	}
 	list_iterator_destroy(job_iterator);
+
+	/* check reservations */
+	if (list_find_first(resv_list, _find_resv_part, part_ptr))
+		return true;
+
 	return false;
 }
 
@@ -3846,6 +3862,7 @@ extern struct job_record *job_array_split(struct job_record *job_ptr)
 					   job_ptr->prio_factors);
 
 	job_ptr_pend->account = xstrdup(job_ptr->account);
+	job_ptr_pend->admin_comment = xstrdup(job_ptr->admin_comment);
 	job_ptr_pend->alias_list = xstrdup(job_ptr->alias_list);
 	job_ptr_pend->alloc_node = xstrdup(job_ptr->alloc_node);
 
@@ -3872,6 +3889,8 @@ extern struct job_record *job_array_split(struct job_record *job_ptr)
 			checkpoint_copy_jobinfo(job_ptr->check_job);
 	}
 	job_ptr_pend->burst_buffer = xstrdup(job_ptr->burst_buffer);
+	job_ptr_pend->burst_buffer_state = xstrdup(job_ptr->burst_buffer_state);
+	job_ptr_pend->clusters = xstrdup(job_ptr->clusters);
 	job_ptr_pend->comment = xstrdup(job_ptr->comment);
 
 	job_ptr_pend->front_end_ptr = NULL;
@@ -6499,7 +6518,7 @@ static int _test_job_desc_fields(job_desc_msg_t * job_desc)
 	    _test_strlen(job_desc->burst_buffer, "burst_buffer",1024*8) ||
 	    _test_strlen(job_desc->ckpt_dir, "ckpt_dir", 1024)		||
 	    _test_strlen(job_desc->comment, "comment", 1024)		||
-	    _test_strlen(job_desc->cpu_bind, "cpu_bind", 1024)		||
+	    _test_strlen(job_desc->cpu_bind, "cpu_bind", 1024 * 128)	||
 	    _test_strlen(job_desc->dependency, "dependency", 1024*128)	||
 	    _test_strlen(job_desc->features, "features", 1024)		||
 	    _test_strlen(job_desc->gres, "gres", 1024)			||
@@ -6507,7 +6526,7 @@ static int _test_job_desc_fields(job_desc_msg_t * job_desc)
 	    _test_strlen(job_desc->linuximage, "linuximage", 1024)	||
 	    _test_strlen(job_desc->mail_user, "mail_user", 1024)	||
 	    _test_strlen(job_desc->mcs_label, "mcs_label", 1024)	||
-	    _test_strlen(job_desc->mem_bind, "mem_bind", 1024)		||
+	    _test_strlen(job_desc->mem_bind, "mem_bind", 1024 * 128)	||
 	    _test_strlen(job_desc->mloaderimage, "mloaderimage", 1024)	||
 	    _test_strlen(job_desc->name, "name", 1024)			||
 	    _test_strlen(job_desc->network, "network", 1024)		||
@@ -9377,7 +9396,7 @@ static void _pack_default_job_details(struct job_record *job_ptr,
 				pack32((uint32_t) 0, buffer);
 			} else if (job_ptr->node_cnt_wag) {
 				/* This should catch everything else, but
-				 * just incase this is 0 (startup or
+				 * just in case this is 0 (startup or
 				 * whatever) we will keep the rest of
 				 * this if statement around.
 				 */
@@ -9529,7 +9548,7 @@ static void _pack_default_job_details(struct job_record *job_ptr,
 				pack32((uint32_t) 0, buffer);
 			} else if (job_ptr->node_cnt_wag) {
 				/* This should catch everything else, but
-				 * just incase this is 0 (startup or
+				 * just in case this is 0 (startup or
 				 * whatever) we will keep the rest of
 				 * this if statement around.
 				 */
@@ -10778,23 +10797,29 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 	}
 
 	/* Always do this last just in case the assoc_ptr changed */
-	if (job_specs->admin_comment && !validate_super_user(uid)) {
-		error("Attempt to change admin_comment for job %u",
-		      job_ptr->job_id);
-		error_code = ESLURM_ACCESS_DENIED;
-	} else if (job_specs->admin_comment &&
-		   (job_specs->admin_comment[0] == '+') &&
-		   (job_specs->admin_comment[1] == '=')) {
-		if (job_ptr->admin_comment)
-			xstrcat(job_ptr->admin_comment, ",");
-		xstrcat(job_ptr->admin_comment, job_specs->admin_comment + 2);
-		info("update_job: setting admin_comment to %s for job_id %u",
-		     job_ptr->admin_comment, job_ptr->job_id);
-	} else {
-		xfree(job_ptr->admin_comment);
-		job_ptr->admin_comment = xstrdup(job_specs->admin_comment);
-		info("update_job: setting admin_comment to %s for job_id %u",
-		     job_ptr->admin_comment, job_ptr->job_id);
+	if (job_specs->admin_comment) {
+		if (!validate_super_user(uid)) {
+			error("Attempt to change admin_comment for job %u",
+			      job_ptr->job_id);
+			error_code = ESLURM_ACCESS_DENIED;
+		} else if ((job_specs->admin_comment[0] == '+') &&
+			   (job_specs->admin_comment[1] == '=')) {
+			if (job_ptr->admin_comment)
+				xstrcat(job_ptr->admin_comment, ",");
+			xstrcat(job_ptr->admin_comment,
+				job_specs->admin_comment + 2);
+			info("update_job: adding to admin_comment it is now %s for job_id %u",
+			     job_ptr->admin_comment, job_ptr->job_id);
+		} else if (!xstrcmp(job_ptr->admin_comment,
+				   job_specs->admin_comment)) {
+			info("update_job: admin_comment the same as before, not changing");
+		} else {
+			xfree(job_ptr->admin_comment);
+			job_ptr->admin_comment =
+				xstrdup(job_specs->admin_comment);
+			info("update_job: setting admin_comment to %s for job_id %u",
+			     job_ptr->admin_comment, job_ptr->job_id);
+		}
 	}
 
 	/* Always do this last just in case the assoc_ptr changed */
@@ -11327,6 +11352,15 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 				} else
 					error_code = ESLURM_PRIO_RESET_FAIL;
 				job_ptr->priority = job_specs->priority;
+				if (job_ptr->part_ptr_list &&
+				    job_ptr->priority_array) {
+					int i, j = list_count(
+						job_ptr->part_ptr_list);
+					for (i = 0; i < j; i++) {
+						job_ptr->priority_array[i] =
+						job_specs->priority;
+					}
+				}
 			}
 			info("sched: update_job: setting priority to %u for "
 			     "job_id %u", job_ptr->priority,
@@ -14832,7 +14866,7 @@ static int _set_top(struct job_record *job_ptr, uid_t uid)
 	list_iterator_destroy(job_iterator);
 
 	/* Now adjust nice values and priorities of effected jobs */
-	if (high_prio > job_ptr->priority) {
+	if (high_prio >= job_ptr->priority) {
 		delta_nice = high_prio - job_ptr->priority;
 		delta_nice = MIN(job_ptr->details->nice, delta_nice);
 		job_ptr->priority += delta_nice;
@@ -14840,13 +14874,16 @@ static int _set_top(struct job_record *job_ptr, uid_t uid)
 		for (i = 0; i < high_prio_job_cnt; i++) {
 			adj_prio = delta_nice / (high_prio_job_cnt - i);
 			job_test_ptr = job_adj_list[i];
+			if (job_test_ptr->priority == high_prio)
+				adj_prio = MAX(adj_prio, 1);  /* ensure lower */
 			adj_prio = MIN((job_test_ptr->priority - 1), adj_prio);
 			max_delta = (uint32_t) 0xffffffff -
 				    job_test_ptr->details->nice;
 			adj_prio = MIN(max_delta, adj_prio);
 			job_test_ptr->priority -= adj_prio;
 			job_test_ptr->details->nice += adj_prio;
-			delta_nice -= adj_prio;
+			if (delta_nice >= adj_prio)
+				delta_nice -= adj_prio;
 		}
 		last_job_update = time(NULL);
 	}

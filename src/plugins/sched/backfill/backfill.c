@@ -68,6 +68,7 @@
 #include "slurm/slurm_errno.h"
 
 #include "src/common/assoc_mgr.h"
+#include "src/common/gres.h"
 #include "src/common/list.h"
 #include "src/common/macros.h"
 #include "src/common/node_features.h"
@@ -888,6 +889,7 @@ static int _attempt_backfill(void)
 	struct job_record *job_ptr;
 	struct part_record *part_ptr, **bf_part_ptr = NULL;
 	uint32_t end_time, end_reserve, deadline_time_limit, boot_time;
+	uint32_t orig_end_time;
 	uint32_t time_limit, comp_time_limit, orig_time_limit, part_time_limit;
 	uint32_t min_nodes, max_nodes, req_nodes;
 	bitstr_t *active_bitmap = NULL, *avail_bitmap = NULL;
@@ -1135,10 +1137,10 @@ static int _attempt_backfill(void)
 			continue;
 		}
 
-		if (!acct_policy_job_runnable_state(job_ptr) &&
-		    (!assoc_limit_stop ||
-		     !acct_policy_job_runnable_pre_select(job_ptr)))
+		if (!assoc_limit_stop &&
+		    !acct_policy_job_runnable_pre_select(job_ptr)) {
 			continue;
+		}
 
 		job_no_reserve = 0;
 		if (bf_min_prio_reserve &&
@@ -1390,6 +1392,13 @@ next_task:
 				break;
 			}
 
+			/* Reset backfill scheduling timers, resume testing */
+			sched_start = time(NULL);
+			gettimeofday(&start_tv, NULL);
+			job_test_count = 1;
+			test_time_count = 0;
+			START_TIMER;
+
 			/* With bf_continue configured, the original job could
 			 * have been scheduled or cancelled and purged.
 			 * Revalidate job the record here. */
@@ -1408,12 +1417,6 @@ next_task:
 
 			job_ptr->time_limit = save_time_limit;
 			job_ptr->part_ptr = part_ptr;
-			/* Reset backfill scheduling timers, resume testing */
-			sched_start = time(NULL);
-			gettimeofday(&start_tv, NULL);
-			job_test_count = 1;
-			test_time_count = 0;
-			START_TIMER;
 		}
 
 		FREE_NULL_BITMAP(avail_bitmap);
@@ -1532,12 +1535,15 @@ next_task:
 			}
 		}
 		boot_time = 0;
-		if (test_fini != 1) {
-			/* Unable to start job using currently currently active
-			 * features, need to use features which can be made
+		if (test_fini == 0) {
+			/* Unable to start job using currently active features,
+			 * need to try using features which can be made
 			 * available after node reboot */
 			bitstr_t *tmp_core_bitmap = NULL;
 			bitstr_t *tmp_node_bitmap = NULL;
+			debug2("backfill: entering _try_sched for job %u. "
+			       "Need to use features which can be made "
+			       "available after node reboot", job_ptr->job_id);
 			/* Determine impact of any advance reservations */
 			j = job_test_resv(job_ptr, &start_res, true,
 					  &tmp_node_bitmap, &tmp_core_bitmap,
@@ -1549,6 +1555,26 @@ next_task:
 				FREE_NULL_BITMAP(tmp_node_bitmap);
 			}
 			boot_time = node_features_g_boot_time();
+			orig_end_time = end_time;
+			end_time += boot_time;
+
+			for (j = 0; ; ) {
+				if (node_space[j].end_time <= start_res)
+					;
+				else if (node_space[j].begin_time <= end_time) {
+					if (node_space[j].begin_time >
+					    orig_end_time)
+						bit_and(avail_bitmap,
+						node_space[j].avail_bitmap);
+				} else
+					break;
+				if ((j = node_space[j].next) == 0)
+					break;
+			}
+		}
+		if (test_fini != 1) {
+			/* Either active_bitmap was NULL or not usable by the
+			 * job. Test using avail_bitmap instead */
 			j = _try_sched(job_ptr, &avail_bitmap, min_nodes,
 				       max_nodes, req_nodes, exc_core_bitmap);
 			if (test_fini == 0) {
@@ -1682,7 +1708,8 @@ next_task:
 			}
 
 			if ((rc == ESLURM_RESERVATION_BUSY) ||
-			    (rc == ESLURM_ACCOUNTING_POLICY) ||
+			    (rc == ESLURM_ACCOUNTING_POLICY &&
+			     !assoc_limit_stop) ||
 			    (rc == ESLURM_POWER_NOT_AVAIL) ||
 			    (rc == ESLURM_POWER_RESERVED)) {
 				/* Unknown future start time, just skip job */
@@ -1693,6 +1720,19 @@ next_task:
 					job_ptr->start_time = 0;
 				_set_job_time_limit(job_ptr, orig_time_limit);
 				continue;
+			} else if (rc == ESLURM_ACCOUNTING_POLICY) {
+				/* Unknown future start time. Determining
+				 * when it can start with certainty requires
+				 * when every running and pending job starts
+				 * and ends and tracking all of there resources.
+				 * That requires very high overhead, that we
+				 * don't want to add. Estimate that it can start
+				 * after the next job ends (or in 5 minutes if
+				 * we don't have that information yet). */
+				if (later_start)
+					job_ptr->start_time = later_start;
+				else
+					job_ptr->start_time = now + 500;
 			} else if (rc != SLURM_SUCCESS) {
 				if (debug_flags & DEBUG_FLAG_BACKFILL) {
 					info("backfill: planned start of job %u"
@@ -1743,6 +1783,10 @@ next_task:
 		if (later_start && (job_ptr->start_time > later_start)) {
 			/* Try later when some nodes currently reserved for
 			 * pending jobs are free */
+			if (debug_flags & DEBUG_FLAG_BACKFILL) {
+				info("backfill: Try later job %u later_start %ld",
+			             job_ptr->job_id, later_start);
+			}
 			job_ptr->start_time = 0;
 			goto TRY_LATER;
 		}
@@ -1799,12 +1843,56 @@ next_task:
 			 * plugin does not know about. Try again later. */
 			later_start = job_ptr->start_time;
 			job_ptr->start_time = 0;
+			if (debug_flags & DEBUG_FLAG_BACKFILL) {
+				info("backfill: Job %u overlaps with existing "
+				     "reservation start_time=%u "
+				     "end_reserve=%u boot_time=%u "
+				     "later_start %ld", job_ptr->job_id,
+				     start_time, end_reserve, boot_time,
+				     later_start);
+			}
 			goto TRY_LATER;
 		}
 
 		/*
 		 * Add reservation to scheduling table if appropriate
 		 */
+		if (!assoc_limit_stop) {
+			uint32_t selected_node_cnt;
+			uint64_t tres_req_cnt[slurmctld_tres_cnt];
+
+			selected_node_cnt = bit_set_count(avail_bitmap);
+			memcpy(tres_req_cnt, job_ptr->tres_req_cnt,
+			       sizeof(tres_req_cnt));
+			tres_req_cnt[TRES_ARRAY_CPU] =
+				(uint64_t)(job_ptr->total_cpus ?
+					   job_ptr->total_cpus :
+					   job_ptr->details->min_cpus);
+
+			tres_req_cnt[TRES_ARRAY_MEM] = job_get_tres_mem(
+						job_ptr->details->pn_min_memory,
+						tres_req_cnt[TRES_ARRAY_CPU],
+						selected_node_cnt);
+
+			tres_req_cnt[TRES_ARRAY_NODE] =
+				(uint64_t)selected_node_cnt;
+
+			gres_set_job_tres_cnt(job_ptr->gres_list,
+					      selected_node_cnt,
+					      tres_req_cnt,
+					      false);
+
+			if (!acct_policy_job_runnable_post_select(job_ptr,
+							  tres_req_cnt)) {
+				if (debug_flags & DEBUG_FLAG_BACKFILL) {
+					info("backfill: adding reservation for "
+					     "job %u blocked by "
+					     "acct_policy_job_runnable_post_select",
+					     job_ptr->job_id);
+				}
+				continue;
+			}
+		}
 		if (debug_flags & DEBUG_FLAG_BACKFILL)
 			_dump_job_sched(job_ptr, end_reserve, avail_bitmap);
 		if (qos_ptr && (qos_ptr->flags & QOS_FLAG_NO_RESERVE))

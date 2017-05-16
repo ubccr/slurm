@@ -31,7 +31,7 @@
 
 PROGRAM=libtool
 PACKAGE=libtool
-VERSION="2.4.6 Debian-2.4.6-1"
+VERSION="2.4.6 Debian-2.4.6-2"
 package_revision=2.4.6
 
 
@@ -854,7 +854,7 @@ func_mkdir_p ()
       # While some portion of DIR does not yet exist...
       while test ! -d "$_G_directory_path"; do
         # ...make a list in topmost first order.  Use a colon delimited
-	# list incase some portion of path contains whitespace.
+	# list in case some portion of path contains whitespace.
         _G_dir_list=$_G_directory_path:$_G_dir_list
 
         # If the last portion added has no slash in it, the list is done
@@ -1977,7 +1977,7 @@ func_version ()
 # End:
 
 # Set a version string.
-scriptversion='(GNU libtool) 2.4.6 Debian-2.4.6-1'
+scriptversion='(GNU libtool) 2.4.6'
 
 
 # func_echo ARG...
@@ -2068,7 +2068,7 @@ include the following information:
        compiler:       $LTCC
        compiler flags: $LTCFLAGS
        linker:         $LD (gnu? $with_gnu_ld)
-       version:        $progname $scriptversion
+       version:        $progname $scriptversion Debian-2.4.6-2
        automake:       `($AUTOMAKE --version) 2>/dev/null |$SED 1q`
        autoconf:       `($AUTOCONF --version) 2>/dev/null |$SED 1q`
 

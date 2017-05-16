@@ -923,7 +923,7 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 		}
 
 		/*
-		 * Just incase we (or someone we are linking to)
+		 * Just in case we (or someone we are linking to)
 		 * opened a file and didn't do a close on exec.  This
 		 * is needed mostly to protect us against libs we link
 		 * to that don't set the flag as we should already be
@@ -2599,6 +2599,10 @@ _rpc_reboot(slurm_msg_t *msg)
 				sp = xstrdup(reboot_program);
 			reboot_msg = (reboot_msg_t *) msg->data;
 			if (reboot_msg && reboot_msg->features) {
+				/*
+				 * Run reboot_program with only arguments given
+				 * in reboot_msg->features.
+				 */
 				info("Node reboot request with features %s being processed",
 				     reboot_msg->features);
 				(void) node_features_g_node_set(
@@ -2610,7 +2614,8 @@ _rpc_reboot(slurm_msg_t *msg)
 					cmd = xstrdup(sp);
 				}
 			} else {
-				cmd = xstrdup(sp);
+				/* Run reboot_program verbatim */
+				cmd = xstrdup(reboot_program);
 				info("Node reboot request being processed");
 			}
 			if (access(sp, R_OK | X_OK) < 0)

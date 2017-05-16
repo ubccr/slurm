@@ -1,6 +1,71 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 17.02.3
+==========================
+ -- Increase --cpu_bind and --mem_bind field length limits.
+ -- Fix segfault when using AdminComment field with job arrays.
+ -- Clear Dependency field when all dependencies are satisfied.
+ -- Add --array-unique to squeue which will display one unique pending job
+    array element per line.
+ -- Reset backfill timers correctly without skipping over them in certain
+    circumstances.
+ -- When running the "scontrol top" command, make sure that all of the user's
+    jobs have a priority that is lower than the selected job. Previous logic
+    would permit other jobs with equal priority (no jobs with higher priority).
+ -- Fix perl api so we always get an allocation when calling Slurm::new().
+ -- Fix issue with cleaning up cpuset and devices cgroups when multiple steps
+    end at the same time.
+ -- Document that PriorityFlags option of DEPTH_OBLIVIOUS precludes the use of
+    FAIR_TREE.
+ -- Fix issue if an invalid message came in a Slurm daemon/command may abort.
+ -- Make it impossible to use CR_CPU* along with CR_ONE_TASK_PER_CORE. The
+    options are mutually exclusive.
+ -- ALPS - Fix scheduling when ALPS doesn't agree with Slurm on what nodes
+    are free.
+ -- When removing a partition make sure it isn't part of a reservation.
+ -- Fix seg fault if loading attempting to load non-existent burstbuffer plugin.
+ -- Fix to backfill scheduling with respect to QOS and association limits. Jobs
+    submitted to multiple partitions are most likley to be effected.
+ -- sched/backfill: Improve assoc_limit_stop configuration parameter support.
+ -- CRAY - Add ansible play and README.
+ -- sched/backfill: Fix bug related to advanced reservations and the need to
+    reboot nodes to change KNL mode.
+ -- Preempt plugins - fix check for 'preempt_youngest_first' option.
+ -- Preempt plugins - fix incorrect casts in preempt_youngest_first mode.
+ -- Preempt/job_prio - fix incorrect casts in sort function.
+ -- Fix to make task/affinity work with ldoms where there are more than 64
+    cpus on the node.
+ -- When using node_features/knl_generic make it so the slurmd doesn't segfault
+    when shutting down.
+ -- Fix potential double-xfree() when using job arrays that can lead to
+    slurmctld crashing.
+ -- Fix priority/multifactor priorities on a slurmctld restart if not using
+    accounting_storage/[mysql|slurmdbd].
+ -- Fix NULL dereference reported by CLANG.
+ -- Update proctrack documentation to strongly encourage use of
+    proctrack/cgroup.
+ -- Fix potential memory leak if job fails to begin after nodes have been
+    selected for a job.
+ -- Handle a job that made it out of the select plugin without a job_resrcs
+    pointer.
+ -- Fix potential race condition when persistent connections are being closed at
+    shutdown.
+ -- Fix incorrect locks levels when submitting a batch job or updating a job
+    in general.
+ -- CRAY - Move delay waiting for job cleanup to after we check once.
+ -- MYSQL - Fix memory leak when loading archived jobs into the database.
+ -- Fix potential race condition when starting the priority/multifactor plugin's
+    decay thread.
+ -- Sanity check to make sure we have started a job in acct_policy.c before we
+    clear it as started.
+ -- Allow reboot program to use arguments.
+ -- Message Aggr - Remove race condition on slurmd shutdown with respects to
+    destroying a mutex.
+ -- Fix updating job priority on multiple partitions to be correct.
+ -- Don't remove admin comment when updating a job.
+ -- Return error when bad separator is given for scontrol update job licenses.
+
 * Changes in Slurm 17.02.2
 ==========================
  -- Update hyperlink to LBNL Node Health Check program.
@@ -376,6 +441,11 @@ documents those changes that are of interest to users and administrators.
  -- Fix double read lock of tres when updating gres or licenses on a job.
  -- Fix regression in 16.05.10 with respects to GrpTresMins on a QOS or
     Association.
+ -- ALPS - Fix scheduling when ALPS doesn't agree with Slurm on what nodes
+    are free.
+ -- Fix seg fault if loading attempting to load non-existent burstbuffer plugin.
+ -- Fix to backfill scheduling with respect to QOS and association limits. Jobs
+    submitted to multiple partitions are most likley to be effected.
 
 * Changes in Slurm 16.05.10-2
 =============================
