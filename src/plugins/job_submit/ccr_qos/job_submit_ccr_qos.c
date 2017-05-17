@@ -34,7 +34,7 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 	    }
 
 	    /* Is it the correct QOS */
-            if ( job_desc->partition && (strcmp( job_desc->qos, job_desc->partition !=0 ))){
+            if ( job_desc->partition && (strcmp( job_desc->qos, job_desc->partition) !=0 )){
                 info("Clearing Bad QOS: %s for UID: %u on Partition: %s", job_desc->qos, submit_uid, job_desc->partition);
                 xfree(job_desc->qos);
             }
@@ -43,8 +43,8 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
         /* Can't use "else" since we take off a bad QOS in the "if" */
         if(job_desc->partition && !job_desc->qos){
 		/* Missing, add a qos that matches the partition name */
-                info("Adding Missing QOS: %s for UID: %u on Partition: %s", job_desc->qos, submit_uid, job_desc->partition);
 		xstrcat(job_desc->qos, job_desc->partition);
+                info("Adding Missing QOS: %s for UID: %u on Partition: %s", job_desc->qos, submit_uid, job_desc->partition);
 	}
 
         /* Not sure what happens if there is no partition or QOS */
