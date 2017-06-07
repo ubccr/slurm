@@ -865,11 +865,11 @@ extern void jag_common_poll_data(
 		jobacct->max_rss =
 			MAX(jobacct->max_rss, prec->rss);
 		jobacct->tot_rss = prec->rss;
-		total_job_mem += prec->rss;
+                total_job_mem = MAX(total_job_mem, prec->rss);
 		jobacct->max_vsize =
 			MAX(jobacct->max_vsize, prec->vsize);
 		jobacct->tot_vsize = prec->vsize;
-		total_job_vsize += prec->vsize;
+                total_job_vsize = MAX(total_job_vsize, prec->vsize);
 		jobacct->max_pages =
 			MAX(jobacct->max_pages, prec->pages);
 		jobacct->tot_pages = prec->pages;
