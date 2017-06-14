@@ -50,12 +50,14 @@
 static char user_cgroup_path[PATH_MAX];
 static char job_cgroup_path[PATH_MAX];
 static char jobstep_cgroup_path[PATH_MAX];
+static char task_cgroup_path[PATH_MAX];
 
 static xcgroup_ns_t memory_ns;
 
 static xcgroup_t user_memory_cg;
 static xcgroup_t job_memory_cg;
-xcgroup_t step_memory_cg;
+static xcgroup_t step_memory_cg;
+xcgroup_t task_memory_cg;
 
 static uint32_t max_task_id;
 
@@ -66,6 +68,7 @@ jobacct_gather_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	user_cgroup_path[0]='\0';
 	job_cgroup_path[0]='\0';
 	jobstep_cgroup_path[0]='\0';
+	task_cgroup_path[0] = 0;
 
 	/* initialize memory cgroup namespace */
 	if (xcgroup_ns_create(slurm_cgroup_conf, &memory_ns, "", "memory")
@@ -87,7 +90,8 @@ jobacct_gather_cgroup_memory_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 
 	if (user_cgroup_path[0] == '\0'
 	    || job_cgroup_path[0] == '\0'
-	    || jobstep_cgroup_path[0] == '\0')
+	    || jobstep_cgroup_path[0] == '\0'
+	    || task_cgroup_path[0] == 0)
 		return SLURM_SUCCESS;
 	/*
 	 * Move the slurmstepd back to the root memory cg and force empty
@@ -115,6 +119,28 @@ jobacct_gather_cgroup_memory_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 
 	/* Clean up starting from the leaves way up, the
 	 * reverse order in which the cgroups were created.
+	 * The debug2 messages are not errors as it is possible
+	 * that some other processes/plugins are accessing
+	 * some of those directories. The last one to leave
+	 * will clean it up, eventually the release_agent.
+	 */
+	for (cc = 0; cc <= max_task_id; cc++) {
+		xcgroup_t cgroup;
+		char buf[PATH_MAX];
+
+		/* rmdir all tasks this running slurmstepd
+		 * was responsible for.
+		 */
+		sprintf(buf, "%s%s/task_%d",
+			memory_ns.mnt_point, jobstep_cgroup_path, cc);
+		cgroup.path = buf;
+
+		if (xcgroup_delete(&cgroup) != XCGROUP_SUCCESS) {
+			debug2("%s: failed to delete %s %m", __func__, buf);
+		}
+	}
+
+	/* Clean the rest of the hierarchy.
 	 */
 	if (xcgroup_delete(&step_memory_cg) != XCGROUP_SUCCESS) {
 		debug2("%s: failed to delete %s %m", __func__,
@@ -138,10 +164,12 @@ jobacct_gather_cgroup_memory_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	xcgroup_destroy(&user_memory_cg);
 	xcgroup_destroy(&job_memory_cg);
 	xcgroup_destroy(&step_memory_cg);
+	xcgroup_destroy(&task_memory_cg);
 
 	user_cgroup_path[0]='\0';
 	job_cgroup_path[0]='\0';
 	jobstep_cgroup_path[0]='\0';
+	task_cgroup_path[0] = 0;
 
 	xcgroup_ns_destroy(&memory_ns);
 
@@ -155,9 +183,9 @@ jobacct_gather_cgroup_memory_attach_task(pid_t pid, jobacct_id_t *jobacct_id)
 	stepd_step_rec_t *job;
 	uid_t uid;
 	gid_t gid;
-	uint64_t jobid;
-	uint64_t stepid;
-	uint64_t taskid;
+	uint32_t jobid;
+	uint32_t stepid;
+	uint32_t taskid;
 	int fstatus = SLURM_SUCCESS;
 	int rc;
 	char* slurm_cgpath;
@@ -222,6 +250,14 @@ jobacct_gather_cgroup_memory_attach_task(pid_t pid, jobacct_id_t *jobacct_id)
 			      jobid, stepid);
 			return SLURM_ERROR;
 		}
+	}
+
+	/* build task cgroup relative path */
+	if (snprintf(task_cgroup_path, PATH_MAX, "%s/task_%u",
+		     jobstep_cgroup_path, taskid) >= PATH_MAX) {
+		error("jobacct_gather/cgroup: unable to build task %u "
+		      "memory cg relative path: %m", taskid);
+		return SLURM_ERROR;
 	}
 
 	/*
@@ -321,12 +357,38 @@ jobacct_gather_cgroup_memory_attach_task(pid_t pid, jobacct_id_t *jobacct_id)
 	}
 
 	/*
-	 * Attach the slurmstepd to the step memory cgroup
+	 * Create task cgroup in the memory ns
 	 */
-	rc = xcgroup_add_pids(&step_memory_cg, &pid, 1);
+	if (xcgroup_create(&memory_ns, &task_memory_cg,
+			   task_cgroup_path,
+			   uid, gid) != XCGROUP_SUCCESS) {
+		/* do not delete user/job cgroup as they can exist for other
+		 * steps, but release cgroup structures */
+		xcgroup_destroy(&user_memory_cg);
+		xcgroup_destroy(&job_memory_cg);
+		error("jobacct_gather/cgroup: unable to create jobstep %u.%u "
+		      "task %u memory cgroup", jobid, stepid, taskid);
+		fstatus = SLURM_ERROR;
+		goto error;
+	}
+
+	if (xcgroup_instantiate(&task_memory_cg) != XCGROUP_SUCCESS) {
+		xcgroup_destroy(&user_memory_cg);
+		xcgroup_destroy(&job_memory_cg);
+		xcgroup_destroy(&step_memory_cg);
+		error("jobacct_gather/cgroup: unable to instantiate jobstep "
+		      "%u.%u task %u memory cgroup", jobid, stepid, taskid);
+		fstatus = SLURM_ERROR;
+		goto error;
+	}
+
+	/*
+	 * Attach the slurmstepd to the task memory cgroup
+	 */
+	rc = xcgroup_add_pids(&task_memory_cg, &pid, 1);
 	if (rc != XCGROUP_SUCCESS) {
 		error("jobacct_gather/cgroup: unable to add slurmstepd to "
-		      "memory cg '%s'", step_memory_cg.path);
+		      "memory cg '%s'", task_memory_cg.path);
 		fstatus = SLURM_ERROR;
 	} else
 		fstatus = SLURM_SUCCESS;
