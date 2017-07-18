@@ -1604,6 +1604,9 @@ int init ( void )
 {
 	pthread_attr_t thread_attr;
 	char *temp = NULL;
+	/* Write lock on jobs, read lock on nodes and partitions */
+	slurmctld_lock_t job_write_lock =
+		{ NO_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK, NO_LOCK };
 
 	/* This means we aren't running from the controller so skip setup. */
 	if (cluster_cpus == NO_VAL) {
@@ -1617,6 +1620,7 @@ int init ( void )
 	temp = slurm_get_accounting_storage_type();
 	if (xstrcasecmp(temp, "accounting_storage/slurmdbd")
 	    && xstrcasecmp(temp, "accounting_storage/mysql")) {
+		time_t start_time = time(NULL);
 		error("You are not running a supported "
 		      "accounting_storage plugin\n(%s).\n"
 		      "Fairshare can only be calculated with either "
@@ -1627,6 +1631,14 @@ int init ( void )
 		      temp);
 		calc_fairshare = 0;
 		weight_fs = 0;
+
+		/* Initialize job priority factors for valid sprio output */
+		lock_slurmctld(job_write_lock);
+		list_for_each(
+			job_list,
+			(ListForF) _decay_apply_new_usage_and_weighted_factors,
+			&start_time);
+		unlock_slurmctld(job_write_lock);
 	} else if (assoc_mgr_root_assoc) {
 		if (!cluster_cpus)
 			fatal("We need to have a cluster cpu count "
@@ -1634,18 +1646,21 @@ int init ( void )
 			      "plugin");
 		assoc_mgr_root_assoc->usage->usage_efctv = 1.0;
 		slurm_attr_init(&thread_attr);
-		if (pthread_create(&decay_handler_thread, &thread_attr,
-				   _decay_thread, NULL))
-			fatal("pthread_create error %m");
 
 		/* The decay_thread sets up some global variables that are
 		 * needed outside of the decay_thread (i.e. decay_factor,
 		 * g_last_ran).  These are needed if a job was completing and
 		 * the slurmctld was reset.  If they aren't setup before
 		 * continuing we could get more time added than should be on a
-		 * restart.  So wait until they are set up.
-		 */
+		 * restart.  So wait until they are set up. Set the lock now so
+		 * that the decay thread won't trigger the conditional before we
+		 * wait for it. */
 		slurm_mutex_lock(&decay_init_mutex);
+
+		if (pthread_create(&decay_handler_thread, &thread_attr,
+				   _decay_thread, NULL))
+			fatal("pthread_create error %m");
+
 		pthread_cond_wait(&decay_init_cond, &decay_init_mutex);
 		slurm_mutex_unlock(&decay_init_mutex);
 

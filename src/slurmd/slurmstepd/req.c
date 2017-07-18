@@ -1194,7 +1194,7 @@ done:
 		xfree(gtids);
 
 		for (i = 0; i < job->node_tasks; i++) {
-			if (job->task[i] && job->task[i]->argv) {
+			if (job->task && job->task[i] && job->task[i]->argv) {
 				len = strlen(job->task[i]->argv[0]) + 1;
 				safe_write(fd, &len, sizeof(int));
 				safe_write(fd, job->task[i]->argv[0], len);
@@ -1341,7 +1341,7 @@ static int _handle_add_extern_pid_internal(stepd_step_rec_t *job, pid_t pid)
 	/* track pid: add outside of the below thread so that the pam module
 	 * waits until the parent pid is added, before letting the parent spawn
 	 * any children. */
-	jobacct_id.taskid = job->nodeid;
+	jobacct_id.taskid = job->nodeid; /* Treat node ID as global task ID */
 	jobacct_id.nodeid = job->nodeid;
 	jobacct_id.job = job;
 

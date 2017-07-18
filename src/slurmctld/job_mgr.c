@@ -129,6 +129,8 @@ typedef struct {
 List   job_list = NULL;		/* job_record list */
 time_t last_job_update;		/* time of last update to job records */
 
+List purge_files_list = NULL;	/* job files to delete */
+
 /* Local variables */
 static int      bf_min_age_reserve = 0;
 static uint32_t delay_boot = 0;
@@ -143,8 +145,6 @@ static struct   job_record **job_array_hash_t = NULL;
 static bool     kill_invalid_dep;
 static time_t   last_file_write_time = (time_t) 0;
 static uint32_t max_array_size = NO_VAL;
-static bool	purge_quit = false;
-static struct timeval purge_start_time = {0, 0};
 static bitstr_t *requeue_exit = NULL;
 static bitstr_t *requeue_exit_hold = NULL;
 static int	select_serial = -1;
@@ -165,8 +165,8 @@ static int  _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 static char *_copy_nodelist_no_dup(char *node_list);
 static struct job_record *_create_job_record(int *error_code,
 					     uint32_t num_jobs);
+static void _delete_job_details(struct job_record *job_entry);
 static void _del_batch_list_rec(void *x);
-static void _delete_job_desc_files(uint32_t job_id);
 static slurmdb_qos_rec_t *_determine_and_validate_qos(
 	char *resv_name, slurmdb_assoc_rec_t *assoc_ptr,
 	bool admin, slurmdb_qos_rec_t *qos_rec,	int *error_code, bool locked);
@@ -181,7 +181,6 @@ static void _job_array_comp(struct job_record *job_ptr, bool was_running);
 static int  _job_create(job_desc_msg_t * job_specs, int allocate, int will_run,
 			struct job_record **job_rec_ptr, uid_t submit_uid,
 			char **err_msg, uint16_t protocol_version);
-static void _job_purge_start(void);
 static void _job_timed_out(struct job_record *job_ptr);
 static void _kill_dependent(struct job_record *job_ptr);
 static void _list_delete_job(void *job_entry);
@@ -480,12 +479,10 @@ static struct job_record *_create_job_record(int *error_code, uint32_t num_jobs)
 
 
 /*
- * delete_job_details - delete a job's detail record and clear it's pointer
- *	this information can be deleted as soon as the job is allocated
- *	resources and running (could need to restart batch job)
+ * _delete_job_details - delete a job's detail record and clear it's pointer
  * IN job_entry - pointer to job_record to clear the record of
  */
-void delete_job_details(struct job_record *job_entry)
+static void _delete_job_details(struct job_record *job_entry)
 {
 	int i;
 
@@ -493,8 +490,17 @@ void delete_job_details(struct job_record *job_entry)
 		return;
 
 	xassert (job_entry->details->magic == DETAILS_MAGIC);
-	if (IS_JOB_FINISHED(job_entry))
-		_delete_job_desc_files(job_entry->job_id);
+
+	/*
+	 * Queue up job to have the batch script and environment deleted.
+	 * This is handled by a separate thread to limit the amount of
+	 * time purge_old_job needs to spend holding locks.
+	 */
+	if (IS_JOB_FINISHED(job_entry)) {
+		uint32_t *job_id = xmalloc(sizeof(uint32_t));
+		*job_id = job_entry->job_id;
+		list_enqueue(purge_files_list, job_id);
+	}
 
 	xfree(job_entry->details->acctg_freq);
 	for (i=0; i<job_entry->details->argc; i++)
@@ -524,8 +530,8 @@ void delete_job_details(struct job_record *job_entry)
 	xfree(job_entry->details);	/* Must be last */
 }
 
-/* _delete_job_desc_files - delete job descriptor related files */
-static void _delete_job_desc_files(uint32_t job_id)
+/* delete_job_desc_files - delete job descriptor related files */
+extern void delete_job_desc_files(uint32_t job_id)
 {
 	char *dir_name = NULL, *file_name = NULL;
 	struct stat sbuf;
@@ -768,6 +774,16 @@ int dump_all_job_state(void)
 	free_buf(buffer);
 	END_TIMER2("dump_all_job_state");
 	return error_code;
+}
+
+static int _find_resv_part(void *x, void *key)
+{
+	slurmctld_resv_t *resv_ptr = (slurmctld_resv_t *) x;
+
+	if (resv_ptr->part_ptr != (struct part_record *) key)
+		return 0;
+	else
+		return 1;	/* match */
 }
 
 /* Open the job state save file, or backup if necessary.
@@ -2189,7 +2205,7 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 			job_ptr->qos_id = qos_rec.id;
 	}
 
-	/* do this after the format string just incase for some
+	/* do this after the format string just in case for some
 	 * reason the tres_alloc_str is NULL but not the fmt_str */
 	if (job_ptr->tres_alloc_str)
 		assoc_mgr_set_tres_cnt_array(
@@ -3246,7 +3262,7 @@ extern int kill_job_by_front_end_name(char *node_name)
 
 /*
  * partition_in_use - determine whether a partition is in use by a RUNNING
- *	PENDING or SUSPENDED job
+ *	PENDING or SUSPENDED job or reservations
  * IN part_name - name of a partition
  * RET true if the partition is in use, else false
  */
@@ -3260,6 +3276,7 @@ extern bool partition_in_use(char *part_name)
 	if (part_ptr == NULL)	/* No such partition */
 		return false;
 
+	/* check jobs */
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
 		if (job_ptr->part_ptr == part_ptr) {
@@ -3270,6 +3287,11 @@ extern bool partition_in_use(char *part_name)
 		}
 	}
 	list_iterator_destroy(job_iterator);
+
+	/* check reservations */
+	if (list_find_first(resv_list, _find_resv_part, part_ptr))
+		return true;
+
 	return false;
 }
 
@@ -3745,7 +3767,6 @@ void dump_job_desc(job_desc_msg_t * job_specs)
 		debug3("   %s", buf);
 }
 
-
 /*
  * init_job_conf - initialize the job configuration tables and values.
  *	this should be called after creating node information, but
@@ -3764,6 +3785,11 @@ int init_job_conf(void)
 	}
 
 	last_job_update = time(NULL);
+
+	if (!purge_files_list) {
+		purge_files_list = list_create(slurm_destroy_uint32_ptr);
+	}
+
 	return SLURM_SUCCESS;
 }
 
@@ -3846,6 +3872,7 @@ extern struct job_record *job_array_split(struct job_record *job_ptr)
 					   job_ptr->prio_factors);
 
 	job_ptr_pend->account = xstrdup(job_ptr->account);
+	job_ptr_pend->admin_comment = xstrdup(job_ptr->admin_comment);
 	job_ptr_pend->alias_list = xstrdup(job_ptr->alias_list);
 	job_ptr_pend->alloc_node = xstrdup(job_ptr->alloc_node);
 
@@ -3872,6 +3899,8 @@ extern struct job_record *job_array_split(struct job_record *job_ptr)
 			checkpoint_copy_jobinfo(job_ptr->check_job);
 	}
 	job_ptr_pend->burst_buffer = xstrdup(job_ptr->burst_buffer);
+	job_ptr_pend->burst_buffer_state = xstrdup(job_ptr->burst_buffer_state);
+	job_ptr_pend->clusters = xstrdup(job_ptr->clusters);
 	job_ptr_pend->comment = xstrdup(job_ptr->comment);
 
 	job_ptr_pend->front_end_ptr = NULL;
@@ -4315,7 +4344,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 
 	/* Avoid resource fragmentation if important */
 	if ((submit_uid || (job_specs->req_nodes == NULL)) &&
-	    independent && job_is_completing())
+	    independent && job_is_completing(NULL))
 		too_fragmented = true;	/* Don't pick nodes for job now */
 	/* FIXME: Ideally we only want to refuse the request if the
 	 * required node list is insufficient to satisfy the job's
@@ -6499,7 +6528,7 @@ static int _test_job_desc_fields(job_desc_msg_t * job_desc)
 	    _test_strlen(job_desc->burst_buffer, "burst_buffer",1024*8) ||
 	    _test_strlen(job_desc->ckpt_dir, "ckpt_dir", 1024)		||
 	    _test_strlen(job_desc->comment, "comment", 1024)		||
-	    _test_strlen(job_desc->cpu_bind, "cpu_bind", 1024)		||
+	    _test_strlen(job_desc->cpu_bind, "cpu_bind", 1024 * 128)	||
 	    _test_strlen(job_desc->dependency, "dependency", 1024*128)	||
 	    _test_strlen(job_desc->features, "features", 1024)		||
 	    _test_strlen(job_desc->gres, "gres", 1024)			||
@@ -6507,7 +6536,7 @@ static int _test_job_desc_fields(job_desc_msg_t * job_desc)
 	    _test_strlen(job_desc->linuximage, "linuximage", 1024)	||
 	    _test_strlen(job_desc->mail_user, "mail_user", 1024)	||
 	    _test_strlen(job_desc->mcs_label, "mcs_label", 1024)	||
-	    _test_strlen(job_desc->mem_bind, "mem_bind", 1024)		||
+	    _test_strlen(job_desc->mem_bind, "mem_bind", 1024 * 128)	||
 	    _test_strlen(job_desc->mloaderimage, "mloaderimage", 1024)	||
 	    _test_strlen(job_desc->name, "name", 1024)			||
 	    _test_strlen(job_desc->network, "network", 1024)		||
@@ -7592,12 +7621,20 @@ extern void job_config_fini(struct job_record *job_ptr)
 				now + (job_ptr->time_limit * 60);
 		}
 	}
+
+	/* Request asynchronous launch of a prolog for a
+	 * non-batch job. PROLOG_FLAG_CONTAIN also turns on
+	 * PROLOG_FLAG_ALLOC. */
+	if (slurmctld_conf.prolog_flags & PROLOG_FLAG_ALLOC)
+		launch_prolog(job_ptr);
 }
 
 /* Determine of the nodes are ready to run a job
  * RET true if ready */
 extern bool test_job_nodes_ready(struct job_record *job_ptr)
 {
+	if (!job_ptr->node_bitmap)	/* Revoked allocation */
+		return true;
 	if (bit_overlap(job_ptr->node_bitmap, power_node_bitmap))
 		return false;
 
@@ -8327,7 +8364,7 @@ static void _list_delete_job(void *job_entry)
 			*job_pptr = job_ptr->job_array_next_t;
 	}
 
-	delete_job_details(job_ptr);
+	_delete_job_details(job_ptr);
 	xfree(job_ptr->account);
 	xfree(job_ptr->admin_comment);
 	xfree(job_ptr->alias_list);
@@ -8408,12 +8445,6 @@ extern int list_find_job_id(void *job_entry, void *key)
 		return 0;
 }
 
-static void _job_purge_start(void)
-{
-	purge_quit = false;
-	gettimeofday(&purge_start_time, NULL);
-}
-
 /*
  * _list_find_job_old - find old entries in the job list,
  *	see common/list.h for documentation, key is ignored
@@ -8424,19 +8455,6 @@ static int _list_find_job_old(void *job_entry, void *key)
 	time_t kill_age, min_age, now = time(NULL);;
 	struct job_record *job_ptr = (struct job_record *)job_entry;
 	uint16_t cleaning = 0;
-	struct timeval tv_now = {0, 0};
-	long delta_t;
-
-	if (purge_quit)
-		return 0;
-	gettimeofday(&tv_now, NULL);
-	delta_t  = (tv_now.tv_sec - purge_start_time.tv_sec) * 1000000;
-	delta_t += tv_now.tv_usec;
-	delta_t -= purge_start_time.tv_usec;
-	if (delta_t > 1000000) {
-		purge_quit = true;
-		return 0;
-	}
 
 	if (IS_JOB_COMPLETING(job_ptr) && !LOTS_OF_AGENTS) {
 		kill_age = now - (slurmctld_conf.kill_wait +
@@ -9377,7 +9395,7 @@ static void _pack_default_job_details(struct job_record *job_ptr,
 				pack32((uint32_t) 0, buffer);
 			} else if (job_ptr->node_cnt_wag) {
 				/* This should catch everything else, but
-				 * just incase this is 0 (startup or
+				 * just in case this is 0 (startup or
 				 * whatever) we will keep the rest of
 				 * this if statement around.
 				 */
@@ -9529,7 +9547,7 @@ static void _pack_default_job_details(struct job_record *job_ptr,
 				pack32((uint32_t) 0, buffer);
 			} else if (job_ptr->node_cnt_wag) {
 				/* This should catch everything else, but
-				 * just incase this is 0 (startup or
+				 * just in case this is 0 (startup or
 				 * whatever) we will keep the rest of
 				 * this if statement around.
 				 */
@@ -9723,7 +9741,11 @@ void purge_old_job(void)
 {
 	ListIterator job_iterator;
 	struct job_record  *job_ptr;
-	int i;
+	int i, purge_job_count;
+
+	if ((purge_job_count = list_count(purge_files_list)))
+		debug("%s: job file deletion is falling behind, "
+		      "%d left to remove", __func__, purge_job_count);
 
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
@@ -9769,11 +9791,11 @@ void purge_old_job(void)
 	}
 	list_iterator_destroy(job_iterator);
 
-	_job_purge_start();
 	i = list_delete_all(job_list, &_list_find_job_old, "");
 	if (i) {
 		debug2("purge_old_job: purged %d old job records", i);
 		last_job_update = time(NULL);
+		slurm_cond_signal(&purge_thread_cond);
 	}
 }
 
@@ -10753,6 +10775,7 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 				&tmp_part_ptr, part_ptr_list,
 				job_ptr->assoc_ptr, job_ptr->qos_ptr);
 			if (!error_code) {
+				acct_policy_remove_job_submit(job_ptr);
 				xfree(job_ptr->partition);
 				job_ptr->partition =
 					xstrdup(job_specs->partition);
@@ -10766,6 +10789,7 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 				     "job_id %u", job_specs->partition,
 				     job_ptr->job_id);
 				update_accounting = true;
+				acct_policy_add_job_submit(job_ptr);
 			}
 		}
 		FREE_NULL_LIST(part_ptr_list);	/* error clean-up */
@@ -10778,23 +10802,29 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 	}
 
 	/* Always do this last just in case the assoc_ptr changed */
-	if (job_specs->admin_comment && !validate_super_user(uid)) {
-		error("Attempt to change admin_comment for job %u",
-		      job_ptr->job_id);
-		error_code = ESLURM_ACCESS_DENIED;
-	} else if (job_specs->admin_comment &&
-		   (job_specs->admin_comment[0] == '+') &&
-		   (job_specs->admin_comment[1] == '=')) {
-		if (job_ptr->admin_comment)
-			xstrcat(job_ptr->admin_comment, ",");
-		xstrcat(job_ptr->admin_comment, job_specs->admin_comment + 2);
-		info("update_job: setting admin_comment to %s for job_id %u",
-		     job_ptr->admin_comment, job_ptr->job_id);
-	} else {
-		xfree(job_ptr->admin_comment);
-		job_ptr->admin_comment = xstrdup(job_specs->admin_comment);
-		info("update_job: setting admin_comment to %s for job_id %u",
-		     job_ptr->admin_comment, job_ptr->job_id);
+	if (job_specs->admin_comment) {
+		if (!validate_super_user(uid)) {
+			error("Attempt to change admin_comment for job %u",
+			      job_ptr->job_id);
+			error_code = ESLURM_ACCESS_DENIED;
+		} else if ((job_specs->admin_comment[0] == '+') &&
+			   (job_specs->admin_comment[1] == '=')) {
+			if (job_ptr->admin_comment)
+				xstrcat(job_ptr->admin_comment, ",");
+			xstrcat(job_ptr->admin_comment,
+				job_specs->admin_comment + 2);
+			info("update_job: adding to admin_comment it is now %s for job_id %u",
+			     job_ptr->admin_comment, job_ptr->job_id);
+		} else if (!xstrcmp(job_ptr->admin_comment,
+				   job_specs->admin_comment)) {
+			info("update_job: admin_comment the same as before, not changing");
+		} else {
+			xfree(job_ptr->admin_comment);
+			job_ptr->admin_comment =
+				xstrdup(job_specs->admin_comment);
+			info("update_job: setting admin_comment to %s for job_id %u",
+			     job_ptr->admin_comment, job_ptr->job_id);
+		}
 	}
 
 	/* Always do this last just in case the assoc_ptr changed */
@@ -11327,6 +11357,15 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 				} else
 					error_code = ESLURM_PRIO_RESET_FAIL;
 				job_ptr->priority = job_specs->priority;
+				if (job_ptr->part_ptr_list &&
+				    job_ptr->priority_array) {
+					int i, j = list_count(
+						job_ptr->part_ptr_list);
+					for (i = 0; i < j; i++) {
+						job_ptr->priority_array[i] =
+						job_specs->priority;
+					}
+				}
 			}
 			info("sched: update_job: setting priority to %u for "
 			     "job_id %u", job_ptr->priority,
@@ -11382,15 +11421,23 @@ static int _update_job(struct job_record *job_ptr, job_desc_msg_t * job_specs,
 			 (job_ptr->details->nice == job_specs->nice))
 			debug("sched: update_job: new nice identical to "
 			      "old nice %u", job_ptr->job_id);
-		else if (authorized || (job_specs->nice >= NICE_OFFSET)) {
-			int64_t new_prio = job_ptr->priority;
-			new_prio += job_ptr->details->nice;
-			new_prio -= job_specs->nice;
-			job_ptr->priority = MAX(new_prio, 2);
-			job_ptr->details->nice = job_specs->nice;
-			info("sched: update_job: setting priority to %u for "
-			     "job_id %u", job_ptr->priority,
+		else if (job_ptr->direct_set_prio && job_ptr->priority != 0)
+			info("ignore nice set request on  job %u",
 			     job_ptr->job_id);
+		else if (authorized || (job_specs->nice >= NICE_OFFSET)) {
+			if (!xstrcmp(slurmctld_conf.priority_type,
+			             "priority/basic")) {
+				int64_t new_prio = job_ptr->priority;
+				new_prio += job_ptr->details->nice;
+				new_prio -= job_specs->nice;
+				job_ptr->priority = MAX(new_prio, 2);
+				info("sched: update_job: nice changed from %u to %u, setting priority to %u for job_id %u",
+				     job_ptr->details->nice,
+				     job_specs->nice,
+				     job_ptr->priority,
+				     job_ptr->job_id);
+			}
+			job_ptr->details->nice = job_specs->nice;
 			update_accounting = true;
 		} else {
 			error("sched: Attempt to modify nice for "
@@ -12190,11 +12237,13 @@ fini:
 		jobacct_storage_job_start_direct(acct_db_conn, job_ptr);
 	}
 
-	/* If job update is successful and priority is calculated (not only
-	 * based upon job submit order), recalculate the job priority, since
-	 * many factors of an update may affect priority considerations.
-	 * If job has a hold then do nothing */
-	if ((error_code == SLURM_SUCCESS) && (job_ptr->priority != 0) &&
+	/*
+	 * If job isn't held recalculate the priority when not using
+	 * priority/basic. Since many factors of an update may affect priority
+	 * considerations. Do this whether or not the update was successful or
+	 * not.
+	 */
+	if ((job_ptr->priority != 0) &&
 	    xstrcmp(slurmctld_conf.priority_type, "priority/basic"))
 		set_job_prio(job_ptr);
 
@@ -13173,7 +13222,7 @@ static void _remove_defunct_batch_dirs(List batch_dirs)
 	while ((job_id_ptr = list_next(batch_dir_inx))) {
 		info("Purged files for defunct batch job %u",
 		     *job_id_ptr);
-		_delete_job_desc_files(*job_id_ptr);
+		delete_job_desc_files(*job_id_ptr);
 	}
 	list_iterator_destroy(batch_dir_inx);
 }
@@ -13464,6 +13513,7 @@ void job_fini (void)
 	xfree(job_hash);
 	xfree(job_array_hash_j);
 	xfree(job_array_hash_t);
+	FREE_NULL_LIST(purge_files_list);
 	FREE_NULL_BITMAP(requeue_exit);
 	FREE_NULL_BITMAP(requeue_exit_hold);
 }
@@ -14832,7 +14882,7 @@ static int _set_top(struct job_record *job_ptr, uid_t uid)
 	list_iterator_destroy(job_iterator);
 
 	/* Now adjust nice values and priorities of effected jobs */
-	if (high_prio > job_ptr->priority) {
+	if (high_prio >= job_ptr->priority) {
 		delta_nice = high_prio - job_ptr->priority;
 		delta_nice = MIN(job_ptr->details->nice, delta_nice);
 		job_ptr->priority += delta_nice;
@@ -14840,13 +14890,16 @@ static int _set_top(struct job_record *job_ptr, uid_t uid)
 		for (i = 0; i < high_prio_job_cnt; i++) {
 			adj_prio = delta_nice / (high_prio_job_cnt - i);
 			job_test_ptr = job_adj_list[i];
+			if (job_test_ptr->priority == high_prio)
+				adj_prio = MAX(adj_prio, 1);  /* ensure lower */
 			adj_prio = MIN((job_test_ptr->priority - 1), adj_prio);
 			max_delta = (uint32_t) 0xffffffff -
 				    job_test_ptr->details->nice;
 			adj_prio = MIN(max_delta, adj_prio);
 			job_test_ptr->priority -= adj_prio;
 			job_test_ptr->details->nice += adj_prio;
-			delta_nice -= adj_prio;
+			if (delta_nice >= adj_prio)
+				delta_nice -= adj_prio;
 		}
 		last_job_update = time(NULL);
 	}
@@ -15069,6 +15122,10 @@ extern int job_hold_by_qos_id(uint32_t qos_id)
 	lock_slurmctld(job_write_lock);
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
+		if (job_ptr->qos_blocking_ptr &&
+		    ((slurmdb_qos_rec_t *)job_ptr->qos_blocking_ptr)->id
+		    == qos_id)
+			job_ptr->qos_blocking_ptr = NULL;
 		if (job_ptr->qos_id != qos_id)
 			continue;
 

@@ -114,6 +114,14 @@ int parse_select_type_param(char *select_type_parameters, uint16_t *param)
 			xfree(st_str);
 			return rc;
 		}
+
+		if ((*param & CR_CPU) && (*param & CR_ONE_TASK_PER_CORE)) {
+			error("CR_ONE_TASK_PER_CORE is not compatible with CR_CPU*, please change to use CR_CORE* instead.");
+			rc = SLURM_ERROR;
+			xfree(st_str);
+			return rc;
+		}
+
 		str_parameters = strtok(NULL,",");
 	}
 	xfree(st_str);

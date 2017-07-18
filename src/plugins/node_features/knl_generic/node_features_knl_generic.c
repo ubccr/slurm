@@ -165,6 +165,7 @@ static char *mc_path = NULL;
 static uint32_t syscfg_timeout = 0;
 static bool reconfig = false;
 static time_t shutdown_time = 0;
+static int syscfg_found = -1;
 static char *syscfg_path = NULL;
 static uint32_t ume_check_interval = 0;
 static pthread_mutex_t ume_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -744,6 +745,10 @@ extern int init(void)
 		mc_path = xstrdup("/sys/devices/system/edac/mc");
 	if (!syscfg_path)
 		syscfg_path = xstrdup("/usr/bin/syscfg");
+	if (access(syscfg_path, X_OK) == 0)
+		syscfg_found = 1;
+	else
+		syscfg_found = 0;
 
 	if ((resume_program = slurm_get_resume_program())) {
 		error("Use of ResumeProgram with %s not currently supported",
@@ -810,7 +815,7 @@ extern int fini(void)
 	xfree(mcdram_per_node);
 	xfree(mc_path);
 	xfree(syscfg_path);
-	xfree(syscfg_timeout);
+
 	return SLURM_SUCCESS;
 }
 
@@ -858,6 +863,18 @@ extern void node_features_p_node_state(char **avail_modes, char **current_mode)
 
 	if (!syscfg_path || !avail_modes || !current_mode)
 		return;
+	if (syscfg_found == 0) {
+		/* This node on cluster lacks syscfg; should not be KNL */
+		static bool log_event = true;
+		if (log_event) {
+			info("%s: syscfg program not found, can not get KNL modes",
+			     __func__);
+			log_event = false;
+		}
+		*avail_modes = NULL;
+		*current_mode = NULL;
+		return;
+	}
 
 	argv[0] = "syscfg";
 	argv[1] = "/d";
@@ -1118,6 +1135,13 @@ extern int node_features_p_node_set(char *active_features)
 
 	if (!syscfg_path) {
 		error("%s: SyscfgPath not configured", __func__);
+		return SLURM_ERROR;
+	}
+	if (syscfg_found == 0) {
+		/* This node on cluster lacks syscfg; should not be KNL.
+		 * This code should never be reached */
+		error("%s: syscfg program not found; can not set KNL modes",
+		      __func__);
 		return SLURM_ERROR;
 	}
 
@@ -1382,7 +1406,22 @@ extern void node_features_p_step_config(bool mem_sort, bitstr_t *numa_bitmap)
  * features */
 extern bool node_features_p_user_update(uid_t uid)
 {
+	static int reboot_allowed = -1;
 	int i;
+
+	if (reboot_allowed == -1) {
+		char *reboot_program = slurm_get_reboot_program();
+		if (reboot_program && reboot_program[0])
+			reboot_allowed = 1;
+		else
+			reboot_allowed = 0;
+		xfree(reboot_program);
+	}
+
+	if (reboot_allowed != 1) {
+		info("Change in KNL mode not supported. No RebootProgram configured");
+		return false;
+	}
 
 	if (allowed_uid_cnt == 0)   /* Default is ALL users allowed to update */
 		return true;

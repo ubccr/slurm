@@ -337,6 +337,8 @@ extern void slurm_persist_conn_recv_server_init(void)
 {
 	int sigarray[] = {SIGUSR1, 0};
 
+	shutdown_time = 0;
+
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
@@ -368,8 +370,19 @@ extern void slurm_persist_conn_recv_server_fini(void)
 	for (i=0; i<MAX_THREAD_COUNT; i++) {
 		if (!persist_service_conn[i])
 			continue;
-		if (persist_service_conn[i]->thread_id)
-			pthread_join(persist_service_conn[i]->thread_id, NULL);
+		if (persist_service_conn[i]->thread_id) {
+			pthread_t thread_id =
+				persist_service_conn[i]->thread_id;
+
+			/* Let go of lock in case the persistent connection
+			 * thread is cleaning itself up.
+			 * slurm_persist_conn_free_thread_loc() may be trying to
+			 * remove itself but could be waiting on the
+			 * thread_count mutex which this has locked. */
+			slurm_mutex_unlock(&thread_count_lock);
+			pthread_join(thread_id, NULL);
+			slurm_mutex_lock(&thread_count_lock);
+		}
 		_destroy_persist_service(persist_service_conn[i]);
 		persist_service_conn[i] = NULL;
 	}
@@ -575,7 +588,7 @@ extern int slurm_persist_conn_open(slurm_persist_conn_t *persist_conn)
 	} else {
 		Buf buffer = slurm_persist_recv_msg(persist_conn);
 		persist_msg_t msg;
-		uint16_t flags = persist_conn->flags;
+		slurm_persist_conn_t persist_conn_tmp;
 
 		if (!buffer) {
 			error("%s: No response to persist_init", __func__);
@@ -583,11 +596,12 @@ extern int slurm_persist_conn_open(slurm_persist_conn_t *persist_conn)
 			goto end_it;
 		}
 		memset(&msg, 0, sizeof(persist_msg_t));
+		memcpy(&persist_conn_tmp, persist_conn,
+		       sizeof(slurm_persist_conn_t));
 		/* The first unpack is done the same way for dbd or normal
 		 * communication . */
-		persist_conn->flags &= (~PERSIST_FLAG_DBD);
-		rc = slurm_persist_msg_unpack(persist_conn, &msg, buffer);
-		persist_conn->flags = flags;
+		persist_conn_tmp.flags &= (~PERSIST_FLAG_DBD);
+		rc = slurm_persist_msg_unpack(&persist_conn_tmp, &msg, buffer);
 		free_buf(buffer);
 
 		resp = (persist_rc_msg_t *)msg.data;
@@ -924,7 +938,10 @@ extern Buf slurm_persist_msg_pack(slurm_persist_conn_t *persist_conn,
 		buffer = init_buf(BUF_SIZE);
 
 		pack16(req_msg->msg_type, buffer);
-		pack_msg(&msg, buffer);
+		if (pack_msg(&msg, buffer) != SLURM_SUCCESS) {
+			free_buf(buffer);
+			return NULL;
+                }
 	}
 
 	return buffer;
@@ -958,7 +975,7 @@ extern int slurm_persist_msg_unpack(slurm_persist_conn_t *persist_conn,
 		resp_msg->data = msg.data;
 	}
 
-	/* Here we transfer the auth_cred to the persist_conn just incase in the
+	/* Here we transfer the auth_cred to the persist_conn just in case in the
 	 * future we need to use it in some way to verify things for messages
 	 * that don't have on that will follow on the connection.
 	 */

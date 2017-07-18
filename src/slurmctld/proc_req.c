@@ -2208,7 +2208,8 @@ static void _slurm_rpc_complete_batch_script(slurm_msg_t *msg,
 
 	/* do RPC call */
 	/* First set node DOWN if fatal error */
-	if ((comp_msg->slurm_rc == ESLURM_ALREADY_DONE) ||
+	if ((comp_msg->slurm_rc == ESLURMD_JOB_NOTRUNNING) ||
+	    (comp_msg->slurm_rc == ESLURM_ALREADY_DONE) ||
 	    (comp_msg->slurm_rc == ESLURMD_CREDENTIAL_REVOKED)) {
 		/* race condition on job termination, not a real error */
 		info("slurmd error running JobId=%u from %s=%s: %s",
@@ -2547,9 +2548,9 @@ static void _slurm_rpc_job_will_run(slurm_msg_t * msg, bool allow_sibs)
 	/* Locks: Read config, read job, read node, read partition */
 	slurmctld_lock_t job_read_lock = {
 		READ_LOCK, READ_LOCK, READ_LOCK, READ_LOCK, READ_LOCK };
-	/* Locks: Write job, Write node, read partition */
+	/* Locks: Read config, write job, write node, read partition, read fed*/
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
+		READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred,
 					 slurmctld_config.auth_info);
 	uint16_t port;	/* dummy value */
@@ -2933,15 +2934,38 @@ static void _slurm_rpc_job_alloc_info_lite(slurm_msg_t * msg)
 		job_info_resp_msg.resv_name      = xstrdup(job_ptr->resv_name);
 		job_info_resp_msg.select_jobinfo =
 			select_g_select_jobinfo_copy(job_ptr->select_jobinfo);
-		if (job_ptr->details->env_cnt) {
-			job_info_resp_msg.env_size = job_ptr->details->env_cnt;
-			job_info_resp_msg.environment =
-				xmalloc(sizeof(char *) *
-				        job_info_resp_msg.env_size);
-			for (i = 0; i < job_info_resp_msg.env_size; i++) {
-				job_info_resp_msg.environment[i] =
-					xstrdup(job_ptr->details->env_sup[i]);
+		if (job_ptr->details) {
+			job_info_resp_msg.pn_min_memory =
+				job_ptr->details->pn_min_memory;
+
+			if (job_ptr->details->mc_ptr) {
+				job_info_resp_msg.ntasks_per_board =
+					job_ptr->details->mc_ptr->
+					ntasks_per_board;
+				job_info_resp_msg.ntasks_per_core =
+					job_ptr->details->mc_ptr->
+					ntasks_per_core;
+				job_info_resp_msg.ntasks_per_socket =
+					job_ptr->details->mc_ptr->
+					ntasks_per_socket;
 			}
+
+			if (job_ptr->details->env_cnt) {
+				job_info_resp_msg.env_size =
+					job_ptr->details->env_cnt;
+				job_info_resp_msg.environment =
+					xmalloc(sizeof(char *) *
+						job_info_resp_msg.env_size);
+				for (i = 0; i < job_info_resp_msg.env_size; i++)
+					job_info_resp_msg.environment[i] =
+						xstrdup(job_ptr->details->
+							env_sup[i]);
+			}
+		} else {
+			job_info_resp_msg.pn_min_memory = 0;
+			job_info_resp_msg.ntasks_per_board = (uint16_t)NO_VAL;
+			job_info_resp_msg.ntasks_per_core = (uint16_t)NO_VAL;
+			job_info_resp_msg.ntasks_per_socket = (uint16_t)NO_VAL;
 		}
 		unlock_slurmctld(job_read_lock);
 
@@ -3473,9 +3497,10 @@ static void _slurm_rpc_submit_batch_job(slurm_msg_t * msg)
 	/* Locks: Read config, read job, read node, read partition */
 	slurmctld_lock_t job_read_lock = {
 		READ_LOCK, READ_LOCK, READ_LOCK, READ_LOCK, READ_LOCK };
-	/* Locks: Write job, read node, read partition */
+	/* Locks: Read config, write job, write node, read partition, read
+	 * federation */
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK, READ_LOCK };
+		READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred,
 					 slurmctld_config.auth_info);
 	char *err_msg = NULL;
@@ -3661,9 +3686,9 @@ static void _slurm_rpc_update_job(slurm_msg_t * msg)
 	int error_code = SLURM_SUCCESS;
 	DEF_TIMERS;
 	job_desc_msg_t *job_desc_msg = (job_desc_msg_t *) msg->data;
-	/* Locks: Write job, read node, read partition */
+	/* Locks: Read config, write job, write node, read partition, read fed*/
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK, READ_LOCK };
+		READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred,
 					 slurmctld_config.auth_info);
 
@@ -4044,8 +4069,9 @@ static void _slurm_rpc_update_powercap(slurm_msg_t * msg)
 		slurm_send_rc_msg(msg, SLURM_SUCCESS);
 
 		/* NOTE: These functions provide their own locks */
-		schedule(0);
-		save_all_state();
+		if (!LOTS_OF_AGENTS)
+			schedule(0);	/* Has own locking */
+		save_all_state();	/* Has own locking */
 	}
 }
 

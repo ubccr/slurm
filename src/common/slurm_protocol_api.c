@@ -510,6 +510,23 @@ char *slurm_get_msg_aggr_params(void)
 	return msg_aggr_params;
 }
 
+/* slurm_get_reboot_program
+ * RET char * - RebootProgram from slurm.conf, MUST be xfreed by caller
+ */
+extern char *slurm_get_reboot_program(void)
+{
+	char *reboot_program = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		reboot_program = xstrdup(conf->reboot_program);
+		slurm_conf_unlock();
+	}
+	return reboot_program;
+}
+
 /* slurm_get_tcp_timeout
  * get default tcp timeout value from slurmctld_conf object
  */
@@ -3621,7 +3638,7 @@ int slurm_receive_msg_and_forward(int fd, slurm_addr_t *orig_addr,
 	/*
 	 * header.orig_addr will be set to where the first message
 	 * came from if this is a forward else we set the
-	 * header.orig_addr to our addr just incase we need to send it off.
+	 * header.orig_addr to our addr just in case we need to send it off.
 	 */
 	if (header.orig_addr.sin_addr.s_addr != 0) {
 		memcpy(&msg->orig_addr, &header.orig_addr, sizeof(slurm_addr_t));
