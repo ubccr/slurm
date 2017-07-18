@@ -564,12 +564,16 @@ extern List build_job_queue(bool clear_start, bool backfill)
 
 /*
  * job_is_completing - Determine if jobs are in the process of completing.
+ * IN/OUT  eff_cg_bitmap - optional bitmap of all relevent completing nodes,
+ *                         relevenace determined by filtering via CompleteWait
+ *                         if NULL, function will terminate at first completing
+ *                         job
  * RET - True of any job is in the process of completing AND
  *	 CompleteWait is configured non-zero
  * NOTE: This function can reduce resource fragmentation, which is a
  * critical issue on Elan interconnect based systems.
  */
-extern bool job_is_completing(void)
+extern bool job_is_completing(bitstr_t *eff_cg_bitmap)
 {
 	bool completing = false;
 	ListIterator job_iterator;
@@ -586,7 +590,14 @@ extern bool job_is_completing(void)
 		if (IS_JOB_COMPLETING(job_ptr) &&
 		    (job_ptr->end_time >= recent)) {
 			completing = true;
-			break;
+			/* can return after finding first completing job so long
+			 * as a map of nodes in partitions affected by
+			 * completing jobs is not required */
+			if (!eff_cg_bitmap)
+				break;
+			else
+				bit_or(eff_cg_bitmap,
+				       job_ptr->part_ptr->node_bitmap);
 		}
 	}
 	list_iterator_destroy(job_iterator);
@@ -1198,6 +1209,7 @@ static int _schedule(uint32_t job_limit)
 	static int def_job_limit = 100;
 	static int max_jobs_per_part = 0;
 	static int defer_rpc_cnt = 0;
+	static bool reduce_completing_frag = 0;
 	time_t now, last_job_sched_start, sched_start;
 	uint32_t reject_array_job_id = 0;
 	struct part_record *reject_array_part = NULL;
@@ -1325,6 +1337,12 @@ static int _schedule(uint32_t job_limit)
 		}
 
 		if (sched_params &&
+		    (strstr(sched_params, "reduce_completing_frag")))
+			reduce_completing_frag = true;
+		else
+			reduce_completing_frag = false;
+
+		if (sched_params &&
 		    (tmp_ptr = strstr(sched_params, "max_rpc_cnt=")))
 			defer_rpc_cnt = atoi(tmp_ptr + 12);
 		else if (sched_params &&
@@ -1433,13 +1451,13 @@ static int _schedule(uint32_t job_limit)
 		      "available");
 		goto out;
 	}
-	/* Avoid resource fragmentation if important */
-	if (job_is_completing()) {
+
+	if (!reduce_completing_frag && job_is_completing(NULL)) {
 		unlock_slurmctld(job_write_lock);
-		debug("sched: schedule() returning, some job is still "
-		      "completing");
+		debug("sched: schedule() returning, some job is still completing");
 		goto out;
 	}
+
 
 #ifdef HAVE_ALPS_CRAY
 	/*
@@ -1465,6 +1483,42 @@ static int _schedule(uint32_t job_limit)
 	bit_not(booting_node_bitmap);
 	bit_and(avail_node_bitmap, booting_node_bitmap);
 	bit_not(booting_node_bitmap);
+
+	/* Avoid resource fragmentation if important */
+	if (reduce_completing_frag) {
+		bitstr_t *eff_cg_bitmap = bit_alloc(node_record_count);
+		if (job_is_completing(eff_cg_bitmap)) {
+			ListIterator part_iterator;
+			struct part_record *part_ptr = NULL;
+			char *cg_part_str = NULL;
+
+			part_iterator = list_iterator_create(part_list);
+			while ((part_ptr = list_next(part_iterator))) {
+				if (bit_overlap(eff_cg_bitmap,
+						part_ptr->node_bitmap)) {
+					failed_parts[failed_part_cnt++] =
+						part_ptr;
+					bit_and_not(avail_node_bitmap,
+						    part_ptr->node_bitmap);
+					if (slurmctld_conf.slurmctld_debug >=
+					    LOG_LEVEL_DEBUG) {
+						if (cg_part_str)
+							xstrcat(cg_part_str,
+								",");
+						xstrfmtcat(cg_part_str, "%s",
+							   part_ptr->name);
+					}
+				}
+			}
+			list_iterator_destroy(part_iterator);
+			if (cg_part_str) {
+				debug("sched: some job is still completing, skipping partitions '%s'",
+				      cg_part_str);
+				xfree(cg_part_str);
+			}
+		}
+		bit_free(eff_cg_bitmap);
+	}
 
 	if (max_jobs_per_part) {
 		ListIterator part_iterator;
@@ -3783,6 +3837,10 @@ static void *_wait_boot(void *arg)
 	/* Locks: Write jobs; read nodes */
 	slurmctld_lock_t job_write_lock = {
 		READ_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
+	/* Locks: Write jobs; write nodes */
+	slurmctld_lock_t node_write_lock = {
+		READ_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
+	bitstr_t *boot_node_bitmap;
 	uint16_t resume_timeout = slurm_get_resume_timeout();
 	struct node_record *node_ptr;
 	time_t start_time = time(NULL);
@@ -3832,10 +3890,23 @@ static void *_wait_boot(void *arg)
 		unlock_slurmctld(job_write_lock);
 	} while (wait_node_cnt);
 
-	lock_slurmctld(job_write_lock);
+	/* Validate the nodes have desired features */
+	lock_slurmctld(node_write_lock);
+	boot_node_bitmap = node_features_reboot(job_ptr);
+	if (boot_node_bitmap && bit_set_count(boot_node_bitmap)) {
+		char *node_list = bitmap2node_name(boot_node_bitmap);
+		error("Failed to reboot nodes %s into expected state for job %u",
+		      node_list, job_ptr->job_id);
+		(void) drain_nodes(node_list, "Node mode change failure",
+				   getuid());
+		xfree(node_list);
+		(void) job_requeue(getuid(), job_ptr->job_id, NULL, false, 0);
+	}
+	FREE_NULL_BITMAP(boot_node_bitmap);
+
 	prolog_running_decr(job_ptr);
 	job_validate_mem(job_ptr);
-	unlock_slurmctld(job_write_lock);
+	unlock_slurmctld(node_write_lock);
 
 	return NULL;
 }

@@ -197,7 +197,7 @@ static int _find_char_in_list(void *x, void *key)
 /* returns number of objects added to list */
 extern int slurm_addto_char_list(List char_list, char *names)
 {
-	int i = 0, start = 0;
+	int i = 0, start = 0, cnt = 0;
 	char *name = NULL;
 	ListIterator itr = NULL;
 	char quote_c = '\0';
@@ -222,6 +222,7 @@ extern int slurm_addto_char_list(List char_list, char *names)
 			i++;
 		}
 		start = i;
+		cnt = list_count(char_list);
 		while (names[i]) {
 			//info("got %d - %d = %d", i, start, i-start);
 			if (quote && (names[i] == quote_c))
@@ -324,7 +325,8 @@ extern int slurm_addto_char_list(List char_list, char *names)
 			i++;
 		}
 
-		if (i-start) {
+		/* check for empty strings user='' etc */
+		if ((cnt == list_count(char_list)) || (i - start)) {
 			name = xstrndup(names+start, (i-start));
 			/* If we get a duplicate remove the
 			 * first one and tack this on the end.
@@ -1860,6 +1862,27 @@ extern char *job_reason_string(enum job_state_reason inx)
 		snprintf(val, sizeof(val), "%d", inx);
 		return val;
 	}
+}
+
+/* If the job is held up by a QOS GRP limit return true else return false. */
+extern bool job_state_qos_grp_limit(enum job_state_reason state_reason)
+{
+	if ((state_reason >= WAIT_QOS_GRP_CPU &&
+	     state_reason <= WAIT_QOS_GRP_WALL) ||
+	    (state_reason == WAIT_QOS_GRP_MEM_MIN) ||
+	    (state_reason == WAIT_QOS_GRP_MEM_RUN_MIN) ||
+	    (state_reason >= WAIT_QOS_GRP_ENERGY &&
+	     state_reason <= WAIT_QOS_GRP_ENERGY_RUN_MIN) ||
+	    (state_reason == WAIT_QOS_GRP_NODE_MIN) ||
+	    (state_reason == WAIT_QOS_GRP_NODE_RUN_MIN) ||
+	    (state_reason >= WAIT_QOS_GRP_GRES &&
+	     state_reason <= WAIT_QOS_GRP_GRES_RUN_MIN) ||
+	    (state_reason >= WAIT_QOS_GRP_LIC &&
+	     state_reason <= WAIT_QOS_GRP_LIC_RUN_MIN) ||
+	    (state_reason >= WAIT_QOS_GRP_BB &&
+	     state_reason <= WAIT_QOS_GRP_BB_RUN_MIN))
+		return true;
+	return false;
 }
 
 extern void slurm_free_get_kvs_msg(kvs_get_msg_t *msg)

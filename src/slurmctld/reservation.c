@@ -2688,7 +2688,11 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 		resv_ptr->end_time = resv_desc_ptr->end_time;
 		resv_ptr->duration = 0;
 	}
-	if (resv_desc_ptr->duration != NO_VAL) {
+
+	if (resv_desc_ptr->duration == INFINITE) {
+		resv_ptr->duration = ONE_YEAR / 60;
+		resv_ptr->end_time = resv_ptr->start_time_first + ONE_YEAR;
+	} else if (resv_desc_ptr->duration != NO_VAL) {
 		resv_ptr->duration = resv_desc_ptr->duration;
 		resv_ptr->end_time = resv_ptr->start_time_first +
 				     (resv_desc_ptr->duration * 60);
@@ -4514,7 +4518,7 @@ static void _add_bb_resv(burst_buffer_info_msg_t **bb_resv, char *plugin,
 static void _update_bb_resv(burst_buffer_info_msg_t **bb_resv, char *bb_spec)
 {
 	uint64_t cnt;
-	char *end_ptr = NULL, *end_ptr2 = NULL;
+	char *end_ptr = NULL, *unit = NULL;
 	char *sep, *tmp_spec, *tok, *plugin, *type;
 
 	if ((bb_spec == NULL) || (bb_spec[0] == '\0'))
@@ -4541,19 +4545,40 @@ static void _update_bb_resv(burst_buffer_info_msg_t **bb_resv, char *bb_spec)
 			type = NULL;
 		}
 
-		cnt = strtol(tok, &end_ptr2, 10);
-		if ((end_ptr2[0] == 'n') || (end_ptr2[0] == 'N')) {
+		cnt = (uint64_t) strtoull(tok, &unit, 10);
+		if (!xstrcasecmp(unit, "n") ||
+		    !xstrcasecmp(unit, "node") ||
+		    !xstrcasecmp(unit, "nodes")) {
 			type = "nodes";	/* Cray node spec format */
-		} else if ((end_ptr2[0] == 'k') || (end_ptr2[0] == 'K')) {
-			cnt *= ((uint64_t) 1024);
-		} else if ((end_ptr2[0] == 'm') || (end_ptr2[0] == 'M')) {
-			cnt *= ((uint64_t) 1024 * 1024);
-		} else if ((end_ptr2[0] == 'g') || (end_ptr2[0] == 'G')) {
-			cnt *= ((uint64_t) 1024 * 1024 * 1024);
-		} else if ((end_ptr2[0] == 't') || (end_ptr2[0] == 'T')) {
-			cnt *= ((uint64_t) 1024 * 1024 * 1024 * 1024);
-		} else if ((end_ptr2[0] == 'p') || (end_ptr2[0] == 'P')) {
-			cnt *= ((uint64_t) 1024 * 1024 * 1024 * 1024 * 1024);
+		} else if (!xstrcasecmp(unit, "k") ||
+			   !xstrcasecmp(unit, "kib")) {
+			cnt *= 1024;
+		} else if (!xstrcasecmp(unit, "kb")) {
+			cnt *= 1000;
+
+		} else if (!xstrcasecmp(unit, "m") ||
+			   !xstrcasecmp(unit, "mib")) {
+			cnt *= ((uint64_t)1024 * 1024);
+		} else if (!xstrcasecmp(unit, "mb")) {
+			cnt *= ((uint64_t)1000 * 1000);
+
+		} else if (!xstrcasecmp(unit, "g") ||
+			   !xstrcasecmp(unit, "gib")) {
+			cnt *= ((uint64_t)1024 * 1024 * 1024);
+		} else if (!xstrcasecmp(unit, "gb")) {
+			cnt *= ((uint64_t)1000 * 1000 * 1000);
+
+		} else if (!xstrcasecmp(unit, "t") ||
+			   !xstrcasecmp(unit, "tib")) {
+			cnt *= ((uint64_t)1024 * 1024 * 1024 * 1024);
+		} else if (!xstrcasecmp(unit, "tb")) {
+			cnt *= ((uint64_t)1000 * 1000 * 1000 * 1000);
+
+		} else if (!xstrcasecmp(unit, "p") ||
+			   !xstrcasecmp(unit, "pib")) {
+			cnt *= ((uint64_t)1024 * 1024 * 1024 * 1024 * 1024);
+		} else if (!xstrcasecmp(unit, "pb")) {
+			cnt *= ((uint64_t)1000 * 1000 * 1000 * 1000 * 1000);
 		}
 
 		if (cnt)

@@ -670,6 +670,11 @@ static void _json_parse_mcdram_cfg_object(json_object *jobj, mcdram_cfg_t *ent)
 	int64_t x;
 	const char *p;
 
+	/* Initialize object */
+	ent->dram_size   = NO_VAL;
+	ent->mcdram_pct  = NO_VAL16;
+	ent->mcdram_size = NO_VAL;
+
 	json_object_object_foreachC(jobj, iter) {
 		type = json_object_get_type(iter.val);
 		switch (type) {
@@ -677,6 +682,8 @@ static void _json_parse_mcdram_cfg_object(json_object *jobj, mcdram_cfg_t *ent)
 			x = json_object_get_int64(iter.val);
 			if (xstrcmp(iter.key, "nid") == 0) {
 				ent->nid = x;
+			} else if (xstrcmp(iter.key, "mcdram_pct") == 0) {
+				ent->mcdram_pct = x;
 			}
 			break;
 		case json_type_string:
@@ -1416,6 +1423,10 @@ static void _update_all_node_features(
 			error("Removed KNL features from non-KNL node %s",
 			      node_ptr->name);
 		}
+		if (!node_ptr->gres) {
+			node_ptr->gres =
+				xstrdup(node_ptr->config_ptr->gres);
+		}
 		gres_plugin_node_feature(node_ptr->name, "hbm", 0,
 					 &node_ptr->gres, &node_ptr->gres_list);
 	}
@@ -1476,6 +1487,10 @@ static void _update_node_features(struct node_record *node_ptr,
 				node_ptr->gres =
 					xstrdup(node_ptr->config_ptr->gres);
 			}
+			if (!node_ptr->gres) {
+				node_ptr->gres =
+					xstrdup(node_ptr->config_ptr->gres);
+			}
 			gres_plugin_node_feature(node_ptr->name, "hbm",
 						 mcdram_size, &node_ptr->gres,
 						 &node_ptr->gres_list);
@@ -1511,6 +1526,10 @@ static void _update_node_features(struct node_record *node_ptr,
 		if (node_inx) {
 			error("Removed KNL features from non-KNL node %s",
 			      node_ptr->name);
+		}
+		if (!node_ptr->gres) {
+			node_ptr->gres =
+				xstrdup(node_ptr->config_ptr->gres);
 		}
 		gres_plugin_node_feature(node_ptr->name, "hbm", 0,
 					 &node_ptr->gres, &node_ptr->gres_list);
@@ -2289,10 +2308,16 @@ static int _update_node_state(char *node_list, bool set_locks)
 				continue;
 			if (mcdram_cfg[i].mcdram_pct !=
 			    mcdram_cfg2[k].cache_pct) {
-				info("%s: HBM mismatch between capmc and cnselect for nid %u (%u != %d)",
-				     __func__, mcdram_cfg[i].nid,
-				     mcdram_cfg[i].mcdram_pct,
-				     mcdram_cfg2[k].cache_pct);
+				if (mcdram_cfg[i].mcdram_pct == NO_VAL16) {
+					info("%s: No mcdram_pct from capmc for nid %u",
+					     __func__, mcdram_cfg[i].nid);
+				} else {
+					info("%s: HBM mismatch between capmc "
+					     "and cnselect for nid %u (%u != %d)",
+					     __func__, mcdram_cfg[i].nid,
+					     mcdram_cfg[i].mcdram_pct,
+					     mcdram_cfg2[k].cache_pct);
+				}
 				mcdram_cfg[i].mcdram_pct =
 					mcdram_cfg2[k].cache_pct;
 				xfree(mcdram_cfg[i].mcdram_cfg);
@@ -2310,10 +2335,16 @@ static int _update_node_state(char *node_list, bool set_locks)
 				continue;
 			if (xstrcmp(numa_cfg[i].numa_cfg,
 				    numa_cfg2[k].numa_cfg)) {
-				info("%s: NUMA mismatch between capmc and cnselect for nid %u (%s != %s)",
-				     __func__, numa_cfg[i].nid,
-				     numa_cfg[i].numa_cfg,
-				     numa_cfg2[k].numa_cfg);
+				if (!numa_cfg[i].numa_cfg) {
+					info("%s: No numa_cfg from capmc for nid %u",
+					     __func__, numa_cfg[i].nid);
+				} else {
+					info("%s: NUMA mismatch between capmc "
+					     "and cnselect for nid %u (%s != %s)",
+					     __func__, numa_cfg[i].nid,
+					     numa_cfg[i].numa_cfg,
+					     numa_cfg2[k].numa_cfg);
+				}
 				xfree(numa_cfg[i].numa_cfg);
 				numa_cfg[i].numa_cfg =
 					xstrdup(numa_cfg2[k].numa_cfg);
@@ -2354,15 +2385,19 @@ static int _update_node_state(char *node_list, bool set_locks)
 		time_t now = time(NULL);
 		for (i = 0, node_ptr = node_record_table_ptr;
 		     i < node_record_count; i++, node_ptr++) {
-			if (node_ptr->last_response > now)
-				continue;	/* Reboot in likely progress */
-			xfree(node_ptr->features_act);
 			_strip_knl_opts(&node_ptr->features);
-			if (node_ptr->features && !node_ptr->features_act) {
-				node_ptr->features_act =
-					xstrdup(node_ptr->features);
+			if (node_ptr->last_response > now) {
+				/* Reboot likely in progress.
+				 * Preserve active KNL features and merge
+				 * with configured non-KNL features */
+				_merge_strings(&node_ptr->features_act,
+					       node_ptr->features, 0);
 			} else {
-				_strip_knl_opts(&node_ptr->features_act);
+				xfree(node_ptr->features_act);
+				if (node_ptr->features) {
+					node_ptr->features_act =
+						xstrdup(node_ptr->features);
+				}
 			}
 		}
 		_update_all_node_features(mcdram_cap, mcdram_cap_cnt,
