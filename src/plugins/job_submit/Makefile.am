@@ -9,4 +9,5 @@ SUBDIRS = \
 	partition \
 	pbs \
 	require_timelimit \
-	throttle
+	throttle \
+	ccr_qos
