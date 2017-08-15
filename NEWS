@@ -1,6 +1,60 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 17.02.7
+==========================
+ -- Fix deadlock if requesting to create more than 10000 reservations.
+ -- Fix potential memory leak when creating partition name.
+ -- Execute the HealthCheckProgram once when the slurmd daemon starts rather
+    than executing repeatedly until an exit code of 0 is returned.
+ -- Set job/step start and end times to 0 when using --truncate and start > end.
+ -- Make srun --pty option ignore EINTR allowing windows to resize.
+ -- When resuming node only send one message to the slurmdbd.
+ -- Modify srun --pty option to use configured SrunPortRange range.
+ -- Fix issue with whole gres not being printed out with Slurm tools.
+ -- Fix issue with multiple jobs from an array are prevented from starting.
+ -- Fix for possible slurmctld abort with use of salloc/sbatch/srun
+    --gres-flags=enforce-binding option.
+ -- Fix race condition when using jobacct_gather/cgroup where the memory of the
+    step wasn't always gathered correctly.
+ -- Better debug when slurmdbd queue is filling up in the slurmctld.
+ -- Fixed truncation on scontrol show config output.
+ -- Serialize updates from from the dbd to the slurmctld.
+ -- Fix memory leak in slurmctld when agent queue to the DBD has filled up.
+ -- CRAY - Throttle step creation if trying to create too many steps at once.
+ -- If failing after switch_g_job_init happened make sure switch_g_job_fini is
+    called.
+ -- Fix minor memory leak if launch fails in the slurmstepd.
+ -- Fix issue where UnkillableStepProgram if step was in an ending state.
+ -- Fix bug when tracking multiple simultaneous spawned ping cycles.
+ -- jobcomp/elasticsearch plugin now saves state of pending requests on
+    slurmctld daemon shutdown so then can be recovered on restart.
+ -- Fix issue when an alternate munge key when communicating on a persistent
+    connection.
+ -- Document inconsistent behavior of GroupUpdateForce option.
+ -- Fix bug in selection of GRES bound to specific CPUs where the GRES count
+    is 2 or more. Previous logic could allocate CPUs not available to the job.
+ -- Increase buffer to handle long /proc/<pid>/stat output so that Slurm can
+    read correct RSS value and take action on jobs using more memory than
+    requested.
+ -- Fix srun job jobs that can run immediately to run in the highest priority
+    partion when multiple partitions are listed. scontrol show jobs can
+    potentially show the partition list in priority order.
+ -- Fix starting controller if StateSaveLocation path didn't exist.
+ -- Fix inherited association 'max' TRES limits combining multiple limits in
+    the tree.
+ -- Sort TRES id's on limits when getting them from the database.
+ -- Fix issue with pmi[2|x] when TreeWidth=1.
+ -- Correct buffer size used in determining specialized cores to avoid possible
+    truncation of core specification and not reserving the specified cores.
+ -- Close race condition on Slurm structures when setting DebugFlags.
+ -- Make it so the cray/switch plugin grabs new DebugFlags on a reconfigure.
+ -- Fix incorrect lock levels when creating or updating a reservation.
+ -- Fix overlapping reservation resize.
+ -- Add logic to help support Dell KNL systems where syscfg is different than
+    the normal Intel syscfg.
+ -- CRAY - Fix BB to handle type= correctly, regression in 17.02.6.
+
 * Changes in Slurm 17.02.6
 ==========================
  -- Fix configurator.easy.html to output the SelectTypeParameters line.
