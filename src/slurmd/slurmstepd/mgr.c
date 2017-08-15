@@ -1057,7 +1057,7 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 		error("spank extern task post-fork failed");
 
 	while ((wait4(pid, &status, 0, &rusage) < 0) && (errno == EINTR)) {
-		;	       /* Wait until above processs exits from signal */
+		;	       /* Wait until above process exits from signal */
 	}
 
 	jobacct = jobacct_gather_remove_task(pid);
@@ -1229,7 +1229,7 @@ job_manager(stepd_step_rec_t *job)
 		(void) log_ctld(LOG_LEVEL_ERROR, err_msg);
 		xfree(err_msg);
 		io_close_task_fds(job);
-		goto fail2;
+		goto fail3;
 	}
 
 	/* fork necessary threads for MPI */
@@ -1241,7 +1241,7 @@ job_manager(stepd_step_rec_t *job)
 			   job->jobid, job->stepid, conf->hostname);
 		(void) log_ctld(LOG_LEVEL_ERROR, err_msg);
 		xfree(err_msg);
-		goto fail2;
+		goto fail3;
 	}
 
 	if (!job->batch && job->accel_bind_type && (job->node_tasks <= 1))
@@ -1267,7 +1267,7 @@ job_manager(stepd_step_rec_t *job)
 	if ((rc = _fork_all_tasks(job, &io_initialized)) < 0) {
 		debug("_fork_all_tasks failed");
 		rc = ESLURMD_EXECVE_FAILED;
-		goto fail2;
+		goto fail3;
 	}
 
 	/*
@@ -1277,7 +1277,7 @@ job_manager(stepd_step_rec_t *job)
 	 * launch to happen.
 	 */
 	if ((rc != SLURM_SUCCESS) || !io_initialized)
-		goto fail2;
+		goto fail3;
 
 	io_close_task_fds(job);
 
@@ -1310,6 +1310,7 @@ job_manager(stepd_step_rec_t *job)
 
 	_set_job_state(job, SLURMSTEPD_STEP_ENDING);
 
+fail3:
 	if (!job->batch &&
 	    (switch_g_job_fini(job->switch_job) < 0)) {
 		error("switch_g_job_fini: %m");
@@ -1400,22 +1401,6 @@ fail1:
 
 	xfree(ckpt_type);
 	return(rc);
-}
-
-static int
-_pre_task_privileged(stepd_step_rec_t *job, int taskid, struct priv_state *sp)
-{
-	if (_reclaim_privileges(sp) < 0)
-		return SLURM_ERROR;
-
-	if (spank_task_privileged (job, taskid) < 0)
-		return error("spank_task_init_privileged failed");
-
-	if (task_g_pre_launch_priv(job) < 0)
-		return error("pre_launch_priv failed");
-
-	/* sp->gid_list should already be initialized */
-	return(_drop_privileges (job, true, sp, false));
 }
 
 struct exec_wait_info {
@@ -1727,15 +1712,6 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 			if (conf->propagate_prio)
 				_set_prio_process(job);
 
-			/*
-			 *  Reclaim privileges and call any plugin hooks
-			 *  that may require elevated privs
-			 *  sprivs.gid_list is already set from the
-			 *  _drop_privileges call above, no not reinitialize.
-			 */
-			if (_pre_task_privileged(job, i, &sprivs) < 0)
-				exit(1);
-
  			if (_become_user(job, &sprivs) < 0) {
  				error("_become_user failed: %m");
 				/* child process, should not return */
@@ -1821,6 +1797,18 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 			      i, job->task[i]->pid, job->pgid);
 		}
 
+		if (spank_task_privileged(job, i) < 0) {
+			error("spank_task_privileged: %m");
+			rc = SLURM_ERROR;
+			goto fail2;
+		}
+
+		if (task_g_pre_launch_priv(job, job->task[i]->pid) < 0) {
+			error("task_g_pre_launch_priv: %m");
+			rc = SLURM_ERROR;
+			goto fail2;
+		}
+
 		if (proctrack_g_add(job, job->task[i]->pid)
 		    == SLURM_ERROR) {
 			error("proctrack_g_add: %m");
@@ -1878,8 +1866,8 @@ fail4:
 	}
 fail3:
 	_reclaim_privileges (&sprivs);
-	FREE_NULL_LIST (exec_wait_list);
 fail2:
+	FREE_NULL_LIST(exec_wait_list);
 	io_close_task_fds(job);
 fail1:
 	pam_finish();

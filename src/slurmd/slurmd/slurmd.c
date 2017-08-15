@@ -115,8 +115,6 @@
 #  define MAXHOSTNAMELEN	64
 #endif
 
-#define HEALTH_RETRY_DELAY 10
-
 #define MAX_THREADS		256
 
 #define _free_and_set(__dst, __src) \
@@ -147,6 +145,7 @@ typedef struct connection {
 static bitstr_t	*res_core_bitmap;	/* reserved abstract cores bitmap */
 static bitstr_t	*res_cpu_bitmap;	/* reserved abstract CPUs bitmap */
 static char	*res_abs_cores = NULL;	/* reserved abstract cores list */
+static int32_t	res_abs_core_size = 0;	/* Length of res_abs_cores variable */
 static char	res_abs_cpus[MAX_CPUSTR]; /* reserved abstract CPUs list */
 static char	*res_mac_cpus = NULL;	/* reserved machine CPUs list */
 static int	ncores;			/* number of cores on this node */
@@ -203,7 +202,6 @@ static void      _update_nice(void);
 static void      _usage(void);
 static int       _validate_and_convert_cpu_list(void);
 static void      _wait_for_all_threads(int secs);
-static void      _wait_health_check(void);
 
 int
 main (int argc, char **argv)
@@ -366,10 +364,9 @@ main (int argc, char **argv)
 	if (slurmd_plugstack_init())
 		fatal("failed to initialize slurmd_plugstack");
 
-	/* Wait for a successful health check if HealthCheckInterval != 0 */
-	_wait_health_check();
-
+	run_script_health_check();
 	_spawn_registration_engine();
+
 	msg_aggr_sender_init(conf->hostname, conf->port,
 			     conf->msg_aggr_window_time,
 			     conf->msg_aggr_window_msgs);
@@ -2113,7 +2110,8 @@ static int _core_spec_init(void)
 
 	ncores = conf->sockets * conf->cores;
 	ncpus = ncores * conf->threads;
-	res_abs_cores = xmalloc(ncores * 4 * sizeof(char));
+	res_abs_core_size = ncores * 4;
+	res_abs_cores = xmalloc(res_abs_core_size);
 	res_core_bitmap = bit_alloc(ncores);
 	res_cpu_bitmap  = bit_alloc(ncpus);
 	res_abs_cpus[0] = '\0';
@@ -2292,7 +2290,7 @@ static void _select_spec_cores(void)
  */
 static int _convert_spec_cores(void)
 {
-	bit_fmt(res_abs_cores, sizeof(res_abs_cores), res_core_bitmap);
+	bit_fmt(res_abs_cores, res_abs_core_size, res_core_bitmap);
 	bit_fmt(res_abs_cpus, sizeof(res_abs_cpus), res_cpu_bitmap);
 	if (xcpuinfo_abs_to_mac(res_abs_cores, &res_mac_cpus) != SLURM_SUCCESS)
 		return SLURM_ERROR;
@@ -2326,7 +2324,7 @@ static int _validate_and_convert_cpu_list(void)
 		if (bit_test(res_cpu_bitmap, thread_off) == 1)
 			bit_set(res_core_bitmap, thread_off/(conf->threads));
 	}
-	bit_fmt(res_abs_cores, sizeof(res_abs_cores), res_core_bitmap);
+	bit_fmt(res_abs_cores, res_abs_core_size, res_core_bitmap);
 	/* create output abstract CPU list from core bitmap */
 	for (core_off = 0; core_off < ncores; core_off++) {
 		if (bit_test(res_core_bitmap, core_off) == 1) {
@@ -2353,28 +2351,6 @@ static void _resource_spec_fini(void)
 }
 
 /*
- * Wait for health check to execute successfully
- *
- * Return immediately if a shutdown has been requested or
- * if the HealthCheckInterval is 0.
- */
-static void _wait_health_check(void)
-{
-	int last_check_time = 0;
-	while (!_shutdown && (conf->health_check_interval != 0) ) {
-		if (time(NULL) - last_check_time > HEALTH_RETRY_DELAY) {
-			if (run_script_health_check() == SLURM_SUCCESS) {
-				break;
-			}
-			last_check_time = time(NULL);
-			info ("Health Check failed, retrying in %ds...",
-				HEALTH_RETRY_DELAY);
-		}
-		usleep(10000);
-	}
-}
-
-/*
  * Run the configured health check program
  *
  * Returns the run result. If the health check program
@@ -2384,7 +2360,7 @@ extern int run_script_health_check(void)
 {
 	int rc = SLURM_SUCCESS;
 
-	if (conf->health_check_program) {
+	if (conf->health_check_program && (conf->health_check_interval != 0)) {
 		char *env[1] = { NULL };
 		rc = run_script("health_check", conf->health_check_program,
 				0, 60, env, 0);

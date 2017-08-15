@@ -70,6 +70,7 @@
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_cred.h"
 #include "src/common/slurm_ext_sensors.h"
+#include "src/common/slurm_jobcomp.h"
 #include "src/common/slurm_priority.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_interface.h"
@@ -2377,8 +2378,21 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 	}
 #endif
 
+#if defined HAVE_NATIVE_CRAY
+	if (LOTS_OF_AGENTS || (slurmctld_config.server_thread_count >= 128)) {
+		/*
+		 * Don't start more steps if system is very busy right now.
+		 * Getting cray network switch cookie is slow and happens
+		 * with job write lock set.
+		 */
+		slurm_send_rc_msg(msg, EAGAIN);
+		return;
+	}
+#endif
+
 	_throttle_start(&active_rpc_cnt);
 	lock_slurmctld(job_write_lock);
+
 	error_code = step_create(req_step_msg, &step_rec, false,
 				 msg->protocol_version);
 
@@ -3264,6 +3278,17 @@ static void _slurm_rpc_shutdown_controller(slurm_msg_t * msg)
 			error("REQUEST_CONTROL reply with %d active threads",
 			      slurmctld_config.server_thread_count);
 		/* save_all_state();	performed by _slurmctld_background */
+
+		/*
+		 * jobcomp/elasticsearch saves/loads the state to/from file
+		 * elasticsearch_state. Since the jobcomp API isn't designed
+		 * with save/load state operations, the jobcomp/elasticsearch
+		 * _save_state() is highly coupled to its fini() function. This
+		 * state doesn't follow the same execution path as the rest of
+		 * Slurm states, where in save_all_sate() they are all indepen-
+		 * dently scheduled. So we save it manually here.
+		 */
+		(void) g_slurm_jobcomp_fini();
 	}
 
 
@@ -4126,9 +4151,9 @@ static void _slurm_rpc_resv_create(slurm_msg_t * msg)
 	DEF_TIMERS;
 	resv_desc_msg_t *resv_desc_ptr = (resv_desc_msg_t *)
 		msg->data;
-	/* Locks: write node, read partition */
+	/* Locks: read config, read job, write node, read partition */
 	slurmctld_lock_t node_write_lock = {
-		NO_LOCK, NO_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK };
+		READ_LOCK, READ_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK };
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred,
 					 slurmctld_config.auth_info);
 
@@ -4184,9 +4209,9 @@ static void _slurm_rpc_resv_update(slurm_msg_t * msg)
 	DEF_TIMERS;
 	resv_desc_msg_t *resv_desc_ptr = (resv_desc_msg_t *)
 		msg->data;
-	/* Locks: write node, read partition */
+	/* Locks: read config, read job, write node, read partition */
 	slurmctld_lock_t node_write_lock = {
-		NO_LOCK, NO_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK };
+		READ_LOCK, READ_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK };
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred,
 					 slurmctld_config.auth_info);
 
@@ -5290,7 +5315,7 @@ inline static void  _slurm_rpc_set_debug_flags(slurm_msg_t *msg)
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred,
 					 slurmctld_config.auth_info);
 	slurmctld_lock_t config_write_lock =
-		{ WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK, READ_LOCK };
+		{ WRITE_LOCK, READ_LOCK, READ_LOCK, READ_LOCK, READ_LOCK };
 	set_debug_flags_msg_t *request_msg =
 		(set_debug_flags_msg_t *) msg->data;
 	uint64_t debug_flags;
@@ -5450,6 +5475,7 @@ static int _find_update_object_in_list(void *x, void *key)
 
 inline static void  _slurm_rpc_accounting_update_msg(slurm_msg_t *msg)
 {
+	static int active_rpc_cnt = 0;
 	int rc = SLURM_SUCCESS;
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred,
 					 slurmctld_config.auth_info);
@@ -5475,6 +5501,18 @@ inline static void  _slurm_rpc_accounting_update_msg(slurm_msg_t *msg)
 
 	slurm_send_rc_msg(msg, rc);
 
+	/*
+	 * We only want one of these running at a time or we could get some
+	 * interesting locking scenarios.  Meaning we could get into a situation
+	 * if multiple were running to have both the assoc_mgr locks locked in
+	 * one threads as well as the slurmctld locks locked and then waiting of
+	 * the assoc_mgr locks in another.  Usually this wouldn't be an issue
+	 * though some systems looking up user names could be fairly heavy.  If
+	 * you are looking for hundreds you could make the slurmctld
+	 * unresponsive in the mean time.  Throttling this to only 1 update at a
+	 * time should minimize this situation.
+	 */
+	_throttle_start(&active_rpc_cnt);
 	if (update_ptr->update_list && list_count(update_ptr->update_list)) {
 		slurmdb_update_object_t *object;
 
@@ -5493,6 +5531,7 @@ inline static void  _slurm_rpc_accounting_update_msg(slurm_msg_t *msg)
 
 		rc = assoc_mgr_update(update_ptr->update_list, 0);
 	}
+	_throttle_fini(&active_rpc_cnt);
 
 	END_TIMER2("_slurm_rpc_accounting_update_msg");
 

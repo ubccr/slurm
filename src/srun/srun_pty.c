@@ -94,8 +94,14 @@ void pty_thread_create(srun_job_t *job)
 {
 	slurm_addr_t pty_addr;
 	pthread_attr_t attr;
+	uint16_t *ports;
 
-	if ((job->pty_fd = slurm_init_msg_engine_port(0)) < 0) {
+	if ((ports = slurm_get_srun_port_range()))
+		job->pty_fd = slurm_init_msg_engine_ports(ports);
+	else
+		job->pty_fd = slurm_init_msg_engine_port(0);
+
+	if (job->pty_fd < 0) {
 		error("init_msg_engine_port: %m");
 		return;
 	}
@@ -157,7 +163,7 @@ static void *_pty_thread(void *arg)
 
 	while (job->state <= SRUN_JOB_RUNNING) {
 		debug2("waiting for SIGWINCH");
-		if (poll(NULL, 0, -1) < 1) {
+		if ((poll(NULL, 0, -1) < 1) && (errno != EINTR)) {
 			debug("%s: poll error %m", __func__);
 			continue;
 		}
