@@ -77,15 +77,15 @@
 %slurm_with_opt sgijob
 %endif
 
-Name:    see META file
-Version: see META file
-Release: see META file
+Name:    slurm
+Version: 15.08.4
+Release: 2.2.ccr%{?dist}
 
 Summary: Slurm Workload Manager
 
 License: GPL
 Group: System Environment/Base
-Source: %{name}-%{version}-%{release}.tgz
+Source: slurm-15.08.4.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://slurm.schedmd.com/
 
@@ -374,7 +374,7 @@ according to the Slurm
 #############################################################################
 
 %prep
-%setup -n %{name}-%{version}-%{release}
+%setup -n slurm-15.08.4
 
 %build
 %configure \
@@ -586,8 +586,8 @@ libdir=%{_libdir}
 Cflags: -I\${includedir}
 Libs: -L\${libdir} -lslurm
 Description: Slurm API
-Name: %{name}
-Version: %{version}
+Name: slurm
+Version: 15.08.4
 EOF
 
 %if %{slurm_with bluegene}
@@ -862,6 +862,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/job_submit_ccr_qos.so
 %{_libdir}/slurm/job_submit_cray.so
 %{_libdir}/slurm/job_submit_require_timelimit.so
+%{_libdir}/slurm/job_submit_save_script.so
 %{_libdir}/slurm/job_submit_throttle.so
 %{_libdir}/slurm/jobacct_gather_cgroup.so
 %{_libdir}/slurm/jobacct_gather_linux.so
