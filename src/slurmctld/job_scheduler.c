@@ -3289,7 +3289,7 @@ extern int job_start_data(job_desc_msg_t *job_desc_msg,
 		return ESLURM_DISABLED;
 
 	if ((job_desc_msg->req_nodes == NULL) ||
-	    (job_desc_msg->req_nodes == '\0')) {
+	    (job_desc_msg->req_nodes[0] == '\0')) {
 		/* assume all nodes available to job for testing */
 		avail_bitmap = bit_alloc(node_record_count);
 		bit_nset(avail_bitmap, 0, (node_record_count - 1));
@@ -3576,7 +3576,7 @@ static char **_build_env(struct job_record *job_ptr, bool is_epilog)
 	}
 
 	setenvf(&my_env, "SLURM_JOB_GID", "%u", job_ptr->group_id);
-	name = gid_to_string((uid_t) job_ptr->group_id);
+	name = gid_to_string((gid_t) job_ptr->group_id);
 	setenvf(&my_env, "SLURM_JOB_GROUP", "%s", name);
 	xfree(name);
 	setenvf(&my_env, "SLURM_JOBID", "%u", job_ptr->job_id);

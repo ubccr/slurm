@@ -227,7 +227,7 @@ static void _set_job_requeue_exit_value(struct job_record *job_ptr);
 static void _signal_batch_job(struct job_record *job_ptr,
 			      uint16_t signal,
 			      uint16_t flags);
-static void _signal_job(struct job_record *job_ptr, int signal);
+static void _signal_job(struct job_record *job_ptr, int signal, uint16_t flags);
 static void _suspend_job(struct job_record *job_ptr, uint16_t op,
 			 bool indf_susp);
 static int  _suspend_job_nodes(struct job_record *job_ptr, bool indf_susp);
@@ -4687,15 +4687,12 @@ static int _job_signal(struct job_record *job_ptr, uint16_t signal,
 			deallocate_nodes(job_ptr, false, false, preempt);
 			if (flags & KILL_FED_REQUEUE)
 				job_ptr->job_state &= (~JOB_REQUEUE);
-		} else if (job_ptr->batch_flag &&
-			   ((flags & KILL_FULL_JOB)  ||
-			    (flags & KILL_JOB_BATCH) ||
-			    (flags & KILL_STEPS_ONLY))) {
+		} else if (job_ptr->batch_flag && (flags & KILL_JOB_BATCH)) {
 			_signal_batch_job(job_ptr, signal, flags);
 		} else if ((flags & KILL_JOB_BATCH) && !job_ptr->batch_flag) {
 			return ESLURM_JOB_SCRIPT_MISSING;
 		} else {
-			_signal_job(job_ptr, signal);
+			_signal_job(job_ptr, signal, flags);
 		}
 		verbose("%s: %u of running %s successful 0x%x",
 			__func__, signal, jobid2str(job_ptr, jbuf,
@@ -5316,7 +5313,13 @@ static int _alt_part_test(struct part_record *part_ptr,
 	return SLURM_SUCCESS;
 }
 
-/* Test if this job can use this partition */
+/*
+ * Test if this job can use this partition
+ *
+ * NOTE: This function is also called with a dummy job_desc_msg_t from
+ * job_limits_check() if there is any new check added here you may also have to
+ * add that parameter to the job_desc_msg_t in that function.
+ */
 static int _part_access_check(struct part_record *part_ptr,
 			      job_desc_msg_t * job_desc, bitstr_t *req_bitmap,
 			      uid_t submit_uid, slurmdb_qos_rec_t *qos_ptr,
@@ -5334,7 +5337,7 @@ static int _part_access_check(struct part_record *part_ptr,
 	if ((part_ptr->flags & PART_FLAG_REQ_RESV) &&
 		((job_desc->reservation == NULL) ||
 		(resv_name_leng == 0))) {
-		info("%s: uid %u access to partition %s "
+		debug2("%s: uid %u access to partition %s "
 		     "denied, requires reservation", __func__,
 		     (unsigned int) submit_uid, part_ptr->name);
 		return ESLURM_ACCESS_DENIED;
@@ -5343,7 +5346,7 @@ static int _part_access_check(struct part_record *part_ptr,
 
 	if ((part_ptr->flags & PART_FLAG_REQ_RESV) &&
 	    (!job_desc->reservation || !strlen(job_desc->reservation))) {
-		info("%s: uid %u access to partition %s "
+		debug2("%s: uid %u access to partition %s "
 		     "denied, requires reservation", __func__,
 		     (unsigned int) submit_uid, part_ptr->name);
 		return ESLURM_ACCESS_DENIED;
@@ -5351,7 +5354,7 @@ static int _part_access_check(struct part_record *part_ptr,
 
 	if ((part_ptr->flags & PART_FLAG_ROOT_ONLY) && (submit_uid != 0) &&
 	    (submit_uid != slurmctld_conf.slurm_user_id)) {
-		info("%s: uid %u access to partition %s "
+		debug2("%s: uid %u access to partition %s "
 		     "denied, not root", __func__,
 		     (unsigned int) submit_uid, part_ptr->name);
 		return ESLURM_ACCESS_DENIED;
@@ -5364,14 +5367,14 @@ static int _part_access_check(struct part_record *part_ptr,
 	}
 
 	if (validate_group(part_ptr, job_desc->user_id) == 0) {
-		info("%s: uid %u access to partition %s "
+		debug2("%s: uid %u access to partition %s "
 		     "denied, bad group", __func__,
 		     (unsigned int) job_desc->user_id, part_ptr->name);
 		return ESLURM_JOB_MISSING_REQUIRED_PARTITION_GROUP;
 	}
 
 	if (validate_alloc_node(part_ptr, job_desc->alloc_node) == 0) {
-		info("%s: uid %u access to partition %s "
+		debug2("%s: uid %u access to partition %s "
 		     "denied, bad allocating node: %s", __func__,
 		     (unsigned int) job_desc->user_id, part_ptr->name,
 		     job_desc->alloc_node);
@@ -5382,7 +5385,7 @@ static int _part_access_check(struct part_record *part_ptr,
 	    (job_desc->min_cpus != NO_VAL)) {
 
 		if (job_desc->min_cpus > part_ptr->total_cpus) {
-			info("%s: Job requested too many "
+			debug2("%s: Job requested too many "
 			     "cpus (%u) of partition %s(%u)", __func__,
 			     job_desc->min_cpus, part_ptr->name,
 			     part_ptr->total_cpus);
@@ -5390,7 +5393,7 @@ static int _part_access_check(struct part_record *part_ptr,
 		} else if (job_desc->min_cpus >
 			   (part_ptr->max_cpus_per_node *
 			    part_ptr->total_nodes)) {
-			info("%s: Job requested too many "
+			debug2("%s: Job requested too many "
 			     "cpus (%u) of partition %s(%u)", __func__,
 			     job_desc->min_cpus, part_ptr->name,
 			     (part_ptr->max_cpus_per_node *
@@ -5405,14 +5408,14 @@ static int _part_access_check(struct part_record *part_ptr,
 	if ((part_ptr->state_up & PARTITION_SCHED) &&
 	    (job_desc->min_nodes != NO_VAL) &&
 	    (job_desc->min_nodes > total_nodes)) {
-		info("%s: Job requested too many nodes (%u) "
+		debug2("%s: Job requested too many nodes (%u) "
 		     "of partition %s(%u)", __func__,
 		     job_desc->min_nodes, part_ptr->name, total_nodes);
 		return ESLURM_INVALID_NODE_COUNT;
 	}
 
 	if (req_bitmap && !bit_super_set(req_bitmap, part_ptr->node_bitmap)) {
-		info("%s: requested nodes %s not in partition %s", __func__,
+		debug2("%s: requested nodes %s not in partition %s", __func__,
 		     job_desc->req_nodes, part_ptr->name);
 		return ESLURM_REQUESTED_NODES_NOT_IN_PARTITION;
 	}
@@ -5438,7 +5441,7 @@ static int _part_access_check(struct part_record *part_ptr,
 	    (job_min_nodes < min_nodes_tmp) &&
 	    (!qos_ptr || (qos_ptr && !(qos_ptr->flags
 				       & QOS_FLAG_PART_MIN_NODE)))) {
-		info("%s: Job requested for nodes (%u) "
+		debug2("%s: Job requested for nodes (%u) "
 		     "smaller than partition %s(%u) min nodes", __func__,
 		     job_min_nodes, part_ptr->name, min_nodes_tmp);
 		return  ESLURM_INVALID_NODE_COUNT;
@@ -5449,7 +5452,7 @@ static int _part_access_check(struct part_record *part_ptr,
 	    (job_max_nodes > max_nodes_tmp) &&
 	    (!qos_ptr || (qos_ptr && !(qos_ptr->flags
 				       & QOS_FLAG_PART_MAX_NODE)))) {
-		info("%s: Job requested for nodes (%u) greater than partition"
+		debug2("%s: Job requested for nodes (%u) greater than partition"
 		     " %s(%u) max nodes", __func__, job_max_nodes,
 		     part_ptr->name, max_nodes_tmp);
 		return ESLURM_INVALID_NODE_COUNT;
@@ -5459,7 +5462,7 @@ static int _part_access_check(struct part_record *part_ptr,
 	    (job_desc->time_limit != NO_VAL) &&
 	    (job_desc->time_limit > part_ptr->max_time) &&
 	    (!qos_ptr || !(qos_ptr->flags & QOS_FLAG_PART_TIME_LIMIT))) {
-		info("%s: Job time limit (%u) exceeds limit of partition "
+		debug2("%s: Job time limit (%u) exceeds limit of partition "
 		     "%s(%u)", __func__, job_desc->time_limit, part_ptr->name,
 		     part_ptr->max_time);
 		return ESLURM_INVALID_TIME_LIMIT;
@@ -5828,9 +5831,9 @@ extern int job_limits_check(struct job_record **job_pptr, bool check_min_time)
 	struct job_record *job_ptr = NULL;
 	slurmdb_qos_rec_t  *qos_ptr;
 	slurmdb_assoc_rec_t *assoc_ptr;
-	uint32_t job_min_nodes, job_max_nodes;
-	uint32_t part_min_nodes, part_max_nodes;
-	uint32_t time_check;
+	job_desc_msg_t job_desc;
+	int rc;
+
 #ifdef HAVE_BG
 	static uint16_t cpus_per_node = 0;
 	if (!cpus_per_node)
@@ -5847,46 +5850,59 @@ extern int job_limits_check(struct job_record **job_pptr, bool check_min_time)
 		return WAIT_NO_REASON;
 	}
 
+	fail_reason = WAIT_NO_REASON;
+
+	/*
+	 * Here we need to pretend we are just submitting the job so we can
+	 * utilize the already existing function _part_access_check.  If
+	 * anything else is ever checked in that function this will most likely
+	 * have to be updated.
+	 */
+	memset(&job_desc, 0, sizeof(job_desc_msg_t));
+	job_desc.reservation = job_ptr->resv_name;
+	job_desc.user_id = job_ptr->user_id;
+	job_desc.alloc_node = job_ptr->alloc_node;
+	job_desc.min_cpus = detail_ptr->min_cpus;
 #ifdef HAVE_BG
 	/* The node counts have been altered to reflect slurm nodes instead of
 	 * cnodes, so we need to figure out the cnode count
 	 * by using the cpu counts.  The partitions have been altered as well
 	 * so we have to use the original values.
 	 */
-	job_min_nodes = detail_ptr->min_cpus / cpus_per_node;
-	job_max_nodes = detail_ptr->max_cpus / cpus_per_node;
-	part_min_nodes = part_ptr->min_nodes_orig;
-	part_max_nodes = part_ptr->max_nodes_orig;
+	job_desc.min_nodes = detail_ptr->min_cpus / cpus_per_node;
+	job_desc.max_nodes = detail_ptr->max_cpus / cpus_per_node;
 #else
-	job_min_nodes = detail_ptr->min_nodes;
-	job_max_nodes = detail_ptr->max_nodes;
-	part_min_nodes = part_ptr->min_nodes;
-	part_max_nodes = part_ptr->max_nodes;
+	job_desc.min_nodes = detail_ptr->min_nodes;
+	/* _part_access_check looks for NO_VAL instead of 0 */
+	job_desc.max_nodes = detail_ptr->max_nodes ?
+		detail_ptr->max_nodes : NO_VAL;;
 #endif
-
-	fail_reason = WAIT_NO_REASON;
-
 	if (check_min_time && job_ptr->time_min)
-		time_check = job_ptr->time_min;
+		job_desc.time_limit = job_ptr->time_min;
 	else
-		time_check = job_ptr->time_limit;
-	if ((job_min_nodes > part_max_nodes) &&
-	    (!qos_ptr || (qos_ptr && !(qos_ptr->flags
-				       & QOS_FLAG_PART_MAX_NODE)))) {
-		debug2("Job %u requested too many nodes (%u) of "
-		       "partition %s (MaxNodes %u)",
-		       job_ptr->job_id, job_min_nodes,
-		       part_ptr->name, part_max_nodes);
-		fail_reason = WAIT_PART_NODE_LIMIT;
-	} else if ((job_max_nodes != 0) &&  /* no max_nodes for job */
-		   ((job_max_nodes < part_min_nodes) &&
-		    (!qos_ptr || (qos_ptr && !(qos_ptr->flags &
-					       QOS_FLAG_PART_MIN_NODE))))) {
-		debug2("Job %u requested too few nodes (%u) of "
-		       "partition %s (MinNodes %u)",
-		       job_ptr->job_id, job_max_nodes,
-		       part_ptr->name, part_min_nodes);
-		fail_reason = WAIT_PART_NODE_LIMIT;
+		job_desc.time_limit = job_ptr->time_limit;
+
+	if ((rc = _part_access_check(part_ptr, &job_desc, NULL,
+				     job_ptr->user_id, qos_ptr,
+				     job_ptr->account))) {
+		debug2("Job %u can't run in partition %s: %s",
+		       job_ptr->job_id, part_ptr->name, slurm_strerror(rc));
+		switch (rc) {
+		case ESLURM_INVALID_TIME_LIMIT:
+			if (job_ptr->limit_set.time != ADMIN_SET_LIMIT)
+				fail_reason = WAIT_PART_TIME_LIMIT;
+			break;
+		case ESLURM_INVALID_NODE_COUNT:
+			fail_reason = WAIT_PART_NODE_LIMIT;
+			break;
+		/* FIXME */
+		/* case ESLURM_TOO_MANY_REQUESTED_CPUS: */
+		/* 	failt_reason = NON_EXISTANT_WAIT_PART_CPU_LIMIT; */
+		/* 	break; */
+		default:
+			fail_reason = WAIT_PART_CONFIG;
+			break;
+		}
 	} else if (part_ptr->state_up == PARTITION_DOWN) {
 		debug2("Job %u requested down partition %s",
 		       job_ptr->job_id, part_ptr->name);
@@ -5895,14 +5911,6 @@ extern int job_limits_check(struct job_record **job_pptr, bool check_min_time)
 		debug2("Job %u requested inactive partition %s",
 		       job_ptr->job_id, part_ptr->name);
 		fail_reason = WAIT_PART_INACTIVE;
-	} else if ((time_check != NO_VAL) &&
-		   (time_check > part_ptr->max_time) &&
-		   (!qos_ptr || (qos_ptr && !(qos_ptr->flags &
-					     QOS_FLAG_PART_TIME_LIMIT)))) {
-		debug2("Job %u exceeds partition %s time limit (%u > %u)",
-		       job_ptr->job_id, part_ptr->name, time_check,
-		       part_ptr->max_time);
-		fail_reason = WAIT_PART_TIME_LIMIT;
 	} else if (qos_ptr && assoc_ptr &&
 		   (qos_ptr->flags & QOS_FLAG_ENFORCE_USAGE_THRES) &&
 		   (!fuzzy_equal(qos_ptr->usage_thres, NO_VAL))) {
@@ -13808,15 +13816,16 @@ extern int job_node_ready(uint32_t job_id, int *ready)
 }
 
 /* Send specified signal to all steps associated with a job */
-static void _signal_job(struct job_record *job_ptr, int signal)
+static void _signal_job(struct job_record *job_ptr, int signal, uint16_t flags)
 {
 #ifndef HAVE_FRONT_END
 	int i;
 #endif
 	agent_arg_t *agent_args = NULL;
-	signal_job_msg_t *signal_job_msg = NULL;
+	kill_tasks_msg_t *signal_job_msg = NULL;
 	static int notify_srun_static = -1;
 	int notify_srun = 0;
+	uint32_t z = 0;
 
 	if (notify_srun_static == -1) {
 		/* do this for all but slurm (poe, aprun, etc...) */
@@ -13854,12 +13863,30 @@ static void _signal_job(struct job_record *job_ptr, int signal)
 	}
 
 	agent_args = xmalloc(sizeof(agent_arg_t));
-	agent_args->msg_type = REQUEST_SIGNAL_JOB;
+	agent_args->msg_type = REQUEST_SIGNAL_TASKS;
 	agent_args->retry = 1;
 	agent_args->hostlist = hostlist_create(NULL);
 	signal_job_msg = xmalloc(sizeof(kill_tasks_msg_t));
 	signal_job_msg->job_id = job_ptr->job_id;
-	signal_job_msg->signal = signal;
+
+	/*
+	 * We don't ever want to kill a step with this message.  The flags below
+	 * will make sure that does happen.  Just in case though, set the
+	 * step_id to an impossible number.
+	 */
+	signal_job_msg->job_step_id = slurmctld_conf.max_step_cnt + 1;
+
+	/*
+	 * Encode the flags for slurm stepd to know what steps get signaled
+	 * Here if we aren't signaling the full job we always only want to
+	 * signal all other steps.
+	 */
+	if (flags == KILL_FULL_JOB)
+		z = KILL_FULL_JOB << 24;
+	else
+		z = KILL_STEPS_ONLY << 24;
+
+	signal_job_msg->signal = z | signal;
 
 #ifdef HAVE_FRONT_END
 	xassert(job_ptr->batch_host);

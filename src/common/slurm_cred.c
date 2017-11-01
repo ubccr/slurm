@@ -441,7 +441,7 @@ slurm_cred_ctx_destroy(slurm_cred_ctx_t ctx)
 	FREE_NULL_LIST(ctx->job_list);
 	FREE_NULL_LIST(ctx->state_list);
 
-	xassert(ctx->magic = ~CRED_CTX_MAGIC);
+	xassert((ctx->magic = ~CRED_CTX_MAGIC));
 
 	slurm_mutex_unlock(&ctx->mutex);
 	slurm_mutex_destroy(&ctx->mutex);
@@ -918,7 +918,7 @@ slurm_cred_destroy(slurm_cred_t *cred)
 	FREE_NULL_LIST(cred->step_gres_list);
 	xfree(cred->step_hostlist);
 	xfree(cred->signature);
-	xassert(cred->magic = ~CRED_MAGIC);
+	xassert((cred->magic = ~CRED_MAGIC));
 
 	slurm_mutex_unlock(&cred->mutex);
 	slurm_mutex_destroy(&cred->mutex);
@@ -1292,6 +1292,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 {
 	uint32_t     cred_uid, len;
 	slurm_cred_t *cred = NULL;
+	char *bit_fmt_str = NULL;
 	char       **sigp;
 	uint32_t     cluster_flags = slurmdb_setup_cluster_flags();
 
@@ -1382,20 +1383,19 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 
 		if (!(cluster_flags & CLUSTER_FLAG_BG)) {
 			uint32_t tot_core_cnt;
-			char *bit_fmt = NULL;
 			safe_unpack32(&tot_core_cnt, buffer);
-			safe_unpackstr_xmalloc(&bit_fmt, &len, buffer);
+			safe_unpackstr_xmalloc(&bit_fmt_str, &len, buffer);
 			cred->job_core_bitmap =
 				bit_alloc((bitoff_t) tot_core_cnt);
-			if (bit_unfmt(cred->job_core_bitmap, bit_fmt))
+			if (bit_unfmt(cred->job_core_bitmap, bit_fmt_str))
 				goto unpack_error;
-			xfree(bit_fmt);
-			safe_unpackstr_xmalloc(&bit_fmt, &len, buffer);
+			xfree(bit_fmt_str);
+			safe_unpackstr_xmalloc(&bit_fmt_str, &len, buffer);
 			cred->step_core_bitmap =
 				bit_alloc((bitoff_t) tot_core_cnt);
-			if (bit_unfmt(cred->step_core_bitmap, bit_fmt))
+			if (bit_unfmt(cred->step_core_bitmap, bit_fmt_str))
 				goto unpack_error;
-			xfree(bit_fmt);
+			xfree(bit_fmt_str);
 			safe_unpack16(&cred->core_array_size, buffer);
 			if (cred->core_array_size) {
 				safe_unpack16_array(&cred->cores_per_socket,
@@ -1432,7 +1432,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 	return cred;
 
 unpack_error:
-	xfree(bit_fmt);
+	xfree(bit_fmt_str);
 	slurm_mutex_unlock(&cred->mutex);
 	slurm_cred_destroy(cred);
 	return NULL;
@@ -1629,7 +1629,7 @@ _slurm_cred_ctx_alloc(void)
 	ctx->expiry_window = cred_expire;
 	ctx->exkey_exp     = (time_t) -1;
 
-	xassert(ctx->magic = CRED_CTX_MAGIC);
+	xassert((ctx->magic = CRED_CTX_MAGIC));
 
 	slurm_mutex_unlock(&ctx->mutex);
 	return ctx;
@@ -1644,7 +1644,7 @@ _slurm_cred_alloc(void)
 	slurm_mutex_init(&cred->mutex);
 	cred->uid = (uid_t) -1;
 
-	xassert(cred->magic = CRED_MAGIC);
+	xassert((cred->magic = CRED_MAGIC));
 
 	return cred;
 }
