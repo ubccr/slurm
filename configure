@@ -18802,6 +18802,11 @@ $as_echo "#define STDC_HEADERS 1" >>confdefs.h
 
 fi
 
+
+# Workaround for transition of autoconf/glibc issues in deprecation of the
+# definitions major, minor, makedev by sys/types.h vs sys/sysmacros.h
+old_CFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -Werror"
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether sys/types.h defines makedev" >&5
 $as_echo_n "checking whether sys/types.h defines makedev... " >&6; }
 if ${ac_cv_header_sys_types_h_makedev+:} false; then :
@@ -18852,6 +18857,7 @@ fi
   fi
 fi
 
+CFLAGS=$old_CFLAGS
 
 
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -23010,7 +23016,11 @@ fi
         test -f "$_test_dir/lib64/libjob.so" || continue
 
         CRAY_JOB_CPPFLAGS="$CRAY_JOB_CPPFLAGS -I$_test_dir/include"
-        CRAY_JOB_LDFLAGS="$CRAY_JOB_LDFLAGS -L$_test_dir/lib64 -ljob"
+        if test "$ac_with_rpath" = "yes"; then
+          CRAY_JOB_LDFLAGS="$CRAY_JOB_LDFLAGS -Wl,-rpath -Wl,$_test_dir/lib64 -L$_test_dir/lib64 -ljob"
+        else
+          CRAY_JOB_LDFLAGS="$CRAY_JOB_LDFLAGS -L$_test_dir/lib64 -ljob"
+        fi
       fi
 
       _test_dir="$d/$_x_ac_cray_alpscomm_dir"
@@ -23024,8 +23034,13 @@ fi
 
       CRAY_ALPSC_CN_CPPFLAGS="$CRAY_ALPSC_CN_CPPFLAGS -I$_test_dir/include"
       CRAY_ALPSC_SN_CPPFLAGS="$CRAY_ALPSC_SN_CPPFLAGS -I$_test_dir/include"
-      CRAY_ALPSC_CN_LDFLAGS="$CRAY_ALPSC_CN_LDFLAGS -L$_test_dir/lib64 -lalpscomm_cn"
-      CRAY_ALPSC_SN_LDFLAGS="$CRAY_ALPSC_SN_LDFLAGS -L$_test_dir/lib64 -lalpscomm_sn"
+      if test "$ac_with_rpath" = "yes"; then
+        CRAY_ALPSC_CN_LDFLAGS="$CRAY_ALPSC_CN_LDFLAGS -Wl,-rpath -Wl,$_test_dir/lib64 -L$_test_dir/lib64 -lalpscomm_cn"
+        CRAY_ALPSC_SN_LDFLAGS="$CRAY_ALPSC_SN_LDFLAGS -Wl,-rpath -Wl,$_test_dir/lib64 -L$_test_dir/lib64 -lalpscomm_sn"
+      else
+        CRAY_ALPSC_CN_LDFLAGS="$CRAY_ALPSC_CN_LDFLAGS -L$_test_dir/lib64 -lalpscomm_cn"
+        CRAY_ALPSC_SN_LDFLAGS="$CRAY_ALPSC_SN_LDFLAGS -L$_test_dir/lib64 -lalpscomm_sn"
+      fi
 
       CRAY_SWITCH_CPPFLAGS="$CRAY_SWITCH_CPPFLAGS $CRAY_JOB_CPPFLAGS $CRAY_ALPSC_CN_CPPFLAGS $CRAY_ALPSC_SN_CPPFLAGS"
       CRAY_SWITCH_LDFLAGS="$CRAY_SWITCH_LDFLAGS $CRAY_JOB_LDFLAGS $CRAY_ALPSC_CN_LDFLAGS $CRAY_ALPSC_SN_LDFLAGS"
@@ -25147,7 +25162,8 @@ x=CURLOPT_WRITEDATA;
 x=CURLOPT_ERRORBUFFER;
 x=CURLOPT_STDERR;
 x=CURLOPT_VERBOSE;
-if (x) ;
+if (x)
+;
 
   ;
   return 0;

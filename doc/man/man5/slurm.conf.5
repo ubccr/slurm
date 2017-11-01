@@ -521,7 +521,7 @@ job step credentials.
 The slurmctld daemon must be restarted for a change in \fBCryptoType\fR
 to take effect.
 Acceptable values at present include "crypto/munge" and "crypto/openssl".
-The default value is "crypto/munge".
+The default value is "crypto/munge" and is the recommended.
 
 .TP
 \fBDebugFlags\fR
@@ -630,6 +630,9 @@ Power management plugin
 .TP
 \fBPriority\fR
 Job prioritization
+.TP
+\fBProfile\fR
+AcctGatherProfile plugins details
 .TP
 \fBProtocol\fR
 Communication protocol details
@@ -984,8 +987,8 @@ The default value is unlimited (zero) and may not exceed 65533 seconds.
 \fBJobAcctGatherType\fR
 The job accounting mechanism type.
 Acceptable values at present include "jobacct_gather/linux" (for Linux
-systems), "jobacct_gather/cgroup" and "jobacct_gather/none"
-(no accounting data collected).
+systems) and is the recommended one, "jobacct_gather/cgroup" and
+"jobacct_gather/none" (no accounting data collected).
 The default value is "jobacct_gather/none".
 "jobacct_gather/cgroup" is a plugin for the Linux operating system
 that uses cgroups to collect accounting statistics. The plugin collects the
@@ -1073,6 +1076,10 @@ Do not kill process that uses more then requested memory.
 This parameter should be used with caution as if jobs exceeds
 its memory allocation it may affect other processes and/or machine
 health.
+NOTE: It is recommended to limit memory by enabling task/cgroup
+in TaskPlugin and making use of ConstrainRAMSpace=yes cgroup.conf.
+If so, having JobAcctGather as an extra mechanism for memory enforcement
+is not recommended, so setting \fBNoOverMemoryKill\fR is advised.
 .RE
 
 .TP
@@ -1096,9 +1103,11 @@ Also see \fBDefaultStorageHost\fR.
 The fully qualified file name where job completion records are written
 when the \fBJobCompType\fR is "jobcomp/filetxt" or the database where
 job completion records are stored when the \fBJobCompType\fR is a
-database or an url with format http://yourelasticserver:port where job
-completion records are indexed when the \fBJobCompType\fR is
-"jobcomp/elasticsearch".
+database, or an url with format http://yourelasticserver:port when
+\fBJobCompType\fR is "jobcomp/elasticsearch".
+NOTE: when you specify a URL for elasticsearch, Slurm will remove any trailing
+slashes "/" from the configured URL and append "/slurm/jobcomp", which are the
+elasticsearch index name (slurm) and mapping (jobcomp).
 Also see \fBDefaultStorageLoc\fR.
 
 .TP
@@ -3485,6 +3494,20 @@ Lacks support for the \-\-cpu_bind and/or \-\-mem_bind srun options.
 The default value is "task/none".
 .RE
 
+\fBNOTE:\fR It is recommended to stack \fBtask/affinity,task/cgroup\fR together
+when configuring TaskPlugin, and setting \fBTaskAffinity=no\fR and
+\fBConstrainCores=yes\fR in \fBcgroup.conf\fR. This setup uses the task/affinity
+plugin for setting the affinity of the tasks (which is better and different than
+task/cgroup) and uses the task/cgroup plugin to fence tasks into the specified
+resources, thus combining the best of both pieces.
+
+\fBNOTE:\fR For CRAY systems only: task/cgroup must be used with, and listed
+\fBafter\fR task/cray in TaskPlugin. The task/affinity plugin can be listed
+everywhere, but the previous constrain must be satisfied. So for CRAY systems,
+a configuration like this is recommended:
+
+TaskPlugin=task/affinity,task/cray,task/cgroup
+
 .TP
 \fBTaskPluginParam\fR
 Optional parameters for the task plugin.
@@ -3726,6 +3749,10 @@ session     required      pam_unix.so
 For sites configuring PAM with a general configuration file, the appropriate
 lines (see above), where \fBslurm\fR is the service\-name, should be added.
 
+\fBNOTE\fR: UsePAM option has nothing to do with the
+\fBcontribs/pam/pam_slurm\fR and/or \fBcontribs/pam_slurm_adopt\fR modules. So
+these two modules can work independently of the value set for UsePAM.
+
 .TP
 \fBVSizeFactor\fR
 Memory specifications in job requests apply to real memory size (also known
@@ -3813,7 +3840,7 @@ separated by a "\-" (e.g. "linux[0\-64,128]", or "lx[15,18,32\-33]").
 Note that the numeric ranges can include one or more leading
 zeros to indicate the numeric portion has a fixed number of digits
 (e.g. "linux[0000\-1023]").
-Up to two numeric ranges can be included in the expression
+Multiple numeric ranges can be included in the expression
 (e.g. "rack[0\-63]_blade[0\-41]").
 If one or more numeric expressions are included, one of them
 must be at the end of the name (e.g. "unit[0\-31]rack" is invalid),

@@ -1,6 +1,90 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 17.02.9
+==========================
+ -- When resuming powered down nodes, mark DOWN nodes right after ResumeTimeout
+    has been reached (previous logic would wait about one minute longer).
+ -- Fix sreport not showing full column name for TRES Count.
+ -- Fix slurmdb_reservations_get() giving wrong usage data when job's spanned
+    reservation that was modified.
+ -- Fix sreport reservation utilization report showing bad data.
+ -- Show all TRES' on a reservation in sreport reservation utilization report by
+    default.
+ -- Fix sacctmgr show reservation handling "end" parameter.
+ -- Work around issue with sysmacros.h and gcc7 / glibc 2.25.
+ -- Fix layouts code to only allow setting a boolean.
+ -- Fix sbatch --wait to keep waiting even if a message timeout occurs.
+ -- CRAY - If configured with NodeFeatures=knl_cray and there are non-KNL
+    nodes which include no features the slurmctld will abort without
+    this patch when attemping strtok_r(NULL).
+ -- Fix regression in 17.02.7 which would run the spank_task_privileged as
+    part of the slurmstepd instead of it's child process.
+ -- Fix security issue in Prolog and Epilog by always prepending SPANK_ to
+    all user-set environment variables. CVE-2017-15566.
+
+* Changes in Slurm 17.02.8
+==========================
+ -- Add 'slurmdbd:' to the accounting plugin to notify message is from dbd
+    instead of local.
+ -- mpi/mvapich - Buffer being only partially cleared. No failures observed.
+ -- Fix for job --switch option on dragonfly network.
+ -- In salloc with --uid option, drop supplementary groups before changing UID.
+ -- jobcomp/elasticsearch - strip any trailing slashes from JobCompLoc.
+ -- jobcomp/elasticsearch - fix memory leak when transferring generated buffer.
+ -- Prevent slurmstepd ABRT when parsing gres.conf CPUs.
+ -- Fix sbatch --signal to signal all MPI ranks in a step instead of just those
+    on node 0.
+ -- Check multiple partition limits when scheduling a job that were previously
+    only checked on submit.
+ -- Cray: Avoid running application/step Node Health Check on the external
+    job step.
+ -- Optimization enhancements for partition based job preemption.
+ -- Address some build warnings from GCC 7.1, and one possible memory leak if
+    /proc is inaccessible.
+ -- If creating/altering a core based reservation with scontrol/sview on a
+    remote cluster correctly determine the select type.
+ -- Fix autoconf test for libcurl when clang is used.
+ -- Fix default location for cgroup_allowed_devices_file.conf to use correct
+    default path.
+ -- Document NewName option to sacctmgr.
+ -- Reject a second PMI2_Init call within a single step to prevent slurmstepd
+    from hanging.
+ -- Handle old 32bit values stored in the database for requested memory
+    correctly in sacct.
+ -- Fix memory leaks in the task/cgroup plugin when constraining devices.
+ -- Make extremely verbose info messages debug2 messages in the task/cgroup
+    plugin when constraining devices.
+ -- Fix issue that would deny the stepd access to /dev/null where GRES has a
+    'type' but no file defined.
+ -- Fix issue where the slurmstepd would fatal on job launch if you have no
+    gres listed in your slurm.conf but some in gres.conf.
+ -- Fix validating time spec to correctly validate various time formats.
+ -- Make scontrol work correctly with job update timelimit [+|-]=.
+ -- Reduce the visibily of a number of warnings in _part_access_check.
+ -- Prevent segfault in sacctmgr if no association name is specified for
+    an update command.
+ -- burst_buffer/cray plugin modified to work with changes in Cray UP05
+    software release.
+ -- Fix job reasons for jobs that are violating assoc MaxTRESPerNode limits.
+ -- Fix segfault when unpacking a 16.05 slurm_cred in a 17.02 daemon.
+ -- Fix setting TRES limits with case insensitive TRES names.
+ -- Add alias for xstrncmp() -- slurm_xstrncmp().
+ -- Fix sorting of case insensitive strings when using xstrcasecmp().
+ -- Gracefully handle race condition when reading /proc as process exits.
+ -- Avoid error on Cray duplicate setup of core specialization.
+ -- Skip over undefined (hidden in Slurm) nodes in pbsnodes.
+ -- Add empty hashes in perl api's slurm_load_node() for hidden nodes.
+ -- CRAY - Add rpath logic to work for the alpscomm libs.
+ -- Fixes for administrator extended TimeLimit (job reason & time limit reset).
+ -- Fix gres selection on systems running select/linear.
+ -- sview: Added window decorator for maximize,minimize,close buttons for all
+    systems.
+ -- squeue: interpret negative length format specifiers as a request to
+    delimit values with spaces.
+ -- Fix the torque pbsnodes wrapper script to parse a gres field with a type
+    set correctly.
+
 * Changes in Slurm 17.02.7
 ==========================
  -- Fix deadlock if requesting to create more than 10000 reservations.
@@ -599,6 +683,9 @@ documents those changes that are of interest to users and administrators.
  -- Added infrastructure for setting up federations in database and establishing
     connections between federation clusters.
 
+* Changes in Slurm 16.05.12
+===========================
+
 * Changes in Slurm 16.05.11
 ===========================
  -- burst_buffer/cray - Add support for line continuation.
@@ -617,6 +704,9 @@ documents those changes that are of interest to users and administrators.
  -- Fix seg fault if loading attempting to load non-existent burstbuffer plugin.
  -- Fix to backfill scheduling with respect to QOS and association limits. Jobs
     submitted to multiple partitions are most likley to be effected.
+ -- Avoid erroneous errno set by the mariadb 10.2 api.
+ -- Fix security issue in Prolog and Epilog by always prepending SPANK_ to
+    all user-set environment variables. CVE-2017-15566.
 
 * Changes in Slurm 16.05.10-2
 =============================

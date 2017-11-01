@@ -746,7 +746,8 @@ extern int scontrol_update_job(int argc, char **argv)
 		val = strchr(argv[i], '=');
 		if (val) {
 			taglen = val - argv[i];
-			if ((taglen > 0) && (val[-1] == '+')) {
+			if ((taglen > 0) && ((val[-1] == '+') ||
+					     (val[-1] == '-'))) {
 				add_info = val - 1;
 				taglen--;
 			}
@@ -774,9 +775,20 @@ extern int scontrol_update_job(int argc, char **argv)
 			job_msg.job_id_str = val;
 		}
 		else if (strncasecmp(tag, "AdminComment", MAX(taglen, 3)) == 0){
-			if (add_info)
+			if (add_info) {
+				if (add_info[0] == '-') {
+					error("Invalid syntax, AdminComment can not be subtracted from.");
+					exit_code = 1;
+					return 0;
+				}
 				job_msg.admin_comment = add_info;
-			else
+				/*
+				 * Mark as unset so we know we handled this
+				 * correctly as there is a check later to make
+				 * sure we know we got a +-.
+				 */
+				add_info = NULL;
+			} else
 				job_msg.admin_comment = val;
 			update_cnt++;
 		}
@@ -807,20 +819,25 @@ extern int scontrol_update_job(int argc, char **argv)
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "TimeLimit", MAX(taglen, 5)) == 0) {
-			bool incr, decr;
 			uint32_t job_current_time, time_limit;
 
-			incr = (val[0] == '+');
-			decr = (val[0] == '-');
-			if (incr || decr)
+			if (val && ((val[0] == '+') || (val[0] == '-'))) {
+				if (add_info) {
+					error("Invalid syntax, variations of +=- are not accepted.");
+					exit_code = 1;
+					return 0;
+				}
+				add_info = val;
 				val++;
+			}
+
 			time_limit = time_str2mins(val);
 			if (time_limit == NO_VAL) {
 				error("Invalid TimeLimit value");
 				exit_code = 1;
 				return 0;
 			}
-			if (incr || decr) {
+			if (add_info) {
 				if (!job_msg.job_id_str) {
 					error("JobId must precede TimeLimit "
 					      "increment or decrement");
@@ -834,7 +851,7 @@ extern int scontrol_update_job(int argc, char **argv)
 					exit_code = 1;
 					return 0;
 				}
-				if (incr) {
+				if (add_info[0] == '+') {
 					time_limit += job_current_time;
 				} else if (time_limit > job_current_time) {
 					error("TimeLimit decrement larger than"
@@ -846,6 +863,12 @@ extern int scontrol_update_job(int argc, char **argv)
 					time_limit = job_current_time -
 						     time_limit;
 				}
+				/*
+				 * Mark as unset so we know we handled this
+				 * correctly as there is a check later to make
+				 * sure we know we got a +-.
+				 */
+				add_info = NULL;
 			}
 			job_msg.time_limit = time_limit;
 			update_cnt++;
@@ -1243,6 +1266,12 @@ extern int scontrol_update_job(int argc, char **argv)
 			fprintf (stderr, "Update of this parameter is not "
 				 "supported: %s\n", argv[i]);
 			fprintf (stderr, "Request aborted\n");
+			return 0;
+		}
+
+		if (add_info) {
+			error("Option %s does not accept [+|-]= syntax", tag);
+			exit_code = 1;
 			return 0;
 		}
 	}

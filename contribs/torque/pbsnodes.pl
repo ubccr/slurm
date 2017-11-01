@@ -125,6 +125,8 @@ Main:
     my $update = $resp->{last_update};
     foreach my $node (@{$resp->{node_array}}) {
             #print STDERR join(",",keys($node))."\n";
+	    next unless (defined $node);
+	    next unless (keys %{$node});
 	    my $nodeId    = $node->{'name'};
 	    my $rCProc    = $node->{'cpus'};
 	    my $rBoards   = $node->{'boards'};
@@ -153,10 +155,10 @@ Main:
                   foreach my $grestype ( @gres ) {
                           my @elt = split(/:/,$grestype);
 			  if ( $#elt>0 && $elt[0] eq "gpu" ) {
-			          $gpus = int($elt[1]);
+			          $gpus = int($elt[-1]);
 			  }
 			  if ( $#elt>0 && $elt[0] eq "mic" ) {
-			          $mics = int($elt[1]);
+			          $mics = int($elt[-1]);
 			  }
 		  }
 	    }

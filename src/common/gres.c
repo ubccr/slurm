@@ -799,7 +799,8 @@ static int _parse_gres_config(void **dest, slurm_parser_enum_t type,
 			}
 		} else
 			local_cpus = xstrdup(p->cpus);
-		if (bit_unfmt(p->cpus_bitmap, local_cpus) != 0) {
+		if ((bit_size(p->cpus_bitmap) == 0) ||
+		    bit_unfmt(p->cpus_bitmap, local_cpus) != 0) {
 			fatal("Invalid gres data for %s, CPUs=%s (only %u CPUs"
 			      " are available)",
 			      p->name, p->cpus, gres_cpu_cnt);
@@ -814,7 +815,7 @@ static int _parse_gres_config(void **dest, slurm_parser_enum_t type,
 
 	if (s_p_get_string(&p->type, "Type", tbl) && !p->file) {
 		p->file = xstrdup("/dev/null");
-		p->has_file = 1;
+		p->has_file = 2;
 	}
 
 	if (s_p_get_string(&tmp_str, "Count", tbl)) {
@@ -955,6 +956,9 @@ extern int gres_plugin_node_config_devices_path(char ***dev_path,
 	hostlist_t hl;
 
 	gres_plugin_init();
+	if (gres_context_cnt == 0)
+		return 0;
+
 	gres_conf_file = get_extra_conf_path("gres.conf");
 	if (stat(gres_conf_file, &config_stat) < 0) {
 		error("can't stat gres.conf file %s: %m", gres_conf_file);
@@ -972,7 +976,8 @@ extern int gres_plugin_node_config_devices_path(char ***dev_path,
 	gres_conf_list = list_create(_destroy_gres_slurmd_conf);
 	if (s_p_get_array((void ***) &gres_array, &count, "Name", tbl)) {
 		for (i = 0; i < count; i++) {
-			if (!gres_array[i] || !gres_array[i]->file)
+			if (!gres_array[i] || !gres_array[i]->file ||
+			    gres_array[i]->has_file == 2)
 				continue;
 			root_path = xstrdup(gres_array[i]->file);
 			slash = strrchr(root_path, '/');
@@ -1013,7 +1018,8 @@ extern int gres_plugin_node_config_devices_path(char ***dev_path,
 	}
 	if (s_p_get_array((void ***) &gres_array, &count, "NodeName", tbl)) {
 		for (i = 0; i < count; i++) {
-			if (!gres_array[i] || !gres_array[i]->file)
+			if (!gres_array[i] || !gres_array[i]->file ||
+			    gres_array[i]->has_file == 2)
 				continue;
 			root_path = xstrdup(gres_array[i]->file);
 			slash = strrchr(root_path, '/');
@@ -1276,7 +1282,7 @@ extern int gres_plugin_node_config_unpack(Buf buffer, char* node_name)
 					count64 = MAX_GRES_BITMAP;
 				}
 				if (has_file)	/* Don't clear if already set */
-					gres_context[j].has_file = has_file;
+					gres_context[j].has_file = true;
 				break;
 	 		}
 			if (j >= gres_context_cnt) {
@@ -1696,7 +1702,7 @@ extern int gres_gresid_to_gresname(uint32_t gres_id, char* gres_name,
 		/* Should not reach this as if there are GRES id's then there
 		 * must have been a gres_conf_list.
 		 */
-		info("%s--The gres_conf_list is NULL!!!\n", __func__);
+		info("%s--The gres_conf_list is NULL!!!", __func__);
 		snprintf(gres_name, gres_name_len, "%u", gres_id);
 		return rc;
 	}
@@ -4883,7 +4889,7 @@ extern void gres_plugin_job_state_file(List gres_list, int *gres_bit_alloc,
 	gres_state_t *gres_ptr;
 	gres_job_state_t *gres_job_ptr;
 
-	if (gres_list == NULL)
+	if (gres_list == NULL || !gres_count || !gres_bit_alloc)
 		return;
 	(void) gres_plugin_init();
 
@@ -6296,7 +6302,7 @@ extern void gres_plugin_step_state_file(List gres_list, int *gres_bit_alloc,
 	gres_state_t *gres_ptr;
 	gres_step_state_t *gres_step_ptr;
 
-	if (gres_list == NULL)
+	if (gres_list == NULL || !gres_count || !gres_bit_alloc)
 		return;
 	(void) gres_plugin_init();
 

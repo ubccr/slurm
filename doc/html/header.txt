@@ -6,6 +6,8 @@
 
 	<title>Slurm Workload Manager</title>
 
+	<!--#canonical-->
+
 	<link rel="shortcut icon" href="favicon.ico" />
 
 	<link rel="stylesheet" type="text/css" href="fonts.css" />
@@ -13,7 +15,17 @@
 	<link rel="stylesheet" type="text/css" href="style.css" />
 	<link rel="stylesheet" type="text/css" href="slurm.css" />
 
+	<script src="jquery.min.js"></script>
 	<script type="text/javascript">
+	jQuery(document).ready(function() {
+		jQuery('.menu-trigger').bind('click touchstart', function() {
+			jQuery(this).find('.menu-trigger__lines').toggleClass('menu-trigger__lines--closed');
+			jQuery(this).parents('.site-header').find('.site-nav').toggleClass('site-nav--active');
+
+			return false;
+		});
+	});
+
 	(function() {
 	  var cx = '011890816164765777536:jvrtxrd3f0w';
 	  var gcse = document.createElement('script');
@@ -34,7 +46,7 @@
 
 		<div class="site-masthead">
 			<h1 class="site-masthead__title site-masthead__title--slurm">
-				<a href="/slurm" rel="home">
+				<a href="/" rel="home">
 					<span class="slurm-logo">Slurm Workload Manager</span>
 				</a>
 			</h1>
@@ -52,7 +64,7 @@
 			<h2 class="site-nav__title">Navigation</h2>
 
 			<div class="slurm-title">
-				<div class="slurm-logo"><a href="/slurm">Slurm Workload Manager</a></div>
+				<div class="slurm-logo"><a href="/">Slurm Workload Manager</a></div>
 				<div class="slurm-title__version">Version @SLURM_VERSION@</div>
 			</div>
 
