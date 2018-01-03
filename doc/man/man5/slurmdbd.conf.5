@@ -1,4 +1,4 @@
-.TH "slurmdbd.conf" "5" "Slurm Configuration File" "April 2015" "Slurm Configuration File"
+.TH "slurmdbd.conf" "5" "Slurm Configuration File" "July 2015" "Slurm Configuration File"
 
 .SH "NAME"
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file
@@ -225,6 +225,9 @@ in the database.
 .TP
 \fBDB_WCKEY\fR
 SQL statements/queries when dealing with wckeys in the database.
+.TP
+\fBFEDERATION\fR
+SQL statements/queries when dealing with federations in the database.
 .RE
 
 .TP
@@ -265,6 +268,52 @@ Log errors and verbose informational messages and even more debugging messages
 .RE
 
 .TP
+\fBDebugLevelSyslog\fR
+The slurmdbd daemon will log events to the syslog file at the specified
+level of detail (the \fBLogFile\fR file will include log messages
+at level of details specified be \fBDebugLevel\fR configuration parameter).
+If the slurmdbd daemon is run in the foreground (started with the \fB\-D\fR
+command line option) the \fBDebugLevelSyslog\fR configuration parameter
+will be ignored.
+The default value is \fBquiet\fR unless there is no configured
+\fBSlurmdLogFile\fR, in which case the default value will be \fBfatal\bR so
+that fatal errors are logged somewhere.
+
+.RS
+.TP 10
+\fBquiet\fR
+Log nothing
+.TP
+\fBfatal\fR
+Log only fatal errors
+.TP
+\fBerror\fR
+Log only errors
+.TP
+\fBinfo\fR
+Log errors and general informational messages
+.TP
+\fBverbose\fR
+Log errors and verbose informational messages
+.TP
+\fBdebug\fR
+Log errors and verbose informational messages and debugging messages
+.TP
+\fBdebug2\fR
+Log errors and verbose informational messages and more debugging messages
+.TP
+\fBdebug3\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug4\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug5\fR
+Log errors and verbose informational messages and even more debugging messages
+.RE
+
+
+.TP
 \fBDefaultQOS\fR
 When adding a new cluster this will be used as the qos for the cluster
 unless something is explicitly set by the admin with the create.
@@ -291,6 +340,15 @@ with the C standard clock() function. The "short" format is a short
 date and time format. The "thread_id" format shows the timestamp
 in the C standard ctime() function form without the year but
 including the microseconds, the daemon's process ID and the current thread ID.
+
+.TP
+\fBMaxQueryTimeRange\fR
+Return an error if a query is against too large of a time span, to prevent
+ill-formed queries from causing performance problems within SlurmDBD.
+Default value is INFINITE which allows any queries to proceed.
+User \fBSlurmUser\fR and \fBroot\fR are exempt from this restriction.
+Note that queries which attempt to return over 3GB of data will still
+fail to complete with ESLURM_RESULT_TOO_LARGE.
 
 .TP
 \fBMessageTimeout\fR
@@ -323,6 +381,10 @@ Acceptable values include:
 \fBaccounts\fR
 prevents users from viewing any account definitions unless they are
 coordinators of them.
+.TP
+\fBevents\fR
+prevents users from viewing event information unless they have operator status
+or above.
 .TP
 \fBjobs\fR
 prevents users from viewing job records belonging

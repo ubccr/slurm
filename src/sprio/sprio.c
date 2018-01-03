@@ -61,21 +61,18 @@ uint32_t weight_part; /* weight for Partition factor */
 uint32_t weight_qos; /* weight for QOS factor */
 char    *weight_tres; /* weights for TRES factors */
 
-static int _get_info(priority_factors_request_msg_t *factors_req,
-		     priority_factors_response_msg_t **factors_resp);
-
 int main (int argc, char **argv)
 {
 	char *prio_type = NULL;
 	int error_code = SLURM_SUCCESS;
-	priority_factors_request_msg_t req_msg;
 	priority_factors_response_msg_t *resp_msg = NULL;
 	log_options_t opts = LOG_OPTS_STDERR_ONLY ;
+	uint16_t show_flags = 0;
 
 	slurm_conf_init(NULL);
 	log_init(xbasename(argv[0]), opts, SYSLOG_FACILITY_USER, NULL);
 
-	parse_command_line( argc, argv );
+	parse_command_line(argc, argv);
 	if (params.verbose) {
 		opts.stderr_level += params.verbose;
 		log_alter(opts, SYSLOG_FACILITY_USER, NULL);
@@ -118,21 +115,15 @@ int main (int argc, char **argv)
 	}
 	xfree(prio_type);
 
-
-	memset(&req_msg, 0, sizeof(priority_factors_request_msg_t));
-
-	if (params.jobs)
-		req_msg.job_id_list = params.job_list;
-	else
-		req_msg.job_id_list = NULL;
-
-	if (params.users)
-		req_msg.uid_list = params.user_list;
-	else
-		req_msg.uid_list = NULL;
-
-	error_code = _get_info(&req_msg, &resp_msg);
-
+	if (params.federation)
+		show_flags |= SHOW_FEDERATION;
+	if (params.clusters || params.local)
+		show_flags |= SHOW_LOCAL;
+	if (params.sibling)
+		show_flags |= SHOW_FEDERATION | SHOW_SIBLING;
+	error_code = slurm_load_job_prio(&resp_msg, params.job_list,
+					 params.parts, params.user_list,
+					 show_flags);
 	if (error_code) {
 		slurm_perror("Couldn't get priority factors from controller");
 		exit(error_code);
@@ -140,11 +131,13 @@ int main (int argc, char **argv)
 
 	if (params.format == NULL) {
 		if (params.normalized) {
-			if (params.long_list)
-				params.format = "%.15i %.8u %10y %10a %10f "
+			if (params.long_list) {
+				params.format = "%.15i %9r %.8u %10y %10a %10f "
 					"%10j %10p %10q %20t";
-			else{
-				params.format = xstrdup("%.15i");
+			} else {
+				params.format = xstrdup("%.15i %9r");
+				if (params.sibling && !params.local)
+					xstrcat(params.format, " %.8c");
 				if (params.users)
 					xstrcat(params.format, " %.8u");
 				xstrcat(params.format, " %10y");
@@ -162,11 +155,13 @@ int main (int argc, char **argv)
 					xstrcat(params.format, " %20t");
 			}
 		} else {
-			if (params.long_list)
-				params.format = "%.15i %.8u %.10Y %.10A %.10F "
+			if (params.long_list) {
+				params.format = "%.15i %9r %.8u %.10Y %.10A %.10F "
 					"%.10J %.10P %.10Q %.11N %.20T";
-			else{
-				params.format = xstrdup("%.15i");
+			} else {
+				params.format = xstrdup("%.15i %9r");
+				if (params.sibling && !params.local)
+					xstrcat(params.format, " %.8c");
 				if (params.users)
 					xstrcat(params.format, " %.8u");
 				xstrcat(params.format, " %.10Y");
@@ -196,7 +191,8 @@ int main (int argc, char **argv)
 		print_jobs_array(resp_msg->priority_factors_list,
 				 params.format_list);
 	}
-#if 0
+
+#ifdef MEMORY_LEAK_DEBUG
 	/* Free storage here if we want to verify that logic.
 	 * Since we exit next, this is not important */
 	FREE_NULL_LIST(params.format_list);
@@ -204,40 +200,4 @@ int main (int argc, char **argv)
 #endif
 
 	exit (error_code);
-}
-
-static int _get_info(priority_factors_request_msg_t *factors_req,
-		     priority_factors_response_msg_t **factors_resp)
-{
-	int rc;
-        slurm_msg_t req_msg;
-        slurm_msg_t resp_msg;
-
-	slurm_msg_t_init(&req_msg);
-	slurm_msg_t_init(&resp_msg);
-
-        req_msg.msg_type = REQUEST_PRIORITY_FACTORS;
-        req_msg.data     = factors_req;
-
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
-		return SLURM_ERROR;
-
-	switch (resp_msg.msg_type) {
-	case RESPONSE_PRIORITY_FACTORS:
-		*factors_resp =
-			(priority_factors_response_msg_t *) resp_msg.data;
-		break;
-	case RESPONSE_SLURM_RC:
-		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
-		slurm_free_return_code_msg(resp_msg.data);
-		if (rc)
-			slurm_seterrno_ret(rc);
-		*factors_resp = NULL;
-		break;
-	default:
-		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
-		break;
-	}
-
-	return SLURM_PROTOCOL_SUCCESS;
 }

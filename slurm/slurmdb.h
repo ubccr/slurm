@@ -134,6 +134,7 @@ typedef enum {
 #define	QOS_FLAG_REQ_RESV            0x00000020
 #define	QOS_FLAG_DENY_LIMIT          0x00000040
 #define	QOS_FLAG_OVER_PART_QOS       0x00000080
+#define	QOS_FLAG_NO_DECAY            0x00000100
 
 /* Define Server Resource flags */
 #define	SLURMDB_RES_FLAG_BASE        0x0fffffff /* apply to get real flags */
@@ -147,7 +148,6 @@ typedef enum {
 #define	FEDERATION_FLAG_ADD            0x20000000
 #define	FEDERATION_FLAG_REMOVE         0x40000000
 
-#define	FEDERATION_FLAG_LLC            0x00000001
 
 /* SLURM CLUSTER FEDERATION STATES */
 enum cluster_fed_states {
@@ -201,6 +201,7 @@ enum cluster_fed_states {
 #define CLUSTER_FLAG_CRAY_A 0x00000100 /* This cluster is a ALPS cray */
 #define CLUSTER_FLAG_FE     0x00000200 /* This cluster is a front end system */
 #define CLUSTER_FLAG_CRAY_N 0x00000400 /* This cluster is a Native cray */
+#define CLUSTER_FLAG_FED    0x00000800 /* This cluster is in a federation. */
 
 
 /* Cluster Combo flags */
@@ -235,6 +236,7 @@ typedef struct {
 
 	List def_qos_id_list;   /* list of char * */
 
+	List format_list; 	/* list of char * */
 	List id_list;		/* list of char */
 
 	uint16_t only_defs;  /* only send back defaults */
@@ -269,6 +271,7 @@ typedef struct {
 	uint32_t cpus_min;      /* number of cpus low range */
 	uint16_t duplicates;    /* report duplicate job entries */
 	int32_t exitcode;       /* exit code of job */
+	List format_list; 	/* list of char * */
 	List groupid_list;	/* list of char * */
 	List jobname_list;	/* list of char * */
 	uint32_t nodes_max;     /* number of nodes high range */
@@ -299,7 +302,7 @@ typedef struct {
 typedef struct {
 	double act_cpufreq;	/* contains actual average cpu frequency */
 	double cpu_ave;
-	double consumed_energy; /* contains energy consumption in joules */
+	uint64_t consumed_energy; /* contains energy consumption in joules */
 	uint32_t cpu_min;
 	uint32_t cpu_min_nodeid; /* contains which node number it was on */
 	uint32_t cpu_min_taskid; /* contains which task number it was on */
@@ -397,6 +400,7 @@ typedef struct {
 typedef struct {
 	uint64_t count;  /* Count of tres on a given cluster, 0 if
 			    listed generically. */
+	List format_list;/* list of char * */
 	List id_list;    /* Database ID */
 	List name_list;  /* Name of tres if type is generic like GRES
 			    or License. */
@@ -586,6 +590,7 @@ typedef struct {
 	List cluster_list; /* list of char * */
 	List federation_list; /* list of char */
 	uint32_t flags;
+	List format_list; 	/* list of char * */
 	List plugin_id_select_list; /* list of char * */
 	List rpc_version_list; /* list of char * */
 	time_t usage_end;
@@ -595,6 +600,7 @@ typedef struct {
 } slurmdb_cluster_cond_t;
 
 typedef struct {
+	List feature_list; /* list of cluster features */
 	uint32_t id; /* id of cluster in federation */
 	char *name; /* Federation name */
 	void *recv;  /* slurm_persist_conn_t we recv information about this
@@ -602,12 +608,15 @@ typedef struct {
 	void *send; /* slurm_persist_conn_t we send information to this
 		     * cluster on. (We set this information) */
 	uint32_t state; /* state of cluster in federation */
-	uint32_t weight; /* weight of cluster in federation */
+	bool sync_recvd; /* true sync jobs from sib has been processed. */
+	bool sync_sent;  /* true after sib sent sync jobs to sibling */
 } slurmdb_cluster_fed_t;
 
-typedef struct {
+struct slurmdb_cluster_rec {
 	List accounting_list; /* list of slurmdb_cluster_accounting_rec_t *'s */
 	uint16_t classification; /* how this machine is classified */
+	time_t comm_fail_time;	/* avoid constant error messages. For
+			         * convenience only. DOESN'T GET PACKED */
 	slurm_addr_t control_addr; /* For convenience only.
 				    * DOESN'T GET PACKED */
 	char *control_host;
@@ -619,15 +628,21 @@ typedef struct {
 			* PACKED, is set up in slurmdb_get_info_cluster */
 	slurmdb_cluster_fed_t fed; /* Federation information */
 	uint32_t flags;      /* set of CLUSTER_FLAG_* */
-	pthread_mutex_t lock; /* For convenience only. DOESN"T GET PACK */
+	pthread_mutex_t lock; /* For convenience only. DOESN"T GET PACKED */
 	char *name;
 	char *nodes;
 	uint32_t plugin_id_select; /* id of the select plugin */
 	slurmdb_assoc_rec_t *root_assoc; /* root assoc for
 						* cluster */
 	uint16_t rpc_version; /* version of rpc this cluter is running */
+	List send_rpc;        /* For convenience only. DOESN'T GET PACKED */
 	char  	*tres_str;    /* comma separated list of TRES */
-} slurmdb_cluster_rec_t;
+};
+
+#ifndef __slurmdb_cluster_rec_t_defined
+#  define __slurmdb_cluster_rec_t_defined
+typedef struct slurmdb_cluster_rec slurmdb_cluster_rec_t;
+#endif
 
 typedef struct {
 	uint64_t alloc_secs; /* number of cpu seconds allocated */
@@ -657,6 +672,7 @@ typedef struct {
 	uint32_t cpus_min;      /* number of cpus low range */
 	uint16_t event_type;    /* type of events (slurmdb_event_type_t),
 				 * default is all */
+	List format_list; 	/* list of char * */
 	List node_list;	        /* list of char * */
 	time_t period_end;      /* period end of events */
 	time_t period_start;    /* period start of events */
@@ -682,8 +698,9 @@ typedef struct {
 } slurmdb_event_rec_t;
 
 typedef struct {
-	List federation_list; 	/* list of char * */
 	List cluster_list; 	/* list of char * */
+	List federation_list; 	/* list of char * */
+	List format_list; 	/* list of char * */
 	uint16_t with_deleted;
 } slurmdb_federation_cond_t;
 
@@ -729,8 +746,11 @@ typedef struct {
 	uint32_t jobid;
 	char	*jobname;
 	uint32_t lft;
-	char	*partition;
+	char 	*mcs_label;
 	char	*nodes;
+	char	*partition;
+	uint32_t pack_job_id;
+	uint32_t pack_job_offset;
 	uint32_t priority;
 	uint32_t qosid;
 	uint32_t req_cpus;
@@ -761,6 +781,7 @@ typedef struct {
 	uint32_t user_cpu_usec;
 	char    *wckey;
 	uint32_t wckeyid;
+	char    *work_dir;
 } slurmdb_job_rec_t;
 
 typedef struct {
@@ -913,6 +934,7 @@ typedef struct {
 typedef struct {
 	List description_list; /* list of char * */
 	List id_list; /* list of char * */
+	List format_list;/* list of char * */
 	List name_list; /* list of char * */
 	uint16_t preempt_mode;	/* See PREEMPT_MODE_* in slurm/slurm.h */
 	uint16_t with_deleted;
@@ -921,7 +943,8 @@ typedef struct {
 typedef struct {
 	List cluster_list; /* cluster reservations are on list of
 			    * char * */
-	uint16_t flags; /* flags for reservation. */
+	uint32_t flags; /* flags for reservation. */
+	List format_list;/* list of char * */
 	List id_list;   /* ids of reservations. list of char * */
 	List name_list; /* name of reservations. list of char * */
 	char *nodes; /* list of nodes in reservation */
@@ -944,15 +967,16 @@ typedef struct {
 				 * the pervious start time.  Needed
 				 * for accounting */
 	char *tres_str;
+	double unused_wall; /* amount of seconds this reservation wasn't used */
 	List tres_list; /* list of slurmdb_tres_rec_t, only set when
 			 * job usage is requested.
 			 */
 } slurmdb_reservation_rec_t;
 
 typedef struct {
-	uint32_t array_task_id;	/* task_id of a job array of NO_VAL
-				 * if N/A */
+	uint32_t array_task_id;		/* task_id of a job array or NO_VAL */
 	uint32_t jobid;
+	uint32_t pack_job_offset;	/* pack_job_offset or NO_VAL */
 	uint32_t stepid;
 } slurmdb_selected_step_t;
 
@@ -964,8 +988,6 @@ typedef struct {
 	uint32_t nnodes;
 	char *nodes;
 	uint32_t ntasks;
-	uint32_t packjobid;	/* jobid of srun first step of the jobpack */
-	uint32_t packstepid;	/* stepid of jobpack member */
 	char *pid_str;
 	uint32_t req_cpufreq_min;
 	uint32_t req_cpufreq_max;
@@ -993,6 +1015,7 @@ typedef struct {
 	List cluster_list; /* list of char * */
 	List description_list; /* list of char * */
 	uint32_t flags;
+	List format_list;/* list of char * */
 	List id_list; /* list of char * */
 	List manager_list; /* list of char * */
 	List name_list; /* list of char * */
@@ -1023,6 +1046,7 @@ typedef struct {
 	List action_list; /* list of char * */
 	List actor_list; /* list of char * */
 	List cluster_list; /* list of char * */
+	List format_list;/* list of char * */
 	List id_list; /* list of char * */
 	List info_list; /* list of char * */
 	List name_list; /* list of char * */
@@ -1099,6 +1123,7 @@ typedef struct {
 
 typedef struct {
 	List cluster_list;	/* list of char * */
+	List format_list;	/* list of char * */
 	List id_list;		/* list of char * */
 
 	List name_list;         /* list of char * */
@@ -1181,19 +1206,19 @@ typedef struct {
 } slurmdb_report_job_grouping_t;
 
 typedef struct {
-	char *acct; /*account name */
+	char *acct;	/* account name */
 	uint32_t count; /* total count of jobs taken up by this acct */
-	List groups; /* containing slurmdb_report_job_grouping_t's*/
+	List groups;	/* containing slurmdb_report_job_grouping_t's*/
 	uint32_t lft;
 	uint32_t rgt;
 	List tres_list; /* list of slurmdb_tres_rec_t *'s */
 } slurmdb_report_acct_grouping_t;
 
 typedef struct {
-	List acct_list; /* containing slurmdb_report_acct_grouping_t's */
-	char *cluster; /*cluster name */
-	uint32_t count; /* total count of jobs taken up by this cluster */
-	List tres_list; /* list of slurmdb_tres_rec_t *'s */
+	List acct_list;	/* containing slurmdb_report_acct_grouping_t's */
+	char *cluster; 	/* cluster name */
+	uint32_t count;	/* total count of jobs taken up by this cluster */
+	List tres_list;	/* list of slurmdb_tres_rec_t *'s */
 } slurmdb_report_cluster_grouping_t;
 
 #define ROLLUP_HOUR	0
@@ -1433,6 +1458,13 @@ extern void *slurmdb_connection_get();
  */
 extern int slurmdb_connection_close(void **db_conn);
 
+/*
+ * commit or rollback changes made without closing connection
+ * IN: void * pointer returned from slurmdb_connection_get()
+ * IN: bool - true will commit changes false will rollback
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int slurmdb_connection_commit(void *db_conn, bool commit);
 
 /************** coordinator functions **************/
 
@@ -1455,6 +1487,81 @@ extern int slurmdb_coord_add(void *db_conn,
  */
 extern List slurmdb_coord_remove(void *db_conn, List acct_list,
 				 slurmdb_user_cond_t *user_cond);
+
+/*************** Federation functions **************/
+
+/*
+ * add federations to accounting system
+ * IN:  list List of slurmdb_federation_rec_t *
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int slurmdb_federations_add(void *db_conn, List federation_list);
+
+/*
+ * modify existing federations in the accounting system
+ * IN:  slurmdb_federation_cond_t *fed_cond
+ * IN:  slurmdb_federation_rec_t  *fed
+ * RET: List containing (char *'s) else NULL on error
+ */
+extern List slurmdb_federations_modify(void *db_conn,
+				       slurmdb_federation_cond_t *fed_cond,
+				       slurmdb_federation_rec_t *fed);
+
+/*
+ * remove federations from accounting system
+ * IN:  slurmdb_federation_cond_t *fed_cond
+ * RET: List containing (char *'s) else NULL on error
+ */
+extern List slurmdb_federations_remove(void *db_conn,
+				       slurmdb_federation_cond_t *fed_cond);
+
+/*
+ * get info from the storage
+ * IN:  slurmdb_federation_cond_t *
+ * RET: List of slurmdb_federation_rec_t *
+ * note List needs to be freed when called
+ */
+extern List slurmdb_federations_get(void *db_conn,
+				    slurmdb_federation_cond_t *fed_cond);
+
+/*************** Job functions **************/
+
+/*
+ * modify existing job in the accounting system
+ * IN:  slurmdb_job_modify_cond_t *job_cond
+ * IN:  slurmdb_job_rec_t *job
+ * RET: List containing (char *'s) else NULL on error
+ */
+extern List slurmdb_job_modify(void *db_conn,
+			       slurmdb_job_modify_cond_t *job_cond,
+			       slurmdb_job_rec_t *job);
+
+/*
+ * get info from the storage
+ * returns List of slurmdb_job_rec_t *
+ * note List needs to be freed with slurm_list_destroy() when called
+ */
+extern List slurmdb_jobs_get(void *db_conn, slurmdb_job_cond_t *job_cond);
+
+/*
+ * Fix runaway jobs
+ * IN: jobs, a list of all the runaway jobs
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int slurmdb_jobs_fix_runaway(void *db_conn, List jobs);
+
+/* initialization of job completion logging */
+extern int slurmdb_jobcomp_init(char *jobcomp_loc);
+
+/* terminate pthreads and free, general clean-up for termination */
+extern int slurmdb_jobcomp_fini(void);
+
+/*
+ * get info from the storage
+ * returns List of jobcomp_job_rec_t *
+ * note List needs to be freed when called
+ */
+extern List slurmdb_jobcomp_jobs_get(slurmdb_job_cond_t *job_cond);
 
 /************** extra get functions **************/
 
@@ -1494,13 +1601,6 @@ extern List slurmdb_config_get(void *db_conn);
  */
 extern List slurmdb_events_get(void *db_conn,
 			       slurmdb_event_cond_t *event_cond);
-
-/*
- * get info from the storage
- * returns List of slurmdb_job_rec_t *
- * note List needs to be freed with slurm_list_destroy() when called
- */
-extern List slurmdb_jobs_get(void *db_conn, slurmdb_job_cond_t *job_cond);
 
 /*
  * get info from the storage
@@ -1548,12 +1648,33 @@ extern List slurmdb_get_info_cluster(char *cluster_names);
  * OUT: cluster_rec - record of selected cluster or NULL if none found or
  * 		      cluster_names is NULL
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
- * note cluster_rec needs to be freed with slurmdb_destroy_cluster_rec() when
+ *
+ * Note: Cluster_rec needs to be freed with slurmdb_destroy_cluster_rec() when
  * called
+ * Note: The will_runs are not threaded. Currently it relies on the
+ * working_cluster_rec to pack the job_desc's jobinfo. See previous commit for
+ * an example of how to thread this.
  */
 extern int slurmdb_get_first_avail_cluster(job_desc_msg_t *req,
 					   char *cluster_names,
 					   slurmdb_cluster_rec_t **cluster_rec);
+
+/*
+ * get the first cluster that will run a heterogeneous job
+ * IN: req - description of resource allocation request
+ * IN: cluster_names - comma separated string of cluster names
+ * OUT: cluster_rec - record of selected cluster or NULL if none found or
+ * 		      cluster_names is NULL
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ *
+ * Note: Cluster_rec needs to be freed with slurmdb_destroy_cluster_rec() when
+ * called
+ * Note: The will_runs are not threaded. Currently it relies on the
+ * working_cluster_rec to pack the job_desc's jobinfo. See previous commit for
+ * an example of how to thread this.
+ */
+extern int slurmdb_get_first_pack_cluster(List job_req_list,
+	char *cluster_names, slurmdb_cluster_rec_t **cluster_rec);
 
 /************** helper functions **************/
 extern void slurmdb_destroy_assoc_usage(void *object);
@@ -1656,7 +1777,7 @@ extern char *slurmdb_tree_name_get(char *name, char *parent, List tree_list);
  * IN:  res_list List of char *
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
-extern int slurmdb_res_add(void *db_conn, uint32_t uid, List res_list);
+extern int slurmdb_res_add(void *db_conn, List res_list);
 
 /*
  * get info from the storage
@@ -1692,7 +1813,7 @@ extern List slurmdb_res_remove(void *db_conn, slurmdb_res_cond_t *res_cond);
  * IN:  qos_list List of char *
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
-extern int slurmdb_qos_add(void *db_conn, uint32_t uid, List qos_list);
+extern int slurmdb_qos_add(void *db_conn, List qos_list);
 
 /*
  * get info from the storage
@@ -1728,7 +1849,7 @@ extern List slurmdb_qos_remove(void *db_conn, slurmdb_qos_cond_t *qos_cond);
  * IN:  tres_list List of char *
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
-extern int slurmdb_tres_add(void *db_conn, uint32_t uid, List tres_list);
+extern int slurmdb_tres_add(void *db_conn, List tres_list);
 
 /*
  * get info from the storage

@@ -48,12 +48,14 @@
 
 /* If you want "linux12" to sort before "linux2", then set PURE_ALPHA_SORT */
 #define PURE_ALPHA_SORT 0
+#define CLUSTER_NAME_LEN 7
 
 static bool reverse_order;
 
 static void _get_job_info_from_void(job_info_t **j1, job_info_t **j2, void *v1, void *v2);
 static void _get_step_info_from_void(job_step_info_t **j1, job_step_info_t **j2, void *v1, void *v2);
 static int _sort_job_by_batch_host(void *void1, void *void2);
+static int _sort_job_by_cluster_name(void *void1, void *void2);
 static int _sort_job_by_gres(void *void1, void *void2);
 static int _sort_job_by_group_id(void *void1, void *void2);
 static int _sort_job_by_group_name(void *void1, void *void2);
@@ -64,6 +66,7 @@ static int _sort_job_by_state_compact(void *void1, void *void2);
 static int _sort_job_by_time_end(void *void1, void *void2);
 static int _sort_job_by_time_left(void *void1, void *void2);
 static int _sort_job_by_time_limit(void *void1, void *void2);
+static int _sort_job_by_time_submit(void *void1, void *void2);
 static int _sort_job_by_time_start(void *void1, void *void2);
 static int _sort_job_by_time_used(void *void1, void *void2);
 static int _sort_job_by_node_list(void *void1, void *void2);
@@ -81,6 +84,7 @@ static int _sort_job_by_user_id(void *void1, void *void2);
 static int _sort_job_by_user_name(void *void1, void *void2);
 static int _sort_job_by_reservation(void *void1, void *void2);
 
+static int _sort_step_by_cluster_name(void *void1, void *void2);
 static int _sort_step_by_gres(void *void1, void *void2);
 static int _sort_step_by_id(void *void1, void *void2);
 static int _sort_step_by_node_list(void *void1, void *void2);
@@ -113,7 +117,17 @@ void sort_job_list(List job_list)
 		if ((i > 0) && (params.sort[i-1] == '-'))
 			reverse_order = true;
 
-		if (params.sort[i] == 'B')
+		if ((CLUSTER_NAME_LEN <= (i + 1)) &&
+		    !xstrncasecmp(params.sort + (i - CLUSTER_NAME_LEN + 1),
+				  "cluster", CLUSTER_NAME_LEN))
+		{
+			if ((CLUSTER_NAME_LEN <= i) &&
+			    (params.sort[i - CLUSTER_NAME_LEN] == '-'))
+				reverse_order = true;
+
+			list_sort(job_list, _sort_job_by_cluster_name);
+			i -= CLUSTER_NAME_LEN - 1;
+		} else if (params.sort[i] == 'B')
 			list_sort(job_list, _sort_job_by_batch_host);
 		else if (params.sort[i] == 'b')
 			list_sort(job_list, _sort_job_by_gres);
@@ -177,6 +191,8 @@ void sort_job_list(List job_list)
 			list_sort(job_list, _sort_job_by_user_id);
 		else if (params.sort[i] == 'v')
 			list_sort(job_list, _sort_job_by_reservation);
+		else if (params.sort[i] == 'V')
+			list_sort(job_list, _sort_job_by_time_submit);
 		else if (params.sort[i] == 'z')
 			list_sort(job_list, _sort_job_by_num_sct);
 		else {
@@ -209,7 +225,16 @@ void sort_step_list(List step_list)
 		if ((i > 0) && (params.sort[i-1] == '-'))
 			reverse_order = true;
 
-		if      (params.sort[i] == 'b')
+		if ((CLUSTER_NAME_LEN <= (i + 1)) &&
+		    !xstrncasecmp(params.sort + (i - CLUSTER_NAME_LEN + 1),
+				  "cluster", CLUSTER_NAME_LEN)) {
+			if ((CLUSTER_NAME_LEN <= i) &&
+			    (params.sort[i - CLUSTER_NAME_LEN] == '-'))
+				reverse_order = true;
+
+			list_sort(step_list, _sort_step_by_cluster_name);
+			i -= CLUSTER_NAME_LEN - 1;
+		} else if (params.sort[i] == 'b')
 			list_sort(step_list, _sort_step_by_gres);
 		else if (params.sort[i] == 'i')
 			list_sort(step_list, _sort_step_by_id);
@@ -309,6 +334,21 @@ static int _sort_job_by_batch_host(void *void1, void *void2)
 	return diff;
 }
 
+static int _sort_job_by_cluster_name(void *void1, void *void2)
+{
+	int diff;
+	job_info_t *job1;
+	job_info_t *job2;
+
+	_get_job_info_from_void(&job1, &job2, void1, void2);
+
+	diff = xstrcmp(job1->cluster, job2->cluster);
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
 static int _sort_job_by_gres(void *void1, void *void2)
 {
 	int diff;
@@ -374,17 +414,29 @@ static int _sort_job_by_id(void *void1, void *void2)
 
 	_get_job_info_from_void(&job1, &job2, void1, void2);
 
-	if (job1->array_task_id == NO_VAL)
+	if (job1->pack_job_id)
+		job_id1 = job1->pack_job_id;
+	else if (job1->array_task_id == NO_VAL)
 		job_id1 = job1->job_id;
 	else
 		job_id1 = job1->array_job_id;
-	if (job2->array_task_id == NO_VAL)
+
+	if (job2->pack_job_id)
+		job_id2 = job2->pack_job_id;
+	else if (job2->array_task_id == NO_VAL)
 		job_id2 = job2->job_id;
 	else
 		job_id2 = job2->array_job_id;
+
 	if (job_id1 == job_id2) {
-		job_id1 = job1->array_task_id;
-		job_id2 = job2->array_task_id;
+		if (job1->pack_job_id)
+			job_id1 = job1->pack_job_offset;
+		else
+			job_id1 = job1->array_task_id;
+		if (job2->pack_job_id)
+			job_id2 = job2->pack_job_offset;
+		else
+			job_id2 = job2->array_task_id;
 	}
 
 	diff = _diff_uint32(job_id1, job_id2);
@@ -694,6 +746,21 @@ static int _sort_job_by_time_limit(void *void1, void *void2)
 	return diff;
 }
 
+static int _sort_job_by_time_submit(void *void1, void *void2)
+{
+	int diff;
+	job_info_t *job1;
+	job_info_t *job2;
+
+	_get_job_info_from_void(&job1, &job2, void1, void2);
+
+	diff = _diff_time(job1->submit_time, job2->submit_time);
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
 static time_t _get_start_time(job_info_t *job)
 {
 	if (job->start_time == (time_t) 0)
@@ -829,6 +896,21 @@ static int _sort_job_by_reservation(void *void1, void *void2)
 /*****************************************************************************
  * Local Step Sort Functions
  *****************************************************************************/
+static int _sort_step_by_cluster_name(void *void1, void *void2)
+{
+	int diff;
+	job_step_info_t *step1;
+	job_step_info_t *step2;
+
+	_get_step_info_from_void(&step1, &step2, void1, void2);
+
+	diff = xstrcmp(step1->cluster, step2->cluster);
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
 static int _sort_step_by_gres(void *void1, void *void2)
 {
 	int diff;

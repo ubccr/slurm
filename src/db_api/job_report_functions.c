@@ -128,11 +128,7 @@ static void _check_create_grouping(
 				sizeof(slurmdb_report_job_grouping_t));
 			job_group->jobs = list_create(NULL);
 			job_group->min_size = last_size;
-			if (individual)
-				job_group->max_size =
-					job_group->min_size;
-			else
-				job_group->max_size = INFINITE;
+			job_group->max_size = INFINITE;
 			list_append(acct_group->groups, job_group);
 		}
 		list_iterator_reset(group_itr);
@@ -393,18 +389,22 @@ no_objects:
 			}
 
 			if (!flat_view
-			   && (acct_group->lft != (uint32_t)NO_VAL)
-			   && (job->lft != (uint32_t)NO_VAL)) {
+			   && (acct_group->lft != NO_VAL)
+			   && (job->lft != NO_VAL)) {
 				/* keep separate since we don't want
 				 * to so a xstrcmp if we don't have to
 				 */
 				if (job->lft > acct_group->lft
 				    && job->lft < acct_group->rgt) {
-					char *mywckey;
+					char *mywckey = NULL;
 					if (!both)
 						break;
-					mywckey = strstr(acct_group->acct, ":");
-					mywckey++;
+					if (acct_group->acct) {
+						if ((mywckey = strstr(
+							     acct_group->acct,
+							     ":")))
+							mywckey++;
+					}
 					if (!job->wckey && !mywckey)
 						break;
 					else if (!mywckey || !job->wckey)

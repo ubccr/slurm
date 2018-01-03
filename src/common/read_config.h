@@ -55,6 +55,10 @@ extern char *default_slurm_config_file;
 extern char *default_plugin_path;
 extern char *default_plugstack;
 
+#ifndef NDEBUG
+extern uint16_t drop_priv_flag;
+#endif
+
 #define ACCOUNTING_ENFORCE_ASSOCS 0x0001
 #define ACCOUNTING_ENFORCE_LIMITS 0x0002
 #define ACCOUNTING_ENFORCE_WCKEYS 0x0004
@@ -64,7 +68,7 @@ extern char *default_plugstack;
 #define ACCOUNTING_ENFORCE_NO_STEPS 0x0040
 #define ACCOUNTING_ENFORCE_TRES   0x0080
 
-#define DEFAULT_ACCOUNTING_TRES  "cpu,mem,energy,node"
+#define DEFAULT_ACCOUNTING_TRES  "cpu,mem,energy,node,billing"
 #define DEFAULT_ACCOUNTING_DB      "slurm_acct_db"
 #define DEFAULT_ACCOUNTING_ENFORCE  0
 #define DEFAULT_ACCOUNTING_STORAGE_TYPE "accounting_storage/none"
@@ -77,7 +81,10 @@ extern char *default_plugstack;
 #define DEFAULT_FAST_SCHEDULE       1
 #define DEFAULT_FIRST_JOB_ID        1
 #define DEFAULT_GET_ENV_TIMEOUT     2
-#define DEFAULT_GROUP_INFO          (GROUP_FORCE | 600)
+#define DEFAULT_GROUP_TIME          600
+#define DEFAULT_GROUP_FORCE         1	/* if set, update group membership
+					 * info even if no updates to
+					 * /etc/group file */
 /* NOTE: DEFAULT_INACTIVE_LIMIT must be 0 for Blue Gene/L systems */
 #define DEFAULT_INACTIVE_LIMIT      0
 #define DEFAULT_JOB_ACCT_GATHER_TYPE  "jobacct_gather/none"
@@ -85,7 +92,7 @@ extern char *default_plugstack;
 #define DEFAULT_JOB_ACCT_GATHER_FREQ  "30"
 #define DEFAULT_ACCT_GATHER_ENERGY_TYPE "acct_gather_energy/none"
 #define DEFAULT_ACCT_GATHER_PROFILE_TYPE "acct_gather_profile/none"
-#define DEFAULT_ACCT_GATHER_INFINIBAND_TYPE "acct_gather_infiniband/none"
+#define DEFAULT_ACCT_GATHER_INTERCONNECT_TYPE "acct_gather_interconnect/none"
 #define DEFAULT_ACCT_GATHER_FILESYSTEM_TYPE "acct_gather_filesystem/none"
 #define ACCOUNTING_STORAGE_TYPE_NONE "accounting_storage/none"
 #define DEFAULT_CORE_SPEC_PLUGIN    "core_spec/none"
@@ -102,7 +109,7 @@ extern char *default_plugstack;
 #  define DEFAULT_ALLOW_SPEC_RESOURCE_USAGE 0
 #  define DEFAULT_JOB_CONTAINER_PLUGIN "job_container/none"
 #endif
-#define DEFAULT_KEEP_ALIVE_TIME     ((uint16_t) NO_VAL)
+#define DEFAULT_KEEP_ALIVE_TIME     (NO_VAL16)
 #define DEFAULT_KILL_ON_BAD_EXIT    0
 #define DEFAULT_KILL_TREE           0
 #define DEFAULT_KILL_WAIT           30
@@ -135,7 +142,7 @@ extern char *default_plugstack;
 #if defined HAVE_REAL_CRAY/* ALPS requires cluster-unique job container IDs */
 #  define DEFAULT_PROCTRACK_TYPE    "proctrack/sgi_job"
 #else
-#  define DEFAULT_PROCTRACK_TYPE    "proctrack/pgid"
+#  define DEFAULT_PROCTRACK_TYPE    "proctrack/cgroup"
 #endif
 #define DEFAULT_PREEMPT_TYPE        "preempt/none"
 #define DEFAULT_PRIORITY_DECAY      604800 /* 7 days */
@@ -580,5 +587,17 @@ extern bool run_in_daemon(char *daemons);
 /* Translate a job constraint specification into a node feature specification
  * RET - String MUST be xfreed */
 extern char *xlate_features(char *job_features);
+
+/*
+ * Add nodes and corresponding pre-configured slurm_addr_t's to node conf hash
+ * tables.
+ *
+ * IN node_list  - node_list allocated to job
+ * IN node_addrs - array of slurm_addr_t that corresponds to nodes built from
+ * 	host_list. See build_node_details().
+ * RET return SLURM_SUCCESS on success, SLURM_ERROR otherwise.
+ */
+extern int add_remote_nodes_to_conf_tbls(char *node_list,
+					 slurm_addr_t *node_addrs);
 
 #endif /* !_READ_CONFIG_H */

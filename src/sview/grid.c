@@ -120,7 +120,7 @@ static gboolean _open_node(GtkWidget *widget, GdkEventButton *event,
 			   grid_button_t *grid_button)
 {
 	if (event->button == 1) {
-		popup_all_node_name(grid_button->node_name, INFO_PAGE);
+		popup_all_node_name(grid_button->node_name, INFO_PAGE, NULL);
 	} else if (event->button == 3) {
 		/* right click */
 		admin_menu_node_name(grid_button->node_name, event);
@@ -133,7 +133,7 @@ static void _open_block(GtkWidget *widget, GdkEventButton *event,
 			grid_button_t *grid_button)
 {
 	GError *error = NULL;
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 

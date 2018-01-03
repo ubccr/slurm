@@ -42,13 +42,11 @@
 #include "pdebug.h"
 
 #include <fcntl.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <signal.h>
 
-#ifdef HAVE_LINUX_SCHED_H
-#  include <linux/sched.h>
-#endif
 
 /*
  * Prepare task for parallel debugger attach
@@ -101,8 +99,6 @@ pdebug_trace_process(stepd_step_rec_t *job, pid_t pid)
 		if (_PTRACE(PT_DETACH, pid, (caddr_t)1, 0)) {
 #elif defined(PT_DETACH)
 		if (_PTRACE(PT_DETACH, pid, NULL, 0)) {
-#elif defined(__sun)
-		if (_PTRACE(7, pid, NULL, 0)) {
 #else
 		if (_PTRACE(PTRACE_DETACH, pid, NULL, 0)) {
 #endif
@@ -122,13 +118,11 @@ pdebug_stop_current(stepd_step_rec_t *job)
 	/*
 	 * Stop the task on exec for TotalView to connect
 	 */
-	if ( (job->flags & LAUNCH_PARALLEL_DEBUG)
+	if ((job->flags & LAUNCH_PARALLEL_DEBUG)
 #ifdef BSD
 	     && (_PTRACE(PT_TRACE_ME, 0, (caddr_t)0, 0) < 0) )
 #elif defined(PT_TRACE_ME)
 	     && (_PTRACE(PT_TRACE_ME, 0, NULL, 0) < 0) )
-#elif defined(__sun)
-	     && (_PTRACE(0, 0, NULL, 0) < 0))
 #else
 	     && (_PTRACE(PTRACE_TRACEME, 0, NULL, 0) < 0) )
 #endif
@@ -136,48 +130,47 @@ pdebug_stop_current(stepd_step_rec_t *job)
 }
 
 /* Check if this PID should be woken for TotalView partitial attach */
+static int _being_traced(pid_t pid)
+{
+	FILE *fp = NULL;
+	size_t n = 0, max_len;
+	int tracer_id = 0;
+	char *match = NULL;
+	char buf[2048] = {0};
+	char sp[PATH_MAX] = {0};
+
+	if (snprintf(sp, PATH_MAX, "/proc/%lu/status",(unsigned long)pid) == -1)
+		return -1;
+	if ((fp = fopen((const char *)sp, "r")) == NULL)
+		return -1;
+
+	max_len = sizeof(buf) - 1;
+	n = fread(buf, 1, max_len, fp);
+	fclose(fp);
+	if ((n == 0) || (n == max_len))
+		return -1;
+	buf[n] = '\0';	/* Ensure string is terminated */
+	if ((match = strstr(buf, "TracerPid:")) == NULL)
+		return -1;
+	if (sscanf(match, "TracerPid:\t%d", &tracer_id) == EOF)
+		return -1;
+	return tracer_id;
+}
+
 static bool _pid_to_wake(pid_t pid)
 {
-#ifdef CLONE_PTRACE
-	char *proc_stat, proc_name[22], state[1], *str_ptr;
-	int len, proc_fd, ppid, pgrp, session, tty, tpgid;
-	long unsigned flags;
+	int rc = 0;
 
-	sprintf (proc_name, "/proc/%d/stat", (int) pid);
-	if ((proc_fd = open(proc_name, O_RDONLY, 0)) == -1)
-		return false;  /* process is now gone */
-	proc_stat = xmalloc(4097);
-	len = read(proc_fd, proc_stat, 4096);
-	if (len >= 0)
-		proc_stat[len] = '\0';
-	close(proc_fd);
-	if (len < 14) {
-		xfree(proc_stat);
-		return false;
+	if ((rc = _being_traced(pid)) == -1) {
+		/* If an error occurred (e.g., /proc FS doesn't exist
+		 * or TracerPid field doesn't exist, it is better to wake
+		 * up the target process -- at the expense of potential
+		 * side effects on the debugger. */
+		debug("_pid_to_wake(%lu): %m\n", (unsigned long) pid);
+		errno = 0;
+		rc = 0;
 	}
-	/* skip over "PID (CMD) " */
-	if ((str_ptr = (char *)strrchr(proc_stat, ')')) == NULL) {
-		xfree(proc_stat);
-		return false;
-	}
-	if (sscanf(str_ptr + 2,
-		   "%c %d %d %d %d %d %lu ",
-		   state, &ppid, &pgrp, &session, &tty, &tpgid, &flags) != 7) {
-		xfree(proc_stat);
-		return false;
-	}
-	xfree(proc_stat);
-	if ((flags & CLONE_PTRACE) == 0)
-		return true;
-	return false;
-#else
-	int status;
-
-	waitpid(pid, &status, (WUNTRACED | WNOHANG));
-	if (WIFSTOPPED(status))
-		return true;
-	return false;
-#endif
+	return (rc == 0) ? true : false;
 }
 
 /*
@@ -192,7 +185,8 @@ void pdebug_wake_process(stepd_step_rec_t *job, pid_t pid)
 			else
 				debug("woke pid %lu", (unsigned long) pid);
 		} else {
-			debug("pid %lu not stopped", (unsigned long) pid);
+			debug("pid %lu not stopped or being traced",
+			      (unsigned long) pid);
 		}
 	}
 }

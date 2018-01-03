@@ -1,4 +1,4 @@
-.TH scontrol "1" "Slurm Commands" "November 2016" "Slurm Commands"
+.TH scontrol "1" "Slurm Commands" "December 2017" "Slurm Commands"
 
 .SH "NAME"
 scontrol \- Used view and modify Slurm configuration and state.
@@ -35,8 +35,9 @@ group.
 .TP
 \fB\-d\fR, \fB\-\-details\fR
 Causes the \fIshow\fR command to provide additional details where available.
-Repeating the option more than once (e.g., "\-dd") will cause the \fIshow job\fR
-command to also list the batch script, if the job was a batch job.
+.TP
+\fB\-\-federation\fR
+Report jobs from from federation if a member of one.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print a help message describing the usage of scontrol.
@@ -46,9 +47,14 @@ Do not display information about hidden partitions, their jobs and job steps.
 By default, neither partitions that are configured as hidden nor those partitions
 unavailable to user's group will be displayed (i.e. this is the default behavior).
 .TP
+\fB\-\-local\fR
+Show only information local to this cluster. Ignore other clusters in the
+federated if a member of one. Overrides \-\-federation.
+.TP
 \fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
 The cluster to issue commands to. Only one cluster name may be specified.
 Note that the SlurmDBD must be up for this option to work properly.
+This option implicitly sets the \fB\-\-local\fR option.
 
 .TP
 \fB\-o\fR, \fB\-\-oneliner\fR
@@ -56,6 +62,9 @@ Print information one line per record.
 .TP
 \fB\-Q\fR, \fB\-\-quiet\fR
 Print no warning or informational messages, only fatal error messages.
+.TP
+\fB\-\-sibling\fR
+Show all sibling jobs on a federated cluster. Implies \-\-federation.
 .TP
 \fB\-u\fR, \fB\-\-uid\fR=<\fIuid\fR>
 Attempt to update a job as user <uid> instead of the invoking user id.
@@ -156,6 +165,10 @@ If the specified partition is in use, the request is denied.
 .TP
 \fBerrnumstr\fP \fIERRNO\fP
 Given a Slurm error number, return a descriptive string.
+
+.TP
+\fBfsdampeningfactor\fP \fIFACTOR\fP
+Set the FairShareDampeningFactor in slurmctld.
 
 .TP
 \fBhelp\fP
@@ -322,7 +335,7 @@ or
 \fBshow\fP \fIENTITY\fP=\fIID\fP
 Display the state of the specified entity with the specified identification.
 \fIENTITY\fP may be \fIaliases\fP, \fIassoc_mgr\fP, \fIburstbuffer\fP,
-\fIconfig\fP, \fIdaemons\fP, \fIfrontend\fP, \fIjob\fP, \fInode\fP,
+\fIconfig\fP, \fIdaemons\fP, \fIfederation\fP, \fIfrontend\fP, \fIjob\fP, \fInode\fP,
 \fIpartition\fP, \fIpowercap\fP, \fIreservation\fP, \fIslurmd\fP, \fIstep\fP,
 \fItopology\fP, \fIhostlist\fP, \fIhostlistsorted\fP or \fIhostnames\fP
 (also \fIblock\fP or \fIsubmp\fP on BlueGene systems).
@@ -350,7 +363,7 @@ only (e.g. SLURM_VERSION).
 \fIhostnames\fP takes an optional hostlist expression as input and
 writes a list of individual host names to standard output (one per
 line). If no hostlist expression is supplied, the contents of the
-SLURM_NODELIST environment variable is used. For example "tux[1\-3]"
+SLURM_JOB_NODELIST environment variable is used. For example "tux[1\-3]"
 is mapped to "tux1","tux2" and "tux3" (one hostname per line).
 \fIhostlist\fP takes a list of host names and prints the hostlist
 expression for them (the inverse of \fIhostnames\fP).
@@ -368,7 +381,9 @@ list use \fIhostlistsorted\fP (e.g. tux2,tux1,tux2 = tux[1-2,2]).
 By default, all elements of the entity type specified are printed.
 For an \fIENTITY\fP of \fIjob\fP, if the job does not specify
 socket-per-node, cores-per-socket or threads-per-core then it
-will display '*' in ReqS:C:T=*:*:* field.
+will display '*' in ReqS:C:T=*:*:* field. For an \fIENTITY\fP of
+\fIfederation\fP, the federation name that the controller is part of and the
+sibling clusters part of the federation will be listed.
 
 .TP
 \fBshutdown\fP \fIOPTION\fP
@@ -402,9 +417,10 @@ primary Slurm controller is scheduled down.
 (Note: Slurm's primary controller will take the control back at startup.)
 
 .TP
-\fBtop\fP \fIjob_id\fP
-Move the specified job ID to the top of the queue of jobs belonging to the
+\fBtop\fP \fIjob_list\fP
+Move the specified job IDs to the top of the queue of jobs belonging to the
 identical user ID, partition name, account, and QOS.
+The job_list argument is a comma separated ordered list of job IDs.
 Any job not matching \fBall\fP of those fields will not be effected.
 Only jobs submitted to a single partition will be effected.
 This operation changes the order of jobs by adjusting job nice values.
@@ -447,6 +463,13 @@ or in the batch script itself if nodes are powered down and restarted
 automatically as needed.
 
 .TP
+\fBwrite batch_script\fP \fIjob_id optional_filename\fP
+Write the batch script for a given job_id to a file. The file will default to
+\fIslurm-\<job_id\>.sh\fP if the optional filename argument is not given.
+The batch script can only be retrieved by an admin or operator, or by the
+owner of the job.
+
+.TP
 \fBwrite config\fP
 Write the current configuration to a file with the naming convention of
 "slurm.conf.<datetime>" in the same directory as the original slurm.conf
@@ -472,11 +495,10 @@ Note that on computers with hyperthreading enabled and Slurm configured to
 allocate cores, each listed CPU represents one physical core.
 Each hyperthread on that core can be allocated a separate task, so a job's
 CPU count and task count may differ.
-See the \fB\-\-cpu_bind\fR and \fB\-\-mem_bind\fR option descriptions in
+See the \fB\-\-cpu\-bind\fR and \fB\-\-mem\-bind\fR option descriptions in
 srun man pages for more information.
 The \fBdetails\fP option is currently only supported for the \fIshow job\fP
-command. To also list the batch script for batch jobs, in addition to the
-details, use the \fBscript\fP option described below instead of this option.
+command.
 
 .TP
 \fBexit\fP
@@ -499,12 +521,6 @@ Print no warning or informational messages, only fatal error messages.
 .TP
 \fBquit\fP
 Terminate the execution of scontrol.
-
-.TP
-\fBscript\fP
-Causes the \fIshow job\fP command to list the batch script for batch
-jobs in addition to the detail information described under the
-\fBdetails\fP option above.
 
 .TP
 \fBverbose\fP
@@ -546,6 +562,14 @@ is limited to 2.
 Burst buffer specification to be changed for this job's resource use.
 Value may be cleared with blank data value, "BurstBuffer=".
 Format is burst buffer plugin specific.
+.TP
+\fIClusters\fP=<spec>
+Specifies the clusters that the federated job can run on.
+.TP
+\fIClusterFeatures\fP=<spec>
+Specifies features that a federated cluster must have to have a sibling job
+submitted to it. Slurm will attempt to submit a sibling job to a cluster if it
+has at least one of the specified features.
 .TP
 \fIComment\fP=<spec>
 Arbitrary descriptive string.
@@ -1059,8 +1083,8 @@ Identify the state to be assigned to the node. Possible node states are "NoResp"
 "ALLOC", "ALLOCATED", "COMPLETING", "DOWN", "DRAIN", "ERROR, "FAIL", "FAILING",
 "FUTURE" "IDLE", "MAINT", "MIXED", "PERFCTRS/NPC", "RESERVED", "POWER_DOWN",
 "POWER_UP", "RESUME" or "UNDRAIN". Not all of those states can be set using
-the scontrol command only the following can: "NoResp", "DRAIN", "FAIL",
-"FUTURE", "RESUME", "POWER_DOWN", "POWER_UP" and "UNDRAIN".
+the scontrol command only the following can: "DOWN", "DRAIN", "FAIL",
+"FUTURE", "RESUME", "NoResp", "POWER_DOWN", "POWER_UP" and "UNDRAIN".
 If a node is in a "MIXED" state it usually means the node is in
 multiple states.  For instance if only part of the node is "ALLOCATED"
 and the rest of the node is "IDLE" the state will be "MIXED".
@@ -1073,7 +1097,7 @@ node are in use, rendering this node as not usable for any other jobs.
 "RESERVED" indicates the node is in an advanced reservation and not generally
 available.
 "RESUME" is not an actual node state, but will change a node state from
-"DRAINED", "DRAINING", "DOWN", "MAINT" or "REBOOT" to either
+"DRAINED", "DRAINING", "DOWN" or "REBOOT" to either
 "IDLE" or "ALLOCATED" state as appropriate.
 "UNDRAIN" clears the node from being drained (like "RESUME"), but will
 not change the node's base state (e.g. "DOWN").
@@ -1405,10 +1429,12 @@ This is because the CRAY API for managing DataWarps supports both formats.
 
 .TP
 \fICoreCnt\fP=<num>
-This option is only supported when SelectType=select/cons_res. Identify number of
-cores to be reserved. If NodeCnt is used, this is the total number of cores to
-reserve where cores per node is CoreCnt/NodeCnt. If a nodelist is used, this
+This option is only supported when SelectType=select/cons_res. Identify number
+of cores to be reserved. If NodeCnt is used without the FIRST_CORES flag, this
+is the total number of cores to reserve where cores per node is CoreCnt/NodeCnt.
+If a nodelist is used, or if NodeCnt is used with the FIRST_CORES flag, this
 should be an array of core numbers by node: Nodes=node[1\-5] CoreCnt=2,2,3,3,4
+or flags=FIRST_CORES NodeCnt=5 CoreCnt=1,2,1,3,2.
 
 .TP
 \fILicenses\fP=<license>
@@ -1504,7 +1530,14 @@ If this flag is not set, a job using this reservation may use only the nodes
 and licenses associated with the reservation.
 .TP
 \fIDAILY\fR
-Repeat the reservation at the same time every day
+Repeat the reservation at the same time every day.
+.TP
+\fIFLEX\fR
+Permit jobs requesting the reservation to begin prior to the reservation's
+start time and use resources inside or outside of the reservation. A typical
+use case is to prevent jobs not explicitlg requesting the reservation from using
+those reserved resources rather than forcing jobs requesting the reservation to
+use those resources in the time frame reserved.
 .TP
 \fIFIRST_CORES\fR
 Use the lowest numbered cores on a node only.
@@ -1521,6 +1554,12 @@ See \fIANY_NODES\fR.
 Maintenance mode, receives special accounting treatment.
 This partition is permitted to use resources that are already in another
 reservation.
+.TP
+\fINO_HOLD_JOBS_AFTER\fR
+By default, when a reservation ends the reservation request will be removed from
+any pending jobs submitted to the reservation and will be put into a held state.
+Use this flag to let jobs run outside of the reservation after the reservation
+is gone.
 .TP
 \fIOVERLAP\fR
 This reservation can be allocated resources that are already in another
@@ -1557,8 +1596,16 @@ The reservation start time is relative to the current time and moves forward
 through time (e.g. a StartTime=now+10minutes will always be 10 minutes in the
 future).
 .TP
+\fIWEEKDAY\fR
+Repeat the reservation at the same time on every weekday (Monday, Tuesday,
+Wednesday, Thursday and Friday).
+.TP
+\fIWEEKEND\fR
+Repeat the reservation at the same time on every weekend day (Saturday and
+Sunday).
+.TP
 \fIWEEKLY\fR
-Repeat the reservation at the same time every week
+Repeat the reservation at the same time every week.
 .RE
 
 .TP
@@ -1777,6 +1824,15 @@ Commandline options will always override these settings.)
 \fBSCONTROL_ALL\fR
 \fB\-a, \-\-all\fR
 .TP
+\fBSCONTROL_FEDERATION\fR
+\fB\-\-federation\fR
+.TP
+\fBSCONTROL_LOCAL\fR
+\fB\-\-local\fR
+.TP
+\fBSCONTROL_SIBLING\fR
+\fB\-\-sibling\fR
+.TP
 \fBSLURM_BITSTR_LEN\fR
 Specifies the string length to be used for holding a job array's task ID
 expression.
@@ -1945,7 +2001,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010-2016 SchedMD LLC.
+Copyright (C) 2010-2017 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <https://slurm.schedmd.com/>.

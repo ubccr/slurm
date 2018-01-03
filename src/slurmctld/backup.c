@@ -60,6 +60,7 @@
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
 
+#include "src/slurmctld/heartbeat.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/read_config.h"
 #include "src/slurmctld/slurmctld.h"
@@ -98,7 +99,6 @@ void run_backup(slurm_trigger_callbacks_t *callbacks)
 	int i;
 	uint32_t trigger_type;
 	time_t last_ping = 0;
-	pthread_attr_t thread_attr_sig, thread_attr_rpc;
 	slurmctld_lock_t config_read_lock = {
 		READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	slurmctld_lock_t config_write_lock = {
@@ -116,25 +116,14 @@ void run_backup(slurm_trigger_callbacks_t *callbacks)
 	/*
 	 * create attached thread to process RPCs
 	 */
-	slurm_attr_init(&thread_attr_rpc);
-	while (pthread_create(&slurmctld_config.thread_id_rpc,
-			      &thread_attr_rpc, _background_rpc_mgr, NULL)) {
-		error("pthread_create error %m");
-		sleep(1);
-	}
-	slurm_attr_destroy(&thread_attr_rpc);
+	slurm_thread_create(&slurmctld_config.thread_id_rpc,
+			    _background_rpc_mgr, NULL);
 
 	/*
 	 * create attached thread for signal handling
 	 */
-	slurm_attr_init(&thread_attr_sig);
-	while (pthread_create(&slurmctld_config.thread_id_sig,
-			      &thread_attr_sig, _background_signal_hand,
-			      NULL)) {
-		error("pthread_create %m");
-		sleep(1);
-	}
-	slurm_attr_destroy(&thread_attr_sig);
+	slurm_thread_create(&slurmctld_config.thread_id_sig,
+			    _background_signal_hand, NULL);
 	trigger_type = TRIGGER_TYPE_BU_CTLD_RES_OP;
 	_trigger_slurmctld_event(trigger_type);
 
@@ -148,7 +137,7 @@ void run_backup(slurm_trigger_callbacks_t *callbacks)
 		/* Lock of slurmctld_conf below not important */
 		if (slurmctld_conf.slurmctld_timeout &&
 		    (takeover == false) &&
-		    (difftime(time(NULL), last_ping) <
+		    ((time(NULL) - last_ping) <
 		     (slurmctld_conf.slurmctld_timeout / 3)))
 			continue;
 
@@ -160,15 +149,25 @@ void run_backup(slurm_trigger_callbacks_t *callbacks)
 			/* primary no longer respond */
 			break;
 		} else {
-			uint32_t timeout;
-			lock_slurmctld(config_read_lock);
-			timeout = slurmctld_conf.slurmctld_timeout;
-			unlock_slurmctld(config_read_lock);
+			time_t use_time, last_heartbeat;
 
-			if (difftime(time(NULL), last_controller_response) >
-			    timeout) {
+			last_heartbeat = get_last_heartbeat();
+			debug("%s: last_heartbeat %ld", __func__,
+			      last_heartbeat);
+
+			if (last_heartbeat > last_controller_response) {
+				error("Last message to the controller was at %ld,"
+				      " but the last heartbeat was written at %ld,"
+				      " trusting the filesystem instead of the network"
+				      " and not asserting control at this time.",
+				      last_controller_response, last_heartbeat);
+				use_time = last_heartbeat;
+			} else
+				use_time = last_controller_response;
+
+			if ((time(NULL) - use_time) >
+			    slurmctld_conf.slurmctld_timeout)
 				break;
-			}
 		}
 	}
 
@@ -368,11 +367,11 @@ static void *_background_rpc_mgr(void *no_data)
 
 		slurm_free_msg_members(&msg);
 
-		slurm_close(newsockfd);	/* close new socket */
+		close(newsockfd);	/* close new socket */
 	}
 
 	debug3("_background_rpc_mgr shutting down");
-	slurm_close(sockfd);	/* close the main socket */
+	close(sockfd);	/* close the main socket */
 	pthread_exit((void *) 0);
 	return NULL;
 }

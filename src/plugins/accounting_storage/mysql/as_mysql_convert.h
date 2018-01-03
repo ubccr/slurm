@@ -1,9 +1,9 @@
 /*****************************************************************************\
  *  as_mysql_convert.h - functions dealing with converting from tables in
- *                    slurm <= 14.11.
+ *                    slurm <= 17.02.
  *****************************************************************************
  *
- *  Copyright (C) 2015 SchedMD LLC.
+ *  Copyright (C) 2015-2017 SchedMD LLC.
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
@@ -41,10 +41,10 @@
 
 #include "accounting_storage_mysql.h"
 
-extern int as_mysql_convert_event_table(mysql_conn_t *mysql_conn, char *table);
+/* Functions for converting tables before they are created in new schema */
+extern int as_mysql_convert_tables_pre_create(mysql_conn_t *mysql_conn);
 
-extern int as_mysql_convert_usage_table(mysql_conn_t *mysql_conn, char *table);
-
-extern int as_mysql_convert_tables(mysql_conn_t *mysql_conn);
+/* Functions for converting tables after they are created */
+extern int as_mysql_convert_tables_post_create(mysql_conn_t *mysql_conn);
 
 #endif

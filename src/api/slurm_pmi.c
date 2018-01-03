@@ -47,6 +47,7 @@
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/forward.h"
 #include "src/common/read_config.h"
+#include "src/common/strlcpy.h"
 #include "src/common/xmalloc.h"
 #include "src/common/fd.h"
 #include "src/common/slurm_auth.h"
@@ -248,10 +249,9 @@ int  slurm_get_kvs_comm_set(kvs_comm_set_t **kvs_set_ptr,
 	/* hostname is not set here, so slurm_get_addr fails
 	slurm_get_addr(&slurm_addr, &port, hostname, sizeof(hostname)); */
 	port = ntohs(slurm_addr.sin_port);
-	if ((env_pmi_ifhn = getenv("SLURM_PMI_RESP_IFHN"))) {
-		strncpy(hostname, env_pmi_ifhn, sizeof(hostname));
-		hostname[sizeof(hostname)-1] = 0;
-	} else
+	if ((env_pmi_ifhn = getenv("SLURM_PMI_RESP_IFHN")))
+		strlcpy(hostname, env_pmi_ifhn, sizeof(hostname));
+	else
 		gethostname_short(hostname, sizeof(hostname));
 
 	data.task_id = pmi_rank;
@@ -307,7 +307,7 @@ int  slurm_get_kvs_comm_set(kvs_comm_set_t **kvs_set_ptr,
 		if (errno == EINTR)
 			continue;
 		error("slurm_receive_msg: %m");
-		slurm_close(srun_fd);
+		close(srun_fd);
 		return errno;
 	}
 	if (msg_rcv.auth_cred)
@@ -315,13 +315,13 @@ int  slurm_get_kvs_comm_set(kvs_comm_set_t **kvs_set_ptr,
 
 	if (msg_rcv.msg_type != PMI_KVS_GET_RESP) {
 		error("slurm_get_kvs_comm_set msg_type=%d", msg_rcv.msg_type);
-		slurm_close(srun_fd);
+		close(srun_fd);
 		return SLURM_UNEXPECTED_MSG_ERROR;
 	}
 	if (slurm_send_rc_msg(&msg_rcv, SLURM_SUCCESS) < 0)
 		error("slurm_send_rc_msg: %m");
 
-	slurm_close(srun_fd);
+	close(srun_fd);
 	*kvs_set_ptr = msg_rcv.data;
 
 	rc = _forward_comm_set(*kvs_set_ptr);

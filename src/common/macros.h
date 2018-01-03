@@ -48,6 +48,7 @@
 #include <stdlib.h>		/* for abort() */
 #include <string.h>		/* for strerror() */
 #include "src/common/log.h"	/* for error() */
+#include "src/common/strlcpy.h"
 
 #ifndef MAX
 #  define MAX(a,b) ((a) > (b) ? (a) : (b))
@@ -242,6 +243,48 @@
 				"possible memory leak!: %m");		\
 	} while (0)
 
+/*
+ * Note that the attr argument is intentionally omitted, as it will
+ * be setup within the macro to Slurm's default options.
+ */
+#define slurm_thread_create(id, func, arg)				\
+	do {								\
+		pthread_attr_t attr;					\
+		slurm_attr_init(&attr);					\
+		if (pthread_create(id, &attr, func, arg))		\
+			fatal("%s: pthread_create error %m", __func__);	\
+		slurm_attr_destroy(&attr);				\
+	} while (0)
+
+/*
+ * If the id is NULL then the thread_id will be discarded without needing
+ * to create a local pthread_t object first.
+ *
+ * This is only made available for detached threads - if you're creating
+ * an attached thread that you don't need to keep the id of, then you
+ * should really be making it detached.
+ *
+ * The ternary operator that makes that work is intentionally overwrought
+ * to avoid compiler warnings about it always resolving to true, since
+ * this is a macro and the optimization pass will realize that a variable
+ * in the local scope will always have a non-zero memory address.
+ */
+#define slurm_thread_create_detached(id, func, arg)			\
+	do {								\
+		pthread_t *id_ptr, id_local;				\
+		pthread_attr_t attr;					\
+		id_ptr = (id != (pthread_t *) NULL) ? id : &id_local;	\
+		slurm_attr_init(&attr);					\
+		if (pthread_attr_setdetachstate(&attr,			\
+						PTHREAD_CREATE_DETACHED)) \
+			fatal("%s: pthread_attr_setdetachstate %m",	\
+			      __func__);				\
+		if (pthread_create(id_ptr, &attr, func, arg))		\
+			fatal("%s: pthread_create error %m", __func__);	\
+		slurm_attr_destroy(&attr);				\
+	} while (0)
+
+
 #define slurm_atoul(str) strtoul(str, NULL, 10)
 #define slurm_atoull(str) strtoull(str, NULL, 10)
 
@@ -266,7 +309,7 @@ do {									\
 		if (strftime(tmp_string, sizeof(tmp_string), format, tm) == 0) \
 			memset(tmp_string, '#', max);			\
 		tmp_string[max-1] = 0;					\
-		strncpy(s, tmp_string, max);				\
+		strlcpy(s, tmp_string, max);				\
 	}								\
 } while (0)
 

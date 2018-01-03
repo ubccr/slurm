@@ -77,14 +77,15 @@ static void _calc_device_major(char *dev_path[PATH_MAX],
 			       char *dev_major[PATH_MAX],
 			       int lines);
 
-static int read_allowed_devices_file(char *allowed_devices[PATH_MAX]);
+static int _read_allowed_devices_file(char *allowed_devices[PATH_MAX]);
 
 extern int task_cgroup_devices_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 {
 	uint16_t cpunum;
+	FILE *file = NULL;
 
 	/* initialize cpuinfo internal data */
-	if ( xcpuinfo_init() != XCPUINFO_SUCCESS )
+	if (xcpuinfo_init() != XCPUINFO_SUCCESS)
 		return SLURM_ERROR;
 
 	/* initialize user/job/jobstep cgroup relative paths */
@@ -94,13 +95,16 @@ extern int task_cgroup_devices_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	/* initialize allowed_devices_filename */
 	cgroup_allowed_devices_file[0] = '\0';
 
-	if ( get_procs(&cpunum) != 0 ) {
+	if (get_procs(&cpunum) != 0) {
 		error("task/cgroup: unable to get a number of CPU");
 		goto error;
 	}
 
-	(void) gres_plugin_node_config_load(cpunum, conf->node_name, NULL);
-
+	if ((strlen(slurm_cgroup_conf->allowed_devices_file) + 1) >= PATH_MAX) {
+		error("task/cgroup: device file path length exceeds limit: %s",
+		      slurm_cgroup_conf->allowed_devices_file);
+		goto error;
+	}
 	strcpy(cgroup_allowed_devices_file,
 	       slurm_cgroup_conf->allowed_devices_file);
 	if (xcgroup_ns_create(slurm_cgroup_conf, &devices_ns, "", "devices")
@@ -108,6 +112,15 @@ extern int task_cgroup_devices_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		error("task/cgroup: unable to create devices namespace");
 		goto error;
 	}
+
+	file = fopen(cgroup_allowed_devices_file, "r");
+	if (!file) {
+		fatal("task/cgroup: %s doesn't exist, this is needed for proper functionality when Constraining Devices.",
+		      cgroup_allowed_devices_file);
+		goto error;
+	} else
+		fclose(file);
+
 
 	return SLURM_SUCCESS;
 
@@ -196,14 +209,9 @@ extern int task_cgroup_devices_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 
 extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 {
-	int f, k, rc, gres_conf_lines = 0, allow_lines = 0;
+	int k, rc, allow_lines = 0;
 	int fstatus = SLURM_ERROR;
-	char **gres_name = NULL;
-	char **gres_cgroup = NULL, **dev_path = NULL;
 	char *allowed_devices[PATH_MAX], *allowed_dev_major[PATH_MAX];
-	int *gres_job_bit_alloc = NULL;
-	int *gres_step_bit_alloc = NULL;
-	int *gres_count = NULL;
 	xcgroup_t devices_cg;
 	uint32_t jobid = job->jobid;
 	uint32_t stepid = job->stepid;
@@ -212,6 +220,9 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 
 	List job_gres_list = job->job_gres_list;
 	List step_gres_list = job->step_gres_list;
+	List device_list = NULL;
+	ListIterator itr;
+	gres_device_t *gres_device;
 
 	char* slurm_cgpath ;
 
@@ -289,44 +300,6 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 
 	debug2("task/cgroup: manage devices jor job '%u'", jobid);
 
-	 /*
-	  * collect info concerning the gres.conf file
-	  * the GRES devices paths and the GRES names
-	  */
-	gres_conf_lines = gres_plugin_node_config_devices_path(
-		&dev_path, &gres_name, job->node_name);
-
-	/*
-	 * calculate the number of gres.conf records for each gres name
-	 */
-	if (gres_conf_lines) {
-		/*
-		 * create the entry for cgroup devices subsystem with major
-		 * minor
-		 */
-		gres_cgroup = xmalloc(sizeof(char *) * gres_conf_lines);
-		_calc_device_major(dev_path, gres_cgroup, gres_conf_lines);
-
-		gres_count = xmalloc(sizeof(int) * gres_conf_lines + 32);
-		f = 0;
-		gres_count[f] = 1;
-		for (k = 0; k < gres_conf_lines; k++) {
-			if ((k+1 < gres_conf_lines) &&
-			    (xstrcmp(gres_name[k], gres_name[k+1]) == 0))
-				gres_count[f]++;
-			if ((k+1 < gres_conf_lines) &&
-			    (xstrcmp(gres_name[k], gres_name[k+1]) != 0)) {
-				f++;
-				gres_count[f] = 1;
-			}
-		}
-
-		gres_job_bit_alloc = xmalloc(sizeof (int) *
-					     (gres_conf_lines + 32));
-		gres_plugin_job_state_file(job_gres_list, gres_job_bit_alloc,
-					   gres_count);
-	}
-
 	/*
 	 * create user cgroup in the devices ns (it could already exist)
 	 */
@@ -363,8 +336,10 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
          * create the entry with major minor for the default allowed devices
          * read from the file
          */
-	allow_lines = read_allowed_devices_file(allowed_devices);
+	allow_lines = _read_allowed_devices_file(allowed_devices);
 	_calc_device_major(allowed_devices, allowed_dev_major, allow_lines);
+	for (k = 0; k < allow_lines; k++)
+		xfree(allowed_devices[k]);
 
 	/*
 	 * with the current cgroup devices subsystem design (whitelist only
@@ -381,18 +356,27 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 	/*
          * allow or deny access to devices according to job GRES permissions
          */
-	for (k = 0; k < gres_conf_lines; k++) {
-		if (gres_job_bit_alloc[k] == 1) {
-			debug2("Allowing access to device %s for job",
-			       gres_cgroup[k]);
-			xcgroup_set_param(&job_devices_cg, "devices.allow",
-                                          gres_cgroup[k]);
-		} else {
-			debug2("Not allowing access to device %s for job",
-			       gres_cgroup[k]);
-			xcgroup_set_param(&job_devices_cg, "devices.deny",
-					  gres_cgroup[k]);
+	device_list = gres_plugin_get_allocated_devices(job_gres_list, true);
+
+	if (device_list) {
+		itr = list_iterator_create(device_list);
+		while ((gres_device = list_next(itr))) {
+			if (gres_device->alloc) {
+				debug("Allowing access to device %s(%s) for job",
+				      gres_device->major, gres_device->path);
+				xcgroup_set_param(&job_devices_cg,
+						  "devices.allow",
+						  gres_device->major);
+			} else {
+				debug("Not allowing access to device %s(%s) for job",
+				       gres_device->major, gres_device->path);
+				xcgroup_set_param(&job_devices_cg,
+						  "devices.deny",
+						  gres_device->major);
+			}
 		}
+		list_iterator_destroy(itr);
+		list_destroy(device_list);
 	}
 
 	/*
@@ -418,13 +402,6 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 
 	if ((job->stepid != SLURM_BATCH_SCRIPT) &&
 	    (job->stepid != SLURM_EXTERN_CONT)) {
-
-		/* fetch information about step GRES devices allocation */
-		gres_step_bit_alloc = xmalloc(sizeof (int) *
-					      (gres_conf_lines + 32));
-		gres_plugin_step_state_file(step_gres_list, gres_step_bit_alloc,
-					    gres_count);
-
 		/*
 		 * with the current cgroup devices subsystem design (whitelist
 		 * only supported) we need to allow all different devices that
@@ -441,20 +418,30 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 		 * allow or deny access to devices according to GRES permissions
 		 * for the step
 		 */
-		for (k = 0; k < gres_conf_lines; k++) {
-			if (gres_step_bit_alloc[k] == 1) {
-				debug2("Allowing access to device %s for step",
-				       gres_cgroup[k]);
-				xcgroup_set_param(&step_devices_cg,
-						 "devices.allow",
-						  gres_cgroup[k]);
-			} else {
-				debug2("Not allowing access to device %s for step",
-				       gres_cgroup[k]);
-				xcgroup_set_param(&step_devices_cg,
-						 "devices.deny",
-						  gres_cgroup[k]);
+		device_list = gres_plugin_get_allocated_devices(
+			step_gres_list, false);
+
+		if (device_list) {
+			itr = list_iterator_create(device_list);
+			while ((gres_device = list_next(itr))) {
+				if (gres_device->alloc) {
+					debug("Allowing access to device %s(%s) for step",
+					      gres_device->major,
+					      gres_device->path);
+					xcgroup_set_param(&step_devices_cg,
+							  "devices.allow",
+							  gres_device->major);
+				} else {
+					debug("Not allowing access to device %s(%s) for step",
+					      gres_device->major,
+					      gres_device->path);
+					xcgroup_set_param(&step_devices_cg,
+							  "devices.deny",
+							  gres_device->major);
+				}
 			}
+			list_iterator_destroy(itr);
+			list_destroy(device_list);
 		}
 	}
 	/* attach the slurmstepd to the step devices cgroup */
@@ -471,20 +458,10 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 error:
 	xcgroup_unlock(&devices_cg);
 	xcgroup_destroy(&devices_cg);
-	xfree(gres_step_bit_alloc);
-	xfree(gres_job_bit_alloc);
-	xfree(gres_count);
-	xfree(gres_name);
-	xfree(dev_path);
 	for (k = 0; k < allow_lines; k++) {
 		xfree(allowed_dev_major[k]);
 	}
 	xfree(allowed_dev_major);
-
-	for (k = 0; k < gres_conf_lines; k++) {
-		xfree(gres_cgroup[k]);
-	}
-	xfree(gres_cgroup);
 
 	return fstatus;
 }
@@ -500,45 +477,26 @@ extern int task_cgroup_devices_attach_task(stepd_step_rec_t *job)
 }
 
 static void _calc_device_major(char *dev_path[PATH_MAX],
-				char *dev_major[PATH_MAX],
-				int lines)
+			       char *dev_major[PATH_MAX],
+			       int lines)
 {
 
-	int k, major, minor;
-	char str1[256], str2[256];
-	struct stat fs;
+	int k;
 
 	if (lines > PATH_MAX) {
 		error("task/cgroup: more devices configured than table size "
 		      "(%d > %d)", lines, PATH_MAX);
 		lines = PATH_MAX;
 	}
-	for (k = 0; k < lines; k++) {
-		stat(dev_path[k], &fs);
-		major = (int)major(fs.st_rdev);
-		minor = (int)minor(fs.st_rdev);
-		debug3("device : %s major %d, minor %d",
-			dev_path[k], major, minor);
-		memset(str1, 0, sizeof(str1));
-		if (S_ISBLK(fs.st_mode)) {
-			sprintf(str1, "b %d:", major);
-			//info("device is block ");
-		}
-		if (S_ISCHR(fs.st_mode)) {
-			sprintf(str1, "c %d:", major);
-			//info("device is character ");
-		}
-		sprintf(str2, "%d rwm", minor);
-		strcat(str1, str2);
-		dev_major[k] = xstrdup((char *)str1);
-	}
+	for (k = 0; k < lines; k++)
+		dev_major[k] = gres_device_major(dev_path[k]);
 }
 
 
-static int read_allowed_devices_file(char **allowed_devices)
+static int _read_allowed_devices_file(char **allowed_devices)
 {
 
-	FILE *file = fopen (cgroup_allowed_devices_file, "r" );
+	FILE *file = fopen(cgroup_allowed_devices_file, "r");
 	int i, l, num_lines = 0;
 	char line[256];
 	glob_t globbuf;
@@ -547,14 +505,14 @@ static int read_allowed_devices_file(char **allowed_devices)
 		line[i] = '\0';
 
 	if ( file != NULL ){
-		while ( fgets ( line, sizeof line, file ) != NULL ){
+		while (fgets(line, sizeof(line), file)) {
 			line[strlen(line)-1] = '\0';
 
 			/* global pattern matching and return the list of matches*/
-			if (glob(line, GLOB_NOSORT, NULL, &globbuf) != 0){
+			if (glob(line, GLOB_NOSORT, NULL, &globbuf)) {
 				debug3("Device %s does not exist", line);
-			}else{
-				for(l=0; l < globbuf.gl_pathc; l++){
+			} else {
+				for (l=0; l < globbuf.gl_pathc; l++) {
 					allowed_devices[num_lines] =
 						xstrdup(globbuf.gl_pathv[l]);
 					num_lines++;
@@ -562,10 +520,11 @@ static int read_allowed_devices_file(char **allowed_devices)
 				globfree(&globbuf);
 			}
 		}
-		fclose ( file );
+		fclose(file);
 	}
 	else
-		perror (cgroup_allowed_devices_file);
+		fatal("%s: %s does not exist, please create this file.",
+		      __func__, cgroup_allowed_devices_file);
 
 	return num_lines;
 }

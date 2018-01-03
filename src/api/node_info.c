@@ -3,6 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010-2017 SchedMD LLC <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -57,6 +58,21 @@
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+
+/* Data structures for pthreads used to gather node information from multiple
+ * clusters in parallel */
+typedef struct load_node_req_struct {
+	slurmdb_cluster_rec_t *cluster;
+	int cluster_inx;
+	slurm_msg_t *req_msg;
+	List resp_msg_list;
+	uint16_t show_flags;
+} load_node_req_struct_t;
+
+typedef struct load_node_resp_struct {
+	int cluster_inx;
+	node_info_msg_t *new_msg;
+} load_node_resp_struct_t;
 
 /*
  * slurm_print_node_info_msg - output information about all Slurm nodes
@@ -313,9 +329,12 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 	}
 
 	/****** Line ******/
-	if (node_ptr->os)
+	if (node_ptr->os) {
 		xstrfmtcat(out, "OS=%s ", node_ptr->os);
+		xstrcat(out, line_end);
+	}
 
+	/****** Line ******/
 	slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
 				  SELECT_NODEDATA_MEM_ALLOC,
 				  NODE_STATE_ALLOCATED,
@@ -330,7 +349,6 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 
 	xstrfmtcat(out, "Sockets=%u Boards=%u",
 		   node_ptr->sockets, node_ptr->boards);
-
 	xstrcat(out, line_end);
 
 	/****** core & memory specialization Line (optional) ******/
@@ -428,7 +446,7 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 
 	/****** external sensors Line ******/
 	if (!node_ptr->ext_sensors
-	    || node_ptr->ext_sensors->consumed_energy == NO_VAL)
+	    || node_ptr->ext_sensors->consumed_energy == NO_VAL64)
 		xstrcat(out, "ExtSensorsJoules=n/s ");
 	else
 		xstrfmtcat(out, "ExtSensorsJoules=%"PRIu64" ",
@@ -514,6 +532,170 @@ static void _set_node_mixed(node_info_msg_t *resp)
 	}
 }
 
+static int _load_cluster_nodes(slurm_msg_t *req_msg,
+			       node_info_msg_t **node_info_msg_pptr,
+			       slurmdb_cluster_rec_t *cluster,
+			       uint16_t show_flags)
+{
+	slurm_msg_t resp_msg;
+	int rc;
+
+	slurm_msg_t_init(&resp_msg);
+
+	if (slurm_send_recv_controller_msg(req_msg, &resp_msg, cluster) < 0)
+		return SLURM_ERROR;
+
+	switch (resp_msg.msg_type) {
+	case RESPONSE_NODE_INFO:
+		*node_info_msg_pptr = (node_info_msg_t *) resp_msg.data;
+		if (show_flags & SHOW_MIXED)
+			_set_node_mixed(*node_info_msg_pptr);
+		break;
+	case RESPONSE_SLURM_RC:
+		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
+		slurm_free_return_code_msg(resp_msg.data);
+		if (rc)
+			slurm_seterrno_ret(rc);
+		*node_info_msg_pptr = NULL;
+		break;
+	default:
+		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
+		break;
+	}
+
+	return SLURM_PROTOCOL_SUCCESS;
+}
+
+/* Maintain a consistent ordering of records */
+static int _sort_by_cluster_inx(void *x, void *y)
+{
+	load_node_resp_struct_t *resp_x = *(load_node_resp_struct_t **) x;
+	load_node_resp_struct_t *resp_y = *(load_node_resp_struct_t **) y;
+
+	if (resp_x->cluster_inx > resp_y->cluster_inx)
+		return -1;
+	if (resp_x->cluster_inx < resp_y->cluster_inx)
+		return 1;
+	return 0;
+}
+
+/* Thread to read node information from some cluster */
+static void *_load_node_thread(void *args)
+{
+	load_node_req_struct_t *load_args = (load_node_req_struct_t *) args;
+	slurmdb_cluster_rec_t *cluster = load_args->cluster;
+	node_info_msg_t *new_msg = NULL;
+	int i, rc;
+
+	if ((rc = _load_cluster_nodes(load_args->req_msg, &new_msg, cluster,
+				      load_args->show_flags)) || !new_msg) {
+		verbose("Error reading node information from cluster %s: %s",
+			cluster->name, slurm_strerror(rc));
+	} else {
+		load_node_resp_struct_t *node_resp;
+		for (i = 0; i < new_msg->record_count; i++) {
+			if (!new_msg->node_array[i].cluster_name) {
+				new_msg->node_array[i].cluster_name =
+					xstrdup(cluster->name);
+			}
+		}
+		node_resp = xmalloc(sizeof(load_node_resp_struct_t));
+		node_resp->cluster_inx = load_args->cluster_inx;
+		node_resp->new_msg = new_msg;
+		list_append(load_args->resp_msg_list, node_resp);
+	}
+	xfree(args);
+
+	return (void *) NULL;
+}
+
+static int _load_fed_nodes(slurm_msg_t *req_msg,
+			   node_info_msg_t **node_info_msg_pptr,
+			   uint16_t show_flags, char *cluster_name,
+			   slurmdb_federation_rec_t *fed)
+{
+	int cluster_inx = 0, i;
+	load_node_resp_struct_t *node_resp;
+	node_info_msg_t *orig_msg = NULL, *new_msg = NULL;
+	uint32_t new_rec_cnt;
+	slurmdb_cluster_rec_t *cluster;
+	ListIterator iter;
+	int pthread_count = 0;
+	pthread_t *load_thread = 0;
+	load_node_req_struct_t *load_args;
+	List resp_msg_list;
+
+	*node_info_msg_pptr = NULL;
+
+	/* Spawn one pthread per cluster to collect node information */
+	resp_msg_list = list_create(NULL);
+	load_thread = xmalloc(sizeof(pthread_t) *
+			      list_count(fed->cluster_list));
+	iter = list_iterator_create(fed->cluster_list);
+	while ((cluster = (slurmdb_cluster_rec_t *) list_next(iter))) {
+		if ((cluster->control_host == NULL) ||
+		    (cluster->control_host[0] == '\0'))
+			continue;	/* Cluster down */
+
+		load_args = xmalloc(sizeof(load_node_req_struct_t));
+		load_args->cluster = cluster;
+		load_args->cluster_inx = cluster_inx++;
+		load_args->req_msg = req_msg;
+		load_args->resp_msg_list = resp_msg_list;
+		load_args->show_flags = show_flags;
+		slurm_thread_create(&load_thread[pthread_count],
+				    _load_node_thread, load_args);
+		pthread_count++;
+	}
+	list_iterator_destroy(iter);
+
+	/* Wait for all pthreads to complete */
+	for (i = 0; i < pthread_count; i++)
+		pthread_join(load_thread[i], NULL);
+	xfree(load_thread);
+
+	/* Maintain a consistent cluster/node ordering */
+	list_sort(resp_msg_list, _sort_by_cluster_inx);
+
+	/* Merge the responses into a single response message */
+	iter = list_iterator_create(resp_msg_list);
+	while ((node_resp = (load_node_resp_struct_t *) list_next(iter))) {
+		new_msg = node_resp->new_msg;
+		if (!orig_msg) {
+			orig_msg = new_msg;
+			*node_info_msg_pptr = orig_msg;
+		} else {
+			/* Merge the node records */
+			orig_msg->last_update = MIN(orig_msg->last_update,
+						    new_msg->last_update);
+			new_rec_cnt = orig_msg->record_count +
+				      new_msg->record_count;
+			if (new_msg->record_count) {
+				orig_msg->node_array =
+					xrealloc(orig_msg->node_array,
+						 sizeof(node_info_t) *
+						 new_rec_cnt);
+				(void) memcpy(orig_msg->node_array +
+					      orig_msg->record_count,
+					      new_msg->node_array,
+					      sizeof(node_info_t) *
+					      new_msg->record_count);
+				orig_msg->record_count = new_rec_cnt;
+			}
+			xfree(new_msg->node_array);
+			xfree(new_msg);
+		}
+		xfree(node_resp);
+	}
+	list_iterator_destroy(iter);
+	FREE_NULL_LIST(resp_msg_list);
+
+	if (!orig_msg)
+		slurm_seterrno_ret(SLURM_ERROR);
+
+	return SLURM_PROTOCOL_SUCCESS;
+}
+
 /*
  * slurm_load_node - issue RPC to get slurm all node configuration information
  *	if changed since update_time
@@ -523,43 +705,71 @@ static void _set_node_mixed(node_info_msg_t *resp)
  * RET 0 or a slurm error code
  * NOTE: free the response using slurm_free_node_info_msg
  */
-extern int slurm_load_node (time_t update_time,
-			    node_info_msg_t **resp, uint16_t show_flags)
+extern int slurm_load_node(time_t update_time, node_info_msg_t **resp,
+			   uint16_t show_flags)
 {
-	int rc;
 	slurm_msg_t req_msg;
-	slurm_msg_t resp_msg;
 	node_info_request_msg_t req;
+	char *cluster_name = NULL;
+	void *ptr = NULL;
+	slurmdb_federation_rec_t *fed;
+	int rc;
+
+	if (working_cluster_rec)
+		cluster_name = xstrdup(working_cluster_rec->name);
+	else
+		cluster_name = slurm_get_cluster_name();
+	if ((show_flags & SHOW_FEDERATION) && !(show_flags & SHOW_LOCAL) &&
+	    (slurm_load_federation(&ptr) == SLURM_SUCCESS) &&
+	    cluster_in_federation(ptr, cluster_name)) {
+		/* In federation. Need full info from all clusters */
+		update_time = (time_t) 0;
+		show_flags &= (~SHOW_LOCAL);
+	} else {
+		/* Report local cluster info only */
+		show_flags |= SHOW_LOCAL;
+		show_flags &= (~SHOW_FEDERATION);
+	}
 
 	slurm_msg_t_init(&req_msg);
-	slurm_msg_t_init(&resp_msg);
 	req.last_update  = update_time;
 	req.show_flags   = show_flags;
 	req_msg.msg_type = REQUEST_NODE_INFO;
 	req_msg.data     = &req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
-		return SLURM_ERROR;
-
-	switch (resp_msg.msg_type) {
-	case RESPONSE_NODE_INFO:
-		*resp = (node_info_msg_t *) resp_msg.data;
-		if (show_flags & SHOW_MIXED)
-			_set_node_mixed(*resp);
-		break;
-	case RESPONSE_SLURM_RC:
-		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
-		slurm_free_return_code_msg(resp_msg.data);
-		if (rc)
-			slurm_seterrno_ret(rc);
-		*resp = NULL;
-		break;
-	default:
-		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
-		break;
+	if (show_flags & SHOW_FEDERATION) {
+		fed = (slurmdb_federation_rec_t *) ptr;
+		rc = _load_fed_nodes(&req_msg, resp, show_flags, cluster_name,
+				     fed);
+	} else {
+		rc = _load_cluster_nodes(&req_msg, resp, working_cluster_rec,
+					 show_flags);
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	if (ptr)
+		slurm_destroy_federation_rec(ptr);
+	xfree(cluster_name);
+
+	return rc;
+}
+
+/*
+ * slurm_load_node2 - equivalent to slurm_load_node() with addition
+ *	of cluster record for communications in a federation
+ */
+extern int slurm_load_node2(time_t update_time, node_info_msg_t **resp,
+			    uint16_t show_flags, slurmdb_cluster_rec_t *cluster)
+{
+	slurm_msg_t req_msg;
+	node_info_request_msg_t req;
+
+	slurm_msg_t_init(&req_msg);
+	req.last_update  = update_time;
+	req.show_flags   = show_flags;
+	req_msg.msg_type = REQUEST_NODE_INFO;
+	req_msg.data     = &req;
+
+	return _load_cluster_nodes(&req_msg, resp, cluster, show_flags);
 }
 
 /*
@@ -571,43 +781,40 @@ extern int slurm_load_node (time_t update_time,
  * RET 0 or a slurm error code
  * NOTE: free the response using slurm_free_node_info_msg
  */
-extern int slurm_load_node_single (node_info_msg_t **resp,
-				   char *node_name, uint16_t show_flags)
+extern int slurm_load_node_single(node_info_msg_t **resp, char *node_name,
+				  uint16_t show_flags)
 {
-	int rc;
 	slurm_msg_t req_msg;
-	slurm_msg_t resp_msg;
 	node_info_single_msg_t req;
 
 	slurm_msg_t_init(&req_msg);
-	slurm_msg_t_init(&resp_msg);
 	req.node_name    = node_name;
 	req.show_flags   = show_flags;
 	req_msg.msg_type = REQUEST_NODE_INFO_SINGLE;
 	req_msg.data     = &req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
-		return SLURM_ERROR;
+	return _load_cluster_nodes(&req_msg, resp, working_cluster_rec,
+				   show_flags);
+}
 
-	switch (resp_msg.msg_type) {
-	case RESPONSE_NODE_INFO:
-		*resp = (node_info_msg_t *) resp_msg.data;
-		if (show_flags & SHOW_MIXED)
-			_set_node_mixed(*resp);
-		break;
-	case RESPONSE_SLURM_RC:
-		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
-		slurm_free_return_code_msg(resp_msg.data);
-		if (rc)
-			slurm_seterrno_ret(rc);
-		*resp = NULL;
-		break;
-	default:
-		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
-		break;
-	}
+/*
+ * slurm_load_node_single2 - equivalent to slurm_load_node_single() with
+ *	addition of cluster record for communications in a federation
+ */
+extern int slurm_load_node_single2(node_info_msg_t **resp, char *node_name,
+				   uint16_t show_flags,
+				   slurmdb_cluster_rec_t *cluster)
+{
+	slurm_msg_t req_msg;
+	node_info_single_msg_t req;
 
-	return SLURM_PROTOCOL_SUCCESS;
+	slurm_msg_t_init(&req_msg);
+	req.node_name    = node_name;
+	req.show_flags   = show_flags;
+	req_msg.msg_type = REQUEST_NODE_INFO_SINGLE;
+	req_msg.data     = &req;
+
+	return _load_cluster_nodes(&req_msg, resp, cluster, show_flags);
 }
 
 /*
@@ -691,7 +898,7 @@ extern int slurm_get_node_energy(char *host, uint16_t delta,
 		slurm_free_acct_gather_node_resp_msg(resp_msg.data);
 		break;
 	case RESPONSE_SLURM_RC:
-	        rc = ((return_code_msg_t *) resp_msg.data)->return_code;
+		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
 		slurm_free_return_code_msg(resp_msg.data);
 		if (rc)
 			slurm_seterrno_ret(rc);

@@ -245,6 +245,7 @@ typedef struct dbd_job_comp_msg {
 	time_t   start_time;	/* job start time */
 	time_t   submit_time;	/* job submit time needed to find job
 				 * record in db */
+	char    *tres_alloc_str;/* Simple comma separated list of TRES */
 } dbd_job_comp_msg_t;
 
 typedef struct dbd_job_start_msg {
@@ -264,10 +265,13 @@ typedef struct dbd_job_start_msg {
 	uint32_t gid;	        /* group ID */
 	uint32_t job_id;	/* job ID */
 	uint32_t job_state;	/* job state */
+	char *   mcs_label;	/* job mcs_label */
 	char *   name;		/* job name */
 	char *   nodes;		/* hosts allocated to the job */
 	char *   node_inx;      /* ranged bitmap string of hosts
 				 * allocated to the job */
+	uint32_t pack_job_id;	/* ID of pack job leader or 0 */
+	uint32_t pack_job_offset; /* Pack job component ID, zero-origin */
 	char *   partition;	/* partition job is running on */
 	uint32_t priority;	/* job priority */
 	uint32_t qos_id;        /* qos job is running with */
@@ -287,6 +291,7 @@ typedef struct dbd_job_start_msg {
 	char    *tres_alloc_str;/* Simple comma separated list of TRES */
 	char    *tres_req_str;  /* Simple comma separated list of TRES */
 	char *   wckey;		/* wckey name */
+	char    *work_dir;      /* work dir of job */
 } dbd_job_start_msg_t;
 
 /* returns a uint32_t along with a return code */
@@ -351,6 +356,10 @@ typedef struct dbd_step_comp_msg {
 	uint32_t job_id;	/* job ID */
 	time_t   job_submit_time;/* job submit time needed to find job record
 				  * in db */
+	char    *job_tres_alloc_str;/* Simple comma separated list of TRES for
+				     * the job (primarily for the energy of the
+				     * completing job.  This is only filled in
+				     * on the last step in the job. */
 	uint32_t req_uid;	/* requester user ID */
 	time_t   start_time;	/* step start time */
 	uint16_t state;         /* current state of node.  Used to get
@@ -371,8 +380,6 @@ typedef struct dbd_step_start_msg {
 	time_t   start_time;	/* step start time */
 	time_t   job_submit_time;/* job submit time needed to find job record
 				  * in db */
-	uint32_t packjobid;	/* jobid of srun first step of the jobpack */
-	uint32_t packstepid;	/* stepid of jobpack member */
 	uint32_t req_cpufreq_min; /* requested minimum CPU frequency  */
 	uint32_t req_cpufreq_max; /* requested maximum CPU frequency  */
 	uint32_t req_cpufreq_gov; /* requested CPU frequency governor */
@@ -406,6 +413,9 @@ extern int slurm_open_slurmdbd_conn(const slurm_trigger_callbacks_t *callbacks);
 
 /* Close the SlurmDBD socket connection */
 extern int slurm_close_slurmdbd_conn(void);
+
+/* Return true if connection to slurmdbd is active, false otherwise. */
+extern bool slurmdbd_conn_active(void);
 
 /* Send an RPC to the SlurmDBD. Do not wait for the reply. The RPC
  * will be queued and processed later if the SlurmDBD is not responding.
@@ -589,4 +599,6 @@ extern int slurmdbd_unpack_usage_msg(dbd_usage_msg_t **msg,
 extern int slurmdbd_unpack_buffer(void **in,
 				  uint16_t rpc_version,
 				  Buf buffer);
+
+extern int slurmdbd_agent_queue_count();
 #endif	/* !_SLURMDBD_DEFS_H */

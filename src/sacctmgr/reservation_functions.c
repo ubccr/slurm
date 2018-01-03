@@ -65,13 +65,13 @@ static int _set_cond(int *start, int argc, char **argv,
 			}
 		}
 
-		if (!strncasecmp(argv[i], "Set", MAX(command_len, 3))) {
+		if (!xstrncasecmp(argv[i], "Set", MAX(command_len, 3))) {
 			i--;
 			break;
-		} else if (!end && !strncasecmp(argv[i], "where",
-					       MAX(command_len, 5))) {
+		} else if (!end && !xstrncasecmp(argv[i], "where",
+						 MAX(command_len, 5))) {
 			continue;
-		} else if (!strncasecmp(argv[i], "Clusters",
+		} else if (!xstrncasecmp(argv[i], "Clusters",
 					 MAX(command_len, 1))) {
 			if (!reservation_cond->cluster_list) {
 				reservation_cond->cluster_list =
@@ -80,20 +80,19 @@ static int _set_cond(int *start, int argc, char **argv,
 			if (slurm_addto_char_list(reservation_cond->cluster_list,
 						  argv[i]+end))
 				set = 1;
-		} else if (!strncasecmp(argv[i], "Names",
-					 MAX(command_len, 2))) {
-			if (!reservation_cond->name_list) {
-				reservation_cond->name_list =
-					list_create(slurm_destroy_char);
-			}
-			if (slurm_addto_char_list(reservation_cond->name_list,
-						  argv[i]+end))
+		} else if (!xstrncasecmp(argv[i], "End",
+					 MAX(command_len, 1))) {
+			reservation_cond->time_end =
+				parse_time(argv[i]+end, 1);
+			if (errno == ESLURM_INVALID_TIME_VALUE)
+				exit_code = 1;
+			else
 				set = 1;
-		} else if (!strncasecmp(argv[i], "Format",
+		} else if (!xstrncasecmp(argv[i], "Format",
 					 MAX(command_len, 1))) {
 			if (format_list)
 				slurm_addto_char_list(format_list, argv[i]+end);
-		} else if (!strncasecmp(argv[i], "Ids",
+		} else if (!xstrncasecmp(argv[i], "Ids",
 					 MAX(command_len, 1))) {
 			if (!reservation_cond->id_list) {
 				reservation_cond->id_list =
@@ -102,23 +101,24 @@ static int _set_cond(int *start, int argc, char **argv,
 			if (slurm_addto_char_list(reservation_cond->id_list,
 						 argv[i]+end))
 				set = 1;
-		} else if (!strncasecmp(argv[i], "Nodes",
+		} else if (!xstrncasecmp(argv[i], "Names",
+					 MAX(command_len, 2))) {
+			if (!reservation_cond->name_list) {
+				reservation_cond->name_list =
+					list_create(slurm_destroy_char);
+			}
+			if (slurm_addto_char_list(reservation_cond->name_list,
+						  argv[i]+end))
+				set = 1;
+		} else if (!xstrncasecmp(argv[i], "Nodes",
 					 MAX(command_len, 2))) {
 			xfree(reservation_cond->nodes);
 			reservation_cond->nodes = strip_quotes(
 				argv[i]+end, NULL, 1);
 			set = 1;
-		} else if (!strncasecmp(argv[i], "Start",
+		} else if (!xstrncasecmp(argv[i], "Start",
 					 MAX(command_len, 5))) {
 			reservation_cond->time_start =
-				parse_time(argv[i]+end, 1);
-			if (errno == ESLURM_INVALID_TIME_VALUE)
-				exit_code = 1;
-			else
-				set = 1;
-		} else if (!strncasecmp(argv[i], "End",
-					 MAX(command_len, 1))) {
-			reservation_cond->time_end =
 				parse_time(argv[i]+end, 1);
 			if (errno == ESLURM_INVALID_TIME_VALUE)
 				exit_code = 1;
@@ -182,10 +182,29 @@ int sacctmgr_list_reservation(int argc, char **argv)
 	format_list = list_create(slurm_destroy_char);
    	for (i=0; i<argc; i++) {
 		int command_len = strlen(argv[i]);
-		if (!strncasecmp(argv[i], "Where", MAX(command_len, 5))
-		    || !strncasecmp(argv[i], "Set", MAX(command_len, 3)))
+		if (!xstrncasecmp(argv[i], "Where", MAX(command_len, 5))
+		    || !xstrncasecmp(argv[i], "Set", MAX(command_len, 3)))
 			i++;
 		_set_cond(&i, argc, argv, reservation_cond, format_list);
+	}
+
+	if (reservation_cond->nodes && !reservation_cond->cluster_list) {
+		char *cluster_name = slurm_get_cluster_name();
+		char *warning = xstrdup_printf(
+			"If requesting nodes you must also request the cluster.\nWould you like to use the local cluster of '%s'?",
+			cluster_name);
+
+		if (!commit_check(warning)) {
+			exit_code = 1;
+		} else {
+			reservation_cond->cluster_list =
+				list_create(slurm_destroy_char);
+			list_append(reservation_cond->cluster_list,
+				    cluster_name);
+			cluster_name = NULL;
+		}
+		xfree(warning);
+		xfree(cluster_name);
 	}
 
 	if (exit_code) {
@@ -201,11 +220,11 @@ int sacctmgr_list_reservation(int argc, char **argv)
 		 */
 		slurm_addto_char_list(format_list,
 				      "Cluster,Name%15,TRES%30,"
-				      "TimeStart,TimeEnd");
+				      "TimeStart,TimeEnd,Unused");
 	}
 
-	reservation_list = acct_storage_g_get_reservations(
-		db_conn, my_uid, reservation_cond);
+	reservation_list = slurmdb_reservations_get(
+		db_conn, reservation_cond);
 	slurmdb_destroy_reservation_cond(reservation_cond);
 
 	if (!reservation_list) {
@@ -269,6 +288,12 @@ int sacctmgr_list_reservation(int argc, char **argv)
 					reservation->nodes,
 					field_count);
 				break;
+			case PRINT_NODEINX:
+				field->print_routine(
+					field,
+					reservation->node_inx,
+					field_count);
+				break;
 			case PRINT_TIMEEND:
 				field->print_routine(
 					field,
@@ -291,6 +316,12 @@ int sacctmgr_list_reservation(int argc, char **argv)
 						     tmp_char,
 						     field_count);
 				xfree(tmp_char);
+				break;
+			case PRINT_UNUSED:
+				field->print_routine(
+					field,
+					reservation->unused_wall,
+					field_count);
 				break;
 			}
 		}

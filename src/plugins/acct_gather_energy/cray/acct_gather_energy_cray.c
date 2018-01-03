@@ -108,12 +108,13 @@ static uint64_t _get_latest_stats(int type)
 	}
 
 	if (!(fp = fopen(file_name, "r"))) {
-		error("_get_latest_stats: unable to open %s", file_name);
+		error("%s: unable to open %s", __func__, file_name);
 		return data;
 	}
 
 	fd = fileno(fp);
-	fcntl(fd, F_SETFD, FD_CLOEXEC);
+	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
+		error("%s: fcntl(%s): %m", __func__, file_name);
 	num_read = read(fd, sbuf, (sizeof(sbuf) - 1));
 	if (num_read > 0) {
 		sbuf[num_read] = '\0';
@@ -286,7 +287,7 @@ extern int acct_gather_energy_p_get_data(enum acct_energy_type data_type,
 	case ENERGY_DATA_JOULES_TASK:
 	case ENERGY_DATA_NODE_ENERGY_UP:
 		if (local_energy->current_watts == NO_VAL)
-			energy->consumed_energy = NO_VAL;
+			energy->consumed_energy = NO_VAL64;
 		else
 			_get_joules_task(energy);
 		break;

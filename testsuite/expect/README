@@ -198,8 +198,8 @@ test1.89   Test of CPU affinity support.
 test1.90   Test of memory affinity support for NUMA systems.
 test1.91   Test of CPU affinity for multi-core systems.
 test1.92   Test of task distribution support on multi-core systems.
-test1.93   Test of LAM-MPI functionality
-test1.94   Test of MPICH2 task spawn logic
+test1.93   DEFUNCT
+test1.94   Test of PMI2 task spawn logic
 test1.95   Basic UPC (Unified Parallel C) test via srun.
 test1.96   Basic SHMEM test via srun.
 test1.97   Test that --ntask-per-node and -c options are enforced
@@ -250,6 +250,7 @@ test2.22   Validate scontrol requeuehold requeues job to held pending state.
 test2.23   Validate scontrol requeuehold State=SpecialExit.
 test2.24   Validate the scontrol write config creates accurate config
 test2.25   Validate scontrol show assoc_mgr command.
+test2.26   Validate scontrol top command to priority order jobs.
 
 
 test3.#    Testing of scontrol options (best run as SlurmUser or root).
@@ -352,7 +353,7 @@ test7.6    Test of TotalView operation with sattach
 test7.7    (removed)
 test7.8    (removed)
 test7.9    Test that no files are open in spawned tasks (except stdin,
-	   stdout, and stderr) to insure successful checkpoint/restart.
+	   stdout, and stderr) to ensure successful checkpoint/restart.
 test7.10   Test if we can trick SLURM into using the wrong user ID
 	   through an LD_PRELOAD option.
 test7.11   Test of SPANK plugin.
@@ -495,8 +496,6 @@ test15.14  Test of job dependencies (--dependency option).
 test15.15  Test of user signal upon allocation (--bell and --no-bell options)
 test15.16  Verify that SLURM directed environment variables are processed:
 	   SALLOC_BELL and SALLOC_NO_BELL (can't really confirm from Expect)
-test15.17  Test the launch of a batch job within an existing job allocation.
-	   This logic is used by LSF
 test15.18  Test of running non-existent job, confirm timely termination.
 test15.19  Confirm that a job executes with the proper node count
 	   (--nodes option).
@@ -805,3 +804,35 @@ test37.2   Validate federated clusters return federated job ids.
 test37.3   scontrol show federations
 test37.4   federated job submission
 test37.5   Federated Requeue
+test37.6   Federated Job Updates
+test37.7   Federated Cluster States
+test37.8   scontrol --local, --sibling options
+           scancel --sibling=<jobid>
+test37.9   Verify federated scontrol, squeue, sinfo and sprio output
+test37.10  Federated job cancellations
+test37.11  Federated sacct output
+test37.12  Federated sbatch|srun --test-only
+test37.13  Validate federated arrays
+test37.14  Validate federated scontrol notify
+test37.15  Validate federated scontrol suspend
+test37.16  Validate job cleanup when clusters are removed federation
+
+test38.#   Testing of heterogeneous jobs.
+=========================================
+test38.1   Validate sbatch heterogeneous job options.
+test38.2   Validate sbatch heterogeneous job environment variables.
+test38.3   Validate salloc heterogeneous job options.
+test38.4   Validate salloc heterogeneous job environment variables.
+test38.5   Validate squeue heterogeneous job fields
+test38.6   Test of SPANK plugin with heterogeneous jobs
+test38.7   Test of MPI with heterogeneous jobs.
+test38.8   Test of sacct functionality for heterogeneous jobs.
+test38.9   Validate srun --pack-group option.
+test38.10  Test of scontrol update job for heterogeneous jobs.
+test38.11  Validate sbcast for a pack job allocation.
+test38.12  Test label option with pack job allocation.
+test38.13  Test that job arrays of pack jobs are rejected
+test38.14  Test pack job step output file labling and different commands/args
+test38.15  Test for proper handling of different rank end times
+test38.16  Test environment variables needed by MPI
+test38.17  Test for multiple, out of order srun --pack-group options

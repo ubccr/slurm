@@ -117,6 +117,7 @@ static void _partial_free_dbd_job_start(void *object)
 		xfree(req->account);
 		xfree(req->array_task_str);
 		xfree(req->block_id);
+		xfree(req->mcs_label);
 		xfree(req->name);
 		xfree(req->nodes);
 		xfree(req->partition);
@@ -127,6 +128,7 @@ static void _partial_free_dbd_job_start(void *object)
 		xfree(req->gres_used);
 		xfree(req->tres_alloc_str);
 		xfree(req->tres_req_str);
+		xfree(req->work_dir);
 	}
 }
 
@@ -185,6 +187,13 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	req->job_id        = job_ptr->job_id;
 	req->array_job_id  = job_ptr->array_job_id;
 	req->array_task_id = job_ptr->array_task_id;
+	if (job_ptr->pack_job_id) {
+		req->pack_job_id     = job_ptr->pack_job_id;
+		req->pack_job_offset = job_ptr->pack_job_offset;
+	} else {
+		//req->pack_job_id   = 0;
+		req->pack_job_offset = NO_VAL;
+	}
 
 	build_array_str(job_ptr);
 	if (job_ptr->array_recs && job_ptr->array_recs->task_id_str) {
@@ -197,6 +206,7 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	req->job_state     = job_ptr->job_state;
 	req->name          = xstrdup(job_ptr->name);
 	req->nodes         = xstrdup(job_ptr->nodes);
+	req->work_dir      = xstrdup(job_ptr->details->work_dir);
 
 	if (job_ptr->node_bitmap) {
 		char temp_bit[BUF_SIZE];
@@ -218,6 +228,7 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	req->timelimit     = job_ptr->time_limit;
 	req->tres_alloc_str= xstrdup(job_ptr->tres_alloc_str);
 	req->tres_req_str  = xstrdup(job_ptr->tres_req_str);
+	req->mcs_label	   = xstrdup(job_ptr->mcs_label);
 	req->wckey         = xstrdup(job_ptr->wckey);
 	req->uid           = job_ptr->user_id;
 	req->qos_id        = job_ptr->qos_id;
@@ -460,23 +471,16 @@ extern int init ( void )
 				  ACCOUNTING_ENFORCE_NO_JOBS)) {
 			/* only do this when job_list is defined
 			 * (in the slurmctld) */
-			pthread_attr_t thread_attr;
-			slurm_attr_init(&thread_attr);
-			if (pthread_create(&db_inx_handler_thread, &thread_attr,
-					   _set_db_inx_thread, NULL))
-				fatal("pthread_create error %m");
+			slurm_thread_create(&db_inx_handler_thread,
+					    _set_db_inx_thread, NULL);
 
 			/* This is here to join the db inx thread so
 			   we don't core dump if in the sleep, since
 			   there is no other place to join we have to
 			   create another thread to do it.
 			*/
-			slurm_attr_init(&thread_attr);
-			if (pthread_create(&cleanup_handler_thread,
-					   &thread_attr,
-					   _cleanup_thread, NULL))
-				fatal("pthread_create error %m");
-			slurm_attr_destroy(&thread_attr);
+			slurm_thread_create(&cleanup_handler_thread,
+					    _cleanup_thread, NULL);
 		}
 		first = 0;
 	} else {
@@ -1837,7 +1841,6 @@ extern List acct_storage_p_get_federations(void *db_conn, uid_t uid,
 		slurmdbd_free_list_msg(got_msg);
 	}
 
-
 	return ret_list;
 }
 
@@ -2472,7 +2475,8 @@ extern int clusteracct_storage_p_node_up(void *db_conn,
 extern int clusteracct_storage_p_cluster_tres(void *db_conn,
 					      char *cluster_nodes,
 					      char *tres_str_in,
-					      time_t event_time)
+					      time_t event_time,
+					      uint16_t rpc_version)
 {
 	slurmdbd_msg_t msg;
 	dbd_cluster_tres_msg_t req;
@@ -2554,10 +2558,11 @@ extern int jobacct_storage_p_job_start(void *db_conn,
 	 */
 	if ((req.db_index && !IS_JOB_RESIZING(job_ptr))
 	    || (!req.db_index && IS_JOB_FINISHED(job_ptr))) {
-		/* This is to ensure we don't do this multiple times for the
-		   same job.  This can happen when an account is being
-		   deleted and hense the associations dealing with it.
-		*/
+		/*
+		 * This is to ensure we don't do this multiple times for the
+		 * same job.  This can happen when an account is being
+		 * deleted and hense the associations dealing with it.
+		 */
 		if (!req.db_index)
 			job_ptr->db_index = NO_VAL64;
 
@@ -2644,6 +2649,9 @@ extern int jobacct_storage_p_job_complete(void *db_conn,
 		if (job_ptr->details)
 			req.submit_time = job_ptr->details->submit_time;
 	}
+
+	if (!(job_ptr->bit_flags & TRES_STR_CALC))
+		req.tres_alloc_str = job_ptr->tres_alloc_str;
 
 	msg.msg_type    = DBD_JOB_COMPLETE;
 	msg.data        = &req;
@@ -2738,6 +2746,7 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 	req.total_tasks = tasks;
 
 	req.tres_alloc_str = step_ptr->tres_alloc_str;
+
 	req.req_cpufreq_min = step_ptr->cpu_freq_min;
 	req.req_cpufreq_max = step_ptr->cpu_freq_max;
 	req.req_cpufreq_gov = step_ptr->cpu_freq_gov;
@@ -2807,6 +2816,10 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		req.job_submit_time   = step_ptr->job_ptr->resize_time;
 	else if (step_ptr->job_ptr->details)
 		req.job_submit_time   = step_ptr->job_ptr->details->submit_time;
+
+	if (step_ptr->job_ptr->bit_flags & TRES_STR_CALC)
+		req.job_tres_alloc_str = step_ptr->job_ptr->tres_alloc_str;
+
 	req.state       = step_ptr->state;
 	req.step_id     = step_ptr->step_id;
 	req.total_tasks = tasks;
@@ -2874,7 +2887,7 @@ extern List jobacct_storage_p_get_jobs_cond(void *db_conn, uid_t uid,
 	rc = slurm_send_recv_slurmdbd_msg(SLURM_PROTOCOL_VERSION, &req, &resp);
 
 	if (rc != SLURM_SUCCESS)
-		error("slurmdbd: DBD_GET_JOBS_COND failure: %m");
+		error("slurmdbd: DBD_GET_JOBS_COND failure: %s", slurm_strerror(rc));
 	else if (resp.msg_type == PERSIST_RC) {
 		persist_rc_msg_t *msg = resp.data;
 		if (msg->rc == SLURM_SUCCESS) {
@@ -2892,6 +2905,10 @@ extern List jobacct_storage_p_get_jobs_cond(void *db_conn, uid_t uid,
 		got_msg = (dbd_list_msg_t *) resp.data;
 		my_job_list = got_msg->my_list;
 		got_msg->my_list = NULL;
+		if (!my_job_list) {
+			slurm_seterrno(got_msg->return_code);
+			error("slurmdbd: %s", slurm_strerror(got_msg->return_code));
+		}
 		slurmdbd_free_list_msg(got_msg);
 	}
 

@@ -49,7 +49,7 @@
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_acct_gather_energy.h"
-#include "src/common/slurm_acct_gather_infiniband.h"
+#include "src/common/slurm_acct_gather_interconnect.h"
 #include "src/slurmd/common/proctrack.h"
 
 #include "common_jag.h"
@@ -141,7 +141,8 @@ static int _get_pss(char *proc_smaps_file, jag_prec_t *prec)
                 return -1;
         }
 
-	fcntl(fileno(fp), F_SETFD, FD_CLOEXEC);
+	if (fcntl(fileno(fp), F_SETFD, FD_CLOEXEC) == -1)
+		error("%s: fcntl(%s): %m", __func__, proc_smaps_file);
 	pss = 0;
 
         while (fgets(line,sizeof(line),fp)) {
@@ -202,7 +203,8 @@ static int _get_sys_interface_freq_line(uint32_t cpu, char *filename,
 	if ((sys_fp = fopen(freq_file, "r"))!= NULL) {
 		/* frequency scaling enabled */
 		fd = fileno(sys_fp);
-		fcntl(fd, F_SETFD, FD_CLOEXEC);
+		if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
+			error("%s: fcntl(%s): %m", __func__, freq_file);
 		num_read = read(fd, sbuf, (sizeof(sbuf) - 1));
 		if (num_read > 0) {
 			sbuf[num_read] = '\0';
@@ -301,8 +303,14 @@ static int _get_process_data_line(int in, jag_prec_t *prec) {
 		return 0;
 	sbuf[num_read] = '\0';
 
-	tmp = strrchr(sbuf, ')');	/* split into "PID (cmd" and "<rest>" */
-	*tmp = '\0';			/* replace trailing ')' with NUL */
+	/*
+	 * split into "PID (cmd" and "<rest>" replace trailing ')' with NULL
+	 */
+	tmp = strrchr(sbuf, ')');
+	if (!tmp)
+		return 0;
+	*tmp = '\0';
+
 	/* parse these two strings separately, skipping the leading "(". */
 	nvals = sscanf(sbuf, "%d (%39c", &prec->pid, cmd);
 	if (nvals < 2)
@@ -395,7 +403,8 @@ static int _remove_share_data(char *proc_stat_file, jag_prec_t *prec)
 	if (!(statm_fp = fopen(proc_statm_file, "r")))
 		return rc;  /* Assume the process went away */
 	fd = fileno(statm_fp);
-	fcntl(fd, F_SETFD, FD_CLOEXEC);
+	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
+		error("%s: fcntl(%s): %m", __func__, proc_statm_file);
 	rc = _get_process_memory_line(fd, prec);
 	fclose(statm_fp);
 	return rc;
@@ -477,7 +486,8 @@ static void _handle_stats(List prec_list, char *proc_stat_file, char *proc_io_fi
 	 * problem in practice.
 	 */
 	fd = fileno(stat_fp);
-	fcntl(fd, F_SETFD, FD_CLOEXEC);
+	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
+		error("%s: fcntl(%s): %m", __func__, proc_stat_file);
 
 	prec = try_xmalloc(sizeof(jag_prec_t));
 	if (prec == NULL) {	/* Avoid killing slurmstepd on malloc failure */
@@ -507,7 +517,8 @@ static void _handle_stats(List prec_list, char *proc_stat_file, char *proc_io_fi
 
 	if ((io_fp = fopen(proc_io_file, "r"))) {
 		fd2 = fileno(io_fp);
-		fcntl(fd2, F_SETFD, FD_CLOEXEC);
+		if (fcntl(fd2, F_SETFD, FD_CLOEXEC) == -1)
+			error("%s: fcntl: %m", __func__);
 		_get_process_io_data_line(fd2, prec);
 		fclose(io_fp);
 	}
@@ -673,7 +684,7 @@ static void _record_profile(struct jobacctinfo *jobacct)
 		{ NULL, PROFILE_FIELD_NOT_SET }
 	};
 
-	static int profile_gid = -1;
+	static int64_t profile_gid = -1;
 	double et;
 	union {
 		double d;

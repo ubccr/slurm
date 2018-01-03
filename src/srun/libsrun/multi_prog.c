@@ -182,9 +182,11 @@ extern int
 mpir_set_multi_name(int ntasks, const char *config_fname)
 {
 	FILE *config_fd;
-	char line[256];
+	char line[BUF_SIZE];
 	char *ranks, *exec_name, *p, *ptrptr;
 	int line_num = 0;
+	bool last_line_break = false, line_break = false;
+	int line_len;
 
 #if defined HAVE_BG_FILES
 	/* Use symbols from the runjob.so library provided by IBM.
@@ -205,12 +207,25 @@ mpir_set_multi_name(int ntasks, const char *config_fname)
 	}
 	while (fgets(line, sizeof(line), config_fd)) {
 		line_num ++;
-		if (strlen (line) >= (sizeof(line) - 1)) {
+		line_len = strlen(line);
+		if (line_len >= (sizeof(line) - 1)) {
 			error ("Line %d of configuration file %s too long",
 				line_num, config_fname);
 			fclose(config_fd);
 			return -1;
 		}
+		if ((line_len > 0 && line[line_len - 1] == '\\') ||  /* EOF */
+		    (line_len > 1 && line[line_len - 2] == '\\' &&
+				     line[line_len - 1] == '\n'))
+			line_break = true;
+		else
+			line_break = false;
+
+		if (last_line_break) {
+			last_line_break = line_break;
+			continue;
+		}
+		last_line_break = line_break;
 		p = line;
 		while (*p != '\0' && isspace (*p)) /* remove leading spaces */
 			p ++;
@@ -268,8 +283,9 @@ mpir_cleanup(void)
 #endif
 }
 
-extern void
-mpir_set_executable_names(const char *executable_name)
+extern void mpir_set_executable_names(const char *executable_name,
+				      uint32_t task_offset,
+				      uint32_t task_count)
 {
 #if defined HAVE_BG_FILES
 	/* Use symbols from the runjob.so library provided by IBM.
@@ -277,13 +293,12 @@ mpir_set_executable_names(const char *executable_name)
 #else
 	int i;
 
-	for (i = 0; i < MPIR_proctable_size; i++) {
+	if (task_offset == NO_VAL)
+		task_offset = 0;
+	xassert((task_offset + task_count) <= MPIR_proctable_size);
+	for (i = task_offset; i < (task_offset + task_count); i++) {
 		MPIR_proctable[i].executable_name = xstrdup(executable_name);
-		if (MPIR_proctable[i].executable_name == NULL) {
-			error("Unable to set MPI_proctable executable_name:"
-			      " %m");
-			exit(error_exit);
-		}
+		// info("NAME[%d]:%s", i, executable_name);
 	}
 #endif
 }
@@ -300,8 +315,6 @@ mpir_dump_proctable(void)
 
 	for (i = 0; i < MPIR_proctable_size; i++) {
 		tv = &MPIR_proctable[i];
-		if (!tv)
-			break;
 		info("task:%d, host:%s, pid:%d, executable:%s",
 		     i, tv->host_name, tv->pid, tv->executable_name);
 	}
@@ -420,9 +433,11 @@ verify_multi_name(char *config_fname, int *ntasks, bool *ntasks_set,
 		  int32_t *ncmds)
 {
 	FILE *config_fd;
-	char line[256];
+	char line[BUF_SIZE];
 	char *ranks, *exec_name, *p, *ptrptr;
 	int line_num = 0, i, rc = 0;
+	bool last_line_break = false, line_break = false;
+	int line_len;
 	bitstr_t *task_mask;
 
 	if (*ntasks <= 0) {
@@ -440,13 +455,25 @@ verify_multi_name(char *config_fname, int *ntasks, bool *ntasks_set,
 
 	task_mask = bit_alloc(*ntasks);
 	while (fgets(line, sizeof(line), config_fd)) {
-		line_num ++;
-		if (strlen (line) >= (sizeof(line) - 1)) {
+		line_num++;
+		line_len = strlen(line);
+		if (line_len >= (sizeof(line) - 1)) {
 			error ("Line %d of configuration file %s too long",
 				line_num, config_fname);
 			rc = -1;
 			goto fini;
 		}
+		if ((line_len > 0 && line[line_len - 1] == '\\') ||  /* EOF */
+		    (line_len > 1 && line[line_len - 2] == '\\' &&
+				     line[line_len - 1] == '\n'))
+			line_break = true;
+		else
+			line_break = false;
+		if (last_line_break) {
+			last_line_break = line_break;
+			continue;
+		}
+		last_line_break = line_break;
 		p = line;
 		while (*p != '\0' && isspace (*p)) /* remove leading spaces */
 			p ++;

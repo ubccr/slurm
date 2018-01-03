@@ -112,12 +112,14 @@ void ping_begin (void)
 void ping_end (void)
 {
 	slurm_mutex_lock(&lock_mutex);
-	ping_count--;
+
+	if (ping_count > 0)
+		ping_count--;
+	else
+		error("%s: ping_count < 0", __func__);
 
 	if (ping_count == 0) /* no more running ping cycles */
 		ping_start = 0;
-	else if (ping_count < 0)
-		fatal("ping_count < 0");
 
 	slurm_mutex_unlock(&lock_mutex);
 }

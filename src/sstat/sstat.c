@@ -58,7 +58,7 @@ print_field_t fields[] = {
 	{10, "AveRSS", print_fields_str, PRINT_AVERSS},
 	{10, "AveVMSize", print_fields_str, PRINT_AVEVSIZE},
 	{14, "ConsumedEnergy", print_fields_str, PRINT_CONSUMED_ENERGY},
-	{17, "ConsumedEnergyRaw", print_fields_double,
+	{17, "ConsumedEnergyRaw", print_fields_uint64,
 	 PRINT_CONSUMED_ENERGY_RAW},
 	{-12, "JobID", print_fields_str, PRINT_JOBID},
 	{12, "MaxDiskRead", print_fields_str, PRINT_MAXDISKREAD},
@@ -230,7 +230,7 @@ int main(int argc, char **argv)
 	while ((selected_step = list_next(itr))) {
 		char *nodelist = NULL;
 		bool free_nodelist = false;
-		uint16_t use_protocol_ver = (uint16_t)NO_VAL;
+		uint16_t use_protocol_ver = NO_VAL16;
 		if (selected_step->stepid == SSTAT_BATCH_STEP) {
 			/* get the batch step info */
 			job_info_msg_t *job_ptr = NULL;

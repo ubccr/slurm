@@ -133,7 +133,15 @@ typedef struct {
 	uint32_t       nnodes; /* number of nodes in current job            */
 	uint32_t       ntasks; /* total number of tasks in current job      */
 	uint32_t       nodeid; /* relative position of this node in job     */
+	uint32_t       node_offset; 	/* pack job node offset or NO_VAL   */
 	uint32_t       node_tasks; /* number of tasks on *this* node        */
+	uint32_t       pack_jobid;	/* pack job ID or NO_VAL */
+	uint32_t       pack_nnodes;	/* total task count for entire pack job */
+	char          *pack_node_list;	/* pack step node list */
+	uint32_t       pack_ntasks;	/* total task count for entire pack job */
+	uint32_t       pack_offset; 	/* pack job offset or NO_VAL        */
+	uint32_t       pack_task_offset;/* pack job task offset or NO_VAL   */
+	uint16_t      *pack_task_cnts;	/* Number of tasks on each node in pack job */
 	uint16_t      *task_cnts;  /* Number of tasks on each node in job   */
 	uint32_t       cpus_per_task;	/* number of cpus desired per task  */
 	uint32_t       debug;  /* debug level for job slurmd                */
@@ -147,15 +155,15 @@ typedef struct {
 	task_dist_states_t task_dist;/* -m distribution                     */
 	char          *node_name; /* node name of node running job
 				   * needed for front-end systems           */
-	cpu_bind_type_t cpu_bind_type; /* --cpu_bind=                       */
+	cpu_bind_type_t cpu_bind_type; /* --cpu-bind=                       */
 	char          *cpu_bind;       /* binding map for map/mask_cpu      */
-	mem_bind_type_t mem_bind_type; /* --mem_bind=                       */
+	mem_bind_type_t mem_bind_type; /* --mem-bind=                       */
 	char          *mem_bind;       /* binding map for tasks to memory   */
 	uint16_t accel_bind_type;  /* --accel_bind= */
 	uint32_t cpu_freq_min; /* Minimum cpu frequency  */
 	uint32_t cpu_freq_max; /* Maximum cpu frequency  */
 	uint32_t cpu_freq_gov; /* cpu frequency governor */
-	switch_jobinfo_t *switch_job; /* switch-specific job information     */
+	dynamic_plugin_data_t *switch_job; /* switch-specific job information     */
 	uid_t         uid;     /* user id for job                           */
 	char          *user_name;
 	gid_t         gid;     /* group ID for job                          */
@@ -229,6 +237,12 @@ typedef struct {
 					 * increasing across all nodes, set only
 					 * native Cray systems */
 	bool		oom_error;	/* step out of memory error */
+
+	uint16_t x11;			/* only set for extern step */
+	int x11_display;		/* display number if x11 forwarding setup */
+	char *x11_magic_cookie;		/* xauth magic cookie value */
+	char *x11_target_host;		/* remote machine to connect back to */
+	uint16_t x11_target_port;	/* remote x11 port to connect back to */
 } stepd_step_rec_t;
 
 

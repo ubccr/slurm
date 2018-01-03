@@ -6,18 +6,16 @@
   Meta:		1
   Name:		slurm
   Major:	17
-  Minor:	02
-  Micro:	9
-  Version:	17.02.9
-  Release:	1
+  Minor:	11
+  Micro:	1
+  Version:	17.11.1
+  Release:	2
 
 ##
 #  When making a new Major/Minor version update
 #  src/common/slurm_protocol_common.h
 #  with a new SLURM_PROTOCOL_VERSION signifing the old one and the version
 #  it was so the slurmdbd can continue to send the old protocol version.
-#  In src/common/slurm_protocol_util.c check_header_version()
-#  need to be updated also when changes are added also.
 #  In src/plugins/slurmctld/nonstop/msg.c needs to have version_string updated.
 #  The META of libsmd needs to reflect this version and API_CURRENT as well.
 #
@@ -30,6 +28,6 @@
 #        the config.h file that may be used throughout Slurm, so don't remove
 #	 them.
 ##
-  API_CURRENT:	31
+  API_CURRENT:	32
   API_AGE:	0
   API_REVISION:	0

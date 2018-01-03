@@ -55,8 +55,6 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
-#define MAX_RETRIES 3
-
 typedef struct {
 	pthread_cond_t *notify;
 	int            *p_thr_count;
@@ -194,7 +192,7 @@ void *_forward_thread(void *arg)
 				free_buf(buffer);
 				buffer = init_buf(fwd_struct->buf_len);
 				slurm_mutex_unlock(&fwd_struct->forward_mutex);
-				slurm_close(fd);
+				close(fd);
 				fd = -1;
 				/* Abandon tree. This way if all the
 				 * nodes in the branch are down we
@@ -265,7 +263,7 @@ void *_forward_thread(void *arg)
 				free_buf(buffer);
 				buffer = init_buf(fwd_struct->buf_len);
 				slurm_mutex_unlock(&fwd_struct->forward_mutex);
-				slurm_close(fd);
+				close(fd);
 				fd = -1;
 				continue;
 			}
@@ -334,7 +332,7 @@ void *_forward_thread(void *arg)
 	}
 	free(name);
 cleanup:
-	if ((fd >= 0) && slurm_close(fd) < 0)
+	if ((fd >= 0) && close(fd) < 0)
 		error ("close(%d): %m", fd);
 	hostlist_destroy(hl);
 	destroy_forward(&fwd_msg->header.forward);
@@ -497,15 +495,6 @@ static void _start_msg_tree_internal(hostlist_t hl, hostlist_t* sp_hl,
 		fwd_tree_in->timeout  = slurm_get_msg_timeout() * 1000;
 
 	for (j = 0; j < hl_count; j++) {
-		pthread_attr_t attr_agent;
-		pthread_t thread_agent;
-		int retries = 0;
-
-		slurm_attr_init(&attr_agent);
-		if (pthread_attr_setdetachstate
-		    (&attr_agent, PTHREAD_CREATE_DETACHED))
-			error("pthread_attr_setdetachstate error %m");
-
 		fwd_tree = xmalloc(sizeof(fwd_tree_t));
 		memcpy(fwd_tree, fwd_tree_in, sizeof(fwd_tree_t));
 
@@ -529,15 +518,7 @@ static void _start_msg_tree_internal(hostlist_t hl, hostlist_t* sp_hl,
 		(*fwd_tree->p_thr_count)++;
 		slurm_mutex_unlock(fwd_tree->tree_mutex);
 
-		while (pthread_create(&thread_agent, &attr_agent,
-				      _fwd_tree_thread, (void *)fwd_tree)) {
-			error("pthread_create error %m");
-			if (++retries > MAX_RETRIES)
-				fatal("Can't create pthread");
-			usleep(100000);	/* sleep and try again */
-		}
-		slurm_attr_destroy(&attr_agent);
-
+		slurm_thread_create_detached(NULL, _fwd_tree_thread, fwd_tree);
 	}
 }
 
@@ -549,21 +530,12 @@ static void _forward_msg_internal(hostlist_t hl, hostlist_t* sp_hl,
 	int j;
 	forward_msg_t *fwd_msg = NULL;
 	char *buf = NULL, *tmp_char = NULL;
-	pthread_attr_t attr_agent;
-	pthread_t thread_agent;
 
 	if (timeout <= 0)
 		/* convert secs to msec */
 		timeout  = slurm_get_msg_timeout() * 1000;
 
 	for (j = 0; j < hl_count; j++) {
-		int retries = 0;
-
-		slurm_attr_init(&attr_agent);
-		if (pthread_attr_setdetachstate
-		    (&attr_agent, PTHREAD_CREATE_DETACHED))
-			error("pthread_attr_setdetachstate error %m");
-
 		fwd_msg = xmalloc(sizeof(forward_msg_t));
 
 		fwd_msg->fwd_struct = fwd_struct;
@@ -592,15 +564,7 @@ static void _forward_msg_internal(hostlist_t hl, hostlist_t* sp_hl,
 
 		forward_init(&fwd_msg->header.forward, NULL);
 		fwd_msg->header.forward.nodelist = buf;
-		while (pthread_create(&thread_agent, &attr_agent,
-				     _forward_thread,
-				     (void *)fwd_msg)) {
-			error("pthread_create error %m");
-			if (++retries > MAX_RETRIES)
-				fatal("Can't create pthread");
-			usleep(100000);	/* sleep and try again */
-		}
-		slurm_attr_destroy(&attr_agent);
+		slurm_thread_create_detached(NULL, _forward_thread, fwd_msg);
 	}
 }
 

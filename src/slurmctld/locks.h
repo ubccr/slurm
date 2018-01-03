@@ -91,6 +91,8 @@
 #ifndef _SLURMCTLD_LOCKS_H
 #define _SLURMCTLD_LOCKS_H
 
+#include <stdbool.h>
+
 /* levels of locking required for each data structure */
 typedef enum {
 	NO_LOCK,
@@ -125,6 +127,10 @@ typedef enum {
 	ENTITY_COUNT
 }	lock_datatype_t;
 
+#ifndef NDEBUG
+extern bool verify_lock(lock_datatype_t datatype, lock_level_t level);
+#endif
+
 #define read_lock(data_type)		(data_type * 4 + 0)
 #define write_lock(data_type)		(data_type * 4 + 1)
 #define write_wait_lock(data_type)	(data_type * 4 + 2)
@@ -143,15 +149,8 @@ extern void get_lock_values (slurmctld_lock_flags_t *lock_flags);
  *	control */
 extern void init_locks ( void );
 
-/* kill_locked_threads - Kill all threads waiting on semaphores */
-extern void kill_locked_threads ( void );
-
 /* lock_slurmctld - Issue the required lock requests in a well defined order */
 extern void lock_slurmctld (slurmctld_lock_t lock_levels);
-
-/* try_lock_slurmctld - equivalent to lock_slurmctld() except 
- * RET 0 on success or -1 if the locks are currently not available */
-extern int try_lock_slurmctld (slurmctld_lock_t lock_levels);
 
 /* unlock_slurmctld - Issue the required unlock requests in a well
  *	defined order */

@@ -224,7 +224,7 @@ extern char *slurm_get_reboot_program(void);
 extern uint16_t slurm_get_tcp_timeout(void);
 
 /* slurm_api_set_default_config
- *	called by the send_controller_msg function to insure that at least
+ *	called by the send_controller_msg function to ensure that at least
  *	the compiled in default slurm_protocol_config object is initialized
  * RET int 		- return code
  */
@@ -280,13 +280,6 @@ char *slurm_get_node_features_plugins(void);
  * RET char *   - slurmctld_plugstack, MUST be xfreed by caller
  */
 char *slurm_get_slurmctld_plugstack(void);
-
-/* slurm_get_slurmd_plugstack
- * get slurmd_plugstack from slurmctld_conf object from
- * slurmd_conf object
- * RET char *   - slurmd_plugstack, MUST be xfreed by caller
- */
-char *slurm_get_slurmd_plugstack(void);
 
 /* slurm_get_slurmctld_timeout
  * get slurmctld_timeout from slurmctld_conf object from
@@ -364,6 +357,11 @@ uint32_t slurm_get_priority_weight_fairshare(void);
  * RET uint32_t - factor.
  */
 uint16_t slurm_get_fs_dampening_factor(void);
+
+/* slurm_set_fs_dampening_factor
+ * sets the value of fs_dampening in slurmctld_conf object
+ */
+void slurm_set_fs_dampening_factor(uint16_t);
 
 /* slurm_get_priority_weight_job_size
  * returns the priority weight for job size from slurmctld_conf object
@@ -757,11 +755,11 @@ char *slurm_get_acct_gather_energy_type(void);
  */
 char *slurm_get_acct_gather_profile_type(void);
 
-/* slurm_get_acct_infiniband_profile_type
- * get InfinibandAccountingType from slurmctld_conf object
- * RET char *   - acct_gather_infiniband_type, MUST be xfreed by caller
+/* slurm_get_acct_interconnect_profile_type
+ * get InterconnectAccountingType from slurmctld_conf object
+ * RET char *   - acct_gather_interconnect_type, MUST be xfreed by caller
  */
-char *slurm_get_acct_gather_infiniband_type(void);
+char *slurm_get_acct_gather_interconnect_type(void);
 
 /* slurm_get_acct_filesystem_profile_type
  * get FilesystemAccountingType from slurmctld_conf object
@@ -835,6 +833,12 @@ char *slurm_get_select_type(void);
  * RET uint16_t   - select_type_param
  */
 uint16_t slurm_get_select_type_param(void);
+
+/* slurm_set_select_type_param
+ * set select_type_param for slurmctld_conf object
+ * IN uint16_t   - select_type_param
+ */
+void slurm_set_select_type_param(uint16_t select_type_param);
 
 /** Return true if (remote) system runs Cray XT/XE */
 bool is_cray_select_type(void);
@@ -942,7 +946,7 @@ extern int slurm_init_msg_engine_ports(uint16_t *);
  *
  * Try to bind() sock to any port in a given interval of ports
  */
-extern int sock_bind_range(int, uint16_t *);
+extern int sock_bind_range(int, uint16_t *, bool local);
 
 /* In the socket implementation it creates a socket, binds to it, and
  *	listens for connections.
@@ -1061,10 +1065,20 @@ int slurm_send_node_msg(int open_fd, slurm_msg_t *msg);
  * IN/OUT addr       - address of controller contacted
  * IN/OUT use_backup - IN: whether to try the backup first or not
  *                     OUT: set to true if connection established with backup
+ * IN comm_cluster_rec	- Communication record (host/port/version)/
  * RET slurm_fd	- file descriptor of the connection created
  */
-extern int slurm_open_controller_conn(slurm_addr_t *addr, bool *use_backup);
-extern int slurm_open_controller_conn_spec(enum controller_id dest);
+extern int slurm_open_controller_conn(slurm_addr_t *addr, bool *use_backup,
+				      slurmdb_cluster_rec_t *comm_cluster_rec);
+
+/* calls connect to make a connection-less datagram connection to the
+ *	primary or secondary slurmctld message engine
+ * IN dest      - controller to contact, primary or secondary
+ * IN comm_cluster_rec	- Communication record (host/port/version)/
+ * RET int      - file descriptor of the connection created
+ */
+extern int slurm_open_controller_conn_spec(enum controller_id dest,
+				      slurmdb_cluster_rec_t *comm_cluster_rec);
 
 /* In the bsd socket implementation it creates a SOCK_STREAM socket
  *	and calls connect on it a SOCK_DGRAM socket called with connect
@@ -1194,10 +1208,13 @@ int slurm_send_rc_err_msg(slurm_msg_t *msg, int rc, char *err_msg);
  * listens for the response, then closes the connection
  * IN request_msg	- slurm_msg request
  * OUT response_msg	- slurm_msg response
+ * IN comm_cluster_rec	- Communication record (host/port/version)/
  * RET int 		- returns 0 on success, -1 on failure and sets errno
  */
-int slurm_send_recv_controller_msg(slurm_msg_t * request_msg,
-				   slurm_msg_t * response_msg);
+extern int slurm_send_recv_controller_msg(slurm_msg_t * request_msg,
+				slurm_msg_t * response_msg,
+				slurmdb_cluster_rec_t *comm_cluster_rec);
+
 
 /* slurm_send_recv_node_msg
  * opens a connection to node,
@@ -1226,6 +1243,16 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg, int timeout,
 			  bool quiet);
 
 /*
+ * Sends back reroute_msg_t which directs the client to make the request to
+ * another cluster.
+ *
+ * IN msg	  - msg to respond to.
+ * IN cluster_rec - cluster to direct msg to.
+ */
+int slurm_send_reroute_msg(slurm_msg_t *msg,
+			   slurmdb_cluster_rec_t *cluster_rec);
+
+/*
  *  Send a message to msg->address
  *    Then return List containing type (ret_data_info_t).
  * IN msg           - a slurm_msg struct to be sent by the function
@@ -1245,18 +1272,27 @@ List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout);
 int slurm_send_recv_rc_msg_only_one(slurm_msg_t *req, int *rc, int timeout);
 
 /*
- *  Same as above, but send to controller
- *  returns 0 on success, -1 on failure and sets errno
+ * Send message to controller and get return code.
+ * Make use of slurm_send_recv_controller_msg(), which handles
+ * support for backup controller and retry during transistion.
+ * IN req - request to send
+ * OUT rc - return code
+ * IN comm_cluster_rec	- Communication record (host/port/version)
+ * RET - 0 on success, -1 on failure
  */
-int slurm_send_recv_controller_rc_msg(slurm_msg_t *req, int *rc);
+extern int slurm_send_recv_controller_rc_msg(slurm_msg_t *req, int *rc,
+				       slurmdb_cluster_rec_t *comm_cluster_rec);
 
 /* slurm_send_only_controller_msg
- * opens a connection to the controller, sends the node a message then,
- * closes the connection
+ * opens a connection to the controller, sends the controller a
+ * message then, closes the connection
  * IN request_msg	- slurm_msg request
- * RET int 		- return code
+ * IN comm_cluster_rec	- Communication record (host/port/version)
+ * RET int		- return code
+ * NOTE: NOT INTENDED TO BE CROSS-CLUSTER
  */
-int slurm_send_only_controller_msg(slurm_msg_t * request_msg);
+extern int slurm_send_only_controller_msg(slurm_msg_t *req,
+				slurmdb_cluster_rec_t *comm_cluster_rec);
 
 /* slurm_send_only_node_msg
  * opens a connection to node, sends the node a message then,

@@ -107,9 +107,11 @@ extern int license_job_return(struct job_record *job_ptr);
  * license_job_test - Test if the licenses required for a job are available
  * IN job_ptr - job identification
  * IN when    - time to check
+ * IN reboot    - true if node reboot required to start job
  * RET: SLURM_SUCCESS, EAGAIN (not available now), SLURM_ERROR (never runnable)
  */
-extern int license_job_test(struct job_record *job_ptr, time_t when);
+extern int license_job_test(struct job_record *job_ptr, time_t when,
+			    bool reboot);
 
 /*
  * license_validate - Test if the required licenses are valid
@@ -144,14 +146,6 @@ get_all_license_info(char **buffer_ptr,
  *
  */
 extern uint32_t get_total_license_cnt(char *name);
-
-/*
- * lic_get_value_by_type - Return count of named licenses used by job
- * IN licenses - list containing licenses_t records
- * IN name - name of the license
- * RET number of licenses of the particular type used
- */
-extern uint32_t license_get_total_cnt_from_list(List license_list, char *name);
 
 /* node_read should be locked before coming in here
  * returns tres_str of the license_list.

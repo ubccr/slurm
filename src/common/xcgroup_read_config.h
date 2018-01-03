@@ -50,8 +50,6 @@ typedef struct slurm_cgroup_conf {
 
 	bool      cgroup_automount;
 	char *    cgroup_mountpoint;
-	char *    cgroup_subsystems;
-	char *    cgroup_release_agent;
 
 	char *    cgroup_prepend;
 
@@ -72,6 +70,7 @@ typedef struct slurm_cgroup_conf {
 	bool      constrain_swap_space;
 	float     allowed_swap_space;
 	float     max_swap_percent;      /* Upper bound on swap as % of RAM  */
+	uint64_t  memory_swappiness;
 
 	bool      memlimit_enforcement;
 	float     memlimit_threshold;

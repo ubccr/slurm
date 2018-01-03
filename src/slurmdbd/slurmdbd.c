@@ -125,7 +125,6 @@ static void  _usage(char *prog_name);
 /* main - slurmctld main function, start various threads and process RPCs */
 int main(int argc, char **argv)
 {
-	pthread_attr_t thread_attr;
 	char node_name_short[128];
 	char node_name_long[128];
 	void *db_conn = NULL;
@@ -159,8 +158,6 @@ int main(int argc, char **argv)
 	 * (init_pidfile() exits if it can't initialize pid file).
 	 * On Linux we also need to make this setuid job explicitly
 	 * able to write a core dump.
-	 * This also has to happen after daemon(), which closes all fd's,
-	 * so we keep the write lock of the pidfile.
 	 */
 	_init_pidfile();
 	_become_slurm_user();
@@ -178,19 +175,11 @@ int main(int argc, char **argv)
 		error("Unable to block signals");
 
 	/* Create attached thread for signal handling */
-	slurm_attr_init(&thread_attr);
-	if (pthread_create(&signal_handler_thread, &thread_attr,
-			   _signal_handler, NULL))
-		fatal("pthread_create %m");
-	slurm_attr_destroy(&thread_attr);
+	slurm_thread_create(&signal_handler_thread, _signal_handler, NULL);
 
 	registered_clusters = list_create(NULL);
 
-	slurm_attr_init(&thread_attr);
-	if (pthread_create(&commit_handler_thread, &thread_attr,
-			   _commit_handler, NULL))
-		fatal("pthread_create %m");
-	slurm_attr_destroy(&thread_attr);
+	slurm_thread_create(&commit_handler_thread, _commit_handler, NULL);
 
 	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
 
@@ -254,21 +243,13 @@ int main(int argc, char **argv)
 
 		if (!shutdown_time) {
 			/* Create attached thread to process incoming RPCs */
-			slurm_attr_init(&thread_attr);
-			if (pthread_create(&rpc_handler_thread, &thread_attr,
-					   rpc_mgr, NULL))
-				fatal("pthread_create error %m");
-			slurm_attr_destroy(&thread_attr);
+			slurm_thread_create(&rpc_handler_thread, rpc_mgr, NULL);
 		}
 
 		if (!shutdown_time) {
 			/* Create attached thread to do usage rollup */
-			slurm_attr_init(&thread_attr);
-			if (pthread_create(&rollup_handler_thread,
-					   &thread_attr,
-					   _rollup_handler, db_conn))
-				fatal("pthread_create error %m");
-			slurm_attr_destroy(&thread_attr);
+			slurm_thread_create(&rollup_handler_thread,
+					    _rollup_handler, db_conn);
 		}
 
 		/* Daemon is fully operational here */
@@ -508,7 +489,7 @@ static void _usage(char *prog_name)
 		"Print version information and exit.\n");
 }
 
-/* Reset slurmctld logging based upon configuration parameters */
+/* Reset slurmdbd logging based upon configuration parameters */
 static void _update_logging(bool startup)
 {
 	/* Preserve execute line arguments (if any) */
@@ -522,12 +503,17 @@ static void _update_logging(bool startup)
 	log_opts.logfile_level = slurmdbd_conf->debug_level;
 	log_opts.syslog_level  = slurmdbd_conf->debug_level;
 
-	if (foreground)
+	if (foreground) {
 		log_opts.syslog_level = LOG_LEVEL_QUIET;
-	else {
+	} else {
 		log_opts.stderr_level = LOG_LEVEL_QUIET;
-		if (slurmdbd_conf->log_file)
-			log_opts.syslog_level = LOG_LEVEL_QUIET;
+		if (!slurmdbd_conf->log_file &&
+		    (slurmdbd_conf->syslog_debug == LOG_LEVEL_QUIET)) {
+			/* Ensure fatal errors get logged somewhere */
+ 			log_opts.syslog_level = LOG_LEVEL_FATAL;
+		} else {
+			log_opts.syslog_level = slurmdbd_conf->syslog_debug;
+		}
 	}
 
 	log_alter(log_opts, SYSLOG_FACILITY_DAEMON, slurmdbd_conf->log_file);
@@ -545,6 +531,8 @@ static void _update_logging(bool startup)
 			      (int) slurm_user_gid);
 		}
 	}
+
+	debug("Log file re-opened");
 }
 
 /* Reset slurmd nice value */
@@ -607,7 +595,7 @@ static void _init_pidfile(void)
  * "cd" to the LogFile directory (if one is configured) */
 static void _daemonize(void)
 {
-	if (daemon(1, 1))
+	if (xdaemon())
 		error("daemon(): %m");
 	log_alter(log_opts, LOG_DAEMON, slurmdbd_conf->log_file);
 }
@@ -623,7 +611,7 @@ static void _set_work_dir(void)
 		slash_ptr = strrchr(work_dir, '/');
 		if (slash_ptr == work_dir)
 			work_dir[1] = '\0';
-		else
+		else if (slash_ptr)
 			slash_ptr[0] = '\0';
 		if ((access(work_dir, W_OK) != 0) || (chdir(work_dir) < 0))
 			error("chdir(%s): %m", work_dir);
@@ -834,7 +822,7 @@ static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec)
 		 * for an arbitray fd or should these be fire
 		 * and forget?  For this, that we can probably
 		 * forget about it */
-		slurm_close(fd);
+		close(fd);
 	}
 	return rc;
 }
@@ -843,7 +831,7 @@ static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec)
 static void *_signal_handler(void *no_data)
 {
 	int rc, sig;
-	int sig_array[] = {SIGINT, SIGTERM, SIGHUP, SIGABRT, 0};
+	int sig_array[] = {SIGINT, SIGTERM, SIGHUP, SIGABRT, SIGUSR2, 0};
 	sigset_t set;
 
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -854,6 +842,7 @@ static void *_signal_handler(void *no_data)
 	_default_sigaction(SIGTERM);
 	_default_sigaction(SIGHUP);
 	_default_sigaction(SIGABRT);
+	_default_sigaction(SIGUSR2);
 
 	while (1) {
 		xsignal_sigset_create(sig_array, &set);
@@ -875,6 +864,10 @@ static void *_signal_handler(void *no_data)
 			abort();	/* Should terminate here */
 			shutdown_threads();
 			return NULL;
+		case SIGUSR2:
+			info("Logrotate signal (SIGUSR2) received");
+			_update_logging(false);
+			break;
 		default:
 			error("Invalid signal (%d) received", sig);
 		}

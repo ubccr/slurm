@@ -134,7 +134,7 @@ static int _restore_state(char *dir_name)
 {
 	char *data = NULL, *file_name = NULL;
 	int error_code = SLURM_SUCCESS;
-	int state_fd, data_allocated = 0, data_read = 0, data_size = 0;
+	int state_fd, data_allocated = 0, data_read = 0, data_offset = 0;
 
 	if (!dir_name) {
 		error("job_container state directory is NULL");
@@ -147,7 +147,7 @@ static int _restore_state(char *dir_name)
 		data_allocated = JOB_BUF_SIZE;
 		data = xmalloc(data_allocated);
 		while (1) {
-			data_read = read(state_fd, &data[data_size],
+			data_read = read(state_fd, data + data_offset,
 					 JOB_BUF_SIZE);
 			if ((data_read < 0) && (errno == EINTR))
 				continue;
@@ -157,7 +157,7 @@ static int _restore_state(char *dir_name)
 				break;
 			} else if (data_read == 0)
 				break;
-			data_size      += data_read;
+			data_offset    += data_read;
 			data_allocated += data_read;
 			xrealloc(data, data_allocated);
 		}
@@ -173,7 +173,7 @@ static int _restore_state(char *dir_name)
 
 	if (error_code == SLURM_SUCCESS) {
 		job_id_array = (uint32_t *) data;
-		job_id_count = data_size / sizeof(uint32_t);
+		job_id_count = data_offset / sizeof(uint32_t);
 	}
 
 	return error_code;
@@ -296,8 +296,9 @@ extern int container_p_create(uint32_t job_id)
 	if (debug_flags & DEBUG_FLAG_TIME_CRAY) {
 		END_TIMER;
 		INFO_LINE("call took: %s", TIME_STR);
-	} else
+	} else {
 		END_TIMER3("container_p_create: saving state took", 3000000);
+	}
 #ifdef HAVE_NATIVE_CRAY
 	START_TIMER;
 	rc = job_create_reservation(resv_id, CREATE_FLAGS);
@@ -316,11 +317,11 @@ extern int container_p_create(uint32_t job_id)
 			_stat_reservation("create", resv_id);
 		return SLURM_SUCCESS;
 	}
+	error("%s: create(%u): %m", plugin_type, job_id);
+	return SLURM_ERROR;
 #else
 	return SLURM_SUCCESS;
 #endif
-	error("%s: create(%u): %m", plugin_type, job_id);
-	return SLURM_ERROR;
 }
 
 /* Add proctrack container (PAGG) to a job container */
@@ -375,11 +376,11 @@ extern int container_p_add_cont(uint32_t job_id, uint64_t cont_id)
 			_stat_reservation("add", resv_id);
 		return SLURM_SUCCESS;
 	}
+	error("%s: add(%u.%"PRIu64"): %m", plugin_type, job_id, cont_id);
+	return SLURM_ERROR;
 #else
 	return SLURM_SUCCESS;
 #endif
-	error("%s: add(%u.%"PRIu64"): %m", plugin_type, job_id, cont_id);
-	return SLURM_ERROR;
 }
 
 /* Add a process to a job container, create the proctrack container to add */

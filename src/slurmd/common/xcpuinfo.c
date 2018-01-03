@@ -196,8 +196,23 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	hwloc_topology_set_flags(topology, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM);
 
 	/* ignores cache, misc */
-	hwloc_topology_ignore_type (topology, HWLOC_OBJ_CACHE);
-	hwloc_topology_ignore_type (topology, HWLOC_OBJ_MISC);
+#if HWLOC_API_VERSION < 0x00020000
+	hwloc_topology_ignore_type(topology, HWLOC_OBJ_CACHE);
+	hwloc_topology_ignore_type(topology, HWLOC_OBJ_MISC);
+#else
+	hwloc_topology_set_type_filter(topology, HWLOC_OBJ_L1CACHE,
+				       HWLOC_TYPE_FILTER_KEEP_NONE);
+	hwloc_topology_set_type_filter(topology, HWLOC_OBJ_L2CACHE,
+				       HWLOC_TYPE_FILTER_KEEP_NONE);
+	hwloc_topology_set_type_filter(topology, HWLOC_OBJ_L3CACHE,
+				       HWLOC_TYPE_FILTER_KEEP_NONE);
+	hwloc_topology_set_type_filter(topology, HWLOC_OBJ_L4CACHE,
+				       HWLOC_TYPE_FILTER_KEEP_NONE);
+	hwloc_topology_set_type_filter(topology, HWLOC_OBJ_L5CACHE,
+				       HWLOC_TYPE_FILTER_KEEP_NONE);
+	hwloc_topology_set_type_filter(topology, HWLOC_OBJ_MISC,
+				       HWLOC_TYPE_FILTER_KEEP_NONE);
+#endif
 
 	/* load topology */
 	debug2("hwloc_topology_load");
@@ -210,7 +225,8 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 #if _DEBUG
 	_hwloc_children(topology, hwloc_get_root_obj(topology), 0);
 #endif
-	/* Some processors (e.g. AMD Opteron 6000 series) contain multiple
+	/*
+	 * Some processors (e.g. AMD Opteron 6000 series) contain multiple
 	 * NUMA nodes per socket. This is a configuration which does not map
 	 * into the hardware entities that Slurm optimizes resource allocation
 	 * for (PU/thread, core, socket, baseboard, node and network switch).
@@ -243,8 +259,10 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 				    1);
 	}
 
-	/* Count sockets/NUMA containing any cores.
-	 * KNL NUMA with no cores are NOT counted. */
+	/*
+	 * Count sockets/NUMA containing any cores.
+	 * KNL NUMA with no cores are NOT counted.
+	 */
 	nobj[SOCKET] = 0;
 	depth = hwloc_get_type_depth(topology, objtype[SOCKET]);
 	used_socket = bit_alloc(_MAX_SOCKET_INX);
@@ -268,8 +286,10 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 
 	nobj[CORE] = hwloc_get_nbobjs_by_type(topology, objtype[CORE]);
 
-	/* Workaround for hwloc bug, in some cases the topology "children" array
-	 * does not get populated, so _core_child_count() always returns 0 */
+	/*
+	 * Workaround for hwloc bug, in some cases the topology "children" array
+	 * does not get populated, so _core_child_count() always returns 0
+	 */
 	if (nobj[SOCKET] == 0) {
 		nobj[SOCKET] = hwloc_get_nbobjs_by_type(topology,
 							objtype[SOCKET]);
@@ -318,7 +338,8 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	      actual_cpus, actual_boards, nobj[SOCKET], nobj[CORE], nobj[PU]);
 
 	/* allocate block_map */
-	*p_block_map_size = (uint16_t)actual_cpus;
+	if (p_block_map_size)
+		*p_block_map_size = (uint16_t)actual_cpus;
 	if (p_block_map && p_block_map_inv) {
 		*p_block_map     = xmalloc(actual_cpus * sizeof(uint16_t));
 		*p_block_map_inv = xmalloc(actual_cpus * sizeof(uint16_t));
@@ -391,7 +412,7 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 		debug("------");
 	}
 #endif
-	return 0;
+	return SLURM_SUCCESS;
 
 }
 #else
@@ -433,18 +454,9 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	uint32_t minphysid = 0xffffffff;/* minimum "physical id" */
 	uint32_t mincoreid = 0xffffffff;/* minimum "core id" */
 	int i;
-#if defined (__sun)
-#if defined (_LP64)
-	int64_t curcpu, val, sockets, cores, threads;
-#else
-	int32_t curcpu, val, sockets, cores, threads;
-#endif
-	int32_t chip_id, core_id, ncore_per_chip, ncpu_per_chip;
-#else
 	FILE *cpu_info_file;
 	char buffer[128];
 	uint16_t curcpu, sockets, cores, threads;
-#endif
 
 	get_procs(&numproc);
 	*p_cpus = numproc;
@@ -456,24 +468,12 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	*p_block_map      = NULL;
 	*p_block_map_inv  = NULL;
 
-#if defined (__sun)
-	kstat_ctl_t   *kc;
-	kstat_t       *ksp;
-	kstat_named_t *knp;
-
-	kc = kstat_open();
-	if (kc == NULL) {
-		error ("get speed: kstat error %d", errno);
-		return errno;
-	}
-#else
 	cpu_info_file = fopen(_cpuinfo_path, "r");
 	if (cpu_info_file == NULL) {
 		error ("get_cpuinfo: error %d opening %s",
 			errno, _cpuinfo_path);
 		return errno;
 	}
-#endif
 
 	/* Note: assumes all processor IDs are within [0:numproc-1] */
 	/*       treats physical/core IDs as tokens, not indices */
@@ -481,69 +481,6 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 		memset(cpuinfo, 0, numproc * sizeof(cpuinfo_t));
 	else
 		cpuinfo = xmalloc(numproc * sizeof(cpuinfo_t));
-
-#if defined (__sun)
-	ksp = kstat_lookup(kc, "cpu_info", -1, NULL);
-	for (; ksp != NULL; ksp = ksp->ks_next) {
-		if (xstrcmp(ksp->ks_module, "cpu_info"))
-			continue;
-
-		numcpu++;
-		kstat_read(kc, ksp, NULL);
-
-		knp = kstat_data_lookup(ksp, "chip_id");
-		chip_id = knp->value.l;
-		knp = kstat_data_lookup(ksp, "core_id");
-		core_id = knp->value.l;
-		knp = kstat_data_lookup(ksp, "ncore_per_chip");
-		ncore_per_chip = knp->value.l;
-		knp = kstat_data_lookup(ksp, "ncpu_per_chip");
-		ncpu_per_chip = knp->value.l;
-
-		if (chip_id >= numproc) {
-			debug("cpuid is %ld (> %d), ignored", curcpu, numproc);
-			continue;
-		}
-
-		cpuinfo[chip_id].seen = 1;
-		cpuinfo[chip_id].cpuid = chip_id;
-
-		maxcpuid = MAX(maxcpuid, chip_id);
-		mincpuid = MIN(mincpuid, chip_id);
-
-		for (i = 0; i < numproc; i++) {
-			if ((cpuinfo[i].coreid == core_id) &&
-			    (cpuinfo[i].corecnt))
-				break;
-		}
-
-		if (i == numproc) {
-			numcores++;
-		} else {
-			cpuinfo[i].corecnt++;
-		}
-
-		if (chip_id < numproc) {
-			cpuinfo[chip_id].corecnt++;
-			cpuinfo[chip_id].coreid = core_id;
-		}
-
-		maxcoreid = MAX(maxcoreid, core_id);
-		mincoreid = MIN(mincoreid, core_id);
-
-		if (ncore_per_chip > numproc) {
-			debug("cores is %u (> %d), ignored",
-			      ncore_per_chip, numproc);
-				continue;
-		}
-
-		if (chip_id < numproc)
-			cpuinfo[chip_id].cores = ncore_per_chip;
-
-		maxcores = MAX(maxcores, ncore_per_chip);
-		mincores = MIN(mincores, ncore_per_chip);
-	}
-#else
 
 	curcpu = 0;
 	while (fgets(buffer, sizeof(buffer), cpu_info_file) != NULL) {
@@ -628,7 +565,6 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	}
 
 	fclose(cpu_info_file);
-#endif
 
 	/*** Sanity check ***/
 	if (minsibs == 0) minsibs = 1;		/* guaranteee non-zero */

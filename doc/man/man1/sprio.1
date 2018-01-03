@@ -1,4 +1,4 @@
-.TH sprio "1" "Slurm Commands" "April 2015" "Slurm Commands"
+.TH sprio "1" "Slurm Commands" "March 2017" "Slurm Commands"
 
 .SH "NAME"
 sprio \- view the factors that comprise a job's scheduling priority
@@ -17,6 +17,10 @@ jobs by job ID and user name.
 .SH "OPTIONS"
 
 .TP
+\fB\-\-federation\fR
+Show jobs in federation if a member of one.
+
+.TP
 \fB\-h\fR, \fB\-\-noheader\fR
 Do not print a header on the output.
 
@@ -33,6 +37,11 @@ and not include a space between them. For example "\-j1008,1009" and
 not "\-j 1008,1009".
 
 .TP
+\fB\-\-local\fR
+Show only jobs local to this cluster. Ignore other clusters in this federation
+(if any). Overrides \-\-federation.
+
+.TP
 \fB\-l\fR, \fB\-\-long\fR
 Report more of the available information for the selected jobs.
 
@@ -40,6 +49,7 @@ Report more of the available information for the selected jobs.
 \fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
 The cluster to issue commands to. Only one cluster name may be specified.
 Note that the SlurmDBD must be up for this option to work properly.
+This option implicitly sets the \fB\-\-local\fR option.
 
 .TP
 \fB\-n\fR, \fB\-\-norm\fR
@@ -54,10 +64,10 @@ assigned non-zero weights are
 .RS
 .TP 15
 \fIdefault\fR
-"%.15i %.10Y %.10A %.10F %.10J %.10P %.10Q %20T"
+"%.15i %9r %.10Y %.10A %.10F %.10J %.10P %.10Q %20T"
 .TP
 \fI\-l, \-\-long\fR
-"%.15i %.8u %.10Y %.10A %.10F %.10J %.10P %.10Q %.6N %20T"
+"%.15i %9r %.8u %.10Y %.10A %.10F %.10J %.10P %.10Q %.6N %20T"
 .RE
 
 .IP
@@ -84,6 +94,9 @@ Normalized age priority
 \fB%A\fR
 Weighted age priority
 .TP
+\fB%c\fR
+Cluster name. Only applicable for federated clusters
+.TP
 \fB%f\fR
 Normalized fair-share priority
 .TP
@@ -108,6 +121,9 @@ Normalized partition priority
 \fB%P\fR
 Weighted partition priority
 .TP
+\fB%r\fR
+Partition name
+.TP
 \fB%q\fR
 Normalized quality of service priority
 .TP
@@ -129,6 +145,20 @@ Job priority
 \fB%y\fR
 Normalized job priority
 .RE
+
+.TP
+\fB\-p <partition_list>\fR, \fB\-\-partition=<partition_list>\fR
+Requests a comma separated list of partitions to display.  Defaults to
+all partitions.
+
+.TP
+\fB\-\-sibling\fR
+Show all sibling jobs on a federated cluster. Without this option in a
+federated cluster, each job in each partition will have its priority and its
+components reported for only one cluster. Each sibling job on the various
+clusters in the federation may have different priority, which will not be
+reported without using this option. Implicitly adds "%c" (cluster name) to the
+output format.
 
 .TP
 \fB\-u <user_list>\fR, \fB\-\-user=<user_list>\fR
@@ -162,6 +192,18 @@ Same as \fB\-\-clusters\fR
 .TP
 \fBSLURM_CONF\fR
 The location of the Slurm configuration file.
+
+.TP
+\fBSPRIO_FEDERATION\fR
+Same as \fB\-\-federation\fR
+
+.TP
+\fBSPRIO_LOCAL\fR
+Same as \fB\-\-local\fR
+
+.TP
+\fBSPRIO_SIBLING\fR
+Same as \fB\-\-sibling\fR
 
 .SH "EXAMPLES"
 .eo
@@ -230,7 +272,7 @@ Print the configured weights for each priority component
 Copyright (C) 2009 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
-Copyright (C) 2010\-2013 SchedMD LLC.
+Copyright (C) 2010\-2017 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <https://slurm.schedmd.com/>.

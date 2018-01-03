@@ -143,8 +143,8 @@ void _init_params()
 /* returns number of objects added to list */
 static int _addto_job_list(List job_list, char *names)
 {
-	int i=0, start=0;
-	char *name = NULL, *dot = NULL;
+	int i = 0, start = 0;
+	char *name = NULL, *dot, *plus, *under;
 	slurmdb_selected_step_t *selected_step = NULL;
 	slurmdb_selected_step_t *curr_step = NULL;
 
@@ -174,7 +174,6 @@ static int _addto_job_list(List job_list, char *names)
 				names[i] = '`';
 			else if (names[i] == ',') {
 				if ((i-start) > 0) {
-					char *dot = NULL;
 					name = xmalloc((i-start+1));
 					memcpy(name, names+start, (i-start));
 
@@ -200,24 +199,18 @@ static int _addto_job_list(List job_list, char *names)
 								atoi(dot);
 					}
 
-					dot = strstr(name, "_");
-					if (dot == NULL) {
-						debug2("No jobarray requested");
+					selected_step->array_task_id = NO_VAL;
+					selected_step->pack_job_offset = NO_VAL;
+					if ((under = strstr(name, "_"))) {
+						*under++ = 0;
 						selected_step->array_task_id =
-							NO_VAL;
+							atoi(under);
+					} else if ((plus = strstr(name, "+"))) {
+						*plus++ = 0;
+						selected_step->pack_job_offset =
+							atoi(plus);
 					} else {
-						*dot++ = 0;
-						/* INFINITE means give
-						 * me all the tasks of
-						 * the array */
-						if (!dot)
-							selected_step->
-								array_task_id =
-								INFINITE;
-						else
-							selected_step->
-								array_task_id =
-								atoi(dot);
+						debug2("No array/pack job requested");
 					}
 
 					selected_step->jobid =
@@ -270,24 +263,16 @@ static int _addto_job_list(List job_list, char *names)
 					selected_step->stepid = atoi(dot);
 			}
 
-			dot = strstr(name, "_");
-			if (dot == NULL) {
-				debug2("No jobarray requested");
-				selected_step->array_task_id =
-					NO_VAL;
+			selected_step->array_task_id = NO_VAL;
+			selected_step->pack_job_offset = NO_VAL;
+			if ((under = strstr(name, "_"))) {
+				*under++ = 0;
+				selected_step->array_task_id = atoi(under);
+			} else if ((plus = strstr(name, "+"))) {
+				*plus++ = 0;
+				selected_step->pack_job_offset = atoi(plus);
 			} else {
-				*dot++ = 0;
-				/* INFINITE means give
-				 * me all the tasks of
-				 * the array */
-				if (!dot)
-					selected_step->
-						array_task_id =
-						INFINITE;
-				else
-					selected_step->
-						array_task_id =
-						atoi(dot);
+				debug2("No array/pack job requested");
 			}
 
 			selected_step->jobid = slurm_xlate_job_id(name);
@@ -494,7 +479,7 @@ void parse_command_line(int argc, char **argv)
 		command_len = strlen(start);
 
 		for (i = 0; fields[i].name; i++) {
-			if (!strncasecmp(fields[i].name, start, command_len))
+			if (!xstrncasecmp(fields[i].name, start, command_len))
 				goto foundfield;
 		}
 		error("Invalid field requested: \"%s\"", start);

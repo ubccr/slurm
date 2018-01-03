@@ -93,6 +93,7 @@ static struct {
 	callerid_action_t action_generic_failure;
 	log_level_t log_level;
 	char *node_name;
+	bool disable_x11;
 } opts;
 
 static void _init_opts(void)
@@ -102,16 +103,17 @@ static void _init_opts(void)
 	opts.action_no_jobs = CALLERID_ACTION_DENY;
 	opts.action_unknown = CALLERID_ACTION_NEWEST;
 	opts.action_adopt_failure = CALLERID_ACTION_ALLOW;
-	opts.action_generic_failure = CALLERID_ACTION_ALLOW;
+	opts.action_generic_failure = CALLERID_ACTION_IGNORE;
 	opts.log_level = LOG_LEVEL_INFO;
 	opts.node_name = NULL;
+	opts.disable_x11 = false;
 }
 
 /* Adopts a process into the given step. Returns SLURM_SUCCESS if
  * opts.action_adopt_failure == CALLERID_ACTION_ALLOW or if the process was
  * successfully adopted.
  */
-static int _adopt_process(pid_t pid, step_loc_t *stepd)
+static int _adopt_process(pam_handle_t *pamh, pid_t pid, step_loc_t *stepd)
 {
 	int fd;
 	uint16_t protocol_version;
@@ -131,6 +133,19 @@ static int _adopt_process(pid_t pid, step_loc_t *stepd)
 	}
 
 	rc = stepd_add_extern_pid(fd, stepd->protocol_version, pid);
+
+	if ((rc == PAM_SUCCESS) && !opts.disable_x11) {
+		int display;
+		display = stepd_get_x11_display(fd, stepd->protocol_version);
+
+		if (display) {
+			char *env;
+			env = xstrdup_printf("DISPLAY=localhost:%d.0", display);
+			pam_putenv(pamh, env);
+			xfree(env);
+		}
+	}
+
 	close(fd);
 
 	if (rc == PAM_SUCCESS)
@@ -286,8 +301,9 @@ static int _action_unknown(pam_handle_t *pamh, struct passwd *pwd, List steps)
 	rc = _indeterminate_multiple(pamh, steps, pwd->pw_uid, &stepd);
 	if (rc == PAM_SUCCESS) {
 		info("action_unknown: Picked job %u", stepd->jobid);
-		if (_adopt_process(getpid(), stepd) == SLURM_SUCCESS)
+		if (_adopt_process(pamh, getpid(), stepd) == SLURM_SUCCESS) {
 			return PAM_SUCCESS;
+		}
 		if (opts.action_adopt_failure == CALLERID_ACTION_ALLOW)
 			return PAM_SUCCESS;
 		else
@@ -342,7 +358,7 @@ static int _rpc_network_callerid(struct callerid_conn *conn, char *user_name,
 		      req.port_src,
 		      user_name);
 		return SLURM_FAILURE;
-	} else if (*job_id == (uint32_t)NO_VAL) {
+	} else if (*job_id == NO_VAL) {
 		debug("From %s port %d as %s: job indeterminate",
 		      ip_src_str,
 		      req.port_src,
@@ -362,7 +378,7 @@ static int _rpc_network_callerid(struct callerid_conn *conn, char *user_name,
  * what job initiated this connection. If it can be determined, the process is
  * adopted into that job's step_extern. In the event of any failure, it returns
  * PAM_IGNORE so that it will fall through to the next action */
-static int _try_rpc(struct passwd *pwd)
+static int _try_rpc(pam_handle_t *pamh, struct passwd *pwd)
 {
 	uint32_t job_id;
 	int rc;
@@ -408,7 +424,7 @@ static int _try_rpc(struct passwd *pwd)
 		 * into one node and was adopted into a job there that isn't on
 		 * our node here. In that case we got a bad jobid so we'll fall
 		 * through to the next action */
-		if (_adopt_process(getpid(), &stepd) == SLURM_SUCCESS)
+		if (_adopt_process(pamh, getpid(), &stepd) == SLURM_SUCCESS)
 			return PAM_SUCCESS;
 		else
 			return PAM_IGNORE;
@@ -481,15 +497,15 @@ static void _parse_opts(pam_handle_t *pamh, int argc, const char **argv)
 	char *v;
 
 	for (; argc-- > 0; ++argv) {
-		if (!strncasecmp(*argv, "single_job_skip_rpc=0", 21))
+		if (!xstrncasecmp(*argv, "single_job_skip_rpc=0", 21))
 			opts.single_job_skip_rpc = 0;
-		else if (!strncasecmp(*argv, "ignore_root=0", 13))
+		else if (!xstrncasecmp(*argv, "ignore_root=0", 13))
 			opts.ignore_root = 0;
-		else if (!strncasecmp(*argv,"action_no_jobs=",15)) {
+		else if (!xstrncasecmp(*argv,"action_no_jobs=",15)) {
 			v = (char *)(15 + *argv);
-			if (!strncasecmp(v, "deny", 4))
+			if (!xstrncasecmp(v, "deny", 4))
 				opts.action_no_jobs = CALLERID_ACTION_DENY;
-			else if (!strncasecmp(v, "ignore", 6))
+			else if (!xstrncasecmp(v, "ignore", 6))
 				opts.action_no_jobs = CALLERID_ACTION_IGNORE;
 			else {
 				pam_syslog(pamh,
@@ -497,13 +513,13 @@ static void _parse_opts(pam_handle_t *pamh, int argc, const char **argv)
 					   "unrecognized action_no_jobs=%s, setting to 'deny'",
 					   v);
 			}
-		} else if (!strncasecmp(*argv,"action_unknown=",15)) {
+		} else if (!xstrncasecmp(*argv,"action_unknown=",15)) {
 			v = (char *)(15 + *argv);
-			if (!strncasecmp(v, "allow", 5))
+			if (!xstrncasecmp(v, "allow", 5))
 				opts.action_unknown = CALLERID_ACTION_ALLOW;
-			else if (!strncasecmp(v, "newest", 6))
+			else if (!xstrncasecmp(v, "newest", 6))
 				opts.action_unknown = CALLERID_ACTION_NEWEST;
-			else if (!strncasecmp(v, "deny", 4))
+			else if (!xstrncasecmp(v, "deny", 4))
 				opts.action_unknown = CALLERID_ACTION_DENY;
 			else {
 				pam_syslog(pamh,
@@ -511,15 +527,15 @@ static void _parse_opts(pam_handle_t *pamh, int argc, const char **argv)
 					   "unrecognized action_unknown=%s, setting to 'newest'",
 					   v);
 			}
-		} else if (!strncasecmp(*argv,"action_generic_failure=",23)) {
+		} else if (!xstrncasecmp(*argv,"action_generic_failure=",23)) {
 			v = (char *)(23 + *argv);
-			if (!strncasecmp(v, "allow", 5))
+			if (!xstrncasecmp(v, "allow", 5))
 				opts.action_generic_failure =
 					CALLERID_ACTION_ALLOW;
-			else if (!strncasecmp(v, "ignore", 6))
+			else if (!xstrncasecmp(v, "ignore", 6))
 				opts.action_generic_failure =
 					CALLERID_ACTION_IGNORE;
-			else if (!strncasecmp(v, "deny", 4))
+			else if (!xstrncasecmp(v, "deny", 4))
 				opts.action_generic_failure =
 					CALLERID_ACTION_DENY;
 			else {
@@ -528,12 +544,14 @@ static void _parse_opts(pam_handle_t *pamh, int argc, const char **argv)
 					   "unrecognized action_generic_failure=%s, setting to 'allow'",
 					   v);
 			}
-		} else if (!strncasecmp(*argv, "log_level=", 10)) {
+		} else if (!xstrncasecmp(*argv, "log_level=", 10)) {
 			v = (char *)(10 + *argv);
 			opts.log_level = _parse_log_level(pamh, v);
-		} else if (!strncasecmp(*argv, "nodename=", 9)) {
+		} else if (!xstrncasecmp(*argv, "nodename=", 9)) {
 			v = (char *)(9 + *argv);
 			opts.node_name = xstrdup(v);
+		} else if (!xstrncasecmp(*argv, "disable_x11=1", 13)) {
+			opts.disable_x11 = true;
 		}
 	}
 
@@ -551,7 +569,7 @@ static void _log_init(log_level_t level)
 static int _load_cgroup_config()
 {
 	slurm_cgroup_conf = xmalloc(sizeof(slurm_cgroup_conf_t));
-	bzero(slurm_cgroup_conf, sizeof(slurm_cgroup_conf_t));
+	memset(slurm_cgroup_conf, 0, sizeof(slurm_cgroup_conf_t));
 	if (read_slurm_cgroup_conf(slurm_cgroup_conf) != SLURM_SUCCESS) {
 		info("read_slurm_cgroup_conf failed");
 		return SLURM_FAILURE;
@@ -571,7 +589,7 @@ static int _load_cgroup_config()
 PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags
 				__attribute__((unused)), int argc, const char **argv)
 {
-	int retval = PAM_IGNORE, rc, slurmrc, bufsize, user_jobs;
+	int retval = PAM_IGNORE, rc = PAM_IGNORE, slurmrc, bufsize, user_jobs;
 	char *user_name;
 	List steps = NULL;
 	step_loc_t *stepd = NULL;
@@ -684,7 +702,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags
 			info("Connection by user %s: user has only one job %u",
 			     user_name,
 			     stepd->jobid);
-			slurmrc = _adopt_process(getpid(), stepd);
+			slurmrc = _adopt_process(pamh, getpid(), stepd);
 			/* If adoption into the only job fails, it is time to
 			 * exit. Return code is based on the
 			 * action_adopt_failure setting */
@@ -703,7 +721,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags
 	/* Single job check turned up nothing (or we skipped it). Make RPC call
 	 * to slurmd at source IP. If it can tell us the job, the function calls
 	 * _adopt_process */
-	rc = _try_rpc(&pwd);
+	rc = _try_rpc(pamh, &pwd);
 	if (rc == PAM_SUCCESS)
 		goto cleanup;
 

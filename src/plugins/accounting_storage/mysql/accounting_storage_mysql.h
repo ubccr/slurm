@@ -81,6 +81,7 @@ extern char *cluster_day_table;
 extern char *cluster_hour_table;
 extern char *cluster_month_table;
 extern char *cluster_table;
+extern char *convert_version_table;
 extern char *federation_table;
 extern char *event_table;
 extern char *job_table;
@@ -105,6 +106,7 @@ extern List as_mysql_total_cluster_list;
 extern pthread_mutex_t as_mysql_cluster_list_lock;
 
 extern uint64_t debug_flags;
+extern bool backup_dbd;
 
 typedef enum {
 	QOS_LEVEL_NONE,

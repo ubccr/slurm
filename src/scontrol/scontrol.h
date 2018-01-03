@@ -80,9 +80,12 @@ extern int all_flag;	/* display even hidden partitions */
 extern int detail_flag;	/* display additional details */
 extern int exit_code;	/* scontrol's exit code, =1 on any error at any time */
 extern int exit_flag;	/* program to terminate if =1 */
+extern int federation_flag; /* show federated jobs */
 extern int input_words;	/* number of words of input permitted */
+extern int local_flag;	/* show only local jobs -- not remote remote sib jobs */
 extern int one_liner;	/* one record per line if =1 */
 extern int quiet_flag;	/* quiet=1, verbose=-1, normal=0 */
+extern int sibling_flag; /* show sibling jobs (if any fed job). */
 extern uint32_t cluster_flags; /* what type of cluster are we talking to */
 extern uint32_t euid; /* send request to the slurmctld in behave of this user */
 
@@ -95,6 +98,7 @@ extern reserve_info_msg_t *old_res_info_ptr;
 extern slurm_ctl_conf_info_msg_t *old_slurm_ctl_conf_ptr;
 
 extern int	parse_requeue_flags(char *s, uint32_t *flags);
+extern int	scontrol_batch_script(int argc, char **argv);
 extern int	scontrol_callerid(int argc, char **argv);
 extern int	scontrol_checkpoint(char *op, char *job_step_id_str, int argc,
 				    char **argv);
@@ -123,7 +127,7 @@ extern void	scontrol_print_burst_buffer(void);
 extern void	scontrol_print_completing (void);
 extern void	scontrol_print_completing_job(job_info_t *job_ptr,
 					      node_info_msg_t *node_info_msg);
-extern void	scontrol_print_federation();
+extern void	scontrol_print_federation(void);
 extern void	scontrol_print_front_end_list(char *node_list);
 extern void	scontrol_print_front_end(char *node_name,
 					 front_end_info_msg_t  *

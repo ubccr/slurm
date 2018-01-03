@@ -38,13 +38,6 @@ of the Slurm contribs distribution follows:
      opt_modulefiles_slurm - enables use of Munge as soon as built
      pam_job.c             - Less verbose version of the default Cray job service.
 
-  env_cache_builder.c [C program]
-     This program will build an environment variable cache file for specific
-     users or all users on the system. This can be used to prevent the aborting
-     of jobs submitted by Moab using the srun/sbatch --get-user-env option.
-     Build with "make -f /dev/null env_cache_builder" and execute as user root
-     on the node where the moab daemon runs.
-
   lua/               [ LUA scripts ]
      Example LUA scripts that can serve as Slurm plugins.
      job_submit.lua - job_submit plugin that can set a job's default partition
@@ -66,12 +59,6 @@ of the Slurm contribs distribution follows:
 
   mic                [Tools for use on Intel MIC processors]
 
-  mpich1.slurm.patch [ Patch to mpich1/p4 library for Slurm job task launch ]
-     For Slurm based job initiations (from srun command), get the parameters
-     from environment variables as needed. This allows for a truly parallel
-     job launch using the existing "execer" mode of operation with slight
-     modification.
-
   openlava/          [ Wrapper Scripts for OpenLava/LSF migration to Slurm ]
      Helpful scripts to make transition to Slurm easier from OpenLava or LSF.
      These scripts are easily updatable if there is functionality missing.
@@ -90,10 +77,6 @@ of the Slurm contribs distribution follows:
   perlapi/           [ Perl API to Slurm source ]
      API to Slurm using perl.  Making available all Slurm command that exist
      in the Slurm proper API.
-
-  phpext/   	     [ PHP API to Slurm source ]
-     API to Slurm using php.  Not a complete API, but offers quite a few
-     interfaces to existing Slurm proper APIs.
 
   pmi2/              [ PMI2 client library ]
      User applications can link with this library to use Slurm's mpi/pmi2
@@ -133,6 +116,10 @@ of the Slurm contribs distribution follows:
 
   slurm_completion_help/     [shell script, vim file]
      Scripts to help in option completion when using slurm commands.
+
+  slurm.spec-legacy  [ RPM build script ]
+     A version of slurm.spec that may still work on older platforms.
+     DEPRECATED, NOT MAINTAINED.
 
   spank_core.c       [ SPANK plugin, C program ]
      A Slurm SPANK plugin that can be used to permit users to generated

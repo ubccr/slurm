@@ -62,6 +62,10 @@ extern char *wckey_day_table;
 extern char *wckey_hour_table;
 extern char *wckey_month_table;
 
+#ifndef NDEBUG
+extern __thread bool drop_priv;
+#endif
+
 /*
  * We want SLURMDB_MODIFY_ASSOC always to be the last
  */
@@ -144,7 +148,13 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 	slurmdb_update_object_t *update_object = NULL;
 	slurmdb_assoc_rec_t *assoc = object;
 	slurmdb_qos_rec_t *qos = object;
+#ifndef NDEBUG
+	slurmdb_tres_rec_t *tres = object;
+	slurmdb_res_rec_t *res = object;
+	slurmdb_wckey_rec_t *wckey = object;
+#endif
 	ListIterator itr = NULL;
+
 	if (!update_list) {
 		error("no update list given");
 		return SLURM_ERROR;
@@ -186,7 +196,7 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 		update_object->objects = list_create(slurmdb_destroy_user_rec);
 		break;
 	case SLURMDB_ADD_TRES:
-		xassert(((slurmdb_tres_rec_t *)object)->id);
+		xassert(tres->id);
 		update_object->objects = list_create(slurmdb_destroy_tres_rec);
 		break;
 	case SLURMDB_ADD_ASSOC:
@@ -209,7 +219,7 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 		/* fall through */
 	case SLURMDB_MODIFY_ASSOC:
 	case SLURMDB_REMOVE_ASSOC:
-		xassert(((slurmdb_assoc_rec_t *)object)->cluster);
+		xassert(assoc->cluster);
 		update_object->objects = list_create(
 			slurmdb_destroy_assoc_rec);
 		break;
@@ -239,7 +249,7 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 	case SLURMDB_ADD_WCKEY:
 	case SLURMDB_MODIFY_WCKEY:
 	case SLURMDB_REMOVE_WCKEY:
-		xassert(((slurmdb_wckey_rec_t *)object)->cluster);
+		xassert(wckey->cluster);
 		update_object->objects = list_create(
 			slurmdb_destroy_wckey_rec);
 		break;
@@ -251,12 +261,12 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 		update_object->objects = list_create(slurm_destroy_char);
 		break;
 	case SLURMDB_ADD_RES:
-		xassert(((slurmdb_res_rec_t *)object)->name);
-		xassert(((slurmdb_res_rec_t *)object)->server);
+		xassert(res->name);
+		xassert(res->server);
 		/* fall through */
 	case SLURMDB_MODIFY_RES:
 	case SLURMDB_REMOVE_RES:
-		xassert(((slurmdb_res_rec_t *)object)->id != NO_VAL);
+		xassert(res->id != NO_VAL);
 		update_object->objects = list_create(
 			slurmdb_destroy_res_rec);
 		break;
@@ -380,7 +390,7 @@ extern int cluster_first_reg(char *host, uint16_t port, uint16_t rpc_version)
 		 * for an arbitray fd or should these be fire
 		 * and forget?  For this, that we can probably
 		 * forget about it */
-		slurm_close(fd);
+		close(fd);
 	}
 	return rc;
 }
@@ -545,6 +555,10 @@ extern bool is_user_min_admin_level(void *db_conn, uid_t uid,
 	 * THERE IS NO AUTHENTICATION WHEN RUNNNING OUT OF THE
 	 * SLURMDBD!
 	 */
+#ifndef NDEBUG
+	if (drop_priv)
+		return false;
+#endif
 	if (slurmdbd_conf) {
 		/* We have to check the authentication here in the
 		 * plugin since we don't know what accounts are being
@@ -678,7 +692,6 @@ extern int archive_run_script(slurmdb_archive_cond_t *arch_cond,
 	time_t curr_end;
 
 	if (stat(arch_cond->archive_script, &st) < 0) {
-		errno = errno;
 		error("archive_run_script: failed to stat %s: %m",
 		      arch_cond->archive_script);
 		return SLURM_ERROR;

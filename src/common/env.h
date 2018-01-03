@@ -43,13 +43,13 @@ typedef struct env_options {
 	task_dist_states_t distribution; /* --distribution=, -m dist	*/
 	uint16_t plane_size;         /* plane_size for SLURM_DIST_PLANE */
 	cpu_bind_type_t
-		cpu_bind_type;	/* --cpu_bind=			*/
+		cpu_bind_type;	/* --cpu-bind=			*/
 	char *cpu_bind;		/* binding map for map/mask_cpu	*/
 	uint32_t cpu_freq_min;  /* Minimum cpu frequency  */
 	uint32_t cpu_freq_max;  /* Maximum cpu frequency  */
 	uint32_t cpu_freq_gov;  /* cpu frequency governor */
 	mem_bind_type_t
-		mem_bind_type;	/* --mem_bind=			*/
+		mem_bind_type;	/* --mem-bind=			*/
 	char *mem_bind;		/* binding map for tasks to memory	*/
 	bool overcommit;	/* --overcommit,   -O		*/
 	int  slurmd_debug;	/* --slurmd-debug, -D           */
@@ -109,6 +109,11 @@ int	setup_env(env_t *env, bool preserve_env);
  * xmalloc'ed.  The array is terminated by a NULL pointer, and thus is
  * suitable for use by execle() and other env_array_* functions.
  *
+ * dest OUT - array in which to the set environment variables
+ * alloc IN - resource allocation response
+ * desc IN - job allocation request
+ * pack_offset IN - component offset into pack job, -1 if not pack job
+ *
  * Sets the variables:
  *	SLURM_JOB_ID
  *	SLURM_JOB_NUM_NODES
@@ -119,9 +124,9 @@ int	setup_env(env_t *env, bool preserve_env);
  * Sets OBSOLETE variables:
  *	? probably only needed for users...
  */
-int env_array_for_job(char ***dest,
-		      const resource_allocation_response_msg_t *alloc,
-		      const job_desc_msg_t *desc);
+extern int env_array_for_job(char ***dest,
+			     const resource_allocation_response_msg_t *alloc,
+			     const job_desc_msg_t *desc, int pack_offset);
 
 /*
  * Set in "dest" the environment variables relevant to a SLURM batch
@@ -178,9 +183,10 @@ extern int env_array_for_batch_job(char ***dest,
  *	SLURM_LAUNCH_NODE_IPADDR
  *
  */
-void
+extern void
 env_array_for_step(char ***dest,
 		   const job_step_create_response_msg_t *step,
+		   launch_tasks_request_msg_t *launch,
 		   uint16_t launcher_port,
 		   bool preserve_env);
 
@@ -209,13 +215,6 @@ void env_array_merge(char ***dest_array, const char **src_array);
  * overwritten with the value from src_array.
  */
 void env_array_merge_slurm(char ***dest_array, const char **src_array);
-
-/*
- * Merge all of the environment variables in src_array into the array
- * dest_array and strip any header names of "SPANK_".  Any variables already
- * found in dest_array will be overwritten with the value from src_array.
- */
-void env_array_merge_spank(char ***dest_array, const char **src_array);
 
 /*
  * Copy env_array must be freed by env_array_free
@@ -276,6 +275,20 @@ int env_array_overwrite_fmt(char ***array_ptr, const char *name,
   __attribute__ ((format (printf, 3, 4)));
 
 /*
+ * Append a single environment variable to an environment variable array
+ * if a variable by that name does not already exist.  If a variable
+ * by the same name is found in the array, it is overwritten with the
+ * new value.  The "value_fmt" string may contain printf-style options.
+ *
+ * "value_fmt" supports printf-style formatting.
+ *
+ * Return 1 on success, and 0 on error.
+ */
+int env_array_overwrite_pack_fmt(char ***array_ptr, const char *name,
+				 int pack_offset, const char *value_fmt, ...)
+  __attribute__ ((format (printf, 4, 5)));
+
+/*
  * Set in the running process's environment all of the environment
  * variables in a supplied environment variable array.
  */
@@ -305,6 +318,20 @@ char **env_array_from_file(const char *filename);
  */
 char **env_array_user_default(const char *username, int timeout, int mode,
 			      bool no_cache);
+
+/*
+ * Return a string representation of an array of uint16_t elements.
+ * Each value in the array is printed in decimal notation and elements
+ * are separated by a comma.  If sequential elements in the array
+ * contain the same value, the value is written out just once followed
+ * by "(xN)", where "N" is the number of times the value is repeated.
+ *
+ * Example:
+ *   The array "1, 2, 1, 1, 1, 3, 2" becomes the string "1,2,1(x3),3,2"
+ *
+ * Returns an xmalloc'ed string.  Free with xfree().
+ */
+extern char *uint16_array_to_str(int array_len, const uint16_t *array);
 
 /*
  * The cpus-per-node representation in SLURM (and perhaps tasks-per-node

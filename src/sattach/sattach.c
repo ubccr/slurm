@@ -174,7 +174,7 @@ int sattach(int argc, char **argv)
 
 	io = client_io_handler_create(opt.fds, layout->task_cnt,
 				      layout->node_cnt, fake_cred,
-				      opt.labelio);
+				      opt.labelio, NO_VAL, NO_VAL);
 	client_io_handler_start(io);
 
 	if (opt.pty) {
@@ -452,7 +452,6 @@ static message_thread_state_t *_msg_thr_create(int num_nodes, int num_tasks)
 	eio_obj_t *obj;
 	int i;
 	message_thread_state_t *mts;
-	pthread_attr_t attr;
 
 	debug("Entering _msg_thr_create()");
 	mts = (message_thread_state_t *)xmalloc(sizeof(message_thread_state_t));
@@ -474,14 +473,7 @@ static message_thread_state_t *_msg_thr_create(int num_nodes, int num_tasks)
 		eio_new_initial_obj(mts->msg_handle, obj);
 	}
 
-	slurm_attr_init(&attr);
-	if (pthread_create(&mts->msg_thread, &attr,
-			   _msg_thr_internal, (void *)mts) != 0) {
-		error("pthread_create of message thread: %m");
-		slurm_attr_destroy(&attr);
-		goto fail;
-	}
-	slurm_attr_destroy(&attr);
+	slurm_thread_create(&mts->msg_thread, _msg_thr_internal, mts);
 
 	return mts;
 fail:
@@ -653,8 +645,6 @@ _mpir_dump_proctable()
 
 	for (i = 0; i < MPIR_proctable_size; i++) {
 		tv = &MPIR_proctable[i];
-		if (!tv)
-			break;
 		info("task:%d, host:%s, pid:%d, executable:%s",
 		     i, tv->host_name, tv->pid, tv->executable_name);
 	}

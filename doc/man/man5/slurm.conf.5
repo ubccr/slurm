@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "Slurm Configuration File" "May 2017" "Slurm Configuration File"
+.TH "slurm.conf" "5" "Slurm Configuration File" "November 2017" "Slurm Configuration File"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -125,24 +125,21 @@ Comma separated list of resources you wish to track on the cluster.
 These are the resources requested by the sbatch/srun job when it
 is submitted.  Currently this consists of any GRES, BB (burst buffer) or
 license along with CPU, Memory, Node, and Energy.
-By default CPU, Energy, Memory, and Node are tracked.
+By default Billing, CPU, Energy, Memory, and Node are tracked.
 AccountingStorageTRES=gres/craynetwork,license/iop1
-will track cpu, energy, memory, nodes along with a gres called craynetwork
-as well as a license called iop1.  Whenever these resources are used on the
-cluster they are recorded. The TRES are automatically set up in the database
-on the start of the slurmctld.
+will track billing, cpu, energy, memory, nodes along with a gres called
+craynetwork as well as a license called iop1.  Whenever these resources are used
+on the cluster they are recorded. The TRES are automatically set up in the
+database on the start of the slurmctld.
 
 .TP
 \fBAccountingStorageType\fR
 The accounting storage mechanism type.  Acceptable values at
-present include "accounting_storage/filetxt",
-"accounting_storage/mysql", "accounting_storage/none"
+present include "accounting_storage/filetxt", "accounting_storage/none"
 and "accounting_storage/slurmdbd".  The
 "accounting_storage/filetxt" value indicates that accounting records
 will be written to the file specified by the
-\fBAccountingStorageLoc\fR parameter.  The "accounting_storage/mysql"
-value indicates that accounting records will be written to a MySQL or
-MariaDB database specified by the \fBAccountingStorageLoc\fR parameter.
+\fBAccountingStorageLoc\fR parameter.
 The "accounting_storage/slurmdbd" value indicates that accounting records
 will be written to the Slurm DBD, which manages an underlying MySQL
 database. See "man slurmdbd" for more information.  The
@@ -387,9 +384,6 @@ no checkpoint support (default)
 .TP
 \fBcheckpoint/ompi\fR
 OpenMPI (version 1.3 or higher)
-.TP
-\fBcheckpoint/poe\fR
-for use with IBM POE (Parallel Operating Environment) only
 .RE
 
 .TP
@@ -450,7 +444,7 @@ executed (i.e. the name returned by the command "hostname \-s").
 This value must be specified.
 In order to support some high availability architectures, multiple
 hostnames may be listed with comma separators and one \fBControlAddr\fR
-must be specified. The high availability system must insure that the
+must be specified. The high availability system must ensure that the
 slurmctld daemon is running on only one of these hosts at a time.
 See the \fBRELOCATING CONTROLLERS\fR section if you change this.
 
@@ -604,11 +598,17 @@ AcctGatherEnergy debug info
 \fBExtSensors\fR
 External Sensors debug info
 .TP
+\fBFederation\fR
+Federation scheduling debug info
+.TP
 \fBFrontEnd\fR
 Front end node details
 .TP
 \fBGres\fR
 Generic resource details
+.TP
+\fBHeteroJobs\fR
+Heterogeneous job details
 .TP
 \fBGang\fR
 Gang scheduling details
@@ -648,6 +648,9 @@ Slurmctld resource allocation for job steps
 .TP
 \fBSwitch\fR
 Switch plugin
+.TP
+\fBTimeCray\fR
+Timing of Cray APIs
 .TP
 \fBTraceJobs\fR
 Trace jobs in slurmctld. It will print detailed job information
@@ -868,6 +871,20 @@ This option is generally only useful for testing purposes.
 .RE
 
 .TP
+\fBFederationParameters\fR
+Used to define federation options. Multiple options may be comma separated.
+
+.RS
+.TP
+\fBfed_display\fR
+If set, then the client status commands (e.g. squeue, sinfo, sprio, etc.) will
+display information in a federated view by default. This option is functionally
+equivalent to using the \-\-federation options on each command. Use the client's
+\-\-local option to override the federated view and get a local view of the
+given cluster.
+.RE
+
+.TP
 \fBFirstJobId\fR
 The job id to be used for the first submitted to Slurm without a
 specific requested value. Job id values generated will incremented by 1
@@ -891,7 +908,7 @@ A comma delimited list of generic resources to be managed.
 These generic resources may have an associated plugin available to provide
 additional functionality.
 No generic resources are managed by default.
-Insure this parameter is consistent across all nodes in the cluster for
+Ensure this parameter is consistent across all nodes in the cluster for
 proper operation.
 The slurmctld daemon must be restarted for changes to this parameter to become
 effective.
@@ -901,11 +918,9 @@ effective.
 If set to a non\-zero value, then information about which users are members
 of groups allowed to use a partition will be updated periodically, even when
 there have been no changes to the /etc/group file.
-Otherwise group member information will be updated periodically only after the
-/etc/group file is updated. If GroupUpdateTime is set, the default is zero
-(disabled). If GroupUpdateTime is not set, GroupUpdateForce is always 1.
-This behavior will change in 17.11, where the GroupUpdateTime will always
-default to 1, unless explicitly set to 0.
+If set to zero, group member information will be updated only after the
+/etc/group file is updated.
+The default value is 1.
 Also see the \fBGroupUpdateTime\fR parameter.
 
 .TP
@@ -913,8 +928,7 @@ Also see the \fBGroupUpdateTime\fR parameter.
 Controls how frequently information about which users are members of
 groups allowed to use a partition will be updated, and how long user
 group membership lists will be cached.
-The time interval is given in seconds with a default value of 600 seconds and
-a maximum value of 4095 seconds.
+The time interval is given in seconds with a default value of 600 seconds.
 A value of zero will prevent periodic updating of group membership information.
 Also see the \fBGroupUpdateForce\fR parameter.
 
@@ -1263,15 +1277,36 @@ Identifies options to the job launch plugin.
 Acceptable values include:
 .RS
 .TP 24
+\fBbatch_step_set_cpu_freq\fR
+Set the cpu frequency for the batch step from given \-\-cpu\-freq, or
+slurm.conf CpuFreqDef, option.  By default only steps started with srun will
+utilize the cpu freq setting options.
+
+NOTE: If you are using srun to launch your steps inside a batch script
+(advised) this option will create a situation where you may have multiple
+agents setting the cpu_freq as the batch step usually runs on the same
+resources one or more steps the sruns in the script will create.
+.TP 24
 \fBcray_net_exclusive\fR
 Allow jobs on a Cray Native cluster exclusive access to network resources.
 This should only be set on clusters providing exclusive access to each
 node to a single job at once, and not using parallel steps within the job,
 otherwise resources on the node can be oversubscribed.
 .TP 24
+\fBlustre_no_flush\fR
+If set on a Cray Native cluster, then do not flush the Lustre cache on job step
+completion. This setting will only take effect after reconfiguring, and will
+only take effect for newly launched jobs.
+.TP 24
 \fBmem_sort\fR
 Sort NUMA memory at step start. User can override this default with
-SLURM_MEM_BIND environment variable or \-\-mem_bind=nosort command line option.
+SLURM_MEM_BIND environment variable or \-\-mem\-bind=nosort command line option.
+.TP
+\fBsend_gids\fR
+Lookup and send the user_name and extended gids for a job within the slurmctld,
+rather than individual on each node as part of each task launch. Should
+avoid issues around name service scalability when launching jobs involving
+many nodes.
 .TP 24
 \fBslurmstepd_memlock\fR
 Lock the slurmstepd process's current memory in RAM.
@@ -1357,7 +1392,7 @@ The default value is 1001.
 \fBMaxJobCount\fR
 The maximum number of jobs Slurm can have in its active database
 at one time. Set the values of \fBMaxJobCount\fR and \fBMinJobAge\fR
-to insure the slurmctld daemon does not exhaust its memory or other
+to ensure the slurmctld daemon does not exhaust its memory or other
 resources. Once this limit is reached, requests to submit additional
 jobs will fail. The default value is 10000 jobs.
 NOTE: Each task of a job array counts as one job even though they will not
@@ -1480,7 +1515,7 @@ necessitate higher values.
 \fBMinJobAge\fR
 The minimum age of a completed job before its record is purged from
 Slurm's active database. Set the values of \fBMaxJobCount\fR and
-  to insure the slurmctld daemon does not exhaust
+to ensure the slurmctld daemon does not exhaust
 its memory or other resources. The default value is 300 seconds.
 A value of zero prevents any job record purging.
 In order to eliminate some possible race conditions, the minimum non\-zero
@@ -1491,15 +1526,10 @@ value for \fBMinJobAge\fR recommended is 2.
 Identifies the default type of MPI to be used.
 Srun may override this configuration parameter in any case.
 Currently supported versions include:
-\fBlam\fR,
-\fBmpich1_p4\fR,
-\fBmpich1_shmem\fR,
-\fBmpichgm\fR,
-\fBmpichmx\fR,
-\fBmvapich\fR,
-\fBnone\fR (default, which works for many other versions of MPI) and
-\fBopenmpi\fR.
+\fBopenmpi\fR,
 \fBpmi2\fR,
+\fBpmix\fR, and
+\fBnone\fR (default, which works for many other versions of MPI).
 More information about MPI use is available here
 <https://slurm.schedmd.com/mpi_guide.html>.
 
@@ -1980,6 +2010,10 @@ definitions unless they are coordinators of them.
 \fBcloud\fR
 Powered down nodes in the cloud are visible.
 .TP
+\fBevents\fR
+prevents users from viewing event information unless they have operator status
+or above.
+.TP
 \fBjobs\fR
 Prevents users from viewing jobs or job steps belonging
 to other users. (NON-SlurmDBD ACCOUNTING ONLY) Prevents users from viewing
@@ -2026,7 +2060,7 @@ Acceptable values at present include:
 .RS
 .TP 20
 \fBproctrack/cgroup\fR
-which uses linux cgroups to constrain and track processes.
+which uses linux cgroups to constrain and track processes, and is the default.
 NOTE: see "man cgroup.conf" for configuration details
 .TP
 \fBproctrack/cray\fR
@@ -2043,7 +2077,7 @@ which uses SGI's Process Aggregates (PAGG) kernel module,
 see \fIhttp://oss.sgi.com/projects/pagg/\fR for more information
 .TP
 \fBproctrack/pgid\fR
-which uses process group IDs and is the default for all other systems
+which uses process group IDs
 .RE
 
 .TP
@@ -2102,10 +2136,18 @@ block until the prolog is finished on each node.  The blocking will happen when
 steps reach the slurmd and before any execution has happened in the step.
 This is a much faster way to work and if using srun to launch your tasks you
 should use this flag.
+.TP
 \fBSerial\fR
 By default, the Prolog and Epilog scripts run concurrently on each node.
 This flag forces those scripts to run serially within each node, but with
 a significant penalty to job throughput on each node.
+.TP
+\fBX11\fR
+Enable Slurm's built-in X11 forwarding capabilities. Slurm must have been
+compiled with libssh2 support enabled, and either SSH hostkey authentication
+or per-users SSH key authentication must be enabled within the cluster. Only
+RSA keys are supported at this time. Setting the X11 flag implicitly enables
+both Contain and Alloc flags as well.
 .RE
 
 .TP
@@ -2443,7 +2485,7 @@ For example, on Cray systems add "\-\-gres=craynetwork:0" as shown below:
     SallocDefaultCommand = "srun \-n1 \-N1 \-\-mem\-per\-cpu=0 \-\-gres=craynetwork:0 \-\-pty \-\-preserve\-env \-\-mpi=none $SHELL"
 .fi
 
-For systems with TaskPlugin set, adding an option of "\-\-cpu_bind=no" is
+For systems with TaskPlugin set, adding an option of "\-\-cpu\-bind=no" is
 recommended if the default shell should have access to all of the CPUs
 allocated to the job on that node, otherwise the shell may be limited to a
 single cpu or core.
@@ -2515,11 +2557,8 @@ of newly arrived higher priority jobs, but will permit more queued jobs to be
 considered for backfill scheduling.
 .TP
 \fBbf_interval=#\fR
-The number of seconds between iterations.
+The number of seconds between backfill iterations.
 Higher values result in less overhead and better responsiveness.
-The backfill scheduler will start over after reaching this time limit
-(including time spent sleeping), even if the maximum job counts have not
-been reached.
 This option applies only to \fBSchedulerType=sched/backfill\fR.
 The default value is 30 seconds.
 
@@ -2547,6 +2586,20 @@ expected times.
 This has no impact upon the number of tasks from a job array that can be
 started immediately, only those tasks expected to start at some future time.
 The default value is 20 tasks.
+.TP
+\fBbf_max_job_assoc=#\fR
+The maximum number of jobs per user association to attempt starting with the
+backfill scheduler.
+This setting is similar to to \fBbf_max_job_user\fR but is handy if a user
+has multiple assocations equating to basically different users.
+One can set this limit to prevent users from flooding the backfill
+queue with jobs that cannot start and that prevent jobs from other users
+to start.
+The default value is 0, which means no limit.
+This option applies only to \fBSchedulerType=sched/backfill\fR.
+Also see the \fBbf_max_job_user\fR \fBbf_max_job_part\fR, \fBbf_max_job_test\fR
+and \fBbf_max_job_user_part=#\fR options.
+Set \fBbf_max_job_test\fR to a value much higher than \fBbf_max_job_assoc\fR.
 .TP
 \fBbf_max_job_part=#\fR
 The maximum number of jobs per partition to attempt starting with the backfill
@@ -2576,13 +2629,34 @@ This option applies only to \fBSchedulerType=sched/backfill\fR.
 .TP
 \fBbf_max_job_user=#\fR
 The maximum number of jobs per user to attempt starting with the backfill
-scheduler. One can set this limit to prevent users from flooding the backfill
+scheduler for ALL partitions.
+One can set this limit to prevent users from flooding the backfill
 queue with jobs that cannot start and that prevent jobs from other users
 to start.  This is similar to the MAXIJOB limit in Maui.
 The default value is 0, which means no limit.
 This option applies only to \fBSchedulerType=sched/backfill\fR.
-Also see the \fBbf_max_job_part\fR and \fBbf_max_job_test\fR options.
+Also see the \fBbf_max_job_part\fR, \fBbf_max_job_test\fR and
+\fBbf_max_job_user_part=#\fR options.
 Set \fBbf_max_job_test\fR to a value much higher than \fBbf_max_job_user\fR.
+.TP
+\fBbf_max_job_user_part=#\fR
+The maximum number of jobs per user per partition to attempt starting with the
+backfill scheduler for any single partition.
+The default value is 0, which means no limit.
+This option applies only to \fBSchedulerType=sched/backfill\fR.
+Also see the \fBbf_max_job_part\fR, \fBbf_max_job_test\fR and
+\fBbf_max_job_user=#\fR options.
+.TP
+\fBbf_max_time=#\fR
+The maximum time the backfill scheduler can spend (including time spent sleeping
+when locks are released) before discontinuing, even if maximum job counts have
+not been reached.
+This option applies only to \fBSchedulerType=sched/backfill\fR.
+The default value is the value of bf_interval (which defaults to 30 seconds).
+NOTE: This needs to be high enough that scheduling isn't always disabled, and
+low enough that our interactive workload can get through in a reasonable period
+of time.  Certainly needs to be below 256 (the default RPC thread limit).
+Running around the middle (150) may give you good results.
 .TP
 \fBbf_min_age_reserve=#\fR
 The backfill and main scheduling logic will not reserve resources for pending
@@ -2625,6 +2699,27 @@ In order to limit the amount of data managed by the backfill scheduler,
 if the value of \fBbf_window\fR is increased, then it is generally advisable
 to also increase \fBbf_resolution\fR.
 This option applies only to \fBSchedulerType=sched/backfill\fR.
+.TP
+\fBbf_window_linear=#\fR
+For performance reasons, the backfill scheduler will decrease precision in
+calculation of job expected termination times. By default, the precision starts
+at 30 seconds and that time interval doubles with each evaluation of currently
+executing jobs when trying to determine when a pending job can start. This
+algorithm can support an environment with many thousands of running jobs, but
+can result in the expected start time of pending jobs being gradually being
+deferred due to lack of precision. A value for bf_window_linear will cause
+the time interval to be increased by a constant amount on each iteration.
+The value is specified in units of seconds. For example, a value of 60 will
+cause the backfill scheduler on the first iteration to identify the job ending
+soonest and determine if the pending job can be started after that job plus
+all other jobs expected to end within 30 seconds (default initial value) of the
+first job. On the next iteration, the pending job will be evaluated for
+starting after the next job expected to end plus all jobs ending within
+90 seconds of that time (30 second default, plus the 60 second option value).
+The third iteration will have a 150 second window and the fourth 210 seconds.
+Without this option, the time windows will double on each iteration and thus
+be 30, 60, 120, 240 seconds, etc. The use of bf_window_linear is not recommended
+with more than a few hundred simultaneously executing jobs.
 .TP
 \fBbf_yield_interval=#\fR
 The backfill scheduler will periodically relinquish locks in order for other
@@ -2682,8 +2777,15 @@ The default units in job submission memory and temporary disk size specification
 will be gigabytes rather than megabytes.
 Users can override the default by using a suffix of "M" for megabytes.
 .TP
-\fBdisable_user_top\fR
-Disable use of the "scontrol top" command by non-privileged users.
+\fBdisable_hetero_steps\fR
+Disable job steps that span heterogeneous job allocations, even with the
+mpi/none plugin.
+.TP
+\fBenable_hetero_steps\fR
+Enable job steps that span heterogeneous job allocations.
+.TP
+\fBenable_user_top\fR
+Enable use of the "scontrol top" command by non-privileged users.
 .TP
 \fBIgnore_NUMA\fR
 Some processors (e.g. AMD Opteron 6000 series) contain multiple NUMA nodes per
@@ -2777,7 +2879,7 @@ counted against the \fBdefault_queue_depth\fR limit.
 Also see the \fBbf_max_job_part\fR option.
 .TP
 \fBpreempt_reorder_count=#\fR
-Specify how many attempt should be made in reording preemptable jobs to
+Specify how many attempts should be made in reording preemptable jobs to
 minimize the count of jobs preempted.
 The default value is 1. High values may adversely impact performance.
 The logic to support this option is only available in the select/cons_res plugin.
@@ -2847,7 +2949,7 @@ This option specifies the minimum time between the end of one scheduling
 cycle and the beginning of the next scheduling cycle.
 A value of zero will disable throttling of the scheduling logic interval.
 The default value is 1,000,000 microseconds on Cray/ALPS systems and
-zero microseconds (throttling is disabled) on other systems.
+2 microseconds on other systems.
 .TP
 \fBspec_cores_first\fR
 Specialized cores will be selected from the first cores of the first sockets,
@@ -2867,6 +2969,10 @@ retry step allocations for all steps which have been pending for at least this
 number of seconds.
 Also see \fBstep_retry_count\fR.
 The default value is 60 seconds.
+.TP
+\fBwhole_pack\fR
+Requests to cancel, hold or release any component of a heterogeneous job will
+be applied to all components of the job.
 .RE
 
 .TP
@@ -3182,6 +3288,52 @@ Configure SlurmctldPort to use a port outside of the configured SrunPortRange
 and RSIP's port range.
 
 .TP
+\fBSlurmctldSyslogDebug\fR
+The slurmctld daemon will log events to the syslog file at the specified
+level of detail (the \fBSlurmctldLogFile\fR file will include log messages
+at level of details specified be \fBSlurmctldDebug\fR configuration parameter).
+If the slurmctld daemon is run in the foreground (started with the \fB\-D\fR
+command line option) the \fBSlurmctldSyslogDebug\fR configuration parameter
+will be ignored.
+The default value is \fBquiet\fR unless there is no configured
+\fBSlurmctldLogFile\fR, in which case the default value will be \fBfatal\bR so
+that fatal errors are logged somewhere.
+
+.RS
+.TP 10
+\fBquiet\fR
+Log nothing
+.TP
+\fBfatal\fR
+Log only fatal errors
+.TP
+\fBerror\fR
+Log only errors
+.TP
+\fBinfo\fR
+Log errors and general informational messages
+.TP
+\fBverbose\fR
+Log errors and verbose informational messages
+.TP
+\fBdebug\fR
+Log errors and verbose informational messages and debugging messages
+.TP
+\fBdebug2\fR
+Log errors and verbose informational messages and more debugging messages
+.TP
+\fBdebug3\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug4\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug5\fR
+Log errors and verbose informational messages and even more debugging messages
+.RE
+
+
+.TP
 \fBSlurmctldTimeout\fR
 The interval, in seconds, that the backup controller waits for the
 primary controller to respond before assuming control.
@@ -3248,12 +3400,6 @@ Any "%n" within the name is replaced with the Slurm node name on which the
 The default value is "/var/run/slurmd.pid".
 
 .TP
-\fBSlurmdPlugstack\fR
-A comma delimited list of Slurm compute node plugins to be started when the
-daemon begins and terminated when it ends.
-Only the plugin's init and fini functions are called.
-
-.TP
 \fBSlurmdPort\fR
 The port number that the Slurm compute node daemon, \fBslurmd\fR, listens
 to for work. The default value is SLURMD_PORT as established at system
@@ -3278,6 +3424,51 @@ Any "%h" within the name is replaced with the hostname on which the
 \fBslurmd\fR is running.
 Any "%n" within the name is replaced with the Slurm node name on which the
 \fBslurmd\fR is running.
+
+.TP
+\fBSlurmdSyslogDebug\fR
+The slurmd daemon will log events to the syslog file at the specified
+level of detail (the \fBSlurmdLogFile\fR file will include log messages
+at level of details specified be \fBSlurmdDebug\fR configuration parameter).
+If the slurmd daemon is run in the foreground (started with the \fB\-D\fR
+command line option) the \fBSlurmdSyslogDebug\fR configuration parameter
+will be ignored.
+The default value is \fBquiet\fR unless there is no configured
+\fBSlurmdLogFile\fR, in which case the default value will be \fBfatal\bR so
+that fatal errors are logged somewhere.
+
+.RS
+.TP 10
+\fBquiet\fR
+Log nothing
+.TP
+\fBfatal\fR
+Log only fatal errors
+.TP
+\fBerror\fR
+Log only errors
+.TP
+\fBinfo\fR
+Log errors and general informational messages
+.TP
+\fBverbose\fR
+Log errors and verbose informational messages
+.TP
+\fBdebug\fR
+Log errors and verbose informational messages and debugging messages
+.TP
+\fBdebug2\fR
+Log errors and verbose informational messages and more debugging messages
+.TP
+\fBdebug3\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug4\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug5\fR
+Log errors and verbose informational messages and even more debugging messages
+.RE
 
 .TP
 \fBSlurmdTimeout\fR
@@ -3380,7 +3571,18 @@ into this directory.
 \fBSuspendExcNodes\fR
 Specifies the nodes which are to not be placed in power save mode, even
 if the node remains idle for an extended period of time.
-Use Slurm's hostlist expression to identify nodes.
+Use Slurm's hostlist expression to identify nodes with an optional ":" separator
+and count of nodes to exclude from the preceeding range.
+For example "nid[10-20]:4" will prevent 4 usable nodes (i.e IDLE and not 
+DOWN, DRAINING or already powered down) in the set "nid[10-20]" from being
+powered down.
+Multiple sets of nodes can be specified with or without counts in a comma
+separated list (e.g "nid[10-20]:4,nid[80-90]:2").
+If a node count specification is given, any list of nodes to NOT have a node
+count must be after the last specification with a count.
+For example "nid[10-20]:4,nid[60-70]" will exclude 4 nodes in the set
+"nid[10-20]:4" plus all nodes in the set "nid[60-70]" while
+"nid[1-3],nid[10-20]:4" will exclude 4 nodes from the set "nid[1-3],nid[10-20]".
 By default no nodes are excluded.
 Related configuration options include \fBResumeTimeout\fR, \fBResumeProgram\fR,
 \fBResumeRate\fR, \fBSuspendProgram\fR, \fBSuspendRate\fR, \fBSuspendTime\fR,
@@ -3437,9 +3639,9 @@ Related configuration options include \fBResumeTimeout\fR, \fBResumeProgram\fR,
 
 .TP
 \fBSuspendTimeout\fR
-Maximum time permitted (in second) between when a node suspend request
-is issued and when the node shutdown.
-At that time the node must ready for a resume request to be issued
+Maximum time permitted (in seconds) between when a node suspend request
+is issued and when the node is shutdown.
+At that time the node must be ready for a resume request to be issued
 as needed for new work.
 The default value is 30 seconds.
 Related configuration options include \fBResumeProgram\fR, \fBResumeRate\fR,
@@ -3478,19 +3680,19 @@ list. The prefix of "task/" is optional. Acceptable values include:
 .TP 15
 \fBtask/affinity\fR
 enables resource containment using CPUSETs.
-This enables the \-\-cpu_bind and/or \-\-mem_bind srun options.
+This enables the \-\-cpu\-bind and/or \-\-mem\-bind srun options.
 If you use "task/affinity" and encounter problems, it may be due to
 the variety of system calls used to implement task affinity on
 different operating systems.
 .TP
 \fBtask/cgroup\fR
 enables resource containment using Linux control cgroups.
-This enables the \-\-cpu_bind and/or \-\-mem_bind srun options.
+This enables the \-\-cpu\-bind and/or \-\-mem\-bind srun options.
 NOTE: see "man cgroup.conf" for configuration details.
 .TP
 \fBtask/none\fR
 for systems requiring no special handling of user tasks.
-Lacks support for the \-\-cpu_bind and/or \-\-mem_bind srun options.
+Lacks support for the \-\-cpu\-bind and/or \-\-mem\-bind srun options.
 The default value is "task/none".
 .RE
 
@@ -3514,7 +3716,7 @@ Optional parameters for the task plugin.
 Multiple options should be comma separated.
 If \fBNone\fR, \fBBoards\fR, \fBSockets\fR, \fBCores\fR, \fBThreads\fR,
 and/or \fBVerbose\fR are specified, they will override
-the \fB\-\-cpu_bind\fR option specified by the user
+the \fB\-\-cpu\-bind\fR option specified by the user
 in the \fBsrun\fR command.
 \fBNone\fR, \fBBoards\fR, \fBSockets\fR, \fBCores\fR and \fBThreads\fR are mutually
 exclusive and since they decrease scheduling flexibility are not generally
@@ -3553,6 +3755,14 @@ Overrides automatic binding.
 \fBThreads\fR
 Bind to threads by default.
 Overrides automatic binding.
+.TP
+\fBSlurmdOffSpec\fR
+If specialized cores or CPUs are identified for the node (i.e. the
+\fBCoreSpecCount\fR or \fBCpuSpecList\fR are configured for the node),
+then Slurm daemons running on the compute node (i.e. slurmd and slurmstepd)
+should run outside of those resources (i.e. specialized resources are
+completely unavailable to Slurm daemons and jobs spawned by Slurm).
+This option may not be used with the \fBtask/cray\fR plugin.
 .TP
 \fBVerbose\fR
 Verbosely report binding before tasks run.
@@ -3920,15 +4130,16 @@ The default value is 1.
 
 .TP
 \fBCoreSpecCount\fR
-Number of cores on which Slurm compute node daemons (slurmd, slurmstepd) will
-be confined. These cores will not be available for allocation to user jobs.
-Isolation of the Slurm daemons from user jobs may improve
-performance.  If this option and \fBCPUSpecList\fR are both designated for a
+Number of cores reserved for system use.
+These cores will not be available for allocation to user jobs.
+Depending upon the \fBTaskPluginParameter\fR option of \fBSlurmOffSpec\fR,
+Slurm daemons (i.e. slurmd and slurmstepd) may either be confined to these
+resources (the default) or prevented from using these resources.
+Isolation of the Slurm daemons from user jobs may improve application performance.
+If this option and \fBCpuSpecList\fR are both designated for a
 node, an error is generated.  For information on the algorithm used by Slurm
 to select the cores refer to the core specialization documentation
-( https://slurm.schedmd.com/core_spec.html ). This option has no effect
-unless cgroup job confinement is also configured (\fBTaskPlugin=task/cgroup\fR
-with \fBConstrainCores=yes\fR in cgroup.conf).
+(https://slurm.schedmd.com/core_spec.html).
 
 .TP
 \fBCoresPerSocket\fR
@@ -3950,13 +4161,16 @@ If \fBCPUs\fR is omitted, it will be set equal to the product of
 The default value is 1.
 
 .TP
-\fBCPUSpecList\fR
-A comma delimited list of Slurm abstract CPU IDs on which Slurm compute
-node daemons (slurmd, slurmstepd) will be confined. The list will be expanded
-to include all other CPUs, if any, on the same cores. These cores will not be
-available for allocation to user jobs. Isolation of the
-Slurm daemons from user jobs may improve performance.  If this option
-and \fBCoreSpecCount\fR are both designated for a node, an error is generated.
+\fBCpuSpecList\fR
+A comma delimited list of Slurm abstract CPU IDs reserved for system use.
+The list will be expanded to include all other CPUs, if any, on the same cores.
+These cores will not be available for allocation to user jobs.
+Depending upon the \fBTaskPluginParameter\fR option of \fBSlurmOffSpec\fR,
+Slurm daemons (i.e. slurmd and slurmstepd) may either be confined to these
+resources (the default) or prevented from using these resources.
+Isolation of the Slurm daemons from user jobs may improve application performance.
+If this option and \fBCoreSpecCount\fR are both designated for a node,
+an error is generated.
 This option has no effect unless cgroup job confinement is also configured
 (\fBTaskPlugin=task/cgroup\fR with \fBConstrainCores=yes\fR in cgroup.conf).
 
@@ -3996,7 +4210,9 @@ for user allocations.
 If the task/cgroup plugin is configured and that plugin constrains memory
 allocations (i.e. \fBTaskPlugin=task/cgroup\fR in slurm.conf, plus
 \fBConstrainRAMSpace=yes\fR in cgroup.conf), then Slurm compute node daemons
-(slurmd plus slurmstepd) will be allocated the specified memory limit.
+(slurmd plus slurmstepd) will be allocated the specified memory limit. Note that
+having the Memory set in \fBSelectTypeParameters\fR as any of the options that
+has it as a consumable resource is needed for this option to work.
 The daemons will not be killed if they exhaust the memory allocation
 (ie. the Out-Of-Memory Killer is disabled for the daemon's memory cgroup).
 If the task/cgroup plugin is not configured, the specified memory will only be
@@ -4023,7 +4239,12 @@ See \fBCPUs\fR.
 .TP
 \fBRealMemory\fR
 Size of real memory on the node in megabytes (e.g. "2048").
-The default value is 1.
+The default value is 1. Lowering RealMemory with the goal of setting
+aside some amount for the OS and not available for job allocations
+will not work as intended if Memory is not set as a consumable
+resource in \fBSelectTypeParameters\fR. So one of the *_Memory
+options need to be enabled for that goal to be accomplished.
+Also see \fBMemSpecLimit\fR.
 
 .TP
 \fBReason\fR
@@ -4124,11 +4345,11 @@ Total size of temporary disk storage in \fBTmpFS\fR in megabytes
 identifies the location which jobs should use for temporary storage.
 Note this does not indicate the amount of free
 space available to the user on the node, only the total file
-system size. The system administration should insure this file
+system size. The system administration should ensure this file
 system is purged as needed so that user jobs have access to
 most of this space.
 The Prolog and/or Epilog programs (specified in the configuration file)
-might be used to insure the file system is kept clean.
+might be used to ensure the file system is kept clean.
 The default value is 0.
 
 .TP
@@ -4526,7 +4747,7 @@ Maximum number of CPUs on any node available to all jobs from this partition.
 This can be especially useful to schedule GPUs. For example a node can be
 associated with two Slurm partitions (e.g. "cpu" and "gpu") and the
 partition/queue "cpu" could be limited to only a subset of the node's CPUs,
-insuring that one or more CPUs would be available to jobs in the "gpu"
+ensuring that one or more CPUs would be available to jobs in the "gpu"
 partition/queue.
 
 .TP
@@ -4777,7 +4998,8 @@ See also the "Alternate" partition specification.
 .TP
 \fBTRESBillingWeights\fR
 TRESBillingWeights is used to define the billing weights of each TRES type that
-will be used in calculating the usage of a job.
+will be used in calculating the usage of a job. The calculated usage is used
+when calculating fairshare and when enforcing the TRES billing limit on jobs.
 
 Billing weights are specified as a comma\-separated list of
 \fI<TRES Type>\fR=\fI<TRES Billing Weight>\fR pairs.
@@ -4805,10 +5027,9 @@ will be MAX(1*1.0, 8*0.25) + (0*2.0) = 2.0.
 If TRESBillingWeights is not defined then the job is billed against the total
 number of allocated CPUs.
 
-\fBNOTE:\fR TRESBillingWeights is only used when calculating fairshare and
-doesn't affect job priority directly as it is currently not used for the size of
-the job. If you want TRES' to play a role in the job's priority then refer to
-the PriorityWeightTRES option.
+\fBNOTE:\fR TRESBillingWeights doesn't affect job priority directly as it is
+currently not used for the size of the job. If you want TRES' to play a role in
+the job's priority then refer to the PriorityWeightTRES option.
 
 .RE
 
@@ -5004,7 +5225,7 @@ In order to do so, follow this procedure:
 4. Restart the Slurm daemons
 .LP
 There should be no loss of any running or pending jobs.
-Insure that any nodes added to the cluster have the current
+Ensure that any nodes added to the cluster have the current
 slurm.conf file installed.
 .LP
 \fBCAUTION:\fR If two nodes are simultaneously configured as the
@@ -5278,7 +5499,7 @@ and permissions appropriately.
 See the section \fBFILE AND DIRECTORY PERMISSIONS\fR for information
 about the various files and directories used by Slurm.
 .LP
-It is recommended that the logrotate utility be used to insure that
+It is recommended that the logrotate utility be used to ensure that
 various log files do not become too large.
 This also applies to text files used for accounting,
 process tracking, and the slurmdbd log if they are used.
@@ -5287,46 +5508,31 @@ Here is a sample logrotate configuration. Make appropriate site modifications
 and save as /etc/logrotate.d/slurm on all nodes.
 See the \fBlogrotate\fR man page for more details.
 .LP
+.nf
 ##
-.br
 # Slurm Logrotate Configuration
-.br
 ##
-.br
-/var/log/slurm/*log {
-.br
-    compress
-.br
-    missingok
-.br
-    nocopytruncate
-.br
-    nocreate
-.br
-    nodelaycompress
-.br
-    nomail
-.br
-    notifempty
-.br
-    noolddir
-.br
-    rotate 5
-.br
-    sharedscripts
-.br
-    size=5M
-.br
-    create 640 slurm root
-.br
-    postrotate
-.br
-	/etc/init.d/slurm reconfig
-.br
-    endscript
-.br
+/var/log/slurm/*.log {
+	compress
+	missingok
+	nocopytruncate
+	nocreate
+	nodelaycompress
+	nomail
+	notifempty
+	noolddir
+	rotate 5
+	sharedscripts
+	size=5M
+	create 640 slurm root
+	postrotate
+		for daemon in $(/usr/bin/scontrol show daemons)
+		do
+			killall -SIGUSR2 $daemon
+		done
+	endscript
 }
-.br
+.fi
 
 .SH "COPYING"
 Copyright (C) 2002\-2007 The Regents of the University of California.

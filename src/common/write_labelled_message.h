@@ -42,13 +42,15 @@
 #include "slurm/slurm.h"
 
 /*
- * fd          is the file descriptor to write to
- * buf         is the char buffer to write
- * len         is the buffer length in bytes
- * taskid      is will be used in the label
- * label       if true, prepend each line of the buffer with a
- *               label for the task id
- * label_width is the number of digits to use for the task id
+ * fd             is the file descriptor to write to
+ * buf            is the char buffer to write
+ * len            is the buffer length in bytes
+ * task_id        is will be used in the label
+ * pack_offset    is the offset within a pack-job or NO_VAL
+ * task_offset    is the task offset within a pack-job or NO_VAL
+ * label          if true, prepend each line of the buffer with a
+ *                label for the task id
+ * task_id_width  is the number of digits to use for the task id
  *
  * Write as many lines from the message as possible.  Return
  * the number of bytes from the message that have been written,
@@ -58,8 +60,8 @@
  * in a '\n'), then add a newline to the output file, but only
  * in label mode.
  */
-
-int write_labelled_message(int fd, void *buf, int len, int taskid,
-			   bool label, int label_width);
+extern int write_labelled_message(int fd, void *buf, int len, int task_id,
+				  uint32_t pack_offset, uint32_t task_offset,
+				  bool label, int task_id_width);
 
 #endif

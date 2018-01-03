@@ -91,7 +91,8 @@ host_triplet = @host@
 target_triplet = @target@
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
+am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_compile_flag.m4 \
+	$(top_srcdir)/auxdir/ax_check_zlib.m4 \
 	$(top_srcdir)/auxdir/ax_gcc_builtin.m4 \
 	$(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/ax_pthread.m4 \
@@ -109,10 +110,10 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
 	$(top_srcdir)/auxdir/x_ac_curl.m4 \
 	$(top_srcdir)/auxdir/x_ac_databases.m4 \
 	$(top_srcdir)/auxdir/x_ac_debug.m4 \
+	$(top_srcdir)/auxdir/x_ac_deprecated.m4 \
 	$(top_srcdir)/auxdir/x_ac_dlfcn.m4 \
 	$(top_srcdir)/auxdir/x_ac_env.m4 \
 	$(top_srcdir)/auxdir/x_ac_freeipmi.m4 \
-	$(top_srcdir)/auxdir/x_ac_gpl_licensed.m4 \
 	$(top_srcdir)/auxdir/x_ac_hwloc.m4 \
 	$(top_srcdir)/auxdir/x_ac_iso.m4 \
 	$(top_srcdir)/auxdir/x_ac_json.m4 \
@@ -133,6 +134,10 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
 	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
 	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
+	$(top_srcdir)/auxdir/x_ac_ssh2.m4 \
+	$(top_srcdir)/auxdir/x_ac_systemd.m4 \
+	$(top_srcdir)/auxdir/x_ac_ucx.m4 \
+	$(top_srcdir)/auxdir/x_ac_uid_gid_size.m4 \
 	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
@@ -143,8 +148,7 @@ am__CONFIG_DISTCLEAN_FILES = config.status config.cache config.log \
 mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = config.h $(top_builddir)/slurm/slurm.h
 CONFIG_CLEAN_FILES = contribs/perlapi/libslurm/perl/Makefile.PL \
-	contribs/perlapi/libslurmdb/perl/Makefile.PL \
-	contribs/phpext/slurm_php/config.m4
+	contribs/perlapi/libslurmdb/perl/Makefile.PL
 CONFIG_CLEAN_VPATH_FILES =
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
@@ -239,7 +243,6 @@ am__DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/config.h.in \
 	$(top_srcdir)/auxdir/missing \
 	$(top_srcdir)/contribs/perlapi/libslurm/perl/Makefile.PL.in \
 	$(top_srcdir)/contribs/perlapi/libslurmdb/perl/Makefile.PL.in \
-	$(top_srcdir)/contribs/phpext/slurm_php/config.m4.in \
 	$(top_srcdir)/slurm/slurm.h.in AUTHORS COPYING INSTALL NEWS
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 distdir = $(PACKAGE)-$(VERSION)
@@ -379,6 +382,10 @@ LIBCURL_CPPFLAGS = @LIBCURL_CPPFLAGS@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LIBTOOL = @LIBTOOL@
+LIB_SLURM = @LIB_SLURM@
+LIB_SLURMDB = @LIB_SLURMDB@
+LIB_SLURMDB_BUILD = @LIB_SLURMDB_BUILD@
+LIB_SLURM_BUILD = @LIB_SLURM_BUILD@
 LIPO = @LIPO@
 LN_S = @LN_S@
 LTLIBOBJS = @LTLIBOBJS@
@@ -424,7 +431,6 @@ PATH_SEPARATOR = @PATH_SEPARATOR@
 PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
-PMIX_LIBS = @PMIX_LIBS@
 PMIX_V1_CPPFLAGS = @PMIX_V1_CPPFLAGS@
 PMIX_V1_LDFLAGS = @PMIX_V1_LDFLAGS@
 PMIX_V2_CPPFLAGS = @PMIX_V2_CPPFLAGS@
@@ -442,8 +448,6 @@ RRDTOOL_LDFLAGS = @RRDTOOL_LDFLAGS@
 RRDTOOL_LIBS = @RRDTOOL_LIBS@
 RUNJOB_LDFLAGS = @RUNJOB_LDFLAGS@
 SED = @SED@
-SEMAPHORE_LIBS = @SEMAPHORE_LIBS@
-SEMAPHORE_SOURCES = @SEMAPHORE_SOURCES@
 SET_MAKE = @SET_MAKE@
 SHELL = @SHELL@
 SLEEP_CMD = @SLEEP_CMD@
@@ -462,12 +466,18 @@ SLURM_MINOR = @SLURM_MINOR@
 SLURM_PREFIX = @SLURM_PREFIX@
 SLURM_VERSION_NUMBER = @SLURM_VERSION_NUMBER@
 SLURM_VERSION_STRING = @SLURM_VERSION_STRING@
-SO_LDFLAGS = @SO_LDFLAGS@
+SSH2_CPPFLAGS = @SSH2_CPPFLAGS@
+SSH2_LDFLAGS = @SSH2_LDFLAGS@
+SSH2_LIBS = @SSH2_LIBS@
 SSL_CPPFLAGS = @SSL_CPPFLAGS@
 SSL_LDFLAGS = @SSL_LDFLAGS@
 SSL_LIBS = @SSL_LIBS@
 STRIP = @STRIP@
 SUCMD = @SUCMD@
+SYSTEMD_TASKSMAX_OPTION = @SYSTEMD_TASKSMAX_OPTION@
+UCX_CPPFLAGS = @UCX_CPPFLAGS@
+UCX_LDFLAGS = @UCX_LDFLAGS@
+UCX_LIBS = @UCX_LIBS@
 UTIL_LIBS = @UTIL_LIBS@
 VERSION = @VERSION@
 ZLIB_CPPFLAGS = @ZLIB_CPPFLAGS@
@@ -644,8 +654,6 @@ distclean-hdr:
 contribs/perlapi/libslurm/perl/Makefile.PL: $(top_builddir)/config.status $(top_srcdir)/contribs/perlapi/libslurm/perl/Makefile.PL.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 contribs/perlapi/libslurmdb/perl/Makefile.PL: $(top_builddir)/config.status $(top_srcdir)/contribs/perlapi/libslurmdb/perl/Makefile.PL.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-contribs/phpext/slurm_php/config.m4: $(top_builddir)/config.status $(top_srcdir)/contribs/phpext/slurm_php/config.m4.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 
 mostlyclean-libtool:

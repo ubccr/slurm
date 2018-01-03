@@ -96,9 +96,10 @@ static void _clear_slurmdbd_conf(void)
 		xfree(slurmdbd_conf->dbd_host);
 		slurmdbd_conf->dbd_port = 0;
 		slurmdbd_conf->debug_flags = 0;
-		slurmdbd_conf->debug_level = 0;
+		slurmdbd_conf->debug_level = LOG_LEVEL_QUIET;
 		xfree(slurmdbd_conf->default_qos);
 		xfree(slurmdbd_conf->log_file);
+		slurmdbd_conf->syslog_debug = LOG_LEVEL_QUIET;
 		xfree(slurmdbd_conf->pid_file);
 		xfree(slurmdbd_conf->plugindir);
 		slurmdbd_conf->private_data = 0;
@@ -150,10 +151,12 @@ extern int read_slurmdbd_conf(void)
 		{"DbdPort", S_P_UINT16},
 		{"DebugFlags", S_P_STRING},
 		{"DebugLevel", S_P_STRING},
+		{"DebugLevelSyslog", S_P_STRING},
 		{"DefaultQOS", S_P_STRING},
 		{"JobPurge", S_P_UINT32},
 		{"LogFile", S_P_STRING},
 		{"LogTimeFormat", S_P_STRING},
+		{"MaxQueryTimeRange", S_P_STRING},
 		{"MessageTimeout", S_P_UINT16},
 		{"PidFile", S_P_STRING},
 		{"PluginDir", S_P_STRING},
@@ -249,7 +252,7 @@ extern int read_slurmdbd_conf(void)
 
 		if (s_p_get_string(&temp_str, "DebugLevel", tbl)) {
 			slurmdbd_conf->debug_level = log_string2num(temp_str);
-			if (slurmdbd_conf->debug_level == (uint16_t) NO_VAL)
+			if (slurmdbd_conf->debug_level == NO_VAL16)
 				fatal("Invalid DebugLevel %s", temp_str);
 			xfree(temp_str);
 		}
@@ -265,6 +268,13 @@ extern int read_slurmdbd_conf(void)
 		}
 
 		s_p_get_string(&slurmdbd_conf->log_file, "LogFile", tbl);
+
+		if (s_p_get_string(&temp_str, "DebugLevelSyslog", tbl)) {
+			slurmdbd_conf->syslog_debug = log_string2num(temp_str);
+			if (slurmdbd_conf->syslog_debug == NO_VAL16)
+				fatal("Invalid DebugLevelSyslog %s", temp_str);
+			xfree(temp_str);
+		}
 
 		if (s_p_get_string(&temp_str, "LogTimeFormat", tbl)) {
 			if (xstrcasestr(temp_str, "iso8601_ms"))
@@ -285,6 +295,13 @@ extern int read_slurmdbd_conf(void)
 		} else
 			slurmdbd_conf->log_fmt = LOG_FMT_ISO8601_MS;
 
+		if (s_p_get_string(&temp_str, "MaxQueryTimeRange", tbl)) {
+			slurmdbd_conf->max_time_range = time_str2mins(temp_str);
+			xfree(temp_str);
+		} else {
+			slurmdbd_conf->max_time_range = INFINITE;
+		}
+
 		if (!s_p_get_uint16(&slurmdbd_conf->msg_timeout,
 				    "MessageTimeout", tbl))
 			slurmdbd_conf->msg_timeout = DEFAULT_MSG_TIMEOUT;
@@ -303,6 +320,9 @@ extern int read_slurmdbd_conf(void)
 			if (xstrcasestr(temp_str, "job"))
 				slurmdbd_conf->private_data
 					|= PRIVATE_DATA_JOBS;
+			if (xstrcasestr(temp_str, "event"))
+				slurmdbd_conf->private_data
+					|= PRIVATE_DATA_EVENTS;
 			if (xstrcasestr(temp_str, "node"))
 				slurmdbd_conf->private_data
 					|= PRIVATE_DATA_NODES;
@@ -619,6 +639,7 @@ extern void log_config(void)
 	debug2("DebugFlags        = %s", tmp_ptr);
 	xfree(tmp_ptr);
 	debug2("DebugLevel        = %u", slurmdbd_conf->debug_level);
+	debug2("DebugLevelSyslog  = %u", slurmdbd_conf->syslog_debug);
 	debug2("DefaultQOS        = %s", slurmdbd_conf->default_qos);
 
 	debug2("LogFile           = %s", slurmdbd_conf->log_file);
@@ -812,6 +833,11 @@ extern List dump_config(void)
 	key_pair = xmalloc(sizeof(config_key_pair_t));
 	key_pair->name = xstrdup("DebugLevel");
 	key_pair->value = xstrdup(log_num2string(slurmdbd_conf->debug_level));
+	list_append(my_list, key_pair);
+
+	key_pair = xmalloc(sizeof(config_key_pair_t));
+	key_pair->name = xstrdup("DebugLevelSyslog");
+	key_pair->value = xstrdup(log_num2string(slurmdbd_conf->syslog_debug));
 	list_append(my_list, key_pair);
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));

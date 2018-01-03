@@ -97,7 +97,8 @@
 /* Global variables */
 List active_feature_list;	/* list of currently active features_records */
 List avail_feature_list;	/* list of available features_records */
-bool slurmctld_init_db = 1;
+bool node_features_updated = false;
+bool slurmctld_init_db = true;
 
 static void _acct_restore_active_jobs(void);
 static void _add_config_feature(List feature_list, char *feature,
@@ -299,7 +300,6 @@ static int _reset_node_bitmaps(void *x, void *arg)
 
 static int _set_share_node_bitmap(void *x, void *arg)
 {
-	bitstr_t *tmp_bits;
 	struct job_record *job_ptr = (struct job_record *) x;
 
 	if (!IS_JOB_RUNNING(job_ptr) ||
@@ -308,10 +308,7 @@ static int _set_share_node_bitmap(void *x, void *arg)
 	    (job_ptr->details->share_res != 0))
 		return 0;
 
-	tmp_bits = bit_copy(job_ptr->node_bitmap);
-	bit_not(tmp_bits);
-	bit_and(share_node_bitmap, tmp_bits);
-	FREE_NULL_BITMAP(tmp_bits);
+	bit_and_not(share_node_bitmap, job_ptr->node_bitmap);
 
 	return 0;
 }
@@ -492,21 +489,20 @@ static void _handle_all_downnodes(void)
  */
 static int _build_all_nodeline_info(void)
 {
-	int rc;
+	int rc, rc2;
 
 	/* Load the node table here */
 	rc = build_all_nodeline_info(false, slurmctld_tres_cnt);
-	rc = MAX(build_all_frontend_info(false), rc);
+	rc2 = build_all_frontend_info(false);
+	rc = MAX(rc, rc2);
 
 	/* Now perform operations on the node table as needed by slurmctld */
 #ifdef HAVE_BG
 {
-	slurm_ctl_conf_t *conf = slurm_conf_lock();
 	char *node_000 = NULL;
 	struct node_record *node_rec = NULL;
-	if (conf->node_prefix)
-		node_000 = xstrdup(conf->node_prefix);
-	slurm_conf_unlock();
+	if (slurmctld_conf.node_prefix)
+		node_000 = xstrdup(slurmctld_conf.node_prefix);
 #if (SYSTEM_DIMENSIONS == 3)
 	xstrcat(node_000, "000");
 #endif
@@ -577,7 +573,6 @@ extern void qos_list_build(char *qos, bitstr_t **qos_bits)
 
 	if (!qos) {
 		FREE_NULL_BITMAP(*qos_bits);
-		*qos_bits = NULL;
 		return;
 	}
 
@@ -653,10 +648,10 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 		part_ptr->flags |= PART_FLAG_DEFAULT;
 	}
 
-	if (part->preempt_mode != (uint16_t) NO_VAL)
+	if (part->preempt_mode != NO_VAL16)
 		part_ptr->preempt_mode = part->preempt_mode;
 
-	if (part->disable_root_jobs == (uint16_t)NO_VAL) {
+	if (part->disable_root_jobs == NO_VAL16) {
 		if (slurmctld_conf.disable_root_jobs)
 			part_ptr->flags |= PART_FLAG_NO_ROOT;
 	} else if (part->disable_root_jobs) {
@@ -873,6 +868,118 @@ static void _sync_part_prio(void)
 	list_for_each(part_list, _reset_part_prio, NULL);
 }
 
+static void _abort_job(struct job_record *job_ptr, uint32_t job_state,
+		       uint16_t state_reason, char *reason_string)
+{
+	time_t now = time(NULL);
+
+	job_ptr->job_state = job_state | JOB_COMPLETING;
+	build_cg_bitmap(job_ptr);
+	job_ptr->end_time = MIN(job_ptr->end_time, now);
+	job_ptr->state_reason = state_reason;
+	xfree(job_ptr->state_desc);
+	job_ptr->state_desc = xstrdup(reason_string);
+	job_completion_logger(job_ptr, false);
+	if (job_ptr->job_state == JOB_NODE_FAIL) {
+		/* build_cg_bitmap() may clear JOB_COMPLETING */
+		epilog_slurmctld(job_ptr);
+	}
+}
+
+static int _mark_pack_unused(void *x, void *arg)
+{
+	struct job_record *job_ptr = (struct job_record *) x;
+	job_ptr->bit_flags &= (~JOB_PACK_FLAG);
+	return 0;
+}
+
+static int _mark_pack_used(void *x, void *arg)
+{
+	struct job_record *job_ptr = (struct job_record *) x;
+	job_ptr->bit_flags |= JOB_PACK_FLAG;
+	return 0;
+}
+
+static int _test_pack_used(void *x, void *arg)
+{
+	struct job_record *job_ptr = (struct job_record *) x;
+
+	if ((job_ptr->pack_job_id == 0) || IS_JOB_FINISHED(job_ptr))
+		return 0;
+	if (job_ptr->bit_flags & JOB_PACK_FLAG)
+		return 0;
+
+	error("Incomplete pack job being aborted %u+%u (%u)",
+	      job_ptr->pack_job_id, job_ptr->pack_job_offset, job_ptr->job_id);
+	_abort_job(job_ptr, JOB_FAILED, FAIL_SYSTEM, "incomplete pack_job");
+
+	return 0;
+}
+
+/* Validate heterogeneous jobs
+ * Make sure that every active (not yet complete) job has all of its components
+ * and they are all in the same state. Also rebuild pack_job_list */
+static void _validate_pack_jobs(void)
+{
+	ListIterator job_iterator;
+	struct job_record *job_ptr, *pack_job_ptr;
+	hostset_t hs;
+	char *job_id_str;
+	uint32_t job_id;
+	bool pack_job_valid;
+
+	list_for_each(job_list, _mark_pack_unused, NULL);
+
+	job_iterator = list_iterator_create(job_list);
+	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
+		if ((job_ptr->pack_job_id == 0) ||
+		    (job_ptr->pack_job_offset != 0))
+			continue;
+		/* active pack job leader found */
+		FREE_NULL_LIST(job_ptr->pack_job_list);
+		job_id_str = NULL;
+		/* Need to wrap numbers with brackets for hostset functions */
+		xstrfmtcat(job_id_str, "[%s]", job_ptr->pack_job_id_set);
+		hs = hostset_create(job_id_str);
+		xfree(job_id_str);
+		if (!hs) {
+			error("Job %u has invalid pack_job_id_set(%s)",
+			      job_ptr->job_id, job_ptr->pack_job_id_set);
+			_abort_job(job_ptr, JOB_FAILED, FAIL_SYSTEM,
+				   "invalid pack_job_id_set");
+			continue;
+		}
+		job_ptr->pack_job_list = list_create(NULL);
+		pack_job_valid = true;	/* assume valid for now */
+		while (pack_job_valid && (job_id_str = hostset_shift(hs))) {
+			job_id = (uint32_t) strtoll(job_id_str, NULL, 10);
+			pack_job_ptr = find_job_record(job_id);
+			if (!pack_job_ptr) {
+				error("Could not find job %u, part of pack job %u",
+				      job_id, job_ptr->job_id);
+				pack_job_valid = false;
+			} else if (pack_job_ptr->pack_job_id !=
+				   job_ptr->job_id) {
+				error("Invalid state of job %u, part of pack job %u",
+				      job_id, job_ptr->job_id);
+				pack_job_valid = false;
+			} else {
+				list_append(job_ptr->pack_job_list,
+					    pack_job_ptr);
+			}
+			free(job_id_str);
+		}
+		hostset_destroy(hs);
+		if (pack_job_valid) {
+			list_for_each(job_ptr->pack_job_list, _mark_pack_used,
+				      NULL);
+		}
+	}
+	list_iterator_destroy(job_iterator);
+
+	list_for_each(job_list, _test_pack_used, NULL);
+}
+
 /*
  * read_slurm_conf - load the slurm configuration from the configured file.
  * read_slurm_conf can be called more than once if so desired.
@@ -985,12 +1092,11 @@ int read_slurm_conf(int recover, bool reconfig)
 	g_slurm_jobcomp_init(slurmctld_conf.job_comp_loc);
 	if (slurm_sched_init() != SLURM_SUCCESS)
 		fatal("Failed to initialize sched plugin");
-	if (!reconfig && (old_preempt_mode & PREEMPT_MODE_GANG) &&
-	    (gs_init() != SLURM_SUCCESS)) {
+	if (!reconfig && (old_preempt_mode & PREEMPT_MODE_GANG)) {
 		/* gs_init() must immediately follow slurm_sched_init() */
-		fatal("Failed to initialize gang scheduler");
+		gs_init();
 	}
-	if (switch_init() != SLURM_SUCCESS)
+	if (switch_init(1) != SLURM_SUCCESS)
 		fatal("Failed to initialize switch plugin");
 
 	if (default_part_loc == NULL)
@@ -1131,6 +1237,7 @@ int read_slurm_conf(int recover, bool reconfig)
 		build_feature_list_eq();
 	}
 
+	_validate_pack_jobs();
 	(void) _sync_nodes_to_comp_job();/* must follow select_g_node_init() */
 	load_part_uid_allow_list(1);
 
@@ -1363,10 +1470,12 @@ extern void build_feature_list_ne(void)
 	}
 }
 
-/* Update active_feature_list or avail_feature_list
+/*
+ * Update active_feature_list or avail_feature_list
  * feature_list IN - List to update: active_feature_list or avail_feature_list
  * new_features IN - New active_features
- * node_bitmap IN - Nodes with the new active_features value */
+ * node_bitmap IN - Nodes with the new active_features value
+ */
 extern void update_feature_list(List feature_list, char *new_features,
 				bitstr_t *node_bitmap)
 {
@@ -1374,15 +1483,15 @@ extern void update_feature_list(List feature_list, char *new_features,
 	ListIterator feature_iter;
 	char *tmp_str, *token, *last = NULL;
 
-	/* Clear these nodes from the feature_list record,
-	 * then restore as needed */
+	/*
+	 * Clear these nodes from the feature_list record,
+	 * then restore as needed
+	 */
 	feature_iter = list_iterator_create(feature_list);
-	bit_not(node_bitmap);
 	while ((feature_ptr = (node_feature_t *) list_next(feature_iter))) {
-		bit_and(feature_ptr->node_bitmap, node_bitmap);
+		bit_and_not(feature_ptr->node_bitmap, node_bitmap);
 	}
 	list_iterator_destroy(feature_iter);
-	bit_not(node_bitmap);
 
 	if (new_features) {
 		tmp_str = xstrdup(new_features);
@@ -1393,6 +1502,7 @@ extern void update_feature_list(List feature_list, char *new_features,
 		}
 		xfree(tmp_str);
 	}
+	node_features_updated = true;
 }
 
 static void _gres_reconfig(bool reconfig)
@@ -1428,13 +1538,10 @@ static int _restore_node_state(int recover,
 	struct node_record *node_ptr, *old_node_ptr;
 	int i, rc = SLURM_SUCCESS;
 	hostset_t hs = NULL;
-	slurm_ctl_conf_t *conf = slurm_conf_lock();
 	bool power_save_mode = false;
 
-	if (conf->suspend_program && conf->resume_program)
+	if (slurmctld_conf.suspend_program && slurmctld_conf.resume_program)
 		power_save_mode = true;
-	slurm_conf_unlock();
-
 
 	for (i=0, node_ptr=node_record_table_ptr; i<node_record_count;
 	     i++, node_ptr++) {
@@ -1611,10 +1718,11 @@ static void _purge_old_node_state(struct node_record *old_node_table_ptr,
 	struct node_record *node_ptr;
 
 	node_ptr = old_node_table_ptr;
-	for (i=0; i< old_node_record_count; i++, node_ptr++)
-		purge_node_rec(node_ptr);
-
-	xfree(old_node_table_ptr);
+	if (old_node_table_ptr) {
+		for (i = 0; i< old_node_record_count; i++, node_ptr++)
+			purge_node_rec(node_ptr);
+		xfree(old_node_table_ptr);
+	}
 }
 
 /* Restore partition information from saved records */
@@ -1961,13 +2069,15 @@ static int _update_preempt(uint16_t old_preempt_mode)
 
 	if (new_preempt_mode & PREEMPT_MODE_GANG) {
 		info("Enabling gang scheduling");
-		return gs_init();
+		gs_init();
+		return SLURM_SUCCESS;
 	}
 
 	if (old_preempt_mode == PREEMPT_MODE_GANG) {
 		info("Disabling gang scheduling");
 		gs_wake_jobs();
-		return gs_fini();
+		gs_fini();
+		return SLURM_SUCCESS;
 	}
 
 	error("Invalid gang scheduling mode change");
@@ -2071,7 +2181,7 @@ static int _sync_nodes_to_jobs(bool reconfig)
 		    job_ptr->details && job_ptr->details->prolog_running) {
 			job_ptr->details->prolog_running = 0;
 			if (IS_JOB_CONFIGURING(job_ptr)) {
-				(void) prolog_slurmctld(job_ptr);
+				prolog_slurmctld(job_ptr);
 				(void) bb_g_job_begin(job_ptr);
 			}
 		}
@@ -2209,19 +2319,10 @@ static int _sync_nodes_to_active_job(struct job_record *job_ptr)
 			job_post_resize_acctg(job_ptr);
 			accounting_enforce = save_accounting_enforce;
 		} else if (IS_NODE_DOWN(node_ptr) && IS_JOB_RUNNING(job_ptr)) {
-			time_t now = time(NULL);
 			info("Killing job %u on DOWN node %s",
 			     job_ptr->job_id, node_ptr->name);
-			job_ptr->job_state = JOB_NODE_FAIL | JOB_COMPLETING;
-			build_cg_bitmap(job_ptr);
-			job_ptr->end_time = MIN(job_ptr->end_time, now);
-			job_ptr->state_reason = FAIL_DOWN_NODE;
-			xfree(job_ptr->state_desc);
-			job_completion_logger(job_ptr, false);
-			if (job_ptr->job_state == JOB_NODE_FAIL) {
-				/* build_cg_bitmap() may clear JOB_COMPLETING */
-				epilog_slurmctld(job_ptr);
-			}
+			_abort_job(job_ptr, JOB_NODE_FAIL, FAIL_DOWN_NODE,
+				   NULL);
 			cnt++;
 		} else if (IS_NODE_IDLE(node_ptr)) {
 			cnt++;
@@ -2495,6 +2596,8 @@ extern int load_config_state_lite(void)
 	state_fd = open(state_file, O_RDONLY);
 	if (state_fd < 0) {
 		debug2("No last_config_lite file (%s) to recover", state_file);
+		xfree(state_file);
+		return ENOENT;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -2524,6 +2627,10 @@ extern int load_config_state_lite(void)
 	safe_unpack16(&ver, buffer);
 	debug3("Version in last_conf_lite header is %u", ver);
 	if (ver > SLURM_PROTOCOL_VERSION || ver < SLURM_MIN_PROTOCOL_VERSION) {
+		if (!ignore_state_errors)
+			fatal("Can not recover last_conf_lite, incompatible version, (%u not between %d and %d), start with '-i' to ignore this",
+			      ver, SLURM_MIN_PROTOCOL_VERSION,
+			      SLURM_PROTOCOL_VERSION);
 		error("***********************************************");
 		error("Can not recover last_conf_lite, incompatible version, "
 		      "(%u not between %d and %d)",
@@ -2548,8 +2655,10 @@ extern int load_config_state_lite(void)
 	return SLURM_SUCCESS;
 
 unpack_error:
-	if (buffer)
-		free_buf(buffer);
+	if (!ignore_state_errors)
+		fatal("Incomplete last_config_lite checkpoint file, start with '-i' to ignore this");
+	error("Incomplete last_config_lite checkpoint file");
+	free_buf(buffer);
 
 	return SLURM_ERROR;
 }

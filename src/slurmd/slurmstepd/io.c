@@ -72,10 +72,9 @@
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
 
-
+#include "src/slurmd/common/fname.h"
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/io.h"
-#include "src/slurmd/slurmstepd/fname.h"
 #include "src/slurmd/slurmstepd/slurmstepd.h"
 
 /**********************************************************************
@@ -116,7 +115,7 @@ struct client_io_info {
 	   write for one task. -1 means accept output from any task. */
 	int  ltaskid_stdout, ltaskid_stderr;
 	bool labelio;
-	int  label_width;
+	int  taskid_width;
 
 	/* true if writing to a file, false if writing to a socket */
 	bool is_local_file;
@@ -534,8 +533,10 @@ _local_file_write(eio_obj_t *obj, List objs)
 					io_hdr_packed_size();
 	}
 
-	/* This code to make a buffer, fill it, unpack its contents, and free
-	   it is just used to read the header to get the global task id. */
+	/*
+	 * This code to make a buffer, fill it, unpack its contents, and free
+	 * it is just used to read the header to get the global task id.
+	 */
 	header_tmp_buf = create_buf(client->out_msg->data,
 				    client->out_msg->length);
 	if (!header_tmp_buf) {
@@ -546,8 +547,10 @@ _local_file_write(eio_obj_t *obj, List objs)
 	header_tmp_buf->head = NULL;	/* CLANG false positive bug here */
 	free_buf(header_tmp_buf);
 
-	/* A zero-length message indicates the end of a stream from one
-	   of the tasks.  Just free the message and return. */
+	/*
+	 * A zero-length message indicates the end of a stream from one
+	 * of the tasks.  Just free the message and return.
+	 */
 	if (header.length == 0) {
 		_free_outgoing_msg(client->out_msg, client->job);
 		client->out_msg = NULL;
@@ -557,10 +560,10 @@ _local_file_write(eio_obj_t *obj, List objs)
 	/* Write the message to the file. */
 	buf = client->out_msg->data +
 		(client->out_msg->length - client->out_remaining);
-
 	n = write_labelled_message(obj->fd, buf, client->out_remaining,
-				   header.gtaskid, client->labelio,
-				   client->label_width);
+				   header.gtaskid, client->job->pack_offset,
+				   client->job->pack_task_offset,
+				   client->labelio, client->taskid_width);
 	if (n < 0) {
 		client->out_eof = true;
 		_free_all_outgoing_msgs(client->msg_queue, client->job);
@@ -863,8 +866,6 @@ _spawn_window_manager(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 	slurm_addr_t pty_addr;
 	uint16_t port_u;
 	struct window_info *win_info;
-	pthread_attr_t attr;
-	pthread_t win_id;
 
 #if 0
 	/* NOTE: SLURM_LAUNCH_NODE_IPADDR is not available at this point */
@@ -908,10 +909,7 @@ _spawn_window_manager(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 	win_info->task   = task;
 	win_info->job    = job;
 	win_info->pty_fd = pty_fd;
-	slurm_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if (pthread_create(&win_id, &attr, &_window_manager, (void *) win_info))
-		error("pthread_create(pty_conn): %m");
+	slurm_thread_create_detached(NULL, _window_manager, win_info);
 }
 #endif
 
@@ -1184,29 +1182,9 @@ io_init_tasks_stdio(stepd_step_rec_t *job)
 	return rc;
 }
 
-int
-io_thread_start(stepd_step_rec_t *job)
+extern void io_thread_start(stepd_step_rec_t *job)
 {
-	pthread_attr_t attr;
-	int rc = 0, retries = 0;
-
-	slurm_attr_init(&attr);
-
-	while (pthread_create(&job->ioid, &attr, &_io_thr, (void *)job)) {
-		error("io_thread_start: pthread_create error %m");
-		if (++retries > MAX_RETRIES) {
-			error("io_thread_start: Can't create pthread");
-			rc = -1;
-			break;
-		}
-		usleep(10);	/* sleep and again */
-	}
-
-	slurm_attr_destroy(&attr);
-
-	/*fatal_add_cleanup(&_fatal_cleanup, (void *) job);*/
-
-	return rc;
+	slurm_thread_create(&job->ioid, _io_thr, job);
 }
 
 
@@ -1538,10 +1516,10 @@ io_create_local_client(const char *filename, int file_flags,
 	client->labelio = labelio;
 	client->is_local_file = true;
 
-	client->label_width = 1;
-	tmp = job->node_tasks-1;
+	client->taskid_width = 1;
+	tmp = job->node_tasks - 1;
 	while ((tmp /= 10) > 0)
-		client->label_width++;
+		client->taskid_width++;
 
 
 	obj = eio_obj_create(fd, &local_file_ops, (void *)client);
@@ -1610,7 +1588,7 @@ io_initial_client_connect(srun_info_t *srun, stepd_step_rec_t *job,
 	client->ltaskid_stdout = stdout_tasks;
 	client->ltaskid_stderr = stderr_tasks;
 	client->labelio = false;
-	client->label_width = 0;
+	client->taskid_width = 0;
 	client->is_local_file = false;
 
 	obj = eio_obj_create(sock, &client_ops, (void *)client);
@@ -1670,7 +1648,7 @@ io_client_connect(srun_info_t *srun, stepd_step_rec_t *job)
 	client->ltaskid_stdout = -1;     /* accept from all tasks */
 	client->ltaskid_stderr = -1;     /* accept from all tasks */
 	client->labelio = false;
-	client->label_width = 0;
+	client->taskid_width = 0;
 	client->is_local_file = false;
 
 	/* client object adds itself to job->clients in _client_writable */

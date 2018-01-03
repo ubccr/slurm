@@ -545,7 +545,7 @@ static void _display_info_bb(List info_list, popup_info_t *popup_win)
 		bb_ptr = sview_bb_info->bb_ptr;
 
 		if (bb_ptr->name) {
-			strcpy(bb_name_id, bb_ptr->name);
+			strlcpy(bb_name_id, bb_ptr->name, sizeof(bb_name_id));
 		} else if (bb_ptr->array_task_id == NO_VAL) {
 			convert_num_unit(bb_ptr->job_id,
 					 bb_name_id,
@@ -688,6 +688,17 @@ extern void get_info_bb(GtkTable *table, display_data_t *display_data)
 		display_data_bb->set_menu = local_display_data->set_menu;
 		goto reset_curs;
 	}
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		view = ERROR_VIEW;
+		if (display_widget)
+			gtk_widget_destroy(display_widget);
+		label = gtk_label_new("Not available in a federated view");
+		gtk_table_attach_defaults(GTK_TABLE(table), label, 0, 1, 0, 1);
+		gtk_widget_show(label);
+		display_widget = gtk_widget_ref(label);
+		goto end_it;
+	}
+
 	if (display_widget && toggled) {
 		gtk_widget_destroy(display_widget);
 		display_widget = NULL;
@@ -779,7 +790,7 @@ extern void specific_info_bb(popup_info_t *popup_win)
 	List bb_list = NULL;
 	List send_bb_list = NULL;
 	sview_bb_info_t *sview_bb_info_ptr = NULL;
-	int i=-1;
+	int i = -1;
 	ListIterator itr = NULL;
 
 	if (!spec_info->display_widget) {
@@ -817,11 +828,10 @@ extern void specific_info_bb(popup_info_t *popup_win)
 display_it:
 
 	bb_list = _create_bb_info_list(bb_info_ptr);
-
 	if (!bb_list)
 		return;
 
-	if (spec_info->view == ERROR_VIEW && spec_info->display_widget) {
+	if ((spec_info->view == ERROR_VIEW) && spec_info->display_widget) {
 		gtk_widget_destroy(spec_info->display_widget);
 		spec_info->display_widget = NULL;
 	}
@@ -836,9 +846,11 @@ display_it:
 		gtk_table_attach_defaults(popup_win->table,
 					  GTK_WIDGET(tree_view),
 					  0, 1, 0, 1);
-		/* since this function sets the model of the tree_view
+		/*
+		 * since this function sets the model of the tree_view
 		 * to the treestore we don't really care about
-		 * the return value */
+		 * the return value
+		 */
 		create_treestore(tree_view, popup_win->display_data,
 				 SORTID_CNT, SORTID_NAME, SORTID_COLOR);
 	}
@@ -851,26 +863,34 @@ display_it:
 		goto end_it;
 	}
 
-	/* just linking to another list, don't free the inside, just the list */
+	/*
+	 * just linking to another list, don't free the inside, just the list
+	 */
 	send_bb_list = list_create(NULL);
 	itr = list_iterator_create(bb_list);
 	i = -1;
-	/* Set up additional menu options(ie the right click menu stuff) */
+	/*
+	 * Set up additional menu options(ie the right click menu stuff)
+	 */
 	while ((sview_bb_info_ptr = list_next(itr))) {
 		i++;
-		/* Since we will not use any of these pages we will */
-		/* leave them blank */
-		switch(spec_info->type) {
-		case PART_PAGE:
+		switch (spec_info->type) {
+		case BB_PAGE:
+			list_push(send_bb_list, sview_bb_info_ptr);
+			break;
 		case BLOCK_PAGE:
-		case NODE_PAGE:
 		case JOB_PAGE:
+		case NODE_PAGE:
+		case PART_PAGE:
 		case RESV_PAGE:
 		default:
+			/*
+			 * Since we will not use any of these pages we will
+			 * leave them blank
+			 */
 			g_print("Unknown type %d\n", spec_info->type);
-			continue;
+			break;
 		}
-		list_push(send_bb_list, sview_bb_info_ptr);
 	}
 	list_iterator_destroy(itr);
 	post_setup_popup_grid_list(popup_win);
@@ -892,7 +912,7 @@ extern void set_menus_bb(void *arg, void *arg2, GtkTreePath *path, int type)
 	popup_info_t *popup_win = (popup_info_t *)arg;
 	GtkMenu *menu = (GtkMenu *)arg2;
 
-	switch(type) {
+	switch (type) {
 	case TAB_CLICKED:
 		make_fields_menu(NULL, menu, display_data_bb, SORTID_CNT);
 		break;
@@ -930,14 +950,14 @@ extern void set_menus_bb(void *arg, void *arg2, GtkTreePath *path, int type)
 extern void popup_all_bb(GtkTreeModel *model, GtkTreeIter *iter, int id)
 {
 	char *name = NULL;
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 	GError *error = NULL;
 
 	gtk_tree_model_get(model, iter, SORTID_NAME, &name, -1);
 
-	switch(id) {
+	switch (id) {
 	case INFO_PAGE:
 		snprintf(title, 100, "Full info for Burst Buffer %s", name);
 		break;
@@ -973,7 +993,7 @@ extern void popup_all_bb(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	popup_win->iter = *iter;
 
 	/* Sets up right click information */
-	switch(id) {
+	switch (id) {
 	case JOB_PAGE:
 	case INFO_PAGE:
 		popup_win->spec_info->search_info->gchar_data = name;

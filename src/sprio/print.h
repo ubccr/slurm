@@ -1,6 +1,7 @@
 /*****************************************************************************\
  *  print.h - sprio print job definitions
  *****************************************************************************
+ *  Portions Copyright (C) 2010-2017 SchedMD LLC <https://www.schedmd.com>.
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>
@@ -74,6 +75,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_age_priority_normalized)
 #define job_format_add_age_priority_weighted(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_age_priority_weighted)
+#define job_format_add_cluster_name(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_cluster_name)
 #define job_format_add_fs_priority_normalized(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_fs_priority_normalized)
 #define job_format_add_fs_priority_weighted(list,wid,right,suffix) \
@@ -90,6 +93,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_part_priority_normalized)
 #define job_format_add_part_priority_weighted(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_part_priority_weighted)
+#define job_format_add_partition(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_partition)
 #define job_format_add_qos_priority_normalized(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_qos_priority_normalized)
 #define job_format_add_qos_priority_weighted(list,wid,right,suffix) \
@@ -114,6 +119,8 @@ int _print_age_priority_normalized(priority_factors_object_t * job, int width,
 				   bool right_justify, char* suffix);
 int _print_age_priority_weighted(priority_factors_object_t * job, int width,
 				 bool right_justify, char* suffix);
+int _print_cluster_name(priority_factors_object_t *job, int width,
+			bool right, char *suffix);
 int _print_fs_priority_normalized(priority_factors_object_t * job, int width,
 				  bool right_justify, char* suffix);
 int _print_fs_priority_weighted(priority_factors_object_t * job, int width,
@@ -130,6 +137,8 @@ int _print_part_priority_normalized(priority_factors_object_t * job, int width,
 				    bool right_justify,	char* suffix);
 int _print_part_priority_weighted(priority_factors_object_t * job, int width,
 				  bool right_justify, char* suffix);
+int _print_partition(priority_factors_object_t * job, int width,
+		     bool right_justify, char* suffix);
 int _print_qos_priority_normalized(priority_factors_object_t * job, int width,
 				   bool right_justify, char* suffix);
 int _print_qos_priority_weighted(priority_factors_object_t * job, int width,

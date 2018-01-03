@@ -48,8 +48,7 @@
 #include "pmixp_debug.h"
 #include "pmixp_nspaces.h"
 #include "pmixp_utils.h"
-
-#define MAX_RETRIES 5
+#include "pmixp_dconn.h"
 
 static volatile bool _agent_is_running = false;
 static volatile bool _timer_is_running = false;
@@ -57,9 +56,9 @@ static pthread_mutex_t _flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void _run_flag_set(volatile bool *flag, bool val)
 {
-       slurm_mutex_lock(&_flag_mutex);
-       *flag = val;
-       slurm_mutex_unlock(&_flag_mutex);
+	slurm_mutex_lock(&_flag_mutex);
+	*flag = val;
+	slurm_mutex_unlock(&_flag_mutex);
 }
 
 static bool _run_flag_get(volatile bool *flag)
@@ -126,7 +125,9 @@ static int _server_conn_read(eio_obj_t *obj, List objs)
 			if (shutdown) {
 				obj->shutdown = true;
 				if (shutdown < 0) {
-					PMIXP_ERROR_NO(shutdown, "sd=%d failure", obj->fd);
+					PMIXP_ERROR_NO(shutdown,
+						       "sd=%d failure",
+						       obj->fd);
 				}
 			}
 			return 0;
@@ -140,13 +141,23 @@ static int _server_conn_read(eio_obj_t *obj, List objs)
 			if ((errno == ECONNABORTED) || (errno == EWOULDBLOCK)) {
 				return 0;
 			}
-			PMIXP_ERROR_STD("accept()ing connection sd=%d", obj->fd);
+			PMIXP_ERROR_STD("accept()ing connection sd=%d",
+					obj->fd);
 			return 0;
 		}
 
-		PMIXP_DEBUG("accepted connection: sd=%d", fd);
-		/* read command from socket and handle it */
-		pmix_server_new_conn(fd);
+		if (pmixp_info_srv_usock_fd() == obj->fd) {
+			PMIXP_DEBUG("SLURM PROTO: accepted connection: sd=%d",
+				    fd);
+			/* read command from socket and handle it */
+			pmixp_server_slurm_conn(fd);
+		} else if (pmixp_dconn_poll_fd() == obj->fd) {
+			PMIXP_DEBUG("DIRECT PROTO: accepted connection: sd=%d",
+				    fd);
+			/* read command from socket and handle it */
+			pmixp_server_direct_conn(fd);
+
+		}
 	}
 	return 0;
 }
@@ -170,6 +181,9 @@ static int _timer_conn_read(eio_obj_t *obj, List objs)
 
 	/* check collective statuses */
 	pmixp_state_coll_cleanup();
+
+	/* cleanup server structures */
+	pmixp_server_cleanup();
 
 	return 0;
 }
@@ -244,13 +258,22 @@ static void *_agent_thread(void *unused)
 
 	_io_handle = eio_handle_create(0);
 
-	obj = eio_obj_create(pmixp_info_srv_fd(), &srv_ops, (void *)(-1));
+	obj = eio_obj_create(pmixp_info_srv_usock_fd(), &srv_ops,
+			     (void *)(-1));
 	eio_new_initial_obj(_io_handle, obj);
 
 	obj = eio_obj_create(timer_data.work_in, &to_ops, (void *)(-1));
 	eio_new_initial_obj(_io_handle, obj);
 
 	pmixp_info_io_set(_io_handle);
+
+	if (PMIXP_DCONN_PROGRESS_SW == pmixp_dconn_progress_type()) {
+		obj = eio_obj_create(pmixp_dconn_poll_fd(), &srv_ops,
+				     (void *)(-1));
+		eio_new_initial_obj(_io_handle, obj);
+	} else {
+		pmixp_dconn_regio(_io_handle);
+	}
 
 	_run_flag_set(&_agent_is_running, true);
 
@@ -294,33 +317,28 @@ static void *_pmix_timer_thread(void *unused)
 			break;
 		}
 		/* activate main thread's timer event */
-		write(timer_data.work_out, &c, 1);
+		safe_write(timer_data.work_out, &c, 1);
 	}
 
+rwfail:
 	_run_flag_set(&_timer_is_running, false);
 
 	return NULL;
 }
 
+void _direct_init_sent_buf_cb(int rc, pmixp_p2p_ctx_t ctx, void *data)
+{
+    Buf buf = (Buf)data;
+    FREE_NULL_BUFFER(buf);
+    return;
+}
+
 int pmixp_agent_start(void)
 {
-	int retries = 0;
-	pthread_attr_t attr;
-
 	_setup_timeout_fds();
 
-	slurm_attr_init(&attr);
-
 	/* start agent thread */
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&_agent_tid, &attr, _agent_thread, NULL))) {
-		if (++retries > MAX_RETRIES) {
-			PMIXP_ERROR_STD("pthread_create error");
-			slurm_attr_destroy(&attr);
-			return SLURM_ERROR;
-		}
-		sleep(1);
-	}
+	slurm_thread_create_detached(&_agent_tid, _agent_thread, NULL);
 	_agent_spawned = 1;
 
 	/* wait for the agent thread to initialize */
@@ -328,19 +346,59 @@ int pmixp_agent_start(void)
 		sched_yield();
 	}
 
-	PMIXP_DEBUG("agent thread started: tid = %lu",
-			(unsigned long) _agent_tid);
-
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&_timer_tid, &attr, _pmix_timer_thread,
-			NULL))) {
-		if (++retries > MAX_RETRIES) {
-			PMIXP_ERROR_STD("pthread_create error");
-			slurm_attr_destroy(&attr);
-			return SLURM_ERROR;
-		}
-		sleep(1);
+	/* Check if a ping-pong run was requested by user
+	 * NOTE: enabled only if `--enable-debug` configuration
+	 * option was passed
+	 */
+	if (pmixp_server_want_pp()) {
+		pmixp_server_run_pp();
 	}
+
+	/* Check if a collective test was requested by user
+	 * NOTE: enabled only if `--enable-debug` configuration
+	 * option was passed
+	 */
+	if (pmixp_server_want_cperf()) {
+		pmixp_server_run_cperf();
+	}
+
+	PMIXP_DEBUG("agent thread started: tid = %lu",
+		    (unsigned long) _agent_tid);
+
+	if (pmixp_info_srv_direct_conn_early()) {
+		pmixp_coll_t *coll = NULL;
+		int rc;
+		pmixp_proc_t proc;
+
+		pmixp_debug_hang(0);
+
+		proc.rank = pmixp_lib_get_wildcard();
+		strncpy(proc.nspace, _pmixp_job_info.nspace, PMIXP_MAX_NSLEN);
+
+		coll = pmixp_state_coll_get(PMIXP_COLL_TYPE_FENCE, &proc, 1);
+
+		if (coll->prnt_host) {
+			pmixp_ep_t ep = {0};
+			Buf buf = pmixp_server_buf_new();
+
+			pmixp_debug_hang(0);
+
+			ep.type = PMIXP_EP_NOIDEID;
+			ep.ep.nodeid = coll->prnt_peerid;
+
+			rc = pmixp_server_send_nb(
+				&ep, PMIXP_MSG_INIT_DIRECT, coll->seq,
+				buf, _direct_init_sent_buf_cb, NULL);
+
+			if (SLURM_SUCCESS != rc) {
+				PMIXP_ERROR_STD("send init msg error");
+				return SLURM_ERROR;
+			}
+		}
+	}
+
+
+	slurm_thread_create_detached(&_timer_tid, _pmix_timer_thread, NULL);
 	_timer_spawned = 1;
 
 	/* wait for the agent thread to initialize */
@@ -348,10 +406,8 @@ int pmixp_agent_start(void)
 		sched_yield();
 	}
 
-	slurm_attr_destroy(&attr);
-
 	PMIXP_DEBUG("timer thread started: tid = %lu",
-			(unsigned long) _timer_tid);
+		    (unsigned long) _timer_tid);
 
 	return SLURM_SUCCESS;
 }
@@ -372,7 +428,7 @@ int pmixp_agent_stop(void)
 
 	if (timer_data.initialized) {
 		/* cancel timer */
-		write(timer_data.stop_out, &c, 1);
+		safe_write(timer_data.stop_out, &c, 1);
 		while (_run_flag_get(&_timer_is_running) ) {
 			sched_yield();
 		}
@@ -384,4 +440,11 @@ int pmixp_agent_stop(void)
 		pthread_cancel(_timer_tid);
 	}
 	return SLURM_SUCCESS;
+
+rwfail:
+	if (_timer_spawned)
+		pthread_cancel(_timer_tid);
+
+	error("%s: failed", __func__);
+	return SLURM_ERROR;
 }

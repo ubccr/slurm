@@ -146,7 +146,7 @@ static int _send_to_backup_collector(slurm_msg_t *msg, int rc)
 			info("_send_to_backup_collector: backup %s, "
 			     "sending msg to controller",
 			     rc ? "can't be reached" : "is null");
-		rc = slurm_send_only_controller_msg(msg);
+		rc = slurm_send_only_controller_msg(msg, working_cluster_rec);
 	}
 
 	return rc;
@@ -262,9 +262,6 @@ static void * _msg_aggregation_sender(void *arg)
 extern void msg_aggr_sender_init(char *host, uint16_t port, uint64_t window,
 				 uint64_t max_msg_cnt)
 {
-	pthread_attr_t attr;
-	int            retries = 0;
-
 	if (msg_collection.running || (max_msg_cnt <= 1))
 		return;
 
@@ -286,17 +283,8 @@ extern void msg_aggr_sender_init(char *host, uint16_t port, uint64_t window,
 	slurm_mutex_unlock(&msg_collection.aggr_mutex);
 	slurm_mutex_unlock(&msg_collection.mutex);
 
-	slurm_attr_init(&attr);
-
-	while (pthread_create(&msg_collection.thread_id, &attr,
-			      &_msg_aggregation_sender, NULL)) {
-		error("msg_aggr_sender_init: pthread_create: %m");
-		if (++retries > 3)
-			fatal("msg_aggr_sender_init: pthread_create: %m");
-		usleep(10);	/* sleep and again */
-	}
-
-	return;
+	slurm_thread_create(&msg_collection.thread_id,
+			    &_msg_aggregation_sender, NULL);
 }
 
 extern void msg_aggr_sender_reconfig(uint64_t window, uint64_t max_msg_cnt)

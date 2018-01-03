@@ -363,8 +363,10 @@ static void _normalize_assoc_shares_traditional(
 			       assoc->id, assoc->acct, assoc->user,
 			       assoc->shares_raw,
 			       assoc->usage->level_shares,
+			       assoc->usage->level_shares ?
 			       (double)assoc->shares_raw /
-			       (double)assoc->usage->level_shares);
+			       (double)assoc->usage->level_shares :
+			       0);
 		}
 
 		assoc = assoc->usage->parent_assoc_ptr;
@@ -2209,8 +2211,8 @@ extern int assoc_mgr_fill_in_tres(void *db_conn,
 
 	if (!tres->id) {
 		if (!tres->type ||
-		    ((!strncasecmp(tres->type, "gres:", 5) ||
-		      !strncasecmp(tres->type, "license:", 8))
+		    ((!xstrncasecmp(tres->type, "gres:", 5) ||
+		      !xstrncasecmp(tres->type, "license:", 8))
 		     && !tres->name)) {
 			if (enforce & ACCOUNTING_ENFORCE_TRES) {
 				error("get_assoc_id: "
@@ -3384,10 +3386,12 @@ extern int assoc_mgr_info_unpack_msg(
 			     buffer);
 
 	safe_unpack32(&count, buffer);
+	if (count > NO_VAL)
+		goto unpack_error;
 	if (count) {
 		object_ptr->assoc_list =
 			list_create(slurmdb_destroy_assoc_rec);
-		for (i=0; i<count; i++) {
+		for (i = 0; i < count; i++) {
 			if (slurmdb_unpack_assoc_rec_with_usage(
 				    &list_object, protocol_version,
 				    buffer)
@@ -3398,10 +3402,12 @@ extern int assoc_mgr_info_unpack_msg(
 	}
 
 	safe_unpack32(&count, buffer);
+	if (count > NO_VAL)
+		goto unpack_error;
 	if (count) {
 		object_ptr->qos_list =
 			list_create(slurmdb_destroy_qos_rec);
-		for (i=0; i<count; i++) {
+		for (i = 0; i < count; i++) {
 			if (slurmdb_unpack_qos_rec_with_usage(
 				    &list_object, protocol_version, buffer)
 			    != SLURM_SUCCESS)
@@ -3411,10 +3417,12 @@ extern int assoc_mgr_info_unpack_msg(
 	}
 
 	safe_unpack32(&count, buffer);
+	if (count > NO_VAL)
+		goto unpack_error;
 	if (count) {
 		object_ptr->user_list =
 			list_create(slurmdb_destroy_user_rec);
-		for (i=0; i<count; i++) {
+		for (i = 0; i < count; i++) {
 			if (slurmdb_unpack_user_rec(
 				    &list_object, protocol_version, buffer)
 			    != SLURM_SUCCESS)
@@ -3734,7 +3742,7 @@ extern int assoc_mgr_update_assocs(slurmdb_update_object_t *update, bool locked)
 				rec->def_qos_id = 0;
 			}
 
-			if (object->is_def != (uint16_t)NO_VAL) {
+			if (object->is_def != NO_VAL16) {
 				rec->is_def = object->is_def;
 				/* parents_changed will set this later
 				   so try to avoid doing it twice.
@@ -4028,7 +4036,7 @@ extern int assoc_mgr_update_wckeys(slurmdb_update_object_t *update, bool locked)
 				break;
 			}
 
-			if (object->is_def != (uint16_t)NO_VAL) {
+			if (object->is_def != NO_VAL16) {
 				rec->is_def = object->is_def;
 				if (rec->is_def)
 					_set_user_default_wckey(rec);
@@ -4473,7 +4481,7 @@ extern int assoc_mgr_update_qos(slurmdb_update_object_t *update, bool locked)
 /* 				xfree(tmp); */
 			}
 
-			if (object->preempt_mode != (uint16_t)NO_VAL)
+			if (object->preempt_mode != NO_VAL16)
 				rec->preempt_mode = object->preempt_mode;
 
 			if (object->priority != NO_VAL) {
@@ -4730,8 +4738,7 @@ extern int assoc_mgr_update_res(slurmdb_update_object_t *update, bool locked)
 			if (object->type != SLURMDB_RESOURCE_NOTSET)
 				rec->type = object->type;
 
-			if (object->clus_res_rec->percent_allowed !=
-			    (uint16_t)NO_VAL)
+			if (object->clus_res_rec->percent_allowed != NO_VAL16)
 				rec->clus_res_rec->percent_allowed =
 					object->clus_res_rec->percent_allowed;
 
@@ -5360,7 +5367,9 @@ extern int load_assoc_usage(char *state_save_location)
 	state_fd = open(state_file, O_RDONLY);
 	if (state_fd < 0) {
 		debug2("No Assoc usage file (%s) to recover", state_file);
-		goto unpack_error;
+		xfree(state_file);
+		assoc_mgr_unlock(&locks);
+		return ENOENT;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -5390,9 +5399,13 @@ extern int load_assoc_usage(char *state_save_location)
 	safe_unpack16(&ver, buffer);
 	debug3("Version in assoc_usage header is %u", ver);
 	if (ver > SLURM_PROTOCOL_VERSION || ver < SLURM_MIN_PROTOCOL_VERSION) {
+		if (!ignore_state_errors)
+			fatal("Can not recover assoc_usage state, incompatible version, got %u need >= %u <= %u, start with '-i' to ignore this",
+			      ver, SLURM_MIN_PROTOCOL_VERSION,
+			      SLURM_PROTOCOL_VERSION);
 		error("***********************************************");
 		error("Can not recover assoc_usage state, "
-		      "incompatible version, got %u need > %u <= %u", ver,
+		      "incompatible version, got %u need >= %u <= %u", ver,
 		      SLURM_MIN_PROTOCOL_VERSION, SLURM_PROTOCOL_VERSION);
 		error("***********************************************");
 		free_buf(buffer);
@@ -5447,8 +5460,12 @@ extern int load_assoc_usage(char *state_save_location)
 	return SLURM_SUCCESS;
 
 unpack_error:
-	if (buffer)
-		free_buf(buffer);
+	if (!ignore_state_errors)
+		fatal("Incomplete assoc usage state file, start with '-i' to ignore this");
+	error("Incomplete assoc usage state file");
+
+	free_buf(buffer);
+
 	xfree(tmp_str);
 	assoc_mgr_unlock(&locks);
 	return SLURM_ERROR;
@@ -5478,7 +5495,9 @@ extern int load_qos_usage(char *state_save_location)
 	state_fd = open(state_file, O_RDONLY);
 	if (state_fd < 0) {
 		debug2("No Qos usage file (%s) to recover", state_file);
-		goto unpack_error;
+		xfree(state_file);
+		assoc_mgr_unlock(&locks);
+		return ENOENT;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -5508,6 +5527,10 @@ extern int load_qos_usage(char *state_save_location)
 	safe_unpack16(&ver, buffer);
 	debug3("Version in qos_usage header is %u", ver);
 	if (ver > SLURM_PROTOCOL_VERSION || ver < SLURM_MIN_PROTOCOL_VERSION) {
+		if (!ignore_state_errors)
+			fatal("Can not recover qos_usage state, incompatible version, "
+			      "got %u need >= %u <= %u, start with '-i' to ignore this",
+			      ver, SLURM_MIN_PROTOCOL_VERSION, SLURM_PROTOCOL_VERSION);
 		error("***********************************************");
 		error("Can not recover qos_usage state, "
 		      "incompatible version, got %u need > %u <= %u", ver,
@@ -5553,8 +5576,12 @@ extern int load_qos_usage(char *state_save_location)
 	return SLURM_SUCCESS;
 
 unpack_error:
-	if (buffer)
-		free_buf(buffer);
+	if (!ignore_state_errors)
+		fatal("Incomplete QOS usage state file, start with '-i' to ignore this");
+	error("Incomplete QOS usage state file");
+
+	free_buf(buffer);
+
 	if (itr)
 		list_iterator_destroy(itr);
 	xfree(tmp_str);
@@ -5585,7 +5612,9 @@ extern int load_assoc_mgr_state(char *state_save_location)
 	state_fd = open(state_file, O_RDONLY);
 	if (state_fd < 0) {
 		debug2("No association state file (%s) to recover", state_file);
-		goto unpack_error;
+		xfree(state_file);
+		assoc_mgr_unlock(&locks);
+		return ENOENT;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -5615,6 +5644,10 @@ extern int load_assoc_mgr_state(char *state_save_location)
 	safe_unpack16(&ver, buffer);
 	debug3("Version in assoc_mgr_state header is %u", ver);
 	if (ver > SLURM_PROTOCOL_VERSION || ver < SLURM_MIN_PROTOCOL_VERSION) {
+		if (!ignore_state_errors)
+			fatal("Can not recover assoc_mgr state, incompatible version, "
+			      "got %u need >= %u <= %u, start with '-i' to ignore this",
+			      ver, SLURM_MIN_PROTOCOL_VERSION, SLURM_PROTOCOL_VERSION);
 		error("***********************************************");
 		error("Can not recover assoc_mgr state, incompatible version, "
 		      "got %u need > %u <= %u", ver,
@@ -5753,8 +5786,12 @@ extern int load_assoc_mgr_state(char *state_save_location)
 	return SLURM_SUCCESS;
 
 unpack_error:
-	if (buffer)
-		free_buf(buffer);
+	if (!ignore_state_errors)
+		fatal("Incomplete assoc mgr state file, start with '-i' to ignore this");
+	error("Incomplete assoc mgr state file");
+
+	free_buf(buffer);
+
 	assoc_mgr_unlock(&locks);
 	return SLURM_ERROR;
 }
@@ -6077,6 +6114,8 @@ extern char *assoc_mgr_make_tres_str_from_array(
 				   tres_str ? "," : "",
 				   assoc_mgr_tres_array[i]->id, tres_cnt[i]);
 		else {
+			if (tres_cnt[i] == NO_VAL64)
+				continue;
 			if ((flags & TRES_STR_CONVERT_UNITS) &&
 			    ((assoc_mgr_tres_array[i]->id == TRES_MEM) ||
 			     (assoc_mgr_tres_array[i]->type &&
@@ -6166,6 +6205,9 @@ extern double assoc_mgr_tres_weighted(uint64_t *tres_cnt, double *weights,
 		double tres_weight = weights[i];
 		char  *tres_type   = assoc_mgr_tres_array[i]->type;
 		double tres_value  = tres_cnt[i];
+
+		if (i == TRES_ARRAY_BILLING)
+			continue;
 
 		debug("TRES Weight: %s = %f * %f = %f",
 		      assoc_mgr_tres_name_array[i], tres_value, tres_weight,

@@ -333,6 +333,7 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 	int tmp_cpt = 0;
 	int count, cpu_min, b_min, elig, s_min, comb_idx, sock_idx;
 	int elig_idx, comb_brd_idx, sock_list_idx, comb_min, board_num;
+	int sock_per_comb;
 	int* boards_core_cnt;
 	int* sort_brds_core_cnt;
 	int* board_combs;
@@ -346,7 +347,6 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 	uint16_t ncores_nb;
 	uint16_t nsockets_nb;
 	uint16_t sock_per_brd;
-	uint16_t sock_per_comb;
 	uint16_t req_cores,best_fit_cores = 0;
 	uint32_t best_fit_location = 0;
 	uint64_t ncomb_brd;
@@ -372,7 +372,7 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 
 	if (job_ptr->details && job_ptr->details->mc_ptr) {
 		multi_core_data_t *mc_ptr = job_ptr->details->mc_ptr;
-		if ((mc_ptr->ntasks_per_core != (uint16_t) INFINITE) &&
+		if ((mc_ptr->ntasks_per_core != INFINITE16) &&
 		    (mc_ptr->ntasks_per_core)) {
 			ntasks_per_core = mc_ptr->ntasks_per_core;
 		}
@@ -736,7 +736,7 @@ static int _cyclic_sync_core_bitmap(struct job_record *job_ptr,
 	core_map = job_res->core_bitmap;
 	if (job_ptr->details->mc_ptr) {
 		multi_core_data_t *mc_ptr = job_ptr->details->mc_ptr;
-		if ((mc_ptr->ntasks_per_core != (uint16_t) INFINITE) &&
+		if ((mc_ptr->ntasks_per_core != INFINITE16) &&
 		    (mc_ptr->ntasks_per_core)) {
 			ntasks_per_core = mc_ptr->ntasks_per_core;
 		}
@@ -1013,7 +1013,7 @@ extern int cr_dist(struct job_record *job_ptr, const uint16_t cr_type,
 {
 	int error_code, cr_cpu = 1;
 
-	if (job_ptr->details->core_spec != (uint16_t) NO_VAL) {
+	if (job_ptr->details->core_spec != NO_VAL16) {
 		/* The job has been allocated all non-specialized cores,
 		 * so we don't need to select specific CPUs. */
 		return SLURM_SUCCESS;

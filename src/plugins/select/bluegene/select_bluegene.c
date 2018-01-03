@@ -69,10 +69,10 @@ time_t last_job_update __attribute__((weak_import));
 char *alpha_num  __attribute__((weak_import)) =
 	"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 void *acct_db_conn  __attribute__((weak_import)) = NULL;
-char *slurmctld_cluster_name  __attribute__((weak_import)) = NULL;
 slurmdb_cluster_rec_t *working_cluster_rec  __attribute__((weak_import)) = NULL;
 uint32_t g_qos_count __attribute__((weak_import));
 List assoc_mgr_qos_list __attribute__((weak_import)) = NULL;
+bool  ignore_state_errors __attribute__((weak_import)) = true;
 #else
 slurmctld_config_t slurmctld_config;
 slurm_ctl_conf_t slurmctld_conf;
@@ -84,10 +84,10 @@ time_t last_node_update;
 time_t last_job_update;
 char *alpha_num = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 void *acct_db_conn = NULL;
-char *slurmctld_cluster_name = NULL;
 slurmdb_cluster_rec_t *working_cluster_rec = NULL;
 uint32_t g_qos_count;
 List assoc_mgr_qos_list = NULL;
+bool ignore_state_errors = true;
 #endif
 
 /*
@@ -612,7 +612,7 @@ static int _load_state_file(List curr_block_list, char *dir_name)
 	struct part_record *part_ptr = NULL;
 	bitstr_t *usable_mp_bitmap = NULL;
 	ListIterator itr = NULL;
-	uint16_t protocol_version = (uint16_t)NO_VAL;
+	uint16_t protocol_version = NO_VAL16;
 	uint32_t record_count;
 
 	xassert(curr_block_list);
@@ -655,7 +655,9 @@ static int _load_state_file(List curr_block_list, char *dir_name)
 	if (ver_str && !xstrcmp(ver_str, BLOCK_STATE_VERSION))
 		safe_unpack16(&protocol_version, buffer);
 
-	if (protocol_version == (uint16_t)NO_VAL) {
+	if (protocol_version == NO_VAL16) {
+		if (!ignore_state_errors)
+			fatal("Can not recover block state, data version incompatible, start with '-i' to ignore this");
 		error("***********************************************");
 		error("Can not recover block state, "
 		      "data version incompatible");
@@ -811,9 +813,11 @@ static int _load_state_file(List curr_block_list, char *dir_name)
 	return SLURM_SUCCESS;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete block data checkpoint file, start with '-i' to ignore this");
+	error("Incomplete block data checkpoint file");
 	FREE_NULL_BITMAP(usable_mp_bitmap);
 	slurm_mutex_unlock(&block_state_mutex);
-	error("Incomplete block data checkpoint file");
 	free_buf(buffer);
 
 	return SLURM_FAILURE;
@@ -965,7 +969,7 @@ static int _validate_config_blocks(List curr_block_list,
 					   parse_blockreq() function.
 					*/
 					if (bg_record->conn_type[dim] ==
-					    (uint16_t)NO_VAL) {
+					    NO_VAL16) {
 						dim = SYSTEM_DIMENSIONS;
 						break;
 					}
@@ -2003,7 +2007,7 @@ extern bitstr_t *select_p_step_pick_nodes(struct job_record *job_ptr,
 			char rel_str[step_jobinfo->dim_cnt+1];
 			for (dim = 0; dim < step_jobinfo->dim_cnt; dim++) {
 				if (step_jobinfo->conn_type[dim]
-				    == (uint16_t)NO_VAL)
+				    == NO_VAL16)
 					rel_str[dim] = alpha_num[0];
 				else
 					rel_str[dim] = alpha_num[
@@ -3036,7 +3040,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 		}
 		break;
 	case SELECT_GET_NODE_CPU_CNT:
-		if ((*cpus) != (uint16_t)INFINITE)
+		if ((*cpus) != INFINITE16)
 			(*cpus) = bg_conf->cpu_ratio;
 		break;
 	case SELECT_GET_MP_CPU_CNT:
@@ -3085,7 +3089,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 		set_select_jobinfo(job_desc->select_jobinfo->data,
 				   SELECT_JOBDATA_ALTERED, &tmp);
 
-		if (job_desc->min_nodes == (uint32_t) NO_VAL)
+		if (job_desc->min_nodes == NO_VAL)
 			return SLURM_SUCCESS;
 
 #ifdef HAVE_BG_L_P
@@ -3098,7 +3102,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 			 && (job_desc->min_cpus != NO_VAL)) {
 			job_desc->min_nodes = job_desc->min_cpus;
 			if (job_desc->ntasks_per_node
-			    && job_desc->ntasks_per_node != (uint16_t)NO_VAL)
+			    && job_desc->ntasks_per_node != NO_VAL16)
 				job_desc->min_nodes /=
 					job_desc->ntasks_per_node;
 		}
@@ -3108,7 +3112,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 				   SELECT_JOBDATA_GEOMETRY, &req_geometry);
 
 		if (req_geometry[0] != 0
-		    && req_geometry[0] != (uint16_t)NO_VAL) {
+		    && req_geometry[0] != NO_VAL16) {
 			job_desc->min_nodes = 1;
 			for (i=0; i<SYSTEM_DIMENSIONS; i++)
 				job_desc->min_nodes *=
@@ -3140,7 +3144,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 					 * validated beforehand. */
 					if (job_desc->ntasks_per_node
 					    && (job_desc->ntasks_per_node
-						!= (uint16_t)NO_VAL))
+						!= NO_VAL16))
 						divisor = (float)job_desc->
 							ntasks_per_node
 							/ bg_conf->cpu_ratio;
@@ -3169,7 +3173,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 		/* initialize min_cpus to the min_nodes */
 		job_desc->min_cpus = job_desc->min_nodes * bg_conf->cpu_ratio;
 
-		if ((job_desc->max_nodes == (uint32_t) NO_VAL)
+		if ((job_desc->max_nodes == NO_VAL)
 		    || (job_desc->max_nodes < job_desc->min_nodes))
 			job_desc->max_nodes = job_desc->min_nodes;
 
@@ -3399,7 +3403,7 @@ extern bitstr_t *select_p_resv_test(resv_desc_msg_t *resv_desc_ptr,
 	}
 
 	job_rec.details->max_cpus = job_rec.details->min_cpus;
-	job_rec.details->core_spec = (uint16_t)NO_VAL;
+	job_rec.details->core_spec = NO_VAL16;
 
 	preemptee_candidates = list_create(NULL);
 

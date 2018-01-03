@@ -78,38 +78,38 @@ static int _set_cond(int *start, int argc, char **argv,
 			}
 		}
 
-		if (!strncasecmp(argv[i], "Set", MAX(command_len, 3))) {
+		if (!xstrncasecmp(argv[i], "Set", MAX(command_len, 3))) {
 			i--;
 			break;
 		} else if (!end &&
-			   !strncasecmp(argv[i], "WithAssoc",
+			   !xstrncasecmp(argv[i], "WithAssoc",
 					 MAX(command_len, 5))) {
 			acct_cond->with_assocs = 1;
 		} else if (!end &&
-			   !strncasecmp(argv[i], "WithCoordinators",
+			   !xstrncasecmp(argv[i], "WithCoordinators",
 					 MAX(command_len, 5))) {
 			acct_cond->with_coords = 1;
 		} else if (!end &&
-			   !strncasecmp(argv[i], "WithDeleted",
+			   !xstrncasecmp(argv[i], "WithDeleted",
 					 MAX(command_len, 5))) {
 			acct_cond->with_deleted = 1;
 			assoc_cond->with_deleted = 1;
 		} else if (!end &&
-			   !strncasecmp(argv[i], "WithRawQOSLevel",
+			   !xstrncasecmp(argv[i], "WithRawQOSLevel",
 					 MAX(command_len, 5))) {
 			assoc_cond->with_raw_qos = 1;
-		} else if (!end && !strncasecmp(argv[i], "WOPLimits",
+		} else if (!end && !xstrncasecmp(argv[i], "WOPLimits",
 						 MAX(command_len, 4))) {
 			assoc_cond->without_parent_limits = 1;
-		} else if (!end && !strncasecmp(argv[i], "where",
+		} else if (!end && !xstrncasecmp(argv[i], "where",
 					       MAX(command_len, 5))) {
 			continue;
 		} else if (!end
-			  || !strncasecmp(argv[i], "Names",
+			  || !xstrncasecmp(argv[i], "Names",
 					   MAX(command_len, 1))
-			  || !strncasecmp(argv[i], "Accounts",
+			  || !xstrncasecmp(argv[i], "Accounts",
 					   MAX(command_len, 1))
-			  || !strncasecmp(argv[i], "Acct",
+			  || !xstrncasecmp(argv[i], "Acct",
 					   MAX(command_len, 4))) {
 			if (!assoc_cond->acct_list) {
 				assoc_cond->acct_list =
@@ -119,7 +119,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				   assoc_cond->acct_list,
 				   argv[i]+end))
 				u_set = 1;
-		} else if (!strncasecmp(argv[i], "Descriptions",
+		} else if (!xstrncasecmp(argv[i], "Descriptions",
 					 MAX(command_len, 1))) {
 			if (!acct_cond->description_list) {
 				acct_cond->description_list =
@@ -128,11 +128,11 @@ static int _set_cond(int *start, int argc, char **argv,
 			if (slurm_addto_char_list(acct_cond->description_list,
 						 argv[i]+end))
 				u_set = 1;
-		} else if (!strncasecmp(argv[i], "Format",
+		} else if (!xstrncasecmp(argv[i], "Format",
 					 MAX(command_len, 1))) {
 			if (format_list)
 				slurm_addto_char_list(format_list, argv[i]+end);
-		} else if (!strncasecmp(argv[i], "Organizations",
+		} else if (!xstrncasecmp(argv[i], "Organizations",
 					 MAX(command_len, 1))) {
 			if (!acct_cond->organization_list) {
 				acct_cond->organization_list =
@@ -188,18 +188,18 @@ static int _set_rec(int *start, int argc, char **argv,
 			}
 		}
 
-		if (!strncasecmp(argv[i], "Where", MAX(command_len, 5))) {
+		if (!xstrncasecmp(argv[i], "Where", MAX(command_len, 5))) {
 			i--;
 			break;
-		} else if (!end && !strncasecmp(argv[i], "set",
-					       MAX(command_len, 3))) {
+		} else if (!end && !xstrncasecmp(argv[i], "set",
+						 MAX(command_len, 3))) {
 			continue;
 		} else if (!end
-			  || !strncasecmp(argv[i], "Accounts",
+			  || !xstrncasecmp(argv[i], "Accounts",
 					   MAX(command_len, 1))
-			  || !strncasecmp(argv[i], "Names",
+			  || !xstrncasecmp(argv[i], "Names",
 					   MAX(command_len, 1))
-			  || !strncasecmp(argv[i], "Acct",
+			  || !xstrncasecmp(argv[i], "Acct",
 					   MAX(command_len, 4))) {
 			if (acct_list)
 				slurm_addto_char_list(acct_list, argv[i]+end);
@@ -209,7 +209,7 @@ static int _set_rec(int *start, int argc, char **argv,
 					" Can't modify the name "
 					"of an account\n");
 			}
-		} else if (!strncasecmp(argv[i], "Clusters",
+		} else if (!xstrncasecmp(argv[i], "Clusters",
 					 MAX(command_len, 1))) {
 			if (cluster_list)
 				slurm_addto_char_list(cluster_list,
@@ -220,15 +220,15 @@ static int _set_rec(int *start, int argc, char **argv,
 					" Can't modify the cluster "
 					"of an account\n");
 			}
-		} else if (!strncasecmp(argv[i], "Description",
+		} else if (!xstrncasecmp(argv[i], "Description",
 					 MAX(command_len, 1))) {
 			acct->description =  strip_quotes(argv[i]+end, NULL, 1);
 			u_set = 1;
-		} else if (!strncasecmp(argv[i], "Organization",
+		} else if (!xstrncasecmp(argv[i], "Organization",
 					 MAX(command_len, 1))) {
 			acct->organization = strip_quotes(argv[i]+end, NULL, 1);
 			u_set = 1;
-		} else if (!strncasecmp (argv[i], "RawUsage",
+		} else if (!xstrncasecmp(argv[i], "RawUsage",
 					 MAX(command_len, 7))) {
 			uint32_t usage;
 			if (!assoc)
@@ -274,7 +274,7 @@ static int _isdefault_old(List acct_list)
 	memset(&user_cond, 0, sizeof(slurmdb_user_cond_t));
 	user_cond.def_acct_list = acct_list;
 
-	ret_list = acct_storage_g_get_users(db_conn, my_uid, &user_cond);
+	ret_list = slurmdb_users_get(db_conn, &user_cond);
 	if (ret_list && list_count(ret_list)) {
 		ListIterator itr = list_iterator_create(ret_list);
 		slurmdb_user_rec_t *user = NULL;
@@ -379,8 +379,8 @@ extern int sacctmgr_add_account(int argc, char **argv)
 
 	for (i = 0; i < argc; i++) {
 		int command_len = strlen(argv[i]);
-		if (!strncasecmp(argv[i], "Where", MAX(command_len, 5))
-		    || !strncasecmp(argv[i], "Set", MAX(command_len, 3)))
+		if (!xstrncasecmp(argv[i], "Where", MAX(command_len, 5))
+		    || !xstrncasecmp(argv[i], "Set", MAX(command_len, 3)))
 			i++;
 		limit_set += _set_rec(&i, argc, argv, name_list, cluster_list,
 				      start_acct, start_assoc);
@@ -407,8 +407,8 @@ extern int sacctmgr_add_account(int argc, char **argv)
 		assoc_cond.acct_list = name_list;
 		account_cond.assoc_cond = &assoc_cond;
 
-		local_account_list = acct_storage_g_get_accounts(
-			db_conn, my_uid, &account_cond);
+		local_account_list = slurmdb_accounts_get(
+			db_conn, &account_cond);
 	}
 
 	if (!local_account_list) {
@@ -428,7 +428,7 @@ extern int sacctmgr_add_account(int argc, char **argv)
 	if (!cluster_list || !list_count(cluster_list)) {
 		slurmdb_cluster_rec_t *cluster_rec = NULL;
 		List tmp_list =
-			acct_storage_g_get_clusters(db_conn, my_uid, NULL);
+			slurmdb_clusters_get(db_conn, NULL);
 		if (!tmp_list) {
 			exit_code=1;
 			fprintf(stderr,
@@ -489,8 +489,8 @@ extern int sacctmgr_add_account(int argc, char **argv)
 	list_append(assoc_cond.acct_list, start_assoc->parent_acct);
 
 	assoc_cond.cluster_list = cluster_list;
-	local_assoc_list = acct_storage_g_get_assocs(
-		db_conn, my_uid, &assoc_cond);
+	local_assoc_list = slurmdb_associations_get(
+		db_conn, &assoc_cond);
 	FREE_NULL_LIST(assoc_cond.acct_list);
 	if (!local_assoc_list) {
 		exit_code=1;
@@ -629,13 +629,12 @@ extern int sacctmgr_add_account(int argc, char **argv)
 
 	notice_thread_init();
 	if (list_count(acct_list))
-		rc = acct_storage_g_add_accounts(db_conn, my_uid, acct_list);
+		rc = slurmdb_accounts_add(db_conn, acct_list);
 
 
 	if (rc == SLURM_SUCCESS) {
 		if (list_count(assoc_list))
-			rc = acct_storage_g_add_assocs(db_conn, my_uid,
-							     assoc_list);
+			rc = slurmdb_associations_add(db_conn, assoc_list);
 	} else {
 		exit_code=1;
 		fprintf(stderr, " Problem adding accounts: %s\n",
@@ -648,10 +647,10 @@ extern int sacctmgr_add_account(int argc, char **argv)
 
 	if (rc == SLURM_SUCCESS) {
 		if (commit_check("Would you like to commit changes?")) {
-			acct_storage_g_commit(db_conn, 1);
+			slurmdb_connection_commit(db_conn, 1);
 		} else {
 			printf(" Changes Discarded\n");
-			acct_storage_g_commit(db_conn, 0);
+			slurmdb_connection_commit(db_conn, 0);
 		}
 	} else {
 		exit_code=1;
@@ -695,8 +694,8 @@ extern int sacctmgr_list_account(int argc, char **argv)
 
 	for (i=0; i<argc; i++) {
 		int command_len = strlen(argv[i]);
-		if (!strncasecmp(argv[i], "Where", MAX(command_len, 5))
-		    || !strncasecmp(argv[i], "Set", MAX(command_len, 3)))
+		if (!xstrncasecmp(argv[i], "Where", MAX(command_len, 5))
+		    || !xstrncasecmp(argv[i], "Set", MAX(command_len, 3)))
 			i++;
 		prev_set = _set_cond(&i, argc, argv, acct_cond, format_list);
 		cond_set |=  prev_set;
@@ -740,7 +739,7 @@ extern int sacctmgr_list_account(int argc, char **argv)
 		return SLURM_ERROR;
 	}
 
-	acct_list = acct_storage_g_get_accounts(db_conn, my_uid, acct_cond);
+	acct_list = slurmdb_accounts_get(db_conn, acct_cond);
 	slurmdb_destroy_account_cond(acct_cond);
 
 	if (!acct_list) {
@@ -877,11 +876,11 @@ extern int sacctmgr_modify_account(int argc, char **argv)
 
 	for (i=0; i<argc; i++) {
 		int command_len = strlen(argv[i]);
-		if (!strncasecmp(argv[i], "Where", MAX(command_len, 5))) {
+		if (!xstrncasecmp(argv[i], "Where", MAX(command_len, 5))) {
 			i++;
 			prev_set = _set_cond(&i, argc, argv, acct_cond, NULL);
 			cond_set |= prev_set;
-		} else if (!strncasecmp(argv[i], "Set", MAX(command_len, 3))) {
+		} else if (!xstrncasecmp(argv[i], "Set", MAX(command_len, 3))) {
 			i++;
 			prev_set = _set_rec(&i, argc, argv, NULL, NULL,
 					    acct, assoc);
@@ -939,8 +938,8 @@ extern int sacctmgr_modify_account(int argc, char **argv)
 			rc = SLURM_ERROR;
 			goto assoc_start;
 		}
-		ret_list = acct_storage_g_modify_accounts(
-			db_conn, my_uid, acct_cond, acct);
+		ret_list = slurmdb_accounts_modify(
+			db_conn, acct_cond, acct);
 		if (ret_list && list_count(ret_list)) {
 			char *object = NULL;
 			ListIterator itr = list_iterator_create(ret_list);
@@ -988,8 +987,8 @@ assoc_start:
 			}
 		}
 
-		ret_list = acct_storage_g_modify_assocs(
-			db_conn, my_uid, acct_cond->assoc_cond, assoc);
+		ret_list = slurmdb_associations_modify(
+			db_conn, acct_cond->assoc_cond, assoc);
 
 		if (ret_list && list_count(ret_list)) {
 			set = 1;
@@ -1031,10 +1030,10 @@ assoc_end:
 	notice_thread_fini();
 	if (set) {
 		if (commit_check("Would you like to commit changes?"))
-			acct_storage_g_commit(db_conn, 1);
+			slurmdb_connection_commit(db_conn, 1);
 		else {
 			printf(" Changes Discarded\n");
-			acct_storage_g_commit(db_conn, 0);
+			slurmdb_connection_commit(db_conn, 0);
 		}
 	}
 	slurmdb_destroy_account_cond(acct_cond);
@@ -1056,8 +1055,8 @@ extern int sacctmgr_delete_account(int argc, char **argv)
 
 	for (i = 0; i < argc; i++) {
 		int command_len = strlen(argv[i]);
-		if (!strncasecmp(argv[i], "Where", MAX(command_len, 5))
-		    || !strncasecmp(argv[i], "Set", MAX(command_len, 3)))
+		if (!xstrncasecmp(argv[i], "Where", MAX(command_len, 5))
+		    || !xstrncasecmp(argv[i], "Set", MAX(command_len, 3)))
 			i++;
 		prev_set = _set_cond(&i, argc, argv, acct_cond, NULL);
 		cond_set |= prev_set;
@@ -1106,17 +1105,17 @@ extern int sacctmgr_delete_account(int argc, char **argv)
 	}
 
 	acct_cond->assoc_cond->only_defs = 1;
-	local_assoc_list = acct_storage_g_get_assocs(
-		db_conn, my_uid, acct_cond->assoc_cond);
+	local_assoc_list = slurmdb_associations_get(
+		db_conn, acct_cond->assoc_cond);
 	acct_cond->assoc_cond->only_defs = 0;
 
 	notice_thread_init();
 	if (cond_set == 1) {
-		ret_list = acct_storage_g_remove_accounts(
-			db_conn, my_uid, acct_cond);
+		ret_list = slurmdb_accounts_remove(
+			db_conn, acct_cond);
 	} else if (cond_set & 2) {
-		ret_list = acct_storage_g_remove_assocs(
-			db_conn, my_uid, acct_cond->assoc_cond);
+		ret_list = slurmdb_associations_remove(
+			db_conn, acct_cond->assoc_cond);
 	}
 	rc = errno;
 	notice_thread_fini();
@@ -1128,7 +1127,7 @@ extern int sacctmgr_delete_account(int argc, char **argv)
 
 		/* Check to see if person is trying to remove a default
 		 * account of a user.  _isdefault only works with the
-		 * output from acct_storage_g_remove_accounts, and
+		 * output from slurmdb_accounts_remove, and
 		 * with a previously got assoc_list.
 		 */
 		if (_isdefault(cond_set, ret_list, local_assoc_list)) {
@@ -1139,7 +1138,7 @@ extern int sacctmgr_delete_account(int argc, char **argv)
 				" or change these users default account to "
 				"remove the account(s).\n"
 				" Changes Discarded\n");
-			acct_storage_g_commit(db_conn, 0);
+			slurmdb_connection_commit(db_conn, 0);
 			goto end_it;
 		}
 		itr = list_iterator_create(ret_list);
@@ -1152,7 +1151,7 @@ extern int sacctmgr_delete_account(int argc, char **argv)
 			while((object = list_next(itr))) {
 				fprintf(stderr,"  %s\n", object);
 			}
-			acct_storage_g_commit(db_conn, 0);
+			slurmdb_connection_commit(db_conn, 0);
 			goto end_it;
 		}
 
@@ -1166,10 +1165,10 @@ extern int sacctmgr_delete_account(int argc, char **argv)
 		}
 		list_iterator_destroy(itr);
 		if (commit_check("Would you like to commit changes?")) {
-			acct_storage_g_commit(db_conn, 1);
+			slurmdb_connection_commit(db_conn, 1);
 		} else {
 			printf(" Changes Discarded\n");
-			acct_storage_g_commit(db_conn, 0);
+			slurmdb_connection_commit(db_conn, 0);
 		}
 	} else if (ret_list) {
 		printf(" Nothing deleted\n");

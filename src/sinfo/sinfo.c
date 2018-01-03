@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2016 SchedMD <https://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2017 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -38,6 +38,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#include "slurm/slurmdb.h"
 #include "src/common/xstring.h"
 #include "src/common/macros.h"
 #include "src/common/node_select.h"
@@ -53,6 +54,15 @@ typedef struct build_part_info {
 	partition_info_t *part_ptr;
 	List sinfo_list;
 } build_part_info_t;
+
+/* Data structures for pthreads used to gather node/partition information from
+ * multiple clusters in parallel */
+typedef struct load_info_struct {
+	slurmdb_cluster_rec_t *cluster;
+	List node_info_msg_list;
+	List part_info_msg_list;
+	List resp_msg_list;
+} load_info_struct_t;
 
 struct sinfo_parameters params;
 
@@ -74,30 +84,33 @@ static int  _build_sinfo_data(List sinfo_list,
 static sinfo_data_t *_create_sinfo(partition_info_t* part_ptr,
 				   uint16_t part_inx, node_info_t *node_ptr,
 				   uint32_t node_scaling);
+static int  _find_part_list(void *x, void *key);
 static bool _filter_out(node_info_t *node_ptr);
-static int  _get_info(bool clear_old);
-static void _sinfo_list_delete(void *data);
+static int  _get_info(bool clear_old, slurmdb_federation_rec_t *fed);
+static int  _handle_subgrps(List sinfo_list, uint16_t part_num,
+			    partition_info_t *part_ptr,
+			    node_info_t *node_ptr, uint32_t node_scaling);
+static int  _insert_node_ptr(List sinfo_list, uint16_t part_num,
+			     partition_info_t *part_ptr,
+			     node_info_t *node_ptr, uint32_t node_scaling);
+static int  _load_blocks(block_info_msg_t **block_pptr, bool clear_old);
+static int  _load_resv(reserve_info_msg_t ** reserv_pptr, bool clear_old);
 static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr);
 static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 			     partition_info_t* part_ptr);
 static int  _multi_cluster(List clusters);
-static int  _query_server(partition_info_msg_t ** part_pptr,
-			  node_info_msg_t ** node_pptr,
-			  block_info_msg_t ** block_pptr,
-			  reserve_info_msg_t ** reserv_pptr, bool clear_old);
-static int _reservation_report(reserve_info_msg_t *resv_ptr);
+static void _node_list_delete(void *data);
+static void _part_list_delete(void *data);
+static List _query_fed_servers(slurmdb_federation_rec_t *fed,
+			       List node_info_msg_list,
+			       List part_info_msg_list);
+static List _query_server(bool clear_old);
+static int  _reservation_report(reserve_info_msg_t *resv_ptr);
 static bool _serial_part_data(void);
+static void _sinfo_list_delete(void *data);
 static void _sort_hostlist(List sinfo_list);
 static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 			  uint32_t node_scaling);
-
-static int _insert_node_ptr(List sinfo_list, uint16_t part_num,
-			    partition_info_t *part_ptr,
-			    node_info_t *node_ptr, uint32_t node_scaling);
-static int _handle_subgrps(List sinfo_list, uint16_t part_num,
-			   partition_info_t *part_ptr,
-			   node_info_t *node_ptr, uint32_t node_scaling);
-static int _find_part_list(void *x, void *key);
 
 int main(int argc, char **argv)
 {
@@ -118,7 +131,7 @@ int main(int argc, char **argv)
 			print_date();
 
 		if (!params.clusters) {
-			if (_get_info(false))
+			if (_get_info(false, params.fed))
 				rc = 1;
 		} else if (_multi_cluster(params.clusters) != 0)
 			rc = 1;
@@ -145,7 +158,7 @@ static int _multi_cluster(List clusters)
 		else
 			printf("\n");
 		printf("CLUSTER: %s\n", working_cluster_rec->name);
-		rc2 = _get_info(true);
+		rc2 = _get_info(true, NULL);
 		rc = MAX(rc, rc2);
 	}
 	list_iterator_destroy(itr);
@@ -154,32 +167,52 @@ static int _multi_cluster(List clusters)
 }
 
 /* clear_old IN - if set then don't preserve old info (it might be from
- *		  another cluster) */
-static int _get_info(bool clear_old)
+ *		  another cluster)
+ * fed IN - information about other clusters in this federation
+ */
+static int _get_info(bool clear_old, slurmdb_federation_rec_t *fed)
 {
-	partition_info_msg_t *partition_msg = NULL;
-	node_info_msg_t *node_msg = NULL;
+	List node_info_msg_list = NULL, part_info_msg_list = NULL;
 	block_info_msg_t *block_msg = NULL;
 	reserve_info_msg_t *reserv_msg = NULL;
 	List sinfo_list = NULL;
-	int rc = 0;
+	int rc = SLURM_SUCCESS;
 
-	if (_query_server(&partition_msg, &node_msg, &block_msg, &reserv_msg,
-			  clear_old))
-		rc = 1;
-	else if (params.bg_flag)
-		(void) _bg_report(block_msg);
-	else if (params.reservation_flag)
-		(void) _reservation_report(reserv_msg);
-	else {
-		sinfo_list = list_create(_sinfo_list_delete);
-		_build_sinfo_data(sinfo_list, partition_msg, node_msg);
-		sort_sinfo_list(sinfo_list);
-		print_sinfo_list(sinfo_list);
-		FREE_NULL_LIST(sinfo_list);
+	if (params.bg_flag) {
+		if (_load_blocks(&block_msg, clear_old))
+			rc = SLURM_ERROR;
+		else
+			(void) _bg_report(block_msg);
+		return rc;
 	}
 
-	return rc;
+	if (params.reservation_flag) {
+		if (_load_resv(&reserv_msg, clear_old))
+			rc = SLURM_ERROR;
+		else
+			(void) _reservation_report(reserv_msg);
+		return rc;
+	}
+
+	if (fed) {
+		node_info_msg_list = list_create(_node_list_delete);
+		part_info_msg_list = list_create(_part_list_delete);
+		sinfo_list = _query_fed_servers(fed, node_info_msg_list,
+						part_info_msg_list);
+	} else {
+		sinfo_list = _query_server(clear_old);
+	}
+
+	if (!sinfo_list)
+		return SLURM_ERROR;
+
+	sort_sinfo_list(sinfo_list);
+	print_sinfo_list(sinfo_list);
+
+	FREE_NULL_LIST(node_info_msg_list);
+	FREE_NULL_LIST(part_info_msg_list);
+	FREE_NULL_LIST(sinfo_list);
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -199,17 +232,15 @@ static int _bg_report(block_info_msg_t *block_ptr)
 /*                      1234567890123456 123456789012 12345678 1234567890 12345+ */
 /*                      RMP_22Apr1544018 bg[123x456]  READY    TORUS      COPROCESSOR */
 
-	for (i=0; i<block_ptr->record_count; i++) {
+	for (i = 0; i < block_ptr->record_count; i++) {
 		char *conn_str = conn_type_string_full(
 			block_ptr->block_array[i].conn_type);
 		printf("%-16.16s %-15.15s %-8.8s %-10.10s %s\n",
 		       block_ptr->block_array[i].bg_block_id,
 		       block_ptr->block_array[i].mp_str,
-		       bg_block_state_string(
-			       block_ptr->block_array[i].state),
+		       bg_block_state_string(block_ptr->block_array[i].state),
 		       conn_str,
-		       node_use_string(
-			       block_ptr->block_array[i].node_use));
+		       node_use_string(block_ptr->block_array[i].node_use));
 		xfree(conn_str);
 	}
 
@@ -225,38 +256,111 @@ static int _reservation_report(reserve_info_msg_t *resv_ptr)
 		slurm_perror("No resv_ptr given\n");
 		return SLURM_ERROR;
 	}
-	if (resv_ptr->record_count != 0) {
+	if (resv_ptr->record_count)
 		print_sinfo_reservation(resv_ptr);
-	} else
+	else
 		printf ("No reservations in the system\n");
 	return SLURM_SUCCESS;
 }
 
 /*
- * _query_server - download the current server state
- * part_pptr IN/OUT - partition information message
- * node_pptr IN/OUT - node information message
+ * _load_blocks - download the current server's BlueGene block data state
  * block_pptr IN/OUT - BlueGene block data
+ * clear_old IN - If set, then always replace old data, needed when going
+ *		  between clusters.
+ * RET zero or error code
+ */
+static int _load_blocks(block_info_msg_t **block_pptr, bool clear_old)
+{
+	static block_info_msg_t *old_bg_ptr = NULL, *new_bg_ptr;
+	uint16_t show_flags = 0;
+	int error_code = SLURM_SUCCESS;
+
+	if (params.all_flag)
+		show_flags |= SHOW_ALL;
+
+	if (params.cluster_flags & CLUSTER_FLAG_BG) {
+		if (old_bg_ptr) {
+			if (clear_old)
+				old_bg_ptr->last_update = 0;
+			error_code = slurm_load_block_info(
+				old_bg_ptr->last_update,
+				&new_bg_ptr, show_flags);
+			if (error_code == SLURM_SUCCESS)
+				slurm_free_block_info_msg(old_bg_ptr);
+			else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
+				error_code = SLURM_SUCCESS;
+				new_bg_ptr = old_bg_ptr;
+			}
+		} else {
+			error_code = slurm_load_block_info((time_t) NULL,
+							   &new_bg_ptr,
+							   show_flags);
+		}
+	}
+
+	if (error_code) {
+		slurm_perror("slurm_load_block");
+		return error_code;
+	}
+	old_bg_ptr = new_bg_ptr;
+	*block_pptr = new_bg_ptr;
+	return SLURM_SUCCESS;
+}
+
+/*
+ * _load_resv - download the current server's reservation state
  * reserv_pptr IN/OUT - reservation information message
  * clear_old IN - If set, then always replace old data, needed when going
  *		  between clusters.
  * RET zero or error code
  */
-static int
-_query_server(partition_info_msg_t ** part_pptr,
-	      node_info_msg_t ** node_pptr,
-	      block_info_msg_t ** block_pptr,
-	      reserve_info_msg_t ** reserv_pptr,
-	      bool clear_old)
+static int _load_resv(reserve_info_msg_t **reserv_pptr, bool clear_old)
+{
+	static reserve_info_msg_t *old_resv_ptr = NULL, *new_resv_ptr;
+	int error_code;
+
+	if (old_resv_ptr) {
+		if (clear_old)
+			old_resv_ptr->last_update = 0;
+		error_code = slurm_load_reservations(old_resv_ptr->last_update,
+						     &new_resv_ptr);
+		if (error_code == SLURM_SUCCESS)
+			slurm_free_reservation_info_msg(old_resv_ptr);
+		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
+			error_code = SLURM_SUCCESS;
+			new_resv_ptr = old_resv_ptr;
+		}
+	} else {
+		error_code = slurm_load_reservations((time_t) NULL,
+						     &new_resv_ptr);
+	}
+
+	if (error_code) {
+		slurm_perror("slurm_load_reservations");
+		return error_code;
+	}
+	old_resv_ptr = new_resv_ptr;
+	*reserv_pptr = new_resv_ptr;
+
+	return SLURM_SUCCESS;
+}
+
+/*
+ * _query_server - download the current server state
+ * clear_old IN - If set, then always replace old data, needed when going
+ *		  between clusters.
+ * RET List of node/partition records
+ */
+static List _query_server(bool clear_old)
 {
 	static partition_info_msg_t *old_part_ptr = NULL, *new_part_ptr;
 	static node_info_msg_t *old_node_ptr = NULL, *new_node_ptr;
-	static block_info_msg_t *old_bg_ptr = NULL, *new_bg_ptr;
-	static reserve_info_msg_t *old_resv_ptr = NULL, *new_resv_ptr;
 	int error_code;
 	uint16_t show_flags = 0;
 	int cc;
 	node_info_t *node_ptr;
+	List sinfo_list = NULL;
 
 	if (params.all_flag)
 		show_flags |= SHOW_ALL;
@@ -278,11 +382,9 @@ _query_server(partition_info_msg_t ** part_pptr,
 	}
 	if (error_code) {
 		slurm_perror("slurm_load_partitions");
-		return error_code;
+		return sinfo_list;
 	}
-
 	old_part_ptr = new_part_ptr;
-	*part_pptr = new_part_ptr;
 
 	if (old_node_ptr) {
 		if (clear_old)
@@ -308,13 +410,11 @@ _query_server(partition_info_msg_t ** part_pptr,
 		error_code = slurm_load_node((time_t) NULL, &new_node_ptr,
 					     show_flags);
 	}
-
 	if (error_code) {
 		slurm_perror("slurm_load_node");
-		return error_code;
+		return sinfo_list;
 	}
 	old_node_ptr = new_node_ptr;
-	*node_pptr = new_node_ptr;
 
 	/* Set the node state as NODE_STATE_MIXED. */
 	for (cc = 0; cc < new_node_ptr->record_count; cc++) {
@@ -357,65 +457,156 @@ _query_server(partition_info_msg_t ** part_pptr,
 		}
 	}
 
-	/* Avoid calling slurmctld for reservation
-	 * if the reservation flag is not set.
-	 */
-	if (params.reservation_flag) {
-		if (old_resv_ptr) {
-			if (clear_old)
-				old_resv_ptr->last_update = 0;
-			error_code
-				= slurm_load_reservations(old_resv_ptr->last_update,
-							  &new_resv_ptr);
-			if (error_code == SLURM_SUCCESS)
-				slurm_free_reservation_info_msg(old_resv_ptr);
-			else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
-				error_code = SLURM_SUCCESS;
-				new_resv_ptr = old_resv_ptr;
-			}
-		} else {
-			error_code = slurm_load_reservations((time_t) NULL,
-							     &new_resv_ptr);
-		}
+	sinfo_list = list_create(_sinfo_list_delete);
+	_build_sinfo_data(sinfo_list, new_part_ptr, new_node_ptr);
 
-		if (error_code) {
-			slurm_perror("slurm_load_reservations");
-			return error_code;
-		}
-		old_resv_ptr = new_resv_ptr;
-		*reserv_pptr = new_resv_ptr;
-	}
+	return sinfo_list;
+}
 
-	if (!params.bg_flag)
-		return SLURM_SUCCESS;
+static void *_load_job_prio_thread(void *args)
+{
+	load_info_struct_t *load_args = (load_info_struct_t *) args;
+	uint16_t show_flags = 0;
+	char *node_name = NULL;
+	slurmdb_cluster_rec_t *cluster = load_args->cluster;
+	int error_code;
+	partition_info_msg_t *new_part_ptr;
+	node_info_msg_t *new_node_ptr;
+	int cc;
+	node_info_t *node_ptr;
+	List sinfo_list = NULL;
 
-	if (params.cluster_flags & CLUSTER_FLAG_BG) {
-		if (old_bg_ptr) {
-			if (clear_old)
-				old_bg_ptr->last_update = 0;
-			error_code = slurm_load_block_info(
-				old_bg_ptr->last_update,
-				&new_bg_ptr, show_flags);
-			if (error_code == SLURM_SUCCESS)
-				slurm_free_block_info_msg(old_bg_ptr);
-			else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
-				error_code = SLURM_SUCCESS;
-				new_bg_ptr = old_bg_ptr;
-			}
-		} else {
-			error_code = slurm_load_block_info((time_t) NULL,
-							   &new_bg_ptr,
-							   show_flags);
-		}
-	}
+	if (params.node_name_single)
+		node_name = params.nodes;
+	if (params.all_flag)
+		show_flags |= SHOW_ALL;
 
+	error_code = slurm_load_partitions2((time_t) NULL, &new_part_ptr,
+					    show_flags, cluster);
 	if (error_code) {
-		slurm_perror("slurm_load_block");
-		return error_code;
+		slurm_perror("slurm_load_partitions");
+		xfree(args);
+		return (void *) NULL;
 	}
-	old_bg_ptr = new_bg_ptr;
-	*block_pptr = new_bg_ptr;
-	return SLURM_SUCCESS;
+	list_append(load_args->part_info_msg_list, new_part_ptr);
+
+	if (node_name) {
+		error_code = slurm_load_node_single2(&new_node_ptr, node_name,
+						     show_flags, cluster);
+	} else {
+		error_code = slurm_load_node2((time_t) NULL, &new_node_ptr,
+					      show_flags, cluster);
+	}
+	if (error_code) {
+		slurm_perror("slurm_load_node");
+		xfree(args);
+		return (void *) NULL;
+	}
+	list_append(load_args->node_info_msg_list, new_node_ptr);
+
+	/* Set the node state as NODE_STATE_MIXED. */
+	for (cc = 0; cc < new_node_ptr->record_count; cc++) {
+		node_ptr = &(new_node_ptr->node_array[cc]);
+		if (IS_NODE_DRAIN(node_ptr)) {
+			/* don't worry about mixed since the
+			 * whole node is being drained. */
+		} else {
+			uint16_t alloc_cpus = 0, err_cpus = 0, idle_cpus;
+			int single_node_cpus =
+				(node_ptr->cpus / g_node_scaling);
+
+			select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
+						     SELECT_NODEDATA_SUBCNT,
+						     NODE_STATE_ALLOCATED,
+						     &alloc_cpus);
+			if (params.cluster_flags & CLUSTER_FLAG_BG) {
+				if (!alloc_cpus &&
+				    (IS_NODE_ALLOCATED(node_ptr) ||
+				     IS_NODE_COMPLETING(node_ptr)))
+					alloc_cpus = node_ptr->cpus;
+				else
+					alloc_cpus *= single_node_cpus;
+			}
+			idle_cpus = node_ptr->cpus - alloc_cpus;
+
+			select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
+						     SELECT_NODEDATA_SUBCNT,
+						     NODE_STATE_ERROR,
+						     &err_cpus);
+			if (params.cluster_flags & CLUSTER_FLAG_BG)
+				err_cpus *= single_node_cpus;
+			idle_cpus -= err_cpus;
+
+			if ((alloc_cpus && err_cpus) ||
+			    (idle_cpus  && (idle_cpus != node_ptr->cpus))) {
+				node_ptr->node_state &= NODE_STATE_FLAGS;
+				node_ptr->node_state |= NODE_STATE_MIXED;
+			}
+		}
+	}
+
+	sinfo_list = list_create(_sinfo_list_delete);
+	_build_sinfo_data(sinfo_list, new_part_ptr, new_node_ptr);
+	if (sinfo_list) {
+		sinfo_data_t *sinfo_ptr;
+		ListIterator iter;
+		iter = list_iterator_create(sinfo_list);
+		while ((sinfo_ptr = (sinfo_data_t *) list_next(iter)))
+			sinfo_ptr->cluster_name = cluster->name;
+		list_iterator_destroy(iter);
+		list_transfer(load_args->resp_msg_list, sinfo_list);
+		list_destroy(sinfo_list);
+	}
+
+	xfree(args);
+	return (void *) NULL;
+}
+
+/*
+ * _query_fed_servers - download the current server state in parallel for
+ *		all clusters in a federation
+ * fed IN - identification of clusters in federation
+ * RET List of node/partition records
+ */
+static List _query_fed_servers(slurmdb_federation_rec_t *fed,
+			       List node_info_msg_list,
+			       List part_info_msg_list)
+{
+	List resp_msg_list;
+	int pthread_count = 0;
+	pthread_t *load_thread = 0;
+	ListIterator iter;
+	slurmdb_cluster_rec_t *cluster;
+	load_info_struct_t *load_args;
+	int i;
+
+	/* Spawn one pthread per cluster to collect job information */
+	load_thread = xmalloc(sizeof(pthread_t) *
+			      list_count(fed->cluster_list));
+	resp_msg_list = list_create(_sinfo_list_delete);
+	iter = list_iterator_create(fed->cluster_list);
+	while ((cluster = (slurmdb_cluster_rec_t *) list_next(iter))) {
+		if ((cluster->control_host == NULL) ||
+		    (cluster->control_host[0] == '\0'))
+			continue;	/* Cluster down */
+		load_args = xmalloc(sizeof(load_info_struct_t));
+		load_args->cluster = cluster;
+		load_args->node_info_msg_list = node_info_msg_list;
+		load_args->part_info_msg_list = part_info_msg_list;
+		load_args->resp_msg_list = resp_msg_list;
+		slurm_thread_create(&load_thread[pthread_count],
+				    _load_job_prio_thread, load_args);
+		pthread_count++;
+
+	}
+	list_iterator_destroy(iter);
+
+	/* Wait for all pthreads to complete */
+	for (i = 0; i < pthread_count; i++)
+		pthread_join(load_thread[i], NULL);
+	xfree(load_thread);
+
+	return resp_msg_list;
 }
 
 /* Build information about a partition using one pthread per partition */
@@ -494,8 +685,6 @@ static int _build_sinfo_data(List sinfo_list,
 			     partition_info_msg_t *partition_msg,
 			     node_info_msg_t *node_msg)
 {
-	pthread_attr_t attr_sinfo;
-	pthread_t thread_sinfo;
 	build_part_info_t *build_struct_ptr;
 	node_info_t *node_ptr = NULL;
 	partition_info_t *part_ptr = NULL;
@@ -506,7 +695,7 @@ static int _build_sinfo_data(List sinfo_list,
 	/* by default every partition is shown, even if no nodes */
 	if ((!params.node_flag) && params.match_flags.partition_flag) {
 		part_ptr = partition_msg->partition_array;
-		for (j=0; j<partition_msg->record_count; j++, part_ptr++) {
+		for (j = 0; j < partition_msg->record_count; j++, part_ptr++) {
 			if ((!params.part_list) ||
 			    (list_find_first(params.part_list,
 					     _find_part_list,
@@ -584,17 +773,8 @@ static int _build_sinfo_data(List sinfo_list,
 		sinfo_cnt++;
 		slurm_mutex_unlock(&sinfo_cnt_mutex);
 
-		slurm_attr_init(&attr_sinfo);
-		if (pthread_attr_setdetachstate
-		    (&attr_sinfo, PTHREAD_CREATE_DETACHED))
-			error("pthread_attr_setdetachstate error %m");
-		while (pthread_create(&thread_sinfo, &attr_sinfo,
-				      _build_part_info,
-				      (void *) build_struct_ptr)) {
-			error("pthread_create error %m");
-			usleep(10000);	/* sleep and retry */
-		}
-		slurm_attr_destroy(&attr_sinfo);
+		slurm_thread_create_detached(NULL, _build_part_info,
+					     build_struct_ptr);
 	}
 
 	slurm_mutex_lock(&sinfo_cnt_mutex);
@@ -1247,6 +1427,20 @@ static sinfo_data_t *_create_sinfo(partition_info_t* part_ptr,
 		_update_sinfo(sinfo_ptr, node_ptr, node_scaling);
 
 	return sinfo_ptr;
+}
+
+static void _node_list_delete(void *data)
+{
+	node_info_msg_t *old_node_ptr = data;
+
+	slurm_free_node_info_msg(old_node_ptr);
+}
+
+static void _part_list_delete(void *data)
+{
+	partition_info_msg_t *old_part_ptr = data;
+
+	slurm_free_partition_info_msg(old_part_ptr);
 }
 
 static void _sinfo_list_delete(void *data)

@@ -50,6 +50,7 @@ typedef void mpi_plugin_client_state_t;
 
 typedef struct {
 	uint32_t jobid;
+	uint32_t pack_jobid;	/* pack job leader or NO_VAL */
 	uint32_t stepid;
 	slurm_step_layout_t *step_layout;
 } mpi_plugin_client_info_t;
@@ -136,9 +137,6 @@ int mpi_hook_client_init (char *mpi_type);
  */
 mpi_plugin_client_state_t *
 mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env);
-
-/* Call the plugin p_mpi_hook_client_single_task_per_node() function. */
-bool mpi_hook_client_single_task_per_node (void);
 
 /* Call the plugin p_mpi_hook_client_fini() function. */
 int mpi_hook_client_fini (mpi_plugin_client_state_t *state);

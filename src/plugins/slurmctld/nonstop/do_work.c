@@ -274,7 +274,7 @@ static int _update_job(job_desc_msg_t * job_specs, uid_t uid)
 
 	msg.data= job_specs;
 	msg.conn_fd = -1;
-	return update_job(&msg, uid);
+	return update_job(&msg, uid, true);
 }
 
 /*
@@ -373,7 +373,7 @@ extern int restore_nonstop_state(void)
 	uint32_t data_allocated, data_size = 0;
 	uint32_t job_cnt = 0;
 	char *data;
-	uint16_t protocol_version = (uint16_t) NO_VAL;
+	uint16_t protocol_version = NO_VAL16;
 	Buf buffer;
 	int error_code = SLURM_SUCCESS, i, state_fd, data_read;
 	time_t buf_time;
@@ -418,7 +418,9 @@ extern int restore_nonstop_state(void)
 	safe_unpack16(&protocol_version, buffer);
 	debug3("Version in slurmctld/nonstop header is %u", protocol_version);
 
-	if (protocol_version == (uint16_t) NO_VAL) {
+	if (protocol_version == NO_VAL16) {
+		if (!ignore_state_errors)
+			fatal("Can not recover slurmctld/nonstop state, incompatible version, start with '-i' to ignore this");
 		error("*************************************************************");
 		error("Can not recover slurmctld/nonstop state, incompatible version");
 		error("*************************************************************");
@@ -445,6 +447,8 @@ extern int restore_nonstop_state(void)
 	return error_code;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete nonstop state file, start with '-i' to ignore this");
 	error("Incomplete nonstop state file");
 	free_buf(buffer);
 	return SLURM_FAILURE;
@@ -1249,11 +1253,8 @@ extern char *replace_node(char *cmd_ptr, uid_t cmd_uid,
 	job_alloc_req.network	= xstrdup(job_ptr->network);
 	job_alloc_req.partition	= xstrdup(job_ptr->partition);
 	job_alloc_req.priority	= NO_VAL - 1;
-	if (job_ptr->qos_ptr) {
-		slurmdb_qos_rec_t *qos_ptr;
-		qos_ptr = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
-		job_alloc_req.qos = xstrdup(qos_ptr->name);
-	}
+	if (job_ptr->qos_ptr)
+		job_alloc_req.qos = xstrdup(job_ptr->qos_ptr->name);
 
 	/* Without unlock, the job_begin_callback() function will deadlock.
 	 * Not a great solution, but perhaps the least bad solution. */
@@ -1794,19 +1795,13 @@ static void *_state_thread(void *no_data)
 /* Spawn thread to periodically save nonstop plugin state to disk */
 extern int spawn_state_thread(void)
 {
-	pthread_attr_t thread_attr_msg;
-
 	slurm_mutex_lock(&thread_flag_mutex);
 	if (thread_running) {
 		slurm_mutex_unlock(&thread_flag_mutex);
 		return SLURM_ERROR;
 	}
 
-	slurm_attr_init(&thread_attr_msg);
-	if (pthread_create(&msg_thread_id, &thread_attr_msg,
-			   _state_thread, NULL))
-		fatal("pthread_create %m");
-	slurm_attr_destroy(&thread_attr_msg);
+	slurm_thread_create(&msg_thread_id, _state_thread, NULL);
 	thread_running = true;
 	slurm_mutex_unlock(&thread_flag_mutex);
 

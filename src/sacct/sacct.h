@@ -136,6 +136,7 @@ typedef enum {
 		PRINT_MAXVSIZE,
 		PRINT_MAXVSIZENODE,
 		PRINT_MAXVSIZETASK,
+		PRINT_MCS_LABEL,
 		PRINT_MINCPU,
 		PRINT_MINCPUNODE,
 		PRINT_MINCPUTASK,
@@ -169,20 +170,24 @@ typedef enum {
 		PRINT_USER,
 		PRINT_USERCPU,
 		PRINT_WCKEY,
-		PRINT_WCKEYID
+		PRINT_WCKEYID,
+		PRINT_WORK_DIR
 } sacct_print_types_t;
 
 typedef struct {
+	char *cluster_name;	/* Set if in federated cluster */
+	int opt_allocs;		/* --total */
 	uint32_t convert_flags;	/* --noconvert */
 	slurmdb_job_cond_t *job_cond;
 	int opt_completion;	/* --completion */
 	int opt_dup;		/* --duplicates; +1 = explicitly set */
+	bool opt_federation;	/* --federation */
 	char *opt_field_list;	/* --fields= */
+	char *opt_filein;	/* --file */
 	int opt_gid;		/* running persons gid */
 	int opt_help;		/* --help */
-	char *opt_filein;
+	bool opt_local;		/* --local */
 	int opt_noheader;	/* can only be cleared */
-	int opt_allocs;		/* --total */
 	int opt_uid;		/* running persons uid */
 	int units;		/* --units*/
 } sacct_parameters_t;
@@ -205,12 +210,12 @@ void aggregate_stats(slurmdb_stats_t *dest, slurmdb_stats_t *from);
 void print_fields(type_t type, void *object);
 
 /* options.c */
-int get_data(void);
+int  get_data(void);
 void parse_command_line(int argc, char **argv);
 void do_help(void);
 void do_list(void);
 void do_list_completion(void);
-void sacct_init();
-void sacct_fini();
+void sacct_init(void);
+void sacct_fini(void);
 
 #endif /* !_SACCT_H */

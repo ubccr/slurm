@@ -87,8 +87,6 @@ int xcgroup_ns_create(slurm_cgroup_conf_t *conf,
 					 conf->cgroup_mountpoint, subsys);
 	cgns->mnt_args = xstrdup(mnt_args);
 	cgns->subsystems = xstrdup(subsys);
-	cgns->notify_prog = xstrdup_printf("%s/release_%s",
-					   conf->cgroup_release_agent, subsys);
 
 	/* check that freezer cgroup namespace is available */
 	if (!xcgroup_ns_is_available(cgns)) {
@@ -121,7 +119,6 @@ void xcgroup_ns_destroy(xcgroup_ns_t* cgns)
 	xfree(cgns->mnt_point);
 	xfree(cgns->mnt_args);
 	xfree(cgns->subsystems);
-	xfree(cgns->notify_prog);
 }
 
 /*
@@ -142,8 +139,6 @@ int xcgroup_ns_mount(xcgroup_ns_t* cgns)
 	char* mnt_point;
 	char* p;
 
-	xcgroup_t cg;
-
 	mode_t cmask;
 	mode_t omask;
 
@@ -160,7 +155,7 @@ int xcgroup_ns_mount(xcgroup_ns_t* cgns)
 		}
 		mnt_point = xstrdup(cgns->mnt_point);
 		p = mnt_point;
-		while ((p = index(p+1, '/')) != NULL) {
+		while ((p = xstrchr(p+1, '/')) != NULL) {
 			*p = '\0';
 			fstatus = mkdir(mnt_point, 0755);
 			if (fstatus && errno != EEXIST) {
@@ -205,23 +200,8 @@ int xcgroup_ns_mount(xcgroup_ns_t* cgns)
 		  MS_NOSUID|MS_NOEXEC|MS_NODEV, options))
 #endif
 		return XCGROUP_ERROR;
-	else {
-		/* FIXME: this only gets set when we aren't mounted at
-		   all.  Since we never umount this may only be loaded
-		   at startup the first time.
-		*/
 
-		/* we then set the release_agent if necessary */
-		if (cgns->notify_prog) {
-			if (xcgroup_create(cgns, &cg, "/", 0, 0) ==
-			     XCGROUP_ERROR)
-				return XCGROUP_SUCCESS;
-			xcgroup_set_param(&cg, "release_agent",
-					  cgns->notify_prog);
-			xcgroup_destroy(&cg);
-		}
-		return XCGROUP_SUCCESS;
-	}
+	return XCGROUP_SUCCESS;
 }
 
 /*
@@ -306,16 +286,16 @@ int xcgroup_ns_find_by_pid(xcgroup_ns_t* cgns, xcgroup_t* cg, pid_t pid)
 	if (fstatus == XCGROUP_SUCCESS) {
 		fstatus = XCGROUP_ERROR;
 		p = buf;
-		while ((e = index(p, '\n')) != NULL) {
+		while ((e = xstrchr(p, '\n')) != NULL) {
 			*e='\0';
 			/* get subsystems entry */
-			subsys = index(p, ':');
+			subsys = xstrchr(p, ':');
 			p = e + 1;
 			if (subsys == NULL)
 				continue;
 			subsys++;
 			/* get relative path entry */
-			entry = index(subsys, ':');
+			entry = xstrchr(subsys, ':');
 			if (entry == NULL)
 				continue;
 			*entry='\0';
@@ -341,8 +321,6 @@ int xcgroup_ns_load(slurm_cgroup_conf_t *conf, xcgroup_ns_t *cgns, char *subsys)
 					 conf->cgroup_mountpoint, subsys);
 	cgns->mnt_args = NULL;
 	cgns->subsystems = xstrdup(subsys);
-	cgns->notify_prog = xstrdup_printf("%s/release_%s",
-					   conf->cgroup_release_agent, subsys);
 	return XCGROUP_SUCCESS;
 }
 
@@ -374,7 +352,6 @@ int xcgroup_create(xcgroup_ns_t* cgns, xcgroup_t* cg,
 	cg->path = xstrdup(file_path);
 	cg->uid = uid;
 	cg->gid = gid;
-	cg->notify = 1;
 
 	return XCGROUP_SUCCESS;
 }
@@ -431,18 +408,14 @@ int xcgroup_instantiate(xcgroup_t* cg)
 	mode_t cmask;
 	mode_t omask;
 
-	xcgroup_ns_t* cgns;
 	char* file_path;
 	uid_t uid;
 	gid_t gid;
-	uint32_t notify;
 
 	/* init variables based on input cgroup */
-	cgns = cg->ns;
 	file_path = cg->path;
 	uid = cg->uid;
 	gid = cg->gid;
-	notify = cg->notify;
 
 	/* save current mask and apply working one */
 	cmask = S_IWGRP | S_IWOTH;
@@ -474,10 +447,8 @@ int xcgroup_instantiate(xcgroup_t* cg)
 	fstatus = XCGROUP_SUCCESS;
 
 	/* set notify on release flag */
-	if (notify == 1 && cgns->notify_prog)
-		xcgroup_set_params(cg, "notify_on_release=1");
-	else
-		xcgroup_set_params(cg, "notify_on_release=0");
+	xcgroup_set_param(cg, "notify_on_release", "0");
+
 	return fstatus;
 }
 
@@ -508,9 +479,6 @@ int xcgroup_load(xcgroup_ns_t* cgns, xcgroup_t* cg, char* uri)
 	cg->path = xstrdup(file_path);
 	cg->uid = buf.st_uid;
 	cg->gid = buf.st_gid;
-
-	/* read the content of the notify flag */
-	xcgroup_get_uint32_param(cg, "notify_on_release", &(cg->notify));
 
 	return XCGROUP_SUCCESS;
 }
@@ -586,62 +554,16 @@ int xcgroup_get_pids(xcgroup_t* cg, pid_t **pids, int *npids)
 	return fstatus;
 }
 
-int xcgroup_set_params(xcgroup_t* cg, char* parameters)
-{
-	int fstatus = XCGROUP_ERROR;
-	char file_path[PATH_MAX];
-	char* cpath = cg->path;
-	char* params;
-	char* value;
-	char* p;
-	char* next;
-
-	params = (char*) xstrdup(parameters);
-
-	p = params;
-	while (p != NULL && *p != '\0') {
-		next = index(p, ' ');
-		if (next) {
-			*next='\0';
-			next++;
-			while (*next == ' ')
-				next++;
-		}
-		value = index(p, '=');
-		if (value != NULL) {
-			*value='\0';
-			value++;
-			if (snprintf(file_path, PATH_MAX, "%s/%s", cpath, p)
-			     >= PATH_MAX) {
-				debug2("unable to build filepath for '%s' and"
-				       " parameter '%s' : %m", cpath, p);
-				goto next_loop;
-			}
-			fstatus = _file_write_content(file_path, value,
-						      strlen(value));
-			if (fstatus != XCGROUP_SUCCESS)
-				debug2("%s: unable to set parameter '%s' to "
-					"'%s' for '%s'", __func__, p, value,
-					cpath);
-			else
-				debug3("%s: parameter '%s' set to '%s' for '%s'",
-					__func__, p, value, cpath);
-		} else
-			debug2("%s: bad parameters format for entry '%s'",
-				__func__, p);
-	next_loop:
-		p = next;
-	}
-
-	xfree(params);
-	return fstatus;
-}
-
 int xcgroup_set_param(xcgroup_t* cg, char* param, char* content)
 {
 	int fstatus = XCGROUP_ERROR;
 	char file_path[PATH_MAX];
 	char* cpath = cg->path;
+
+	if (!content) {
+		debug2("%s: no content given, nothing to do.", __func__);
+		return fstatus;
+	}
 
 	if (snprintf(file_path, PATH_MAX, "%s/%s", cpath, param) >= PATH_MAX) {
 		debug2("unable to build filepath for '%s' and"
@@ -838,10 +760,11 @@ size_t _file_getsize(int fd)
 	offset = lseek(fd, 0, SEEK_CUR);
 	if (offset < 0)
 		return -1;
-	lseek(fd, 0, SEEK_SET);
+	if (lseek(fd, 0, SEEK_SET) < 0)
+		error("%s: lseek(0): %m", __func__);
 
 	/* get file size */
-	fsize=0;
+	fsize = 0;
 	do {
 		rc = read(fd, (void*)&c, 1);
 		if (rc > 0)
@@ -849,7 +772,8 @@ size_t _file_getsize(int fd)
 	} while ((rc < 0 && errno == EINTR) || rc > 0);
 
 	/* restore position */
-	lseek(fd, offset, SEEK_SET);
+	if (lseek(fd, offset, SEEK_SET) < 0)
+		error("%s: lseek(): %m", __func__);
 
 	if (rc < 0)
 		return -1;
@@ -876,7 +800,7 @@ int _file_write_uint64s(char* file_path, uint64_t* values, int nb)
 
 	/* add one value per line */
 	fstatus = XCGROUP_SUCCESS;
-	for (i=0 ; i < nb ; i++) {
+	for (i = 0; i < nb ; i++) {
 
 		value = values[i];
 
@@ -950,9 +874,9 @@ int _file_read_uint64s(char* file_path, uint64_t** pvalues, int* pnb)
 	i=0;
 	if (rc > 0) {
 		p = buf;
-		while (index(p, '\n') != NULL) {
+		while (xstrchr(p, '\n') != NULL) {
 			i++;
-			p = index(p, '\n') + 1;
+			p = xstrchr(p, '\n') + 1;
 		}
 	}
 
@@ -961,11 +885,11 @@ int _file_read_uint64s(char* file_path, uint64_t** pvalues, int* pnb)
 		pa = (uint64_t*) xmalloc(sizeof(uint64_t) * i);
 		p = buf;
 		i = 0;
-		while (index(p, '\n') != NULL) {
+		while (xstrchr(p, '\n') != NULL) {
 			long long unsigned int ll_tmp;
 			sscanf(p, "%llu", &ll_tmp);
 			pa[i++] = ll_tmp;
-			p = index(p, '\n') + 1;
+			p = xstrchr(p, '\n') + 1;
 		}
 	}
 
@@ -1072,9 +996,9 @@ int _file_read_uint32s(char* file_path, uint32_t** pvalues, int* pnb)
 	i=0;
 	if (rc > 0) {
 		p = buf;
-		while (index(p, '\n') != NULL) {
+		while (xstrchr(p, '\n') != NULL) {
 			i++;
-			p = index(p, '\n') + 1;
+			p = xstrchr(p, '\n') + 1;
 		}
 	}
 
@@ -1083,9 +1007,9 @@ int _file_read_uint32s(char* file_path, uint32_t** pvalues, int* pnb)
 		pa = (uint32_t*) xmalloc(sizeof(uint32_t) * i);
 		p = buf;
 		i = 0;
-		while (index(p, '\n') != NULL) {
+		while (xstrchr(p, '\n') != NULL) {
 			sscanf(p, "%u", pa+i);
-			p = index(p, '\n') + 1;
+			p = xstrchr(p, '\n') + 1;
 			i++;
 		}
 	}

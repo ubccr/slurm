@@ -64,6 +64,7 @@ libslurmdb_la_SOURCES =	\
 	connection_functions.c \
 	extra_get_functions.c \
 	federation_functions.c \
+	job_functions.c \
 	job_report_functions.c \
 	qos_functions.c \
 	resource_functions.c \
@@ -94,7 +95,6 @@ $(libslurmdb_o_LDADD) $(libslurmdb_la_LIBADD) : force
 
 $(VERSION_SCRIPT) :
 	(echo "{ global:";   \
-	 echo "   slurm_*;"; \
 	 echo "   slurmdb_*;"; \
 	 echo "   working_cluster_rec;"; \
 	 echo "  local: *;"; \

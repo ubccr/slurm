@@ -196,9 +196,8 @@ static void _xlate_task_str(slurmdb_job_rec_t *job_ptr)
 	job_ptr->array_task_str = out_buf;
 }
 
-void print_fields(type_t type, void *object)
+extern void print_fields(type_t type, void *object)
 {
-
 	slurmdb_job_rec_t *job = (slurmdb_job_rec_t *)object;
 	slurmdb_step_rec_t *step = (slurmdb_step_rec_t *)object;
 	jobcomp_job_rec_t *job_comp = (jobcomp_job_rec_t *)object;
@@ -222,10 +221,11 @@ void print_fields(type_t type, void *object)
 		step = NULL;
 		if (!job->track_steps)
 			step = (slurmdb_step_rec_t *)job->first_step_ptr;
-		/* set this to avoid printing out info for things that
-		   don't mean anything.  Like an allocation that never
-		   ran anything.
-		*/
+		/*
+		 * set this to avoid printing out info for things that
+		 * don't mean anything.  Like an allocation that never
+		 * ran anything.
+		 */
 		if (!step)
 			job->track_steps = 1;
 		else
@@ -275,9 +275,9 @@ void print_fields(type_t type, void *object)
 		step_cpu_tres_rec_count = 0;
 
 	list_iterator_reset(print_fields_itr);
-	while((field = list_next(print_fields_itr))) {
+	while ((field = list_next(print_fields_itr))) {
 		char *tmp_char = NULL, id[FORMAT_STRING_SIZE];
-		int tmp_int = NO_VAL, tmp_int2 = NO_VAL;
+		int exit_code, tmp_int = NO_VAL, tmp_int2 = NO_VAL;
 		double tmp_dub = (double)NO_VAL; /* don't use NO_VAL64
 						    unless we can
 						    confirm the values
@@ -287,7 +287,7 @@ void print_fields(type_t type, void *object)
 		uint64_t tmp_uint64 = NO_VAL64;
 
 		memset(&outbuf, 0, sizeof(outbuf));
-		switch(field->type) {
+		switch (field->type) {
 		case PRINT_ALLOC_CPUS:
 			switch(type) {
 			case JOB:
@@ -629,19 +629,23 @@ void print_fields(type_t type, void *object)
 			if (got_stats) {
 				switch (type) {
 				case JOB:
-					if (!job->track_steps)
-						tmp_dub = step->
-							stats.consumed_energy;
+					if ((tmp_uint64 =
+					     slurmdb_find_tres_count_in_string(
+						     job->tres_alloc_str,
+						     TRES_ENERGY))
+					     == INFINITE64)
+						tmp_uint64 = 0;
 					break;
 				case JOBSTEP:
-					tmp_dub = step->stats.consumed_energy;
+					tmp_uint64 =
+						step->stats.consumed_energy;
 					break;
 				default:
 					break;
 				}
 			}
-			if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit2((double)tmp_dub, outbuf,
+			if (!fuzzy_equal(tmp_uint64, NO_VAL64))
+				convert_num_unit2((double)tmp_uint64, outbuf,
 						  sizeof(outbuf), UNIT_NONE,
 						  params.units, 1000,
 						  params.convert_flags &
@@ -655,12 +659,16 @@ void print_fields(type_t type, void *object)
 			if (got_stats) {
 				switch (type) {
 				case JOB:
-					if (!job->track_steps)
-						tmp_dub = step->
-							stats.consumed_energy;
+					if ((tmp_uint64 =
+					     slurmdb_find_tres_count_in_string(
+						     job->tres_alloc_str,
+						     TRES_ENERGY))
+					     == INFINITE64)
+						tmp_uint64 = 0;
 					break;
 				case JOBSTEP:
-					tmp_dub = step->stats.consumed_energy;
+					tmp_uint64 = step->
+						stats.consumed_energy;
 					break;
 				default:
 					break;
@@ -668,7 +676,7 @@ void print_fields(type_t type, void *object)
 			}
 
 			field->print_routine(field,
-					     tmp_dub,
+					     tmp_uint64,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_CPU_TIME:
@@ -710,17 +718,18 @@ void print_fields(type_t type, void *object)
 					     (curr_inx == field_count));
 			break;
 		case PRINT_DERIVED_EC:
-			tmp_int2 = 0;
-			switch(type) {
+			tmp_int = tmp_int2 = 0;
+			switch (type) {
 			case JOB:
-				tmp_int = job->derived_ec;
-				if (tmp_int == NO_VAL)
-					tmp_int = 0;
-				if (WIFSIGNALED(tmp_int))
-					tmp_int2 = WTERMSIG(tmp_int);
+				if (job->derived_ec == NO_VAL)
+					;
+				else if (WIFSIGNALED(job->derived_ec))
+					tmp_int2 = WTERMSIG(job->derived_ec);
+				else if (WIFEXITED(job->derived_ec))
+					tmp_int = WEXITSTATUS(job->derived_ec);
 
 				snprintf(outbuf, sizeof(outbuf), "%d:%d",
-					 WEXITSTATUS(tmp_int), tmp_int2);
+					 tmp_int, tmp_int2);
 				break;
 			case JOBSTEP:
 			case JOBCOMP:
@@ -808,29 +817,29 @@ void print_fields(type_t type, void *object)
 					     (curr_inx == field_count));
 			break;
 		case PRINT_EXITCODE:
-			tmp_int = 0;
-			tmp_int2 = 0;
-			switch(type) {
+			exit_code = NO_VAL;
+			switch (type) {
 			case JOB:
-				tmp_int = job->exitcode;
+				exit_code = job->exitcode;
 				break;
 			case JOBSTEP:
-				tmp_int = step->exitcode;
+				exit_code = step->exitcode;
 				break;
 			case JOBCOMP:
 			default:
 				break;
 			}
-			if (tmp_int != NO_VAL) {
-				if (WIFSIGNALED(tmp_int))
-					tmp_int2 = WTERMSIG(tmp_int);
-				tmp_int = WEXITSTATUS(tmp_int);
+			tmp_int = tmp_int2 = 0;
+			if (exit_code != NO_VAL) {
+				if (WIFSIGNALED(exit_code))
+					tmp_int2 = WTERMSIG(exit_code);
+				else if (WIFEXITED(exit_code))
+					tmp_int = WEXITSTATUS(exit_code);
 				if (tmp_int >= 128)
 					tmp_int -= 128;
 			}
 			snprintf(outbuf, sizeof(outbuf), "%d:%d",
 				 tmp_int, tmp_int2);
-
 			field->print_routine(field,
 					     outbuf,
 					     (curr_inx == field_count));
@@ -888,15 +897,21 @@ void print_fields(type_t type, void *object)
 						 "%u_[%s]",
 						 job->array_job_id,
 						 job->array_task_str);
-				} else if (job->array_task_id != NO_VAL)
+				} else if (job->array_task_id != NO_VAL) {
 					snprintf(id, FORMAT_STRING_SIZE,
 						 "%u_%u",
 						 job->array_job_id,
 						 job->array_task_id);
-				else
+				} else if (job->pack_job_id) {
+					snprintf(id, FORMAT_STRING_SIZE,
+						 "%u+%u",
+						 job->pack_job_id,
+						 job->pack_job_offset);
+				} else {
 					snprintf(id, FORMAT_STRING_SIZE,
 						 "%u",
 						 job->jobid);
+				}
 			}
 
 			switch (type) {
@@ -1072,7 +1087,7 @@ void print_fields(type_t type, void *object)
 					break;
 				}
 			}
-			if (tmp_uint32 == (uint32_t)NO_VAL)
+			if (tmp_uint32 == NO_VAL)
 				tmp_uint32 = NO_VAL;
 			field->print_routine(field,
 					     tmp_uint32,
@@ -1146,7 +1161,7 @@ void print_fields(type_t type, void *object)
 					tmp_uint32 = NO_VAL;
 					break;
 				}
-				if (tmp_uint32 == (uint32_t)NO_VAL)
+				if (tmp_uint32 == NO_VAL)
 					tmp_uint32 = NO_VAL;
 			}
 			field->print_routine(field,
@@ -1168,7 +1183,7 @@ void print_fields(type_t type, void *object)
 				default:
 					break;
 				}
-				if (tmp_uint64 != (uint64_t)NO_VAL64)
+				if (tmp_uint64 != NO_VAL64)
 					convert_num_unit(
 						(double)tmp_uint64,
 						outbuf, sizeof(outbuf),
@@ -1224,7 +1239,7 @@ void print_fields(type_t type, void *object)
 					tmp_uint32 = NO_VAL;
 					break;
 				}
-				if (tmp_uint32 == (uint32_t)NO_VAL)
+				if (tmp_uint32 == NO_VAL)
 					tmp_uint32 = NO_VAL;
 			}
 
@@ -1246,7 +1261,7 @@ void print_fields(type_t type, void *object)
 				default:
 					break;
 				}
-				if (tmp_uint64 != (uint64_t)NO_VAL64)
+				if (tmp_uint64 != NO_VAL64)
 					convert_num_unit(
 						(double)tmp_uint64,
 						outbuf, sizeof(outbuf),
@@ -1322,11 +1337,11 @@ void print_fields(type_t type, void *object)
 					break;
 				case JOBCOMP:
 				default:
-					tmp_uint64 = (uint64_t)NO_VAL64;
+					tmp_uint64 = NO_VAL64;
 					break;
 				}
 
-				if (tmp_uint64 != (uint64_t)NO_VAL64)
+				if (tmp_uint64 != NO_VAL64)
 					convert_num_unit(
 						(double)tmp_uint64,
 						outbuf, sizeof(outbuf),
@@ -1383,12 +1398,30 @@ void print_fields(type_t type, void *object)
 					tmp_uint32 = NO_VAL;
 					break;
 				}
-				if (tmp_uint32 == (uint32_t)NO_VAL)
+				if (tmp_uint32 == NO_VAL)
 					tmp_uint32 = NO_VAL;
 			}
 
 			field->print_routine(field,
 					     tmp_uint32,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_MCS_LABEL:
+			switch(type) {
+			case JOB:
+				if (job->mcs_label)
+					tmp_char = job->mcs_label;
+				break;
+			case JOBSTEP:
+				break;
+			case JOBCOMP:
+				break;
+			default:
+				tmp_char = "n/a";
+				break;
+			}
+			field->print_routine(field,
+					     tmp_char,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_MINCPU:
@@ -1458,7 +1491,7 @@ void print_fields(type_t type, void *object)
 					tmp_uint32 = NO_VAL;
 					break;
 				}
-				if (tmp_uint32 == (uint32_t)NO_VAL)
+				if (tmp_uint32 == NO_VAL)
 					tmp_uint32 = NO_VAL;
 			}
 
@@ -1511,11 +1544,8 @@ void print_fields(type_t type, void *object)
 				    != INFINITE64)
 					tmp_int = tmp_uint64;
 			}
-			convert_num_unit((double)tmp_int, outbuf,
-					 sizeof(outbuf), UNIT_NONE,
-					 params.units, params.convert_flags);
 			field->print_routine(field,
-					     outbuf,
+					     tmp_int,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_NTASKS:
@@ -1732,23 +1762,13 @@ void print_fields(type_t type, void *object)
 				break;
 			}
 
-			if (tmp_uint64 != (uint64_t)NO_VAL64) {
+			if (tmp_uint64 != NO_VAL64) {
 				bool per_cpu = false;
 				if (tmp_uint64 & MEM_PER_CPU) {
 					tmp_uint64 &= (~MEM_PER_CPU);
 					per_cpu = true;
-				} else if ((tmp_uint64 & 0x80000000) &&
-					   (tmp_uint64 < 0x100000000)) {
-					/*
-					 * Handle old conversion of memory
-					 * stored incorrectly in the database.
-					 * This will be fixed in 17.11 and we
-					 * can remove this check.  0x80000000
-					 * was the old value of MEM_PER_CPU
-					 */
-					tmp_uint64 &= (~0x80000000);
-					per_cpu = true;
 				}
+
 				convert_num_unit((double)tmp_uint64,
 						 outbuf, sizeof(outbuf),
 						 UNIT_MEGA, params.units,
@@ -1835,7 +1855,7 @@ void print_fields(type_t type, void *object)
 				tmp_uint32 = NO_VAL;
 				break;
 			}
-			if (tmp_uint32 == (uint32_t)NO_VAL)
+			if (tmp_uint32 == NO_VAL)
 				tmp_uint32 = NO_VAL;
 			field->print_routine(field,
 					     tmp_uint32,
@@ -2243,6 +2263,25 @@ void print_fields(type_t type, void *object)
 			}
 			field->print_routine(field,
 					     tmp_int,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_WORK_DIR:
+			switch(type) {
+			case JOB:
+				tmp_char = job->work_dir;
+				break;
+			case JOBSTEP:
+
+				break;
+			case JOBCOMP:
+
+				break;
+			default:
+
+				break;
+			}
+			field->print_routine(field,
+					     tmp_char,
 					     (curr_inx == field_count));
 			break;
 		default:

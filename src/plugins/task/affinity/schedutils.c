@@ -87,37 +87,6 @@ inline int char_to_val(int c)
 		return -1;
 }
 
-int str_to_cpuset(cpu_set_t *mask, const char* str)
-{
-	int len = strlen(str);
-	const char *ptr = str + len - 1;
-	int base = 0;
-
-	/* skip 0x, it's all hex anyway */
-	if (len > 1 && !memcmp(str, "0x", 2L))
-		str += 2;
-
-	CPU_ZERO(mask);
-	while (ptr >= str) {
-		char val = char_to_val(*ptr);
-		if (val == (char) -1)
-			return -1;
-		if (val & 1)
-			CPU_SET(base, mask);
-		if (val & 2)
-			CPU_SET(base + 1, mask);
-		if (val & 4)
-			CPU_SET(base + 2, mask);
-		if (val & 8)
-			CPU_SET(base + 3, mask);
-		len--;
-		ptr--;
-		base += 4;
-	}
-
-	return 0;
-}
-
 int str_to_cnt(const char* str)
 {
 	int len = strlen(str);
@@ -146,28 +115,3 @@ int str_to_cnt(const char* str)
 
 	return cnt;
 }
-
-char * cpuset_to_str(const cpu_set_t *mask, char *str)
-{
-	int base;
-	char *ptr = str;
-	char *ret = NULL;
-
-	for (base = CPU_SETSIZE - 4; base >= 0; base -= 4) {
-		char val = 0;
-		if (CPU_ISSET(base, mask))
-			val |= 1;
-		if (CPU_ISSET(base + 1, mask))
-			val |= 2;
-		if (CPU_ISSET(base + 2, mask))
-			val |= 4;
-		if (CPU_ISSET(base + 3, mask))
-			val |= 8;
-		if (!ret && val)
-			ret = ptr;
-		*ptr++ = val_to_char(val);
-	}
-	*ptr = '\0';
-	return ret ? ret : ptr - 1;
-}
-

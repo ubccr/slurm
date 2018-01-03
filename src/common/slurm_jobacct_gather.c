@@ -141,7 +141,7 @@ static void _acct_kill_step(void)
 	notify_req.message     = "Exceeded job memory limit";
 	msg.msg_type    = REQUEST_JOB_NOTIFY;
 	msg.data        = &notify_req;
-	slurm_send_only_controller_msg(&msg);
+	slurm_send_only_controller_msg(&msg, working_cluster_rec);
 
 	/*
 	 * Request message:
@@ -154,7 +154,7 @@ static void _acct_kill_step(void)
 	msg.msg_type    = REQUEST_CANCEL_JOB_STEP;
 	msg.data        = &req;
 
-	slurm_send_only_controller_msg(&msg);
+	slurm_send_only_controller_msg(&msg, working_cluster_rec);
 }
 
 static void _pack_jobacct_id(jobacct_id_t *jobacct_id,
@@ -164,8 +164,8 @@ static void _pack_jobacct_id(jobacct_id_t *jobacct_id,
 		pack32((uint32_t) jobacct_id->nodeid, buffer);
 		pack16((uint16_t) jobacct_id->taskid, buffer);
 	} else {
-		pack32((uint32_t) NO_VAL, buffer);
-		pack16((uint16_t) NO_VAL, buffer);
+		pack32(NO_VAL, buffer);
+		pack16(NO_VAL16, buffer);
 	}
 }
 
@@ -214,8 +214,6 @@ static bool _init_run_test(void)
 }
 
 /* _watch_tasks() -- monitor slurm jobs and track their memory usage
- *
- * IN, OUT:	Irrelevant; this is invoked by pthread_create()
  */
 
 static void *_watch_tasks(void *arg)
@@ -345,7 +343,6 @@ extern int jobacct_gather_fini(void)
 extern int jobacct_gather_startpoll(uint16_t frequency)
 {
 	int retval = SLURM_SUCCESS;
-	pthread_attr_t attr;
 
 	if (!plugin_polling)
 		return SLURM_SUCCESS;
@@ -370,14 +367,9 @@ extern int jobacct_gather_startpoll(uint16_t frequency)
 	}
 
 	/* create polling thread */
-	slurm_attr_init(&attr);
-	if  (pthread_create(&watch_tasks_thread_id, &attr,
-			    &_watch_tasks, NULL)) {
-		debug("jobacct_gather failed to create _watch_tasks "
-		      "thread: %m");
-	} else
-		debug3("jobacct_gather dynamic logging enabled");
-	slurm_attr_destroy(&attr);
+	slurm_thread_create(&watch_tasks_thread_id, _watch_tasks, NULL);
+
+	debug3("jobacct_gather dynamic logging enabled");
 
 	return retval;
 }
@@ -634,8 +626,8 @@ extern jobacctinfo_t *jobacctinfo_create(jobacct_id_t *jobacct_id)
 	jobacct = xmalloc(sizeof(struct jobacctinfo));
 
 	if (!jobacct_id) {
-		temp_id.taskid = (uint16_t)NO_VAL;
-		temp_id.nodeid = (uint32_t)NO_VAL;
+		temp_id.taskid = NO_VAL16;
+		temp_id.nodeid = NO_VAL;
 		jobacct_id = &temp_id;
 	}
 	memset(jobacct, 0, sizeof(struct jobacctinfo));
@@ -654,7 +646,7 @@ extern jobacctinfo_t *jobacctinfo_create(jobacct_id_t *jobacct_id)
 	jobacct->max_pages = 0;
 	memcpy(&jobacct->max_pages_id, jobacct_id, sizeof(jobacct_id_t));
 	jobacct->tot_pages = 0;
-	jobacct->min_cpu = (uint32_t)NO_VAL;
+	jobacct->min_cpu = NO_VAL;
 	memcpy(&jobacct->min_cpu_id, jobacct_id, sizeof(jobacct_id_t));
 	jobacct->tot_cpu = 0;
 	jobacct->act_cpufreq = 0;
@@ -959,7 +951,8 @@ extern int jobacctinfo_unpack(jobacctinfo_t **jobacct,
 	uint32_t uint32_tmp;
 	uint8_t  uint8_tmp;
 
-	jobacct_gather_init();
+	if (jobacct_gather_init() < 0)
+		return SLURM_ERROR;
 
 	if (rpc_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		safe_unpack8(&uint8_tmp, buffer);
@@ -1032,7 +1025,7 @@ extern void jobacctinfo_aggregate(jobacctinfo_t *dest, jobacctinfo_t *from)
 
 	xassert(dest);
 
-	if (!from || (from->min_cpu == (uint32_t)NO_VAL))
+	if (!from || (from->min_cpu == NO_VAL))
 		return;
 
 	if (dest->max_vsize < from->max_vsize) {
@@ -1054,24 +1047,24 @@ extern void jobacctinfo_aggregate(jobacctinfo_t *dest, jobacctinfo_t *from)
 	dest->tot_pages += from->tot_pages;
 
 	if ((dest->min_cpu > from->min_cpu)
-	    || (dest->min_cpu == (uint32_t)NO_VAL)) {
-		if (from->min_cpu == (uint32_t)NO_VAL)
+	    || (dest->min_cpu == NO_VAL)) {
+		if (from->min_cpu == NO_VAL)
 			from->min_cpu = 0;
 		dest->min_cpu = from->min_cpu;
 		dest->min_cpu_id = from->min_cpu_id;
 	}
 	dest->tot_cpu += from->tot_cpu;
 
-	if (dest->max_vsize_id.taskid == (uint16_t)NO_VAL)
+	if (dest->max_vsize_id.taskid == NO_VAL16)
 		dest->max_vsize_id = from->max_vsize_id;
 
-	if (dest->max_rss_id.taskid == (uint16_t)NO_VAL)
+	if (dest->max_rss_id.taskid == NO_VAL16)
 		dest->max_rss_id = from->max_rss_id;
 
-	if (dest->max_pages_id.taskid == (uint16_t)NO_VAL)
+	if (dest->max_pages_id.taskid == NO_VAL16)
 		dest->max_pages_id = from->max_pages_id;
 
-	if (dest->min_cpu_id.taskid == (uint16_t)NO_VAL)
+	if (dest->min_cpu_id.taskid == NO_VAL16)
 		dest->min_cpu_id = from->min_cpu_id;
 
 	dest->user_cpu_sec	+= from->user_cpu_sec;
@@ -1087,9 +1080,9 @@ extern void jobacctinfo_aggregate(jobacctinfo_t *dest, jobacctinfo_t *from)
 		dest->sys_cpu_usec -= 1E6;
 	}
 	dest->act_cpufreq 	+= from->act_cpufreq;
-	if (dest->energy.consumed_energy != NO_VAL) {
-		if (from->energy.consumed_energy == NO_VAL)
-			dest->energy.consumed_energy = NO_VAL;
+	if (dest->energy.consumed_energy != NO_VAL64) {
+		if (from->energy.consumed_energy == NO_VAL64)
+			dest->energy.consumed_energy = NO_VAL64;
 		else
 			dest->energy.consumed_energy +=
 					from->energy.consumed_energy;
@@ -1130,7 +1123,7 @@ extern void jobacctinfo_2_stats(slurmdb_stats_t *stats, jobacctinfo_t *jobacct)
 	stats->cpu_min_taskid = jobacct->min_cpu_id.taskid;
 	stats->cpu_ave = jobacct->tot_cpu;
 	stats->act_cpufreq = (double)jobacct->act_cpufreq;
-	if (jobacct->energy.consumed_energy == NO_VAL)
+	if (jobacct->energy.consumed_energy == NO_VAL64)
 		stats->consumed_energy = NO_VAL64;
 	else
 		stats->consumed_energy =

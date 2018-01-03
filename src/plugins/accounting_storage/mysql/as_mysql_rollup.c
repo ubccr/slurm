@@ -85,7 +85,9 @@ typedef struct {
 	List local_assocs; /* list of assocs to spread unused time
 			      over of type local_id_usage_t */
 	List loc_tres;
+	time_t orig_start;
 	time_t start;
+	double unused_wall;
 } local_resv_usage_t;
 
 static void _destroy_local_tres_usage(void *object)
@@ -176,7 +178,10 @@ static local_tres_usage_t *_add_time_tres(List tres_list, int type, uint32_t id,
 {
 	local_tres_usage_t *loc_tres;
 
-	if (!time)
+	/* Energy TRES could have a NO_VAL64, we want to skip those as it is the
+	 * same as a 0 since nothing was gathered.
+	 */
+	if (!time || (time == NO_VAL64))
 		return NULL;
 
 	loc_tres = list_find_first(tres_list, _find_loc_tres, &id);
@@ -233,6 +238,52 @@ static void _add_time_tres_list(List tres_list_out, List tres_list_in, int type,
 			       time_in ? time_in : loc_tres->total_time,
 			       times_count);
 	list_iterator_destroy(itr);
+}
+
+/*
+ * Job usage is a ratio of its tres to the reservation's tres:
+ * Unused wall = unused wall - job_seconds * job_tres / resv_tres
+ */
+static int _update_unused_wall(local_resv_usage_t *r_usage, List job_tres,
+			       int job_seconds)
+{
+	ListIterator resv_itr;
+	local_tres_usage_t *loc_tres;
+	uint32_t resv_tres_id;
+	uint64_t resv_tres_count;
+	double tres_ratio = 0.0;
+
+	/* Get TRES counts. Make sure the TRES types match. */
+	resv_itr = list_iterator_create(r_usage->loc_tres);
+	while ((loc_tres = list_next(resv_itr))) {
+		/* Avoid dividing by zero. */
+		if (!loc_tres->count)
+			continue;
+		resv_tres_id = loc_tres->id;
+		resv_tres_count = loc_tres->count;
+		if ((loc_tres = list_find_first(job_tres,
+						_find_loc_tres,
+						&resv_tres_id))) {
+			tres_ratio = (double)loc_tres->count /
+				(double)resv_tres_count;
+			break;
+		}
+	}
+	list_iterator_destroy(resv_itr);
+
+	/*
+	 * Here we are converting TRES seconds to wall seconds.  This is needed
+	 * to determine how much time is actually idle in the reservation.
+	 */
+	r_usage->unused_wall -=	(double)job_seconds * tres_ratio;
+
+	if (r_usage->unused_wall < 0) {
+		/* I'm not sure if I should error or silently ignore. */
+		debug3("WARNING: Unused wall is less than zero; this should never happen. Setting it to zero for resv id = %d, start = %ld.",
+		       r_usage->id, r_usage->orig_start);
+		r_usage->unused_wall = 0;
+	}
+	return SLURM_SUCCESS;
 }
 
 static void _add_job_alloc_time_to_cluster(List c_tres_list, List j_tres)
@@ -363,10 +414,16 @@ static void _add_tres_time_2_list(List tres_list, char *tres_str,
 				loc_seconds = 0;
 		}
 
-		count = slurm_atoull(++tmp_str);
-		time = count * loc_seconds;
+		time = count = slurm_atoull(++tmp_str);
+		/* ENERGY is already totalled for the entire job so don't
+		 * multiple with time.
+		 */
+		if (id != TRES_ENERGY)
+			time *= loc_seconds;
+
 		loc_tres = _add_time_tres(tres_list, type, id,
 					  time, times_count);
+
 		if (loc_tres && !loc_tres->count)
 			loc_tres->count = count;
 
@@ -927,8 +984,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		"job.time_suspended",
 		"job.cpus_req",
 		"job.id_resv",
-		"job.tres_alloc",
-		"SUM(step.consumed_energy)"
+		"job.tres_alloc"
 	};
 	char *job_str = NULL;
 	enum {
@@ -944,7 +1000,6 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		JOB_REQ_RCPU,
 		JOB_REQ_RESVID,
 		JOB_REQ_TRES,
-		JOB_REQ_ENERGY,
 		JOB_REQ_COUNT
 	};
 
@@ -965,7 +1020,8 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		"flags",
 		"tres",
 		"time_start",
-		"time_end"
+		"time_end",
+		"unused_wall"
 	};
 	char *resv_str = NULL;
 	enum {
@@ -975,6 +1031,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		RESV_REQ_TRES,
 		RESV_REQ_START,
 		RESV_REQ_END,
+		RESV_REQ_UNUSED,
 		RESV_REQ_COUNT
 	};
 
@@ -1018,19 +1075,11 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					       cluster_down_list);
 
 		// now get the reservations during this time
-		/* If a reservation has the IGNORE_JOBS flag we don't
-		 * have an easy way to distinguish the cpus a job not
-		 * running in the reservation, but on it's cpus.
-		 * So we will just ignore these reservations for
-		 * accounting purposes.
-		 */
 		query = xstrdup_printf("select %s from \"%s_%s\" where "
 				       "(time_start < %ld && time_end >= %ld) "
-				       "&& !(flags & %u)"
 				       "order by time_start",
 				       resv_str, cluster_name, resv_table,
-				       curr_end, curr_start,
-				       RESERVE_FLAG_IGN_JOBS);
+				       curr_end, curr_start);
 
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
@@ -1067,8 +1116,22 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			time_t row_start = slurm_atoul(row[RESV_REQ_START]);
 			time_t row_end = slurm_atoul(row[RESV_REQ_END]);
 			uint32_t row_flags = slurm_atoul(row[RESV_REQ_FLAGS]);
+			int unused;
 			int resv_seconds;
-			if (row_start < curr_start)
+			time_t orig_start = row_start;
+
+			if (row_start >= curr_start) {
+				/*
+				 * This is the first time we are seeing this
+				 * reservation, so set our unused to be 0.
+				 * This is mostly helpful when
+				 * rerolling set it back to 0.
+				 */
+				unused = 0;
+			} else
+				unused = slurm_atoul(row[RESV_REQ_UNUSED]);
+
+			if (row_start <= curr_start)
 				row_start = curr_start;
 
 			if (!row_end || row_end > curr_end)
@@ -1092,8 +1155,14 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			_add_tres_2_list(r_usage->loc_tres,
 					 row[RESV_REQ_TRES], resv_seconds);
 
+			/*
+			 * Original start is needed when updating the
+			 * reservation's unused_wall later on.
+			 */
+			r_usage->orig_start = orig_start;
 			r_usage->start = row_start;
 			r_usage->end = row_end;
+			r_usage->unused_wall = unused + resv_seconds;
 			list_append(resv_usage_list, r_usage);
 
 			/* Since this reservation was added to the
@@ -1105,11 +1174,16 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			*/
 
 
-			/* only record time for the clusters that have
-			   registered.  This continue should rarely if
-			   ever happen.
-			*/
-			if (!c_usage)
+			/*
+			 * Only record time for the clusters that have
+			 * registered, or if a reservation has the IGNORE_JOBS
+			 * flag we don't have an easy way to distinguish the
+			 * cpus a job not running in the reservation, but on
+			 * it's cpus.
+			 * We still need them for figuring out unused wall time,
+			 * but for cluster utilization we will just ignore them.
+			 */
+			if (!c_usage || (row_flags & RESERVE_FLAG_IGN_JOBS))
 				continue;
 
 			_add_time_tres_list(c_usage->loc_tres,
@@ -1131,9 +1205,6 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 
 		/* now get the jobs during this time only  */
 		query = xstrdup_printf("select %s from \"%s_%s\" as job "
-				       "left outer join \"%s_%s\" as step on "
-				       "job.job_db_inx=step.job_db_inx "
-				       "and (step.id_step>=0) "
 				       "where (job.time_eligible && "
 				       "job.time_eligible < %ld && "
 				       "(job.time_end >= %ld || "
@@ -1142,7 +1213,6 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 				       "order by job.id_assoc, "
 				       "job.time_eligible",
 				       job_str, cluster_name, job_table,
-				       cluster_name, step_table,
 				       curr_end, curr_start);
 
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
@@ -1166,12 +1236,9 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			time_t row_end = slurm_atoul(row[JOB_REQ_END]);
 			uint32_t row_rcpu = slurm_atoul(row[JOB_REQ_RCPU]);
 			List loc_tres = NULL;
-			uint64_t row_energy = 0;
 			int loc_seconds = 0;
 			int seconds = 0, suspend_seconds = 0;
 
-			if (row[JOB_REQ_ENERGY])
-				row_energy = slurm_atoull(row[JOB_REQ_ENERGY]);
 			if (row_start && (row_start < curr_start))
 				row_start = curr_start;
 
@@ -1269,9 +1336,9 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			/* do the cluster allocated calculation */
 		calc_cluster:
 
-			/* We need to have this clean for each job
-			 * since we add the time to the cluster
-			 * individually.
+			/*
+			 * We need to have this clean for each job
+			 * since we add the time to the cluster individually.
 			 */
 			loc_tres = list_create(_destroy_local_tres_usage);
 
@@ -1284,18 +1351,10 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 						      TIME_ALLOC, seconds,
 						      suspend_seconds, 0);
 
-			_add_time_tres(loc_tres,
-				       TIME_ALLOC, TRES_ENERGY,
-				       row_energy, 0);
-			if (w_usage)
-				_add_time_tres(
-					w_usage->loc_tres,
-					TIME_ALLOC, TRES_ENERGY,
-					row_energy, 0);
-
-			/* Now figure out there was a disconnected
-			   slurmctld durning this job.
-			*/
+			/*
+			 * Now figure out there was a disconnected
+			 * slurmctld durning this job.
+			 */
 			list_iterator_reset(c_itr);
 			while ((loc_c_usage = list_next(c_itr))) {
 				int temp_end = row_end;
@@ -1325,30 +1384,29 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					_transfer_loc_tres(&loc_tres, a_usage);
 					continue;
 				}
-				/* Since we have already added the
-				   entire reservation as used time on
-				   the cluster we only need to
-				   calculate the used time for the
-				   reservation and then divy up the
-				   unused time over the associations
-				   able to run in the reservation.
-				   Since the job was to run, or ran a
-				   reservation we don't care about
-				   eligible time since that could
-				   totally skew the clusters reserved time
-				   since the job may be able to run
-				   outside of the reservation. */
+				/*
+				 * Since we have already added the entire
+				 * reservation as used time on the cluster we
+				 * only need to calculate the used time for the
+				 * reservation and then divy up the unused time
+				 * over the associations able to run in the
+				 * reservation. Since the job was to run, or ran
+				 * a reservation we don't care about eligible
+				 * time since that could totally skew the
+				 * clusters reserved time since the job may be
+				 * able to run outside of the reservation.
+				 */
 				list_iterator_reset(r_itr);
 				while ((r_usage = list_next(r_itr))) {
 					int temp_end, temp_start;
-					/* since the reservation could
-					   have changed in some way,
-					   thus making a new
-					   reservation record in the
-					   database, we have to make
-					   sure all the reservations
-					   are checked to see if such
-					   a thing has happened */
+					/*
+					 * since the reservation could have
+					 * changed in some way, thus making a
+					 * new reservation record in the
+					 * database, we have to make sure all
+					 * of the reservations are checked to
+					 * see if such a thing has happened
+					 */
 					if (r_usage->id != resv_id)
 						continue;
 					temp_end = row_end;
@@ -1361,21 +1419,29 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 
 					loc_seconds = (temp_end - temp_start);
 
-					if (loc_seconds > 0)
+					if (loc_seconds > 0) {
 						_add_time_tres_list(
 							r_usage->loc_tres,
 							loc_tres, TIME_ALLOC,
 							loc_seconds, 1);
+						if ((rc = _update_unused_wall(
+							     r_usage,
+							     loc_tres,
+							     loc_seconds))
+						    != SLURM_SUCCESS)
+							goto end_it;
+					}
 				}
 
 				_transfer_loc_tres(&loc_tres, a_usage);
 				continue;
 			}
 
-			/* only record time for the clusters that have
-			   registered.  This continue should rarely if
-			   ever happen.
-			*/
+			/*
+			 * only record time for the clusters that have
+			 * registered.  This continue should rarely if
+			 * ever happen.
+			 */
 			if (!c_usage) {
 				_transfer_loc_tres(&loc_tres, a_usage);
 				continue;
@@ -1398,9 +1464,10 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					loc_tres);
 			}
 
-			/* The loc_tres isn't needed after this so
-			 * transfer to the association and go on our
-			 * merry way. */
+			/*
+			 * The loc_tres isn't needed after this so transfer to
+			 * the association and go on our merry way.
+			 */
 			_transfer_loc_tres(&loc_tres, a_usage);
 
 			/* now reserved time */
@@ -1413,12 +1480,12 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					temp_end = c_usage->end;
 				loc_seconds = (temp_end - temp_start);
 				if (loc_seconds > 0) {
-					/* If we have pending jobs in
-					   an array they haven't been
-					   inserted into the database
-					   yet as proper job records,
-					   so handle them here.
-					*/
+					/*
+					 * If we have pending jobs in an array
+					 * they haven't been inserted into the
+					 * database yet as proper job records,
+					 * so handle them here.
+					 */
 					if (array_pending)
 						loc_seconds *= array_pending;
 
@@ -1436,7 +1503,8 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 
 					_add_time_tres(c_usage->loc_tres,
 						       TIME_RESV, TRES_CPU,
-						       loc_seconds * row_rcpu,
+						       loc_seconds *
+						       (uint64_t) row_rcpu,
 						       0);
 				}
 			}
@@ -1446,10 +1514,16 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		/* now figure out how much more to add to the
 		   associations that could had run in the reservation
 		*/
+		query = NULL;
 		list_iterator_reset(r_itr);
 		while ((r_usage = list_next(r_itr))) {
 			ListIterator t_itr;
 			local_tres_usage_t *loc_tres;
+
+			xstrfmtcat(query, "update \"%s_%s\" set unused_wall=%f where id_resv=%u and time_start=%ld;",
+				   cluster_name, resv_table,
+				   r_usage->unused_wall, r_usage->id,
+				   r_usage->orig_start);
 
 			if (!r_usage->loc_tres ||
 			    !list_count(r_usage->loc_tres))
@@ -1505,6 +1579,17 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 				list_iterator_destroy(tmp_itr);
 			}
 			list_iterator_destroy(t_itr);
+		}
+
+		if (query) {
+			if (debug_flags & DEBUG_FLAG_DB_USAGE)
+				DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+			rc = mysql_db_query(mysql_conn, query);
+			xfree(query);
+			if (rc != SLURM_SUCCESS) {
+				error("couldn't update reservations with unused time");
+				goto end_it;
+			}
 		}
 
 		/* now apply the down time from the slurmctld disconnects */
@@ -1568,9 +1653,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 
 	end_loop:
 		_destroy_local_cluster_usage(c_usage);
-		_destroy_local_id_usage(a_usage);
-		_destroy_local_id_usage(w_usage);
-		_destroy_local_resv_usage(r_usage);
+
 		c_usage     = NULL;
 		r_usage     = NULL;
 		a_usage     = NULL;
@@ -1589,9 +1672,7 @@ end_it:
 	xfree(job_str);
 	xfree(resv_str);
 	_destroy_local_cluster_usage(c_usage);
-	_destroy_local_id_usage(a_usage);
-	_destroy_local_id_usage(w_usage);
-	_destroy_local_resv_usage(r_usage);
+
 	if (a_itr)
 		list_iterator_destroy(a_itr);
 	if (c_itr)

@@ -56,14 +56,14 @@
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
-static xcgroup_t system_cpuset_cg = {NULL, NULL, NULL, 0, 0, 0, 0};
-static xcgroup_t system_memory_cg = {NULL, NULL, NULL, 0, 0, 0, 0};
+static xcgroup_t system_cpuset_cg = {NULL, NULL, NULL, 0, 0, 0};
+static xcgroup_t system_memory_cg = {NULL, NULL, NULL, 0, 0, 0};
 
 static bool cpuset_prefix_set = false;
 static char *cpuset_prefix = "";
 
-static xcgroup_ns_t cpuset_ns = {NULL, NULL, NULL, NULL};
-static xcgroup_ns_t memory_ns = {NULL, NULL, NULL, NULL};
+static xcgroup_ns_t cpuset_ns = {NULL, NULL, NULL};
+static xcgroup_ns_t memory_ns = {NULL, NULL, NULL};
 
 char cpuset_meta[PATH_MAX];
 
@@ -261,7 +261,7 @@ extern int init_system_memory_cgroup(void)
          *  FYI, setting "export SLURMSTEPD_OOM_ADJ=-1000"
          *  in /etc/sysconfig/slurm would be the same
          */
-        setenv("SLURMSTEPD_OOM_ADJ", "-1000", 0);
+        setenvfs("SLURMSTEPD_OOM_ADJ=%d", -1000);
 
 	/* create slurm root cg in this cg namespace */
 	slurm_cgpath = _system_cgroup_create_slurm_cg(&memory_ns);
@@ -328,15 +328,12 @@ static char* _system_cgroup_create_slurm_cg (xcgroup_ns_t* ns)
 	}
 #endif
 
-	/* create slurm cgroup in the ns
-	 * disable notify_on_release to avoid the removal/creation
-	 * of this cgroup for each last/first running job on the node */
+	/* create slurm cgroup in the ns */
 	if (xcgroup_create(ns, &slurm_cg, pre,
 			   getuid(), getgid()) != XCGROUP_SUCCESS) {
 		xfree(pre);
 		return pre;
 	}
-	slurm_cg.notify = 0;
 	if (xcgroup_instantiate(&slurm_cg) != XCGROUP_SUCCESS) {
 		error("system cgroup: unable to build slurm cgroup for "
 		      "ns %s: %m",
@@ -378,7 +375,7 @@ static int _xcgroup_cpuset_init(xcgroup_t* cg)
 
 	/* load ancestor cg */
 	acg_name = (char*) xstrdup(cg->name);
-	p = rindex(acg_name,'/');
+	p = xstrrchr(acg_name, '/');
 	if (p == NULL) {
 		debug2("system cgroup: unable to get ancestor path for "
 		       "cpuset cg '%s' : %m", cg->path);

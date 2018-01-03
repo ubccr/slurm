@@ -1,10 +1,15 @@
-.TH sbatch "1" "Slurm Commands" "March 2016" "Slurm Commands"
+.TH sbatch "1" "Slurm Commands" "December 2017" "Slurm Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to Slurm.
 
 .SH "SYNOPSIS"
-sbatch [\fIoptions\fP] \fIscript\fP [\fIargs\fP...]
+\fBsbatch\fR [\fIOPTIONS(0)\fR...] \fR[ : \fR[\fIOPTIONS(n)\fR...]\fR] \fIscript(0) \fR[\fIargs(0)\fR...]
+
+Option(s) define multiple jobs in a co-scheduled heterogeneous job.
+For more details about heterogeneous jobs see the document
+.br
+http://slurm.schedmd.com/heterogeneous_jobs.html
 
 .SH "DESCRIPTION"
 sbatch submits a batch script to Slurm.  The batch script may be given to
@@ -49,6 +54,7 @@ For example "\-\-array=0\-15%4" will limit the number of simultaneously
 running tasks from this job array to 4.
 The minimum index value is 0.
 the maximum value is one less than the configuration parameter MaxArraySize.
+NOTE: currently, federated job arrays only run on the local cluster.
 
 .TP
 \fB\-A\fR, \fB\-\-account\fR=<\fIaccount\fR>
@@ -128,7 +134,7 @@ desired:
     \fB\-\-threads\-per\-core\fR=<\fIthreads\fR>
 .fi
 If task/affinity plugin is enabled, then specifying an allocation in this
-manner also sets a default \fB\-\-cpu_bind\fR option of \fIthreads\fR
+manner also results in subsequently launched tasks being bound to threads
 if the \fB\-B\fR option specifies a thread count, otherwise an option of
 \fIcores\fR if a core count is specified, otherwise an option of \fIsockets\fR.
 If SelectType is configured to select/cons_res, it must have a parameter of
@@ -205,6 +211,14 @@ be written (used by the checkpoint/blcrm and checkpoint/xlch plugins only).
 The default value is the current working directory.
 Checkpoint files will be of the form "<job_id>.ckpt" for jobs
 and "<job_id>.<step_id>.ckpt" for job steps.
+
+.TP
+\fB\-\-cluster\-constraint\fR=[!]<\fIlist\fR>
+Specifies features that a federated cluster must have to have a sibling job
+submitted to it. Slurm will attempt to submit a sibling job to a cluster if it
+has at least one of the specified features. If the "!" option is included, Slurm
+will attempt to submit a sibling job to a cluster that has none of the specified
+features.
 
 .TP
 \fB\-\-comment\fR=<\fIstring\fR>
@@ -461,7 +475,7 @@ sharing the same job name and user have terminated.
 .RE
 
 .TP
-\fB\-D\fR, \fB\-\-workdir\fR=<\fIdirectory\fR>
+\fB\-D\fR, \fB\-\-chdir\fR=<\fIdirectory\fR>
 Set the working directory of the batch script to \fIdirectory\fR before
 it is executed. The path can be specified as full path or relative path
 to the directory where the command is executed.
@@ -485,19 +499,24 @@ The default shared/exclusive behavior depends on system configuration and the
 partition's \fBOverSubscribe\fR option takes precedence over the job's option.
 
 .TP
-\fB\-\-export\fR=<\fIenvironment variables | ALL | NONE\fR>
-Identify which environment variables are propagated to the batch job.
+\fB\-\-export\fR=<\fIenvironment variables [ALL] | NONE\fR>
+Identify which environment variables are propagated to the launched application,
+by default all are propagated.
 Multiple environment variable names should be comma separated.
 Environment variable names may be specified to propagate the current
-value of those variables (e.g. "\-\-export=EDITOR") or specific values
-for the variables may be exported (e.g.. "\-\-export=EDITOR=/bin/vi")
-in addition to the environment variables that would otherwise be set.
+value (e.g. "\-\-export=EDITOR") or specific values
+may be exported (e.g. "\-\-export=EDITOR=/bin/emacs").  In these two examples
+the environment propagated will only contain the variable "EDITOR"
+and nothing else.
+If one desires to add to the environment instead of replacing it have the
+argument include \fIALL\fR (e.g. "\-\-export=EDITOR,ALL").  This will propagate
+"EDITOR" along with the current environment.
+If one desires no environment variables be propagated use the argument
+\fINONE\fR.
+Regardless of this setting, the appropriate "SLURM_*" task environment variables
+are always exported to the environment.
 This option particularly important for jobs that are submitted on one cluster
-and execute on a different cluster (e.g. with different paths). By default all
-environment variables are propagated. If the argument is \fINONE\fR or
-specific environment variable names, then the \fB\-\-get\-user\-env\fR
-option will implicitly be set to load other environment variables based upon
-the user's configuration on the cluster which executes the job.
+and execute on a different cluster (e.g. with different paths).
 
 .TP
 \fB\-\-export\-file\fR=<\fIfilename\fR | \fIfd\fR>
@@ -636,6 +655,7 @@ read on sbatch's standard input.
 \fB\-\-jobid\fR=<\fIjobid\fR>
 Allocate resources as the specified job id.
 NOTE: Only valid for users root and SlurmUser.
+NOTE: Not valid for federated clusters.
 
 .TP
 \fB\-k\fR, \fB\-\-no\-kill\fR
@@ -852,7 +872,7 @@ Also see \fB\-\-mem\fR.
 \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
 
 .TP
-\fB\-\-mem_bind\fR=[{\fIquiet,verbose\fR},]\fItype\fR
+\fB\-\-mem\-bind\fR=[{\fIquiet,verbose\fR},]\fItype\fR
 Bind tasks to memory. Used only when the task/affinity plugin is enabled
 and the NUMA memory functions are available.
 \fBNote that the resolution of CPU and memory binding
@@ -861,11 +881,11 @@ at the level of the cores within a processor while memory binding will
 be performed at the level of nodes, where the definition of "nodes"
 may differ from system to system.
 By default no memory binding is performed; any task using any CPU can use
-any memory. This option is typically used to insure that each task is bound to
+any memory. This option is typically used to ensure that each task is bound to
 the memory closest to it's assigned CPU. \fBThe use of any type other than
 "none" or "local" is not recommended.\fR
 If you want greater control, try running a simple test code with the
-options "\-\-cpu_bind=verbose,none \-\-mem_bind=verbose,none" to determine
+options "\-\-cpu\-bind=verbose,none \-\-mem\-bind=verbose,none" to determine
 the specific configuration.
 
 NOTE: To have Slurm always report on the selected memory binding for
@@ -873,7 +893,7 @@ all commands executed in a shell, you can enable verbose mode by
 setting the SLURM_MEM_BIND environment variable value to "verbose".
 
 The following informational environment variables are set when
-\fB\-\-mem_bind\fR is in use:
+\fB\-\-mem\-bind\fR is in use:
 
 .nf
 	SLURM_MEM_BIND_LIST
@@ -966,7 +986,7 @@ limit is changed.
 If a job node limit exceeds the number of nodes configured in the
 partition, the job will be rejected.
 Note that the environment
-variable \fBSLURM_NNODES\fR will be set to the count of nodes actually
+variable \fBSLURM_JOB_NODES\fR will be set to the count of nodes actually
 allocated to the job. See the \fBENVIRONMENT VARIABLES \fR section
 for more information.  If \fB\-N\fR is not specified, the default
 behavior is to allocate enough nodes to satisfy the requirements of
@@ -1327,16 +1347,16 @@ The maximum stack size
 .RE
 
 .TP
-\fB\-Q\fR, \fB\-\-quiet\fR
-Suppress informational messages from sbatch. Errors will still be displayed.
-
-.TP
-\fB\-\-qos\fR=<\fIqos\fR>
+\fB\-q\fR, \fB\-\-qos\fR=<\fIqos\fR>
 Request a quality of service for the job.  QOS values can be defined
 for each user/cluster/account association in the Slurm database.
 Users will be limited to their association's defined set of qos's when
 the Slurm configuration parameter, AccountingStorageEnforce, includes
 "qos" in it's definition.
+
+.TP
+\fB\-Q\fR, \fB\-\-quiet\fR
+Suppress informational messages from sbatch. Errors will still be displayed.
 
 .TP
 \fB\-\-reboot\fR
@@ -1397,7 +1417,7 @@ By default, no signal is sent before the job's end time.
 If a \fIsig_num\fR is specified without any \fIsig_time\fR,
 the default time will be 60 seconds.
 Use the "B:" option to signal only the batch shell, none of the other
-processes will be signaled. By default all job steps will be signalled,
+processes will be signaled. By default all job steps will be signaled,
 but not the batch shell itself.
 
 .TP
@@ -1789,7 +1809,7 @@ Same as \fB\-J, \-\-job\-name\fR
 Same as \fB\-\-linux\-image\fR
 .TP
 \fBSBATCH_MEM_BIND\fR
-Same as \fB\-\-mem_bind\fR
+Same as \fB\-\-mem\-bind\fR
 .TP
 \fBSBATCH_MLOADER_IMAGE\fR
 Same as \fB\-\-mloader\-image\fR
@@ -1892,41 +1912,26 @@ Do not free a block on Blue Gene L/P systems only.
 \fBMPIRUN_PARTITION\fR
 The block name on Blue Gene systems only.
 .TP
-\fBSBATCH_CPU_BIND\fR
-Set to value of the \-\-cpu_bind\fR option.
-.TP
-\fBSBATCH_CPU_BIND_VERBOSE\fR
-Set to "verbose" if the \-\-cpu_bind\fR option includes the verbose option.
-Set to "quiet" otherwise.
-.TP
-\fBSBATCH_CPU_BIND_TYPE\fR
-Set to the CPU binding type specified with the \-\-cpu_bind\fR option.
-Possible values two possible comma separated strings.
-The first possible string identifies the entity to be bound to: "threads",
-"cores", "sockets", "ldoms" and "boards".
-The second string identifies manner in which tasks are bound:
-"none", "rank", "map_cpu", "mask_cpu", "rank_ldom", "map_ldom" or "mask_ldom".
-.TP
-\fBSBATCH_CPU_BIND_LIST\fR
-Set to bit mask used for CPU binding.
-
-.TP
 \fBSBATCH_MEM_BIND\fR
-Set to value of the \-\-mem_bind\fR option.
+Set to value of the \-\-mem\-bind\fR option.
 .TP
 \fBSBATCH_MEM_BIND_LIST\fR
 Set to bit mask used for memory binding.
 .TP
 \fBSBATCH_MEM_BIND_PREFER\fR
-Set to "prefer" if the \-\-mem_bind\fR option includes the prefer option.
+Set to "prefer" if the \-\-mem\-bind\fR option includes the prefer option.
 .TP
 \fBSBATCH_MEM_BIND_TYPE\fR
-Set to the memory binding type specified with the \-\-mem_bind\fR option.
+Set to the memory binding type specified with the \-\-mem\-bind\fR option.
 Possible values are "none", "rank", "map_map", "mask_mem" and "local".
 .TP
 \fBSBATCH_MEM_BIND_VERBOSE\fR
-Set to "verbose" if the \-\-mem_bind\fR option includes the verbose option.
+Set to "verbose" if the \-\-mem\-bind\fR option includes the verbose option.
 Set to "quiet" otherwise.
+.TP
+\fBSLURM_*_PACK_GROUP_#\fR
+For a heterogenous job allocation, the environment variables are set separately
+for each component.
 .TP
 \fBSLURM_ARRAY_TASK_COUNT\fR
 Total number of tasks in a job array.
@@ -2034,6 +2039,9 @@ Only set if the \fB\-\-ntasks\-per\-node\fR option is specified.
 Number of tasks requested per socket.
 Only set if the \fB\-\-ntasks\-per\-socket\fR option is specified.
 .TP
+\fBSLURM_PACK_SIZE\fR
+Set to count of components in heterogeneous job.
+.TP
 \fBSLURM_PRIO_PROCESS\fR
 The  scheduling priority (nice value) at the time of job submission.
 This value is  propagated  to the spawned processes.
@@ -2057,7 +2065,7 @@ The hostname of the computer from which \fBsbatch\fR was invoked.
 .TP
 \fBSLURM_TASKS_PER_NODE\fR
 Number of tasks to be initiated on each node. Values are
-comma separated and in the same order as SLURM_NODELIST.
+comma separated and in the same order as SLURM_JOB_NODELIST.
 If two or more consecutive nodes are to have the same task
 count, that count is followed by "(x#)" where "#" is the
 repetition count. For example, "SLURM_TASKS_PER_NODE=2(x3),1"
@@ -2140,13 +2148,20 @@ host3
 .br
 host4
 
+.LP
+To create a heterogeneous job with 3 components, each allocating a unique set of nodes:
+.IP
+sbatch -w node[2-3] : -w node4 : -w node[5-7] work.bash
+.br
+Submitted batch job 34987
+
 .SH "COPYING"
 Copyright (C) 2006\-2007 The Regents of the University of California.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010\-2015 SchedMD LLC.
+Copyright (C) 2010\-2017 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <https://slurm.schedmd.com/>.

@@ -68,6 +68,8 @@ char *job_req_inx[] = {
 	"t1.id_block",
 	"t1.id_group",
 	"t1.id_job",
+	"t1.pack_job_id",
+	"t1.pack_job_offset",
 	"t1.id_qos",
 	"t1.id_resv",
 	"t3.resv_name",
@@ -96,6 +98,8 @@ char *job_req_inx[] = {
 	"t1.gres_used",
 	"t1.tres_alloc",
 	"t1.tres_req",
+	"t1.work_dir",
+	"t1.mcs_label",
 	"t2.acct",
 	"t2.lft",
 	"t2.user"
@@ -116,6 +120,8 @@ enum {
 	JOB_REQ_BLOCKID,
 	JOB_REQ_GID,
 	JOB_REQ_JOBID,
+	JOB_REQ_PACK_JOB_ID,
+	JOB_REQ_PACK_JOB_OFFSET,
 	JOB_REQ_QOS,
 	JOB_REQ_RESVID,
 	JOB_REQ_RESV_NAME,
@@ -144,6 +150,8 @@ enum {
 	JOB_REQ_GRES_USED,
 	JOB_REQ_TRESA,
 	JOB_REQ_TRESR,
+	JOB_REQ_WORK_DIR,
+	JOB_REQ_MCS_LABEL,
 	JOB_REQ_ACCOUNT,
 	JOB_REQ_LFT,
 	JOB_REQ_USER_NAME,
@@ -256,14 +264,22 @@ enum {
 static void _state_time_string(char **extra, char *cluster_name, uint32_t state,
 			       uint32_t start, uint32_t end)
 {
-	int base_state = state & JOB_STATE_BASE;
+	int base_state = state;
 
 	if (!start && !end) {
 		xstrfmtcat(*extra, "t1.state='%u'", state);
 		return;
 	}
 
- 	switch(base_state) {
+	switch(state) {
+	case JOB_RESIZING:
+	case JOB_REQUEUE:
+		break;
+	default:
+		base_state = state & JOB_STATE_BASE;
+	}
+
+	switch(base_state) {
 	case JOB_PENDING:
 		if (start) {
 			if (!end) {
@@ -334,7 +350,8 @@ static void _state_time_string(char **extra, char *cluster_name, uint32_t state,
 	case JOB_PREEMPTED:
 	case JOB_DEADLINE:
 	default:
-		xstrfmtcat(*extra, "(t1.state='%u' && (t1.time_end && ", state);
+		xstrfmtcat(*extra, "(t1.state='%u' && (t1.time_end && ",
+			   base_state);
 		if (start) {
 			if (!end) {
 				xstrfmtcat(*extra, "(t1.time_end >= %d)))",
@@ -552,6 +569,8 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 		job->associd = slurm_atoul(row[JOB_REQ_ASSOCID]);
 		job->array_job_id = slurm_atoul(row[JOB_REQ_ARRAYJOBID]);
 		job->array_task_id = slurm_atoul(row[JOB_REQ_ARRAYTASKID]);
+		job->pack_job_id = slurm_atoul(row[JOB_REQ_PACK_JOB_ID]);
+		job->pack_job_offset = slurm_atoul(row[JOB_REQ_PACK_JOB_OFFSET]);
 		job->resvid = slurm_atoul(row[JOB_REQ_RESVID]);
 
 		/* This shouldn't happen with new jobs, but older jobs
@@ -571,7 +590,10 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 		else
 			job->wckey = xstrdup("");
 		job->wckeyid = slurm_atoul(row[JOB_REQ_WCKEYID]);
-
+		if (row[JOB_REQ_MCS_LABEL])
+			job->mcs_label = xstrdup(row[JOB_REQ_MCS_LABEL]);
+		else
+			job->mcs_label = xstrdup("");
 		if (row[JOB_REQ_USER_NAME])
 			job->user = xstrdup(row[JOB_REQ_USER_NAME]);
 		else
@@ -594,6 +616,9 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 
 		if (row[JOB_REQ_BLOCKID])
 			job->blockid = xstrdup(row[JOB_REQ_BLOCKID]);
+
+		if (row[JOB_REQ_WORK_DIR])
+			job->work_dir = xstrdup(row[JOB_REQ_WORK_DIR]);
 
 		job->eligible = slurm_atoul(row[JOB_REQ_ELIGIBLE]);
 		job->submit = slurm_atoul(row[JOB_REQ_SUBMIT]);
@@ -746,15 +771,21 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 			itr = list_iterator_create(job_cond->step_list);
 			while ((selected_step = list_next(itr))) {
 				if ((selected_step->jobid != job->jobid) &&
+				    (selected_step->jobid != job->pack_job_id)&&
 				    (selected_step->jobid !=
 				     job->array_job_id)) {
 					continue;
 				} else if ((selected_step->array_task_id !=
 					    INFINITE) &&
 					   (selected_step->array_task_id !=
-					    job->array_task_id))
+					    job->array_task_id)) {
 					continue;
-				else if (selected_step->stepid == NO_VAL) {
+				} else if ((selected_step->pack_job_offset !=
+					    NO_VAL) &&
+					   (selected_step->pack_job_offset !=
+					    job->pack_job_offset)) {
+					continue;
+				} else if (selected_step->stepid == NO_VAL) {
 					job->show_full = 1;
 					break;
 				} else if (selected_step->stepid == INFINITE)
@@ -941,7 +972,7 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 					atof(step_row[STEP_REQ_AVE_CPU]);
 				step->stats.act_cpufreq =
 					atof(step_row[STEP_REQ_ACT_CPUFREQ]);
-				step->stats.consumed_energy = atof(
+				step->stats.consumed_energy = slurm_atoull(
 					step_row[STEP_REQ_CONSUMED_ENERGY]);
 				step->stats.vsize_max_nodeid = slurm_atoul(
 					step_row[STEP_REQ_MAX_VSIZE_NODE]);
@@ -1149,14 +1180,14 @@ extern int good_nodes_from_inx(List local_cluster_list,
 		if (!node_inx || !node_inx[0])
 			return 0;
 		if ((start < (*curr_cluster)->start)
-		    || (start > (*curr_cluster)->end)) {
+		    || (start >= (*curr_cluster)->end)) {
 			local_cluster_t *local_cluster = NULL;
 
 			ListIterator itr =
 				list_iterator_create(local_cluster_list);
 			while ((local_cluster = list_next(itr))) {
 				if ((start >= local_cluster->start)
-				    && (start <= local_cluster->end)) {
+				    && (start < local_cluster->end)) {
 					*curr_cluster = local_cluster;
 					break;
 				}
@@ -1260,6 +1291,12 @@ no_resv:
 		list_iterator_destroy(itr);
 		xstrcat(*extra, ")");
 	}
+
+	/* Don't show revoked sibling federated jobs w/out -D */
+	if (!job_cond->duplicates)
+		xstrfmtcat(*extra, " %s (state != %d)",
+			   *extra ? "&&" : "where",
+			   JOB_REVOKED);
 
 	return SLURM_SUCCESS;
 }
@@ -1397,8 +1434,9 @@ extern int setup_job_cond_limits(slurmdb_job_cond_t *job_cond,
 	}
 
 	if (job_cond->step_list && list_count(job_cond->step_list)) {
-		char *job_ids = NULL, *array_job_ids = NULL;
-		char *array_task_ids = NULL;
+		char *job_ids = NULL, *sep = "";
+		char *array_job_ids = NULL, *array_task_ids = NULL;
+		char *pack_job_ids = NULL, *pack_job_offset = NULL;
 
 		if (*extra)
 			xstrcat(*extra, " && (");
@@ -1407,16 +1445,7 @@ extern int setup_job_cond_limits(slurmdb_job_cond_t *job_cond,
 
 		itr = list_iterator_create(job_cond->step_list);
 		while ((selected_step = list_next(itr))) {
-			if (selected_step->array_task_id == NO_VAL) {
-				if (job_ids)
-					xstrcat(job_ids, " ,");
-				if (array_job_ids)
-					xstrcat(array_job_ids, " ,");
-				xstrfmtcat(job_ids, "%u",
-					   selected_step->jobid);
-				xstrfmtcat(array_job_ids, "%u",
-					   selected_step->jobid);
-			} else {
+			if (selected_step->array_task_id != NO_VAL) {
 				if (array_job_ids)
 					xstrcat(array_job_ids, " ,");
 				if (array_task_ids)
@@ -1425,24 +1454,57 @@ extern int setup_job_cond_limits(slurmdb_job_cond_t *job_cond,
 					   selected_step->jobid);
 				xstrfmtcat(array_task_ids, "%u",
 					   selected_step->array_task_id);
+			} else if (selected_step->pack_job_offset != NO_VAL) {
+				if (pack_job_ids)
+					xstrcat(pack_job_ids, " ,");
+				if (pack_job_offset)
+					xstrcat(pack_job_offset, " ,");
+				xstrfmtcat(pack_job_ids, "%u",
+					   selected_step->jobid);
+				xstrfmtcat(pack_job_offset, "%u",
+					   selected_step->pack_job_offset);
+			} else {
+				if (job_ids)
+					xstrcat(job_ids, " ,");
+				if (array_job_ids)
+					xstrcat(array_job_ids, " ,");
+				xstrfmtcat(job_ids, "%u",
+					   selected_step->jobid);
+				xstrfmtcat(array_job_ids, "%u",
+					   selected_step->jobid);
 			}
 		}
 		list_iterator_destroy(itr);
 
-		if (job_ids)
-			xstrfmtcat(*extra, "t1.id_job in (%s) || ", job_ids);
+		if (job_ids) {
+			xstrfmtcat(*extra,
+				   "t1.id_job in (%s) || t1.pack_job_id in (%s)",
+				   job_ids, job_ids);
+			sep = " || ";
+		}
+		if (pack_job_offset) {
+			xstrfmtcat(*extra,
+				   "%s(t1.pack_job_id in (%s) && t1.pack_job_offset in (%s))",
+				   sep, pack_job_ids, pack_job_offset);
+			sep = " || ";
+		}
 		if (array_job_ids) {
-			xstrfmtcat(*extra, "t1.id_array_job in (%s)", array_job_ids);
-			if (array_task_ids)
+			xstrfmtcat(*extra, "%s(t1.id_array_job in (%s)",
+				   sep, array_job_ids);
+			if (array_task_ids) {
 				xstrfmtcat(*extra,
 					   " && t1.id_array_task in (%s)",
 					   array_task_ids);
+			}
+			xstrcat(*extra, ")");
 		}
 
 		xstrcat(*extra, ")");
 		xfree(job_ids);
 		xfree(array_job_ids);
 		xfree(array_task_ids);
+		xfree(pack_job_ids);
+		xfree(pack_job_offset);
 	}
 
 	if (job_cond->cpus_min) {
@@ -1577,11 +1639,11 @@ extern List as_mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 	if (private_data & PRIVATE_DATA_JOBS) {
 		if (!(is_admin = is_user_min_admin_level(
 			      mysql_conn, uid, SLURMDB_ADMIN_OPERATOR))) {
-			/* Only fill in the coordinator accounts here
-			   we will check them later when we actually
-			   try to get the jobs.
-			*/
-			is_user_any_coord(mysql_conn, &user);
+			/*
+			 * Only fill in the coordinator accounts here we will
+			 * check them later when we actually try to get the jobs
+			 */
+			(void) is_user_any_coord(mysql_conn, &user);
 		}
 		if (!is_admin && !user.name) {
 			debug("User %u has no associations, and is not admin, "
@@ -1599,13 +1661,13 @@ extern List as_mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 
 	xfree(tmp);
 	xstrfmtcat(tmp, "%s", job_req_inx[0]);
-	for(i=1; i<JOB_REQ_COUNT; i++) {
+	for (i = 1; i < JOB_REQ_COUNT; i++) {
 		xstrfmtcat(tmp, ", %s", job_req_inx[i]);
 	}
 
 	xfree(tmp2);
 	xstrfmtcat(tmp2, "%s", step_req_inx[0]);
-	for(i=1; i<STEP_REQ_COUNT; i++) {
+	for (i = 1; i < STEP_REQ_COUNT; i++) {
 		xstrfmtcat(tmp2, ", %s", step_req_inx[i]);
 	}
 

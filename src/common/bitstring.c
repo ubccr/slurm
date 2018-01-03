@@ -90,7 +90,7 @@
 } while (0)
 
 
-/* Insure valid bitmap size, prevent overflow in buffer size calcuation */
+/* Ensure valid bitmap size, prevent overflow in buffer size calcuation */
 #define _assert_valid_size(bit) do {	\
 	assert((bit) >= 0);		\
 	assert((bit) <= 0x40000000); 	\
@@ -481,6 +481,11 @@ bit_ffs(bitstr_t *b)
 			bit += sizeof(bitstr_t)*8;
 			continue;
 		}
+#if HAVE___BUILTIN_CLZLL && (defined SLURM_BIGENDIAN)
+		value = bit + __builtin_clzll(b[word]);
+#elif HAVE___BUILTIN_CTZLL && (!defined SLURM_BIGENDIAN)
+		value = bit + __builtin_ctzll(b[word]);
+#else
 		while (bit < _bitstr_bits(b) && _bit_word(bit) == word) {
 			if (bit_test(b, bit)) {
 				value = bit;
@@ -488,6 +493,7 @@ bit_ffs(bitstr_t *b)
 			}
 			bit++;
 		}
+#endif
 	}
 	return value;
 }
@@ -524,6 +530,11 @@ bit_fls(bitstr_t *b)
 			bit -= sizeof(bitstr_t) * 8;
 			continue;
 		}
+#if HAVE___BUILTIN_CTZLL && (defined SLURM_BIGENDIAN)
+		value = bit - __builtin_ctzll(b[word]);
+#elif HAVE___BUILTIN_CLZLL && (!defined SLURM_BIGENDIAN)
+		value = bit - __builtin_clzll(b[word]);
+#else
 		while (bit >= 0) {
 			if (bit_test(b, bit)) {
 				value = bit;
@@ -531,6 +542,7 @@ bit_fls(bitstr_t *b)
 			}
 			bit--;
 		}
+#endif
 	}
 	return value;
 }
@@ -705,6 +717,9 @@ bit_copybits(bitstr_t *dest, bitstr_t *src)
 	memcpy(&dest[BITSTR_OVERHEAD], &src[BITSTR_OVERHEAD], len);
 }
 
+#ifdef HAVE___BUILTIN_POPCOUNTLL
+#define hweight __builtin_popcountll
+#else
 /*
  * Returns the hamming weight (i.e. the number of bits set) in a word.
  * NOTE: This routine borrowed from Linux 4.9 <tools/lib/hweight.c>.
@@ -717,6 +732,7 @@ hweight(uint64_t w)
         w =  (w + (w >> 4)) & 0x0f0f0f0f0f0f0f0ful;
         return (w * 0x0101010101010101ul) >> 56;
 }
+#endif
 
 /*
  * Count the number of bits set in bitstring.
@@ -1029,17 +1045,12 @@ char *bit_fmt(char *str, int32_t len, bitstr_t *b)
 	}
 	if (count > 0)
 		str[strlen(str) - 1] = '\0'; 	/* zap trailing comma */
-/* 	if (count > 1) { /\* add braces if we have more than one here *\/ */
-/* 		assert(strlen(str) + 3 < len); */
-/* 		memmove(str + 1, str, strlen(str)); */
-/* 		str[0] = '['; */
-/* 		strcat(str, "]"); */
-/* 	}  */
 	return str;
 }
 
 /*
  * Convert to range string format, e.g. 0-5,42 with no length restriction
+ * Call xfree() on return value to avoid memory leak
  */
 char *bit_fmt_full(bitstr_t *b)
 {
@@ -1068,6 +1079,50 @@ char *bit_fmt_full(bitstr_t *b)
 			else 			/* add bit position range */
 				xstrfmtcat(str, "%s%"BITSTR_FMT"-%"BITSTR_FMT,
 					   comma, start, bit);
+			comma = ",";
+		}
+		bit++;
+	}
+
+	return str;
+}
+
+/*
+ * Convert to range string format, e.g. 0-5,42 with no length restriction
+ * offset IN - location of bit zero
+ * len IN - number of bits to test
+ * Call xfree() on return value to avoid memory leak
+ */
+char *bit_fmt_range(bitstr_t *b, int offset, int len)
+{
+	int32_t count = 0, word;
+	bitoff_t start, fini_bit, bit;
+	char *str = NULL, *comma = "";
+	_assert_bitstr_valid(b);
+
+	fini_bit = MIN(_bitstr_bits(b), offset + len);
+	for (bit = offset; bit < fini_bit; ) {
+		word = _bit_word(bit);
+		if (b[word] == 0) {
+			bit += sizeof(bitstr_t) * 8;
+			continue;
+		}
+
+		if (bit_test(b, bit)) {
+			count++;
+			start = bit;
+			while ((bit + 1 < fini_bit) && bit_test(b, bit + 1)) {
+				bit++;
+				count++;
+			}
+			if (bit == start) {	/* add single bit position */
+				xstrfmtcat(str, "%s%"BITSTR_FMT"",
+					   comma, (start - offset));
+			} else {		/* add bit position range */
+				xstrfmtcat(str, "%s%"BITSTR_FMT"-%"BITSTR_FMT,
+					   comma, (start - offset),
+					   (bit - offset));
+			}
 			comma = ",";
 		}
 		bit++;

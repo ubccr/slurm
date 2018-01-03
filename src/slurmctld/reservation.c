@@ -64,6 +64,7 @@
 #include "src/common/parse_time.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_time.h"
+#include "src/common/strlcpy.h"
 #include "src/common/uid.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
@@ -77,7 +78,6 @@
 #include "src/slurmctld/state_save.h"
 
 #define _DEBUG		0
-#define ONE_YEAR	(365 * 24 * 60 * 60)
 #define RESV_MAGIC	0x3b82
 
 /* Permit sufficient time for slurmctld failover or other long delay before
@@ -484,7 +484,7 @@ static void _dump_resv_req(resv_desc_msg_t *resv_ptr, char *mode)
 
 	char start_str[32] = "-1", end_str[32] = "-1", *flag_str = NULL;
 	char watts_str[32] = "n/a";
-	char *node_cnt_str = NULL;
+	char *node_cnt_str = NULL, *core_cnt_str = NULL;
 	int duration, i;
 
 	if (!(slurmctld_conf.debug_flags & DEBUG_FLAG_RESERVATION))
@@ -522,15 +522,27 @@ static void _dump_resv_req(resv_desc_msg_t *resv_ptr, char *mode)
 		}
 	}
 
+	if (resv_ptr->core_cnt) {
+		for (i = 0; resv_ptr->core_cnt[i]; i++) {
+			if (core_cnt_str) {
+				xstrfmtcat(core_cnt_str, ",%u",
+					   resv_ptr->core_cnt[i]);
+			} else {
+				xstrfmtcat(core_cnt_str, "%u",
+					   resv_ptr->core_cnt[i]);
+			}
+		}
+	}
+
 	info("%s: Name=%s StartTime=%s EndTime=%s Duration=%d "
-	     "Flags=%s NodeCnt=%s NodeList=%s Features=%s "
-	     "PartitionName=%s Users=%s Accounts=%s Licenses=%s BurstBuffer=%s"
-	     "Watts=%s",
+	     "Flags=%s NodeCnt=%s CoreCnt=%s NodeList=%s Features=%s "
+	     "PartitionName=%s Users=%s Accounts=%s Licenses=%s BurstBuffer=%s "
+	     "TRES=%s Watts=%s",
 	     mode, resv_ptr->name, start_str, end_str, duration,
-	     flag_str, node_cnt_str, resv_ptr->node_list,
+	     flag_str, node_cnt_str, core_cnt_str, resv_ptr->node_list,
 	     resv_ptr->features, resv_ptr->partition,
 	     resv_ptr->users, resv_ptr->accounts, resv_ptr->licenses,
-	     resv_ptr->burst_buffer, watts_str);
+	     resv_ptr->burst_buffer, resv_ptr->tres_str, watts_str);
 
 	xfree(flag_str);
 	xfree(node_cnt_str);
@@ -573,11 +585,13 @@ static void _generate_resv_name(resv_desc_msg_t *resv_ptr)
 		len = sep - key;
 	else
 		len = strlen(key);
-	name = xmalloc(len + 16);
-	strncpy(name, key, len);
+	if (!len) {
+		key = "resv";
+		len = strlen(key);
+	}
 
-	xstrfmtcat(name, "_%d", top_suffix);
-	len++;
+	name = xstrdup_printf("%.*s_%d", len, key, top_suffix);
+
 	xfree(resv_ptr->name);
 	resv_ptr->name = name;
 }
@@ -697,7 +711,7 @@ static int _set_assoc_list(slurmctld_resv_t *resv_ptr)
 				memset(&assoc, 0,
 				       sizeof(slurmdb_assoc_rec_t));
 				assoc.acct = resv_ptr->account_list[j];
-				assoc.uid  = (uint32_t)NO_VAL;
+				assoc.uid  = NO_VAL;
 				rc = _append_assoc_list(assoc_list, &assoc);
 				if (rc != SLURM_SUCCESS)
 					goto end_it;
@@ -729,7 +743,7 @@ static int _set_assoc_list(slurmctld_resv_t *resv_ptr)
 		for (i=0; i < resv_ptr->account_cnt; i++) {
 			memset(&assoc, 0, sizeof(slurmdb_assoc_rec_t));
 			assoc.acct = resv_ptr->account_list[i];
-			assoc.uid  = (uint32_t)NO_VAL;
+			assoc.uid  = NO_VAL;
 			if ((rc = _append_assoc_list(assoc_list, &assoc))
 			    != SLURM_SUCCESS) {
 				goto end_it;
@@ -790,7 +804,7 @@ static int _post_resv_create(slurmctld_resv_t *resv_ptr)
 
 	memset(&resv, 0, sizeof(slurmdb_reservation_rec_t));
 	resv.assocs = resv_ptr->assoc_list;
-	resv.cluster = slurmctld_cluster_name;
+	resv.cluster = slurmctld_conf.cluster_name;
 	resv.tres_str = resv_ptr->tres_str;
 
 	resv.flags = resv_ptr->flags;
@@ -821,7 +835,7 @@ static int _post_resv_delete(slurmctld_resv_t *resv_ptr)
 		return rc;
 
 	memset(&resv, 0, sizeof(slurmdb_reservation_rec_t));
-	resv.cluster = slurmctld_cluster_name;
+	resv.cluster = slurmctld_conf.cluster_name;
 	resv.id = resv_ptr->resv_id;
 	resv.name = resv_ptr->name;
 	resv.time_end = now;
@@ -851,7 +865,7 @@ static int _post_resv_update(slurmctld_resv_t *resv_ptr,
 		return rc;
 
 	memset(&resv, 0, sizeof(slurmdb_reservation_rec_t));
-	resv.cluster = slurmctld_cluster_name;
+	resv.cluster = slurmctld_conf.cluster_name;
 	resv.id = resv_ptr->resv_id;
 	resv.time_end = resv_ptr->end_time;
 
@@ -1494,13 +1508,19 @@ static void _pack_resv(slurmctld_resv_t *resv_ptr, Buf buffer,
 		       bool internal, uint16_t protocol_version)
 {
 	time_t now = time(NULL), start_relative, end_relative;
+	int i_first, i_last, i;
+	int offset_start, offset_end;
+	uint32_t i_cnt;
+	struct node_record *node_ptr;
+	job_resources_t *core_resrcs;
+	char *core_str;
 
 	if (resv_ptr->flags & RESERVE_FLAG_TIME_FLOAT)
 		last_resv_update = now;
 	if (!internal && (resv_ptr->flags & RESERVE_FLAG_TIME_FLOAT)) {
 		start_relative = resv_ptr->start_time + now;
 		if (resv_ptr->duration == INFINITE)
-			end_relative = start_relative + ONE_YEAR;
+			end_relative = start_relative + YEAR_SECONDS;
 		else if (resv_ptr->duration && (resv_ptr->duration != NO_VAL))
 			end_relative = start_relative + resv_ptr->duration * 60;
 		else {
@@ -1513,7 +1533,72 @@ static void _pack_resv(slurmctld_resv_t *resv_ptr, Buf buffer,
 		end_relative = resv_ptr->end_time;
 	}
 
-	if (protocol_version >= SLURM_17_02_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
+		packstr(resv_ptr->accounts,	buffer);
+		packstr(resv_ptr->burst_buffer,	buffer);
+		pack32(resv_ptr->core_cnt,	buffer);
+		pack_time(end_relative,		buffer);
+		packstr(resv_ptr->features,	buffer);
+		pack32(resv_ptr->flags,		buffer);
+		packstr(resv_ptr->licenses,	buffer);
+		packstr(resv_ptr->name,		buffer);
+		pack32(resv_ptr->node_cnt,	buffer);
+		packstr(resv_ptr->node_list,	buffer);
+		packstr(resv_ptr->partition,	buffer);
+		pack32(resv_ptr->resv_watts,    buffer);
+		pack_time(start_relative,	buffer);
+		packstr(resv_ptr->tres_fmt_str,	buffer);
+		packstr(resv_ptr->users,	buffer);
+
+		if (internal) {
+			pack8(resv_ptr->account_not,	buffer);
+			packstr(resv_ptr->assoc_list,	buffer);
+			/* NOTE: Restoring core_bitmap directly only works if
+			 * the system's node and core counts don't change.
+			 * core_resrcs is used so configuration changes can be
+			 * supported */
+			_set_core_resrcs(resv_ptr);
+			pack_job_resources(resv_ptr->core_resrcs, buffer,
+					   protocol_version);
+			pack32(resv_ptr->duration,	buffer);
+			pack8(resv_ptr->full_nodes,	buffer);
+			pack32(resv_ptr->resv_id,	buffer);
+			pack_time(resv_ptr->start_time_prev, buffer);
+			pack_time(resv_ptr->start_time,	buffer);
+			packstr(resv_ptr->tres_str,	buffer);
+			pack8(resv_ptr->user_not,	buffer);
+		} else {
+			pack_bit_str_hex(resv_ptr->node_bitmap, buffer);
+			if (!resv_ptr->core_bitmap ||
+			    !resv_ptr->core_resrcs ||
+			    !resv_ptr->core_resrcs->node_bitmap ||
+			    !resv_ptr->core_resrcs->core_bitmap ||
+			    (bit_ffs(resv_ptr->core_bitmap) == -1)) {
+				pack32((uint32_t) 0, buffer);
+			} else {
+				core_resrcs = resv_ptr->core_resrcs;
+				i_cnt = bit_set_count(core_resrcs->node_bitmap);
+				pack32(i_cnt, buffer);
+				i_first = bit_ffs(core_resrcs->node_bitmap);
+				i_last  = bit_fls(core_resrcs->node_bitmap);
+				for (i = i_first; i <= i_last; i++) {
+					if (!bit_test(core_resrcs->node_bitmap,
+						      i))
+						continue;
+					offset_start = cr_get_coremap_offset(i);
+					offset_end = cr_get_coremap_offset(i+1);
+					node_ptr = node_record_table_ptr + i;
+					packstr(node_ptr->name, buffer);
+					core_str = bit_fmt_range(
+						resv_ptr->core_bitmap,
+						offset_start,
+						(offset_end - offset_start));
+					packstr(core_str, buffer);
+					xfree(core_str);
+				}
+			}
+		}
+	} else if (protocol_version >= SLURM_17_02_PROTOCOL_VERSION) {
 		packstr(resv_ptr->accounts,	buffer);
 		packstr(resv_ptr->burst_buffer,	buffer);
 		pack32(resv_ptr->core_cnt,	buffer);
@@ -1550,7 +1635,7 @@ static void _pack_resv(slurmctld_resv_t *resv_ptr, Buf buffer,
 		} else {
 			pack_bit_str_hex(resv_ptr->node_bitmap, buffer);
 		}
-	} else if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		packstr(resv_ptr->accounts,	buffer);
 		packstr(resv_ptr->burst_buffer,	buffer);
 		pack32(resv_ptr->core_cnt,	buffer);
@@ -1587,41 +1672,6 @@ static void _pack_resv(slurmctld_resv_t *resv_ptr, Buf buffer,
 		} else {
 			pack_bit_fmt(resv_ptr->node_bitmap, buffer);
 		}
-	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		packstr(resv_ptr->accounts,	buffer);
-		packstr(resv_ptr->burst_buffer,	buffer);
-		pack32(resv_ptr->core_cnt,	buffer);
-		pack_time(end_relative,		buffer);
-		packstr(resv_ptr->features,	buffer);
-		pack32(resv_ptr->flags,		buffer);
-		packstr(resv_ptr->licenses,	buffer);
-		packstr(resv_ptr->name,		buffer);
-		pack32(resv_ptr->node_cnt,	buffer);
-		packstr(resv_ptr->node_list,	buffer);
-		packstr(resv_ptr->partition,	buffer);
-		pack32(resv_ptr->resv_watts,    buffer);
-		pack_time(start_relative,	buffer);
-		packstr(resv_ptr->tres_fmt_str,	buffer);
-		packstr(resv_ptr->users,	buffer);
-
-		if (internal) {
-			uint32_t core_cnt = 0;
-			pack8(resv_ptr->account_not,	buffer);
-			packstr(resv_ptr->assoc_list,	buffer);
-			if (resv_ptr->core_bitmap)
-				core_cnt = bit_size(resv_ptr->core_bitmap);
-			pack32(core_cnt,		buffer);
-			pack_bit_fmt(resv_ptr->core_bitmap, buffer);
-			pack32(resv_ptr->duration,	buffer);
-			pack8(resv_ptr->full_nodes,	buffer);
-			pack32(resv_ptr->resv_id,	buffer);
-			pack_time(resv_ptr->start_time_prev,	buffer);
-			pack_time(resv_ptr->start_time,	buffer);
-			pack8(resv_ptr->user_not,	buffer);
-			packstr(resv_ptr->tres_str,	buffer);
-		} else {
-			pack_bit_fmt(resv_ptr->node_bitmap, buffer);
-		}
 	}
 }
 
@@ -1629,12 +1679,51 @@ slurmctld_resv_t *_load_reservation_state(Buf buffer,
 					  uint16_t protocol_version)
 {
 	slurmctld_resv_t *resv_ptr;
-	uint32_t core_cnt, uint32_tmp;
-	char *core_inx_str = NULL;
+	uint32_t uint32_tmp;
 
 	resv_ptr = xmalloc(sizeof(slurmctld_resv_t));
-	xassert((resv_ptr->magic = RESV_MAGIC));	/* Sets value */
-	if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
+	xassert(resv_ptr->magic = RESV_MAGIC);	/* Sets value */
+	if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
+		safe_unpackstr_xmalloc(&resv_ptr->accounts,
+				       &uint32_tmp,	buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->burst_buffer,
+				       &uint32_tmp,	buffer);
+		safe_unpack32(&resv_ptr->core_cnt,	buffer);
+		safe_unpack_time(&resv_ptr->end_time,	buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->features,
+				       &uint32_tmp, 	buffer);
+		safe_unpack32(&resv_ptr->flags,		buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->licenses,
+				       &uint32_tmp, 	buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->name,	&uint32_tmp, buffer);
+
+		safe_unpack32(&resv_ptr->node_cnt,	buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->node_list,
+				       &uint32_tmp,	buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->partition,
+				       &uint32_tmp, 	buffer);
+		safe_unpack32(&resv_ptr->resv_watts,    buffer);
+		safe_unpack_time(&resv_ptr->start_time_first,	buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->tres_fmt_str,
+				       &uint32_tmp, 	buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->users, &uint32_tmp, buffer);
+
+		/* Fields saved for internal use only (save state) */
+		safe_unpack8((uint8_t *)&resv_ptr->account_not,	buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->assoc_list,
+				       &uint32_tmp,	buffer);
+		if (unpack_job_resources(&resv_ptr->core_resrcs, buffer,
+					 protocol_version) != SLURM_SUCCESS)
+			goto unpack_error;
+		safe_unpack32(&resv_ptr->duration,	buffer);
+		safe_unpack8((uint8_t *)&resv_ptr->full_nodes,	buffer);
+		safe_unpack32(&resv_ptr->resv_id,	buffer);
+		safe_unpack_time(&resv_ptr->start_time_prev, buffer);
+		safe_unpack_time(&resv_ptr->start_time, buffer);
+		safe_unpackstr_xmalloc(&resv_ptr->tres_str,
+				       &uint32_tmp, 	buffer);
+		safe_unpack8((uint8_t *)&resv_ptr->user_not,	buffer);
+	} else if (protocol_version >= SLURM_17_02_PROTOCOL_VERSION) {
 		safe_unpackstr_xmalloc(&resv_ptr->accounts,
 				       &uint32_tmp,	buffer);
 		safe_unpackstr_xmalloc(&resv_ptr->burst_buffer,
@@ -1703,29 +1792,17 @@ slurmctld_resv_t *_load_reservation_state(Buf buffer,
 		safe_unpack8((uint8_t *)&resv_ptr->account_not,	buffer);
 		safe_unpackstr_xmalloc(&resv_ptr->assoc_list,
 				       &uint32_tmp,	buffer);
-		safe_unpack32(&core_cnt,		buffer);
-		safe_unpackstr_xmalloc(&core_inx_str, &uint32_tmp, buffer);
-		if (core_inx_str == NULL) {
-#if _DEBUG
-			info("Reservation %s has no core_bitmap",
-			     resv_ptr->name);
-#endif
-		} else {
-			resv_ptr->core_bitmap = bit_alloc(core_cnt);
-			bit_unfmt(resv_ptr->core_bitmap, core_inx_str);
-			info("Reservation %s has core_bitmap %s on node %s",
-			     resv_ptr->name, core_inx_str,
-			     resv_ptr->node_list);
-			xfree(core_inx_str);
-		}
+		if (unpack_job_resources(&resv_ptr->core_resrcs, buffer,
+					 protocol_version) != SLURM_SUCCESS)
+			goto unpack_error;
 		safe_unpack32(&resv_ptr->duration,	buffer);
 		safe_unpack8((uint8_t *)&resv_ptr->full_nodes,	buffer);
 		safe_unpack32(&resv_ptr->resv_id,	buffer);
 		safe_unpack_time(&resv_ptr->start_time_prev, buffer);
 		safe_unpack_time(&resv_ptr->start_time, buffer);
-		safe_unpack8((uint8_t *)&resv_ptr->user_not,	buffer);
 		safe_unpackstr_xmalloc(&resv_ptr->tres_str,
 				       &uint32_tmp, 	buffer);
+		safe_unpack8((uint8_t *)&resv_ptr->user_not,	buffer);
 	}
 
 	return resv_ptr;
@@ -1991,7 +2068,7 @@ static List _license_validate2(resv_desc_msg_t *resv_desc_ptr, bool *valid)
 	char *merged_licenses;
 
 	license_list = license_validate(resv_desc_ptr->licenses, NULL, valid);
-	if (!valid || (resv_desc_ptr->licenses == NULL))
+	if (resv_desc_ptr->licenses == NULL)
 		return license_list;
 
 	merged_licenses = xstrdup(resv_desc_ptr->licenses);
@@ -2054,7 +2131,8 @@ extern int create_resv(resv_desc_msg_t *resv_desc_ptr)
 			goto bad_parse;
 		}
 	} else if (resv_desc_ptr->duration == INFINITE) {
-		resv_desc_ptr->end_time = resv_desc_ptr->start_time + ONE_YEAR;
+		resv_desc_ptr->end_time = resv_desc_ptr->start_time + 
+					  YEAR_SECONDS;
 	} else if (resv_desc_ptr->duration) {
 		resv_desc_ptr->end_time = resv_desc_ptr->start_time +
 					  (resv_desc_ptr->duration * 60);
@@ -2067,9 +2145,12 @@ extern int create_resv(resv_desc_msg_t *resv_desc_ptr)
 		resv_desc_ptr->flags &= (~RESERVE_FLAG_REPLACE);
 #endif
 		resv_desc_ptr->flags &= RESERVE_FLAG_MAINT    |
+					RESERVE_FLAG_FLEX     |
 					RESERVE_FLAG_OVERLAP  |
 					RESERVE_FLAG_IGN_JOBS |
 					RESERVE_FLAG_DAILY    |
+					RESERVE_FLAG_WEEKDAY  |
+					RESERVE_FLAG_WEEKEND  |
 					RESERVE_FLAG_WEEKLY   |
 					RESERVE_FLAG_STATIC   |
 					RESERVE_FLAG_ANY_NODES   |
@@ -2077,7 +2158,8 @@ extern int create_resv(resv_desc_msg_t *resv_desc_ptr)
 					RESERVE_FLAG_FIRST_CORES |
 					RESERVE_FLAG_TIME_FLOAT  |
 					RESERVE_FLAG_PURGE_COMP  |
-					RESERVE_FLAG_REPLACE;
+					RESERVE_FLAG_REPLACE     |
+					RESERVE_FLAG_NO_HOLD_JOBS;
 	}
 	if (resv_desc_ptr->flags & RESERVE_FLAG_REPLACE) {
 		if (resv_desc_ptr->node_list) {
@@ -2236,8 +2318,6 @@ extern int create_resv(resv_desc_msg_t *resv_desc_ptr)
 		if (xstrcasecmp(resv_desc_ptr->node_list, "ALL") == 0) {
 			if ((resv_desc_ptr->partition) &&
 			    (resv_desc_ptr->flags & RESERVE_FLAG_PART_NODES)) {
-				part_ptr = find_part_record(
-					resv_desc_ptr->partition);
 				node_bitmap = bit_copy(part_ptr->node_bitmap);
 			} else {
 				resv_desc_ptr->flags |= RESERVE_FLAG_ALL_NODES;
@@ -2323,7 +2403,7 @@ extern int create_resv(resv_desc_msg_t *resv_desc_ptr)
 				if (!resv_desc_ptr->core_cnt[nodeinx]) {
 					info("Core count for reservation node "
 					     "list is not consistent!");
-					rc = ESLURM_INVALID_NODE_NAME;
+					rc = ESLURM_INVALID_CORE_CNT;
 					goto bad_parse;
 				}
 #if _DEBUG
@@ -2503,11 +2583,12 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 
 	/* FIXME: Support more core based reservation updates */
 #ifndef HAVE_BG
-	if ((resv_ptr->full_nodes == 0) &&
-	    (resv_desc_ptr->node_cnt || resv_desc_ptr->node_list)) {
+	if ((!resv_ptr->full_nodes &&
+	     (resv_desc_ptr->node_cnt || resv_desc_ptr->node_list)) ||
+	    resv_desc_ptr->core_cnt) {
 		info("Core-based reservation %s can not be updated",
 		     resv_desc_ptr->name);
-		return ESLURM_RESERVATION_NOT_USABLE;
+		return ESLURM_CORE_RESERVATION_UPDATE;
 	}
 #endif
 
@@ -2516,6 +2597,10 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 
 	/* Process the request */
 	if (resv_desc_ptr->flags != NO_VAL) {
+		if (resv_desc_ptr->flags & RESERVE_FLAG_FLEX)
+			resv_ptr->flags |= RESERVE_FLAG_FLEX;
+		if (resv_desc_ptr->flags & RESERVE_FLAG_NO_FLEX)
+			resv_ptr->flags &= (~RESERVE_FLAG_FLEX);
 		if (resv_desc_ptr->flags & RESERVE_FLAG_MAINT)
 			resv_ptr->flags |= RESERVE_FLAG_MAINT;
 		if (resv_desc_ptr->flags & RESERVE_FLAG_NO_MAINT)
@@ -2530,6 +2615,14 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 			resv_ptr->flags |= RESERVE_FLAG_DAILY;
 		if (resv_desc_ptr->flags & RESERVE_FLAG_NO_DAILY)
 			resv_ptr->flags &= (~RESERVE_FLAG_DAILY);
+		if (resv_desc_ptr->flags & RESERVE_FLAG_WEEKDAY)
+			resv_ptr->flags |= RESERVE_FLAG_WEEKDAY;
+		if (resv_desc_ptr->flags & RESERVE_FLAG_NO_WEEKDAY)
+			resv_ptr->flags &= (~RESERVE_FLAG_WEEKDAY);
+		if (resv_desc_ptr->flags & RESERVE_FLAG_WEEKEND)
+			resv_ptr->flags |= RESERVE_FLAG_WEEKEND;
+		if (resv_desc_ptr->flags & RESERVE_FLAG_NO_WEEKEND)
+			resv_ptr->flags &= (~RESERVE_FLAG_WEEKEND);
 		if (resv_desc_ptr->flags & RESERVE_FLAG_WEEKLY)
 			resv_ptr->flags |= RESERVE_FLAG_WEEKLY;
 		if (resv_desc_ptr->flags & RESERVE_FLAG_NO_WEEKLY)
@@ -2576,6 +2669,8 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 		}
 		if (resv_desc_ptr->flags & RESERVE_FLAG_PURGE_COMP)
 			resv_ptr->flags |= RESERVE_FLAG_PURGE_COMP;
+		if (resv_desc_ptr->flags & RESERVE_FLAG_NO_HOLD_JOBS)
+			resv_ptr->flags |= RESERVE_FLAG_NO_HOLD_JOBS;
 	}
 	if (resv_desc_ptr->partition && (resv_desc_ptr->partition[0] == '\0')) {
 		/* Clear the partition */
@@ -2704,12 +2799,30 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 	}
 
 	if (resv_desc_ptr->duration == INFINITE) {
-		resv_ptr->duration = ONE_YEAR / 60;
-		resv_ptr->end_time = resv_ptr->start_time_first + ONE_YEAR;
+		resv_ptr->duration = YEAR_SECONDS / 60;
+		resv_ptr->end_time = resv_ptr->start_time_first + YEAR_SECONDS;
 	} else if (resv_desc_ptr->duration != NO_VAL) {
-		resv_ptr->duration = resv_desc_ptr->duration;
+		if (resv_desc_ptr->flags == NO_VAL)
+			resv_ptr->duration = resv_desc_ptr->duration;
+		else if (resv_desc_ptr->flags & RESERVE_FLAG_DUR_PLUS)
+			resv_ptr->duration += resv_desc_ptr->duration;
+		else if (resv_desc_ptr->flags & RESERVE_FLAG_DUR_MINUS) {
+			if (resv_ptr->duration >= resv_desc_ptr->duration)
+				resv_ptr->duration -= resv_desc_ptr->duration;
+			else
+				resv_ptr->duration = 0;
+		} else
+			resv_ptr->duration = resv_desc_ptr->duration;
+
 		resv_ptr->end_time = resv_ptr->start_time_first +
-				     (resv_desc_ptr->duration * 60);
+				     (resv_ptr->duration * 60);
+		/*
+		 * Since duration is a static number we could put the end time
+		 * in the past if the reservation already started and we are
+		 * removing more time than is left.
+		 */
+		if (resv_ptr->end_time < now)
+			resv_ptr->end_time = now;
 	}
 
 	if (resv_ptr->start_time >= resv_ptr->end_time) {
@@ -2863,7 +2976,7 @@ static bool _is_resv_used(slurmctld_resv_t *resv_ptr)
 	return match;
 }
 
-/* Clear the reservation points for jobs referencing a defunct reservation */
+/* Clear the reservation pointers for jobs referencing a defunct reservation */
 static void _clear_job_resv(slurmctld_resv_t *resv_ptr)
 {
 	ListIterator job_iterator;
@@ -2881,6 +2994,17 @@ static void _clear_job_resv(slurmctld_resv_t *resv_ptr)
 		job_ptr->resv_id = 0;
 		job_ptr->resv_ptr = NULL;
 		xfree(job_ptr->resv_name);
+		if (!(resv_ptr->flags & RESERVE_FLAG_NO_HOLD_JOBS) &&
+		    IS_JOB_PENDING(job_ptr) &&
+		    (job_ptr->state_reason != WAIT_HELD)) {
+			xfree(job_ptr->state_desc);
+			job_ptr->state_reason = WAIT_RESV_DELETED;
+			job_ptr->job_state |= JOB_RESV_DEL_HOLD;
+			xstrfmtcat(job_ptr->state_desc,
+				   "Reservation %s was deleted",
+				    resv_ptr->name);
+			job_ptr->priority = 0;	/* Hold job */
+		}
 	}
 	list_iterator_destroy(job_iterator);
 }
@@ -3394,9 +3518,7 @@ static void _resv_node_replace(slurmctld_resv_t *resv_ptr)
 			busy_nodes_needed = resv_ptr->node_cnt - new_nodes
 					    - preserve_nodes;
 			if (busy_nodes_needed > 0) {
-				bit_not(preserve_bitmap);
-				bit_and(resv_ptr->node_bitmap, preserve_bitmap);
-				bit_not(preserve_bitmap);
+				bit_and_not(resv_ptr->node_bitmap, preserve_bitmap);
 				tmp_bitmap = bit_pick_cnt(resv_ptr->node_bitmap,
 							  busy_nodes_needed);
 				bit_and(resv_ptr->node_bitmap, tmp_bitmap);
@@ -3545,7 +3667,7 @@ extern int load_all_resv_state(int recover)
 	int data_allocated, data_read = 0, error_code = 0, state_fd;
 	Buf buffer;
 	slurmctld_resv_t *resv_ptr = NULL;
-	uint16_t protocol_version = (uint16_t) NO_VAL;
+	uint16_t protocol_version = NO_VAL16;
 
 	last_resv_update = time(NULL);
 	if ((recover == 0) && resv_list) {
@@ -3565,7 +3687,9 @@ extern int load_all_resv_state(int recover)
 	if (state_fd < 0) {
 		info("No reservation state file (%s) to recover",
 		     state_file);
-		error_code = ENOENT;
+		xfree(state_file);
+		unlock_state_files();
+		return ENOENT;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -3598,7 +3722,9 @@ extern int load_all_resv_state(int recover)
 	if (ver_str && !xstrcmp(ver_str, RESV_STATE_VERSION))
 		safe_unpack16(&protocol_version, buffer);
 
-	if (protocol_version == (uint16_t) NO_VAL) {
+	if (protocol_version == NO_VAL16) {
+		if (!ignore_state_errors)
+			fatal("Can not recover reservation state, data version incompatible, start with '-i' to ignore this");
 		error("************************************************************");
 		error("Can not recover reservation state, data version incompatible");
 		error("************************************************************");
@@ -3625,13 +3751,12 @@ extern int load_all_resv_state(int recover)
 	free_buf(buffer);
 	return error_code;
 
-      unpack_error:
+unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete reservation data checkpoint file, start with '-i' to ignore this");
+	error("Incomplete reservation data checkpoint file");
 	_validate_all_reservations();
-	if (state_fd >= 0)
-		error("Incomplete reservation data checkpoint file");
 	info("Recovered state of %d reservations", list_count(resv_list));
-	if (resv_ptr)
-		_del_resv_rec(resv_ptr);
 	free_buf(buffer);
 	return EFAULT;
 }
@@ -3691,16 +3816,13 @@ static int  _resize_resv(slurmctld_resv_t *resv_ptr, uint32_t node_cnt)
 			if (i > delta_node_cnt) {
 				tmp2_bitmap = bit_pick_cnt(tmp1_bitmap,
 							   delta_node_cnt);
-				bit_not(tmp2_bitmap);
-				bit_and(resv_ptr->node_bitmap, tmp2_bitmap);
+				bit_and_not(resv_ptr->node_bitmap, tmp2_bitmap);
 				FREE_NULL_BITMAP(tmp1_bitmap);
 				FREE_NULL_BITMAP(tmp2_bitmap);
 				delta_node_cnt = 0;	/* ALL DONE */
 			} else if (i) {
-				bit_not(idle_node_bitmap);
-				bit_and(resv_ptr->node_bitmap,
+				bit_and_not(resv_ptr->node_bitmap,
 					idle_node_bitmap);
-				bit_not(idle_node_bitmap);
 				resv_ptr->node_cnt = bit_set_count(
 						resv_ptr->node_bitmap);
 				delta_node_cnt = resv_ptr->node_cnt -
@@ -3802,7 +3924,7 @@ static int  _select_nodes(resv_desc_msg_t *resv_desc_ptr,
 				start_relative = resv_ptr->start_time + now;
 				if (resv_ptr->duration == INFINITE)
 					end_relative = start_relative +
-						ONE_YEAR;
+						       YEAR_SECONDS;
 				else if (resv_ptr->duration &&
 					 (resv_ptr->duration != NO_VAL)) {
 					end_relative = start_relative +
@@ -3826,9 +3948,7 @@ static int  _select_nodes(resv_desc_msg_t *resv_desc_ptr,
 				resv_ptr->full_nodes = 1;
 			}
 			if (resv_ptr->full_nodes || !resv_desc_ptr->core_cnt) {
-				bit_not(resv_ptr->node_bitmap);
-				bit_and(node_bitmap, resv_ptr->node_bitmap);
-				bit_not(resv_ptr->node_bitmap);
+				bit_and_not(node_bitmap, resv_ptr->node_bitmap);
 			} else {
 				_create_cluster_core_bitmap(core_bitmap);
 				bit_or(*core_bitmap, resv_ptr->core_bitmap);
@@ -3942,8 +4062,8 @@ static bitstr_t *_pick_idle_nodes(bitstr_t *avail_bitmap,
 
 #ifdef HAVE_BG
 	hostlist_t hl = NULL;
-	static uint16_t static_blocks = (uint16_t)NO_VAL;
-	if (static_blocks == (uint16_t)NO_VAL) {
+	static uint16_t static_blocks = NO_VAL16;
+	if (static_blocks == NO_VAL16) {
 		/* Since this never changes we can just set it once
 		 * and not look at it again. */
 		select_g_get_info_from_plugin(SELECT_STATIC_PART, NULL,
@@ -4005,8 +4125,7 @@ static bitstr_t *_pick_idle_nodes(bitstr_t *avail_bitmap,
 			bit_or(ret_bitmap, tmp_bitmap);
 		else
 			ret_bitmap = bit_copy(tmp_bitmap);
-		bit_not(tmp_bitmap);
-		bit_and(avail_bitmap, tmp_bitmap);
+		bit_and_not(avail_bitmap, tmp_bitmap);
 		FREE_NULL_BITMAP(tmp_bitmap);
 
 #ifdef HAVE_BG
@@ -4081,6 +4200,8 @@ static void _check_job_compatibility(struct job_record *job_ptr,
 			int global_core_start;
 
 			node_bitmap_inx = bit_ffs(full_node_bitmap);
+			if (node_bitmap_inx < 0)
+				break;	/* No more nodes */
 			global_core_start =
 				cr_get_coremap_offset(node_bitmap_inx);
 			allocated = 0;
@@ -4124,7 +4245,7 @@ static bitstr_t *_pick_idle_node_cnt(bitstr_t *avail_bitmap,
 	struct job_record *job_ptr;
 	bitstr_t *orig_bitmap, *save_bitmap = NULL;
 	bitstr_t *ret_bitmap = NULL, *tmp_bitmap;
-	int total_node_cnt;
+	int total_node_cnt, requested_node_cnt;
 
 	total_node_cnt = bit_set_count(avail_bitmap);
 	if (total_node_cnt < node_cnt) {
@@ -4150,20 +4271,36 @@ static bitstr_t *_pick_idle_node_cnt(bitstr_t *avail_bitmap,
 			continue;
 
 		if (!resv_desc_ptr->core_cnt) {
-			bit_not(job_ptr->node_bitmap);
-			bit_and(avail_bitmap, job_ptr->node_bitmap);
-			bit_not(job_ptr->node_bitmap);
-		} else {
+			bit_and_not(avail_bitmap, job_ptr->node_bitmap);
+		} else if (!(resv_desc_ptr->flags & RESERVE_FLAG_IGN_JOBS)) {
+			/*
+			 * _check_job_compatibility will remove nodes and cores
+			 * from the available bitmaps if those resources are
+			 * being used by jobs. Don't do this if the IGNORE_JOBS
+			 * flag is set.
+			 */
 			_check_job_compatibility(job_ptr, avail_bitmap,
 						 core_bitmap);
 		}
 	}
 	list_iterator_destroy(job_iterator);
 
+	/*
+	 * Save the number of requested nodes. If node_cnt wasn't specified and
+	 * a node_list was passed instead, node_cnt will be 0, and
+	 * total_node_cnt will hold the number of requested nodes. If node_cnt
+	 * was specified, then that is the number of requested nodes.
+	 * We want to know if the number of available nodes (total_node_cnt
+	 * after total_node_cnt = bit_set_count(avail_bitmap)) is at least as
+	 * many as the number of requested nodes.
+	 */
+	requested_node_cnt = node_cnt ? node_cnt : total_node_cnt;
 	total_node_cnt = bit_set_count(avail_bitmap);
-	if (total_node_cnt >= node_cnt) {
-		/* NOTE: select_g_resv_test() does NOT preserve avail_bitmap,
-		 * so we do that here and other calls to that function */
+	if (total_node_cnt >= requested_node_cnt) {
+		/*
+		 * NOTE: select_g_resv_test() does NOT preserve avail_bitmap,
+		 * so we do that here and other calls to that function.
+		 */
 		save_bitmap = bit_copy(avail_bitmap);
 		ret_bitmap = select_g_resv_test(resv_desc_ptr, node_cnt,
 						avail_bitmap, core_bitmap);
@@ -4366,6 +4503,9 @@ extern int job_test_resv_now(struct job_record *job_ptr)
 	if (rc != SLURM_SUCCESS)
 		return rc;
 
+	if (resv_ptr->flags & RESERVE_FLAG_FLEX)
+		return SLURM_SUCCESS;
+
 	now = time(NULL);
 	if (now < resv_ptr->start_time) {
 		/* reservation starts later */
@@ -4409,8 +4549,10 @@ extern void job_claim_resv(struct job_record *job_ptr)
 	_resv_node_replace(resv_ptr);
 }
 
-/* Adjust a job's time_limit and end_time as needed to avoid using
- *	reserved resources. Don't go below job's time_min value. */
+/*
+ * Adjust a job's time_limit and end_time as needed to avoid using
+ * reserved resources. Don't go below job's time_min value.
+ */
 extern void job_time_adj_resv(struct job_record *job_ptr)
 {
 	ListIterator iter;
@@ -4442,8 +4584,10 @@ extern void job_time_adj_resv(struct job_record *job_ptr)
 	job_end_time_reset(job_ptr);
 }
 
-/* For a given license_list, return the total count of licenses of the
- *	specified name */
+/*
+ * For a given license_list, return the total count of licenses of the
+ * specified name
+ */
 static int _license_cnt(List license_list, char *lic_name)
 {
 	int lic_cnt = 0;
@@ -4474,18 +4618,18 @@ static uint32_t _get_job_duration(struct job_record *job_ptr, bool reboot)
 	uint16_t time_slices = 1;
 
 	if (job_ptr->time_limit == INFINITE)
-		duration = ONE_YEAR;
+		duration = YEAR_SECONDS;
 	else if (job_ptr->time_limit != NO_VAL)
 		duration = (job_ptr->time_limit * 60);
 	else {	/* partition time limit */
 		if (job_ptr->part_ptr->max_time == INFINITE)
-			duration = ONE_YEAR;
+			duration = YEAR_SECONDS;
 		else
 			duration = (job_ptr->part_ptr->max_time * 60);
 	}
 	if (job_ptr->part_ptr)
 		time_slices = job_ptr->part_ptr->max_share & ~SHARED_FORCE;
-	if ((duration != ONE_YEAR) && (time_slices > 1) &&
+	if ((duration != YEAR_SECONDS) && (time_slices > 1) &&
 	    (slurmctld_conf.preempt_mode & PREEMPT_MODE_GANG)) {
 		/* FIXME: Ideally we figure out how many jobs are actually
 		 * time-slicing on each node rather than using the maximum
@@ -4951,7 +5095,7 @@ extern int job_test_resv(struct job_record *job_ptr, time_t *when,
 			 bitstr_t **exc_core_bitmap, bool *resv_overlap,
 			 bool reboot)
 {
-	slurmctld_resv_t * resv_ptr, *res2_ptr;
+	slurmctld_resv_t *resv_ptr = NULL, *res2_ptr;
 	time_t job_start_time, job_end_time, lic_resv_time;
 	time_t start_relative, end_relative;
 	time_t now = time(NULL);
@@ -4970,40 +5114,58 @@ extern int job_test_resv(struct job_record *job_ptr, time_t *when,
 		rc2 = _valid_job_access_resv(job_ptr, resv_ptr);
 		if (rc2 != SLURM_SUCCESS)
 			return rc2;
-		if (resv_ptr->end_time <= now)
-			_advance_resv_time(resv_ptr);
-		if (*when < resv_ptr->start_time) {
-			/* reservation starts later */
-			*when = resv_ptr->start_time;
-			return ESLURM_INVALID_TIME_VALUE;
+		/*
+		 * Just in case the reservation was altered since last looking
+		 * we want to make sure things are good in the database.
+		 */
+		if (job_ptr->resv_id != resv_ptr->resv_id) {
+			job_ptr->resv_id = resv_ptr->resv_id;
+			/* Update the database */
+			jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 		}
-		if ((resv_ptr->node_cnt == 0) &&
-		    (!(resv_ptr->flags & RESERVE_FLAG_ANY_NODES))) {
-			/* empty reservation treated like it will start later */
-			*when = now + 600;
-			return ESLURM_INVALID_TIME_VALUE;
-		}
-		if (*when > resv_ptr->end_time) {
-			/* reservation ended earlier */
-			*when = resv_ptr->end_time;
-			if ((now > resv_ptr->end_time) ||
-			    ((job_ptr->details) &&
-			     (job_ptr->details->begin_time >
-			      resv_ptr->end_time)))
-				job_ptr->priority = 0;	/* admin hold */
-			return ESLURM_RESERVATION_INVALID;
-		}
-		if (job_ptr->details->req_node_bitmap &&
-		    (!(resv_ptr->flags & RESERVE_FLAG_ANY_NODES)) &&
-		    !bit_super_set(job_ptr->details->req_node_bitmap,
-				   resv_ptr->node_bitmap)) {
-			return ESLURM_RESERVATION_INVALID;
-		}
-		if (resv_ptr->flags & RESERVE_FLAG_ANY_NODES) {
+		if (resv_ptr->flags & RESERVE_FLAG_FLEX) {
+			/* Job not bound to reservation nodes or time */
 			*node_bitmap = bit_alloc(node_record_count);
 			bit_nset(*node_bitmap, 0, (node_record_count - 1));
-		} else
-			*node_bitmap = bit_copy(resv_ptr->node_bitmap);
+		} else {
+			if (resv_ptr->end_time <= now)
+				_advance_resv_time(resv_ptr);
+			if (*when < resv_ptr->start_time) {
+				/* reservation starts later */
+				*when = resv_ptr->start_time;
+				return ESLURM_INVALID_TIME_VALUE;
+			}
+			if ((resv_ptr->node_cnt == 0) &&
+			    (!(resv_ptr->flags & RESERVE_FLAG_ANY_NODES))) {
+				/* empty reservation treated like it will
+				 * start later */
+				*when = now + 600;
+				return ESLURM_INVALID_TIME_VALUE;
+			}
+			if (*when > resv_ptr->end_time) {
+				/* reservation ended earlier */
+				*when = resv_ptr->end_time;
+				if ((now > resv_ptr->end_time) ||
+				    ((job_ptr->details) &&
+				     (job_ptr->details->begin_time >
+				      resv_ptr->end_time)))
+					job_ptr->priority = 0;	/* admin hold */
+				return ESLURM_RESERVATION_INVALID;
+			}
+			if (job_ptr->details->req_node_bitmap &&
+			    (!(resv_ptr->flags & RESERVE_FLAG_ANY_NODES)) &&
+			    !bit_super_set(job_ptr->details->req_node_bitmap,
+					   resv_ptr->node_bitmap)) {
+				return ESLURM_RESERVATION_INVALID;
+			}
+			if (resv_ptr->flags & RESERVE_FLAG_ANY_NODES) {
+				*node_bitmap = bit_alloc(node_record_count);
+				bit_nset(*node_bitmap, 0,
+					 (node_record_count - 1));
+			} else {
+				*node_bitmap = bit_copy(resv_ptr->node_bitmap);
+			}
+		}
 
 		/* if there are any overlapping reservations, we need to
 		 * prevent the job from using those nodes (e.g. MAINT nodes) */
@@ -5020,9 +5182,7 @@ extern int job_test_resv(struct job_record *job_ptr, time_t *when,
 				continue;
 			if (bit_overlap(*node_bitmap, res2_ptr->node_bitmap)) {
 				*resv_overlap = true;
-				bit_not(res2_ptr->node_bitmap);
-				bit_and(*node_bitmap, res2_ptr->node_bitmap);
-				bit_not(res2_ptr->node_bitmap);
+				bit_and_not(*node_bitmap,res2_ptr->node_bitmap);
 			}
 		}
 		list_iterator_destroy(iter);
@@ -5051,11 +5211,11 @@ extern int job_test_resv(struct job_record *job_ptr, time_t *when,
 		return SLURM_SUCCESS;
 #ifdef HAVE_BG
 	/* Since on a bluegene we track cnodes instead of cpus do the
-	   adjustment since accounting is expecting cpus here.
-	*/
-	if (!cpus_per_mp)
-		(void)select_g_alter_node_cnt(
-			SELECT_GET_MP_CPU_CNT, &cpus_per_mp);
+	 * adjustment since accounting is expecting cpus here. */
+	if (!cpus_per_mp) {
+		(void) select_g_alter_node_cnt(SELECT_GET_MP_CPU_CNT,
+					       &cpus_per_mp);
+	}
 
 	/* If the job is looking for whole mp blocks we need to tell
 	 * the reservations about it so it sends the plugin the correct
@@ -5077,7 +5237,8 @@ extern int job_test_resv(struct job_record *job_ptr, time_t *when,
 			if (resv_ptr->flags & RESERVE_FLAG_TIME_FLOAT) {
 				start_relative = resv_ptr->start_time + now;
 				if (resv_ptr->duration == INFINITE)
-					end_relative = start_relative+ONE_YEAR;
+					end_relative = start_relative +
+						       YEAR_SECONDS;
 				else if (resv_ptr->duration &&
 					 (resv_ptr->duration != NO_VAL)) {
 					end_relative = start_relative +
@@ -5111,7 +5272,8 @@ extern int job_test_resv(struct job_record *job_ptr, time_t *when,
 					resv_ptr->node_bitmap) &&
 			    (!resv_ptr->tres_str ||
 			     job_ptr->details->whole_node == 1)) {
-				*when = resv_ptr->end_time;
+				if (move_time)
+					*when = resv_ptr->end_time;
 				rc = ESLURM_NODES_BUSY;
 				break;
 			}
@@ -5132,9 +5294,8 @@ extern int job_test_resv(struct job_record *job_ptr, time_t *when,
 				     "will not share nodes",
 				     resv_ptr->name, job_ptr->job_id);
 #endif
-				bit_not(resv_ptr->node_bitmap);
-				bit_and(*node_bitmap, resv_ptr->node_bitmap);
-				bit_not(resv_ptr->node_bitmap);
+				*resv_overlap = true;
+				bit_and_not(*node_bitmap, resv_ptr->node_bitmap);
 			} else {
 #if _DEBUG
 				info("job_test_resv: reservation %s uses "
@@ -5142,19 +5303,24 @@ extern int job_test_resv(struct job_record *job_ptr, time_t *when,
 #endif
 				if (resv_ptr->core_bitmap == NULL) {
 					;
+				} else if (exc_core_bitmap == NULL) {
+					error("job_test_resv: exc_core_bitmap is NULL");
+					*resv_overlap = true;
 				} else if (*exc_core_bitmap == NULL) {
 					*exc_core_bitmap =
 						bit_copy(resv_ptr->core_bitmap);
+					*resv_overlap = true;
 				} else {
 					bit_or(*exc_core_bitmap,
 					       resv_ptr->core_bitmap);
+					*resv_overlap = true;
 				}
 			}
 		}
 		list_iterator_destroy(iter);
 
 		if ((rc == SLURM_SUCCESS) && move_time) {
-			if (license_job_test(job_ptr, job_start_time)
+			if (license_job_test(job_ptr, job_start_time, reboot)
 			    == EAGAIN) {
 				/* Need to postpone for licenses. Time returned
 				 * is best case; first reservation with those
@@ -5198,8 +5364,7 @@ extern time_t find_resv_end(time_t start_time)
 
 	iter = list_iterator_create(resv_list);
 	while ((resv_ptr = (slurmctld_resv_t *) list_next(iter))) {
-		if ((start_time < resv_ptr->start_time) ||
-		    (start_time > resv_ptr->end_time))
+		if (start_time > resv_ptr->end_time)
 			continue;
 		if ((end_time == 0) || (resv_ptr->end_time < end_time))
 			end_time = resv_ptr->end_time;
@@ -5227,27 +5392,112 @@ static int _job_resv_check(void *x, void *arg)
 	return SLURM_SUCCESS;
 }
 
+static int _set_job_resvid(void *object, void *arg)
+{
+	struct job_record *job_ptr = (struct job_record *)object;
+	slurmctld_resv_t *resv_ptr = (slurmctld_resv_t *)arg;
+
+	if ((job_ptr->resv_ptr != resv_ptr) || !IS_JOB_PENDING(job_ptr))
+		return SLURM_SUCCESS;
+
+	if (slurmctld_conf.debug_flags & DEBUG_FLAG_RESERVATION)
+		info("updating job %u to correct resv_id (%u->%u) of reoccurring reservation '%s'",
+		     job_ptr->job_id, job_ptr->resv_id,
+		     resv_ptr->resv_id, resv_ptr->name);
+	job_ptr->resv_id = resv_ptr->resv_id;
+	/* Update the database */
+	jobacct_storage_g_job_start(acct_db_conn, job_ptr);
+
+	return SLURM_SUCCESS;
+}
+
+static void *_update_resv_jobs(void *arg)
+{
+	slurmctld_resv_t *resv_ptr;
+	uint32_t resv_id = *(uint32_t *)arg;
+	/* get the job write lock and node and config read lock */
+	slurmctld_lock_t job_write_lock = {
+		READ_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
+
+	lock_slurmctld(job_write_lock);
+	if (!resv_list) {
+		unlock_slurmctld(job_write_lock);
+		return SLURM_SUCCESS;
+	}
+
+	resv_ptr = list_find_first(resv_list, _find_resv_id, &resv_id);
+
+	if (!resv_ptr) {
+		unlock_slurmctld(job_write_lock);
+		return SLURM_SUCCESS;
+	}
+
+	list_for_each(job_list, _set_job_resvid, resv_ptr);
+	unlock_slurmctld(job_write_lock);
+
+	return NULL;
+}
+
+
 /* Advance a expired reservation's time stamps one day or one week
  * as appropriate. */
 static void _advance_resv_time(slurmctld_resv_t *resv_ptr)
 {
+	time_t now;
+	struct tm tm;
 	int day_cnt = 0;
-	char *interval = "";
+
+	/* Make sure we have node write locks. */
+	xassert(verify_lock(NODE_LOCK, WRITE_LOCK));
 
 	if (resv_ptr->flags & RESERVE_FLAG_TIME_FLOAT)
 		return;		/* Not applicable */
 
 	if (resv_ptr->flags & RESERVE_FLAG_DAILY) {
 		day_cnt = 1;
-		interval = "day";
+	} else if (resv_ptr->flags & RESERVE_FLAG_WEEKDAY) {
+		now = time(NULL);
+		(void) slurm_localtime_r(&now, &tm);
+		if (tm.tm_wday == 5)		/* Friday */
+			day_cnt = 3;
+		else if (tm.tm_wday == 6)	/* Saturday */
+			day_cnt = 2;
+		else
+			day_cnt = 1;
+	} else if (resv_ptr->flags & RESERVE_FLAG_WEEKEND) {
+		now = time(NULL);
+		(void) slurm_localtime_r(&now, &tm);
+		if (tm.tm_wday == 0)		/* Sunday */
+			day_cnt = 6;
+		else if (tm.tm_wday == 6)	/* Saturday */
+			day_cnt = 1;
+		else
+			day_cnt = 6 - tm.tm_wday;
 	} else if (resv_ptr->flags & RESERVE_FLAG_WEEKLY) {
 		day_cnt = 7;
-		interval = "week";
 	}
 
 	if (day_cnt) {
-		verbose("Advance reservation %s one %s", resv_ptr->name,
-			interval);
+		/*
+		 * Repeated reservations need a new reservation id. Try to get a
+		 * new one and update the ID if successful.
+		 */
+		if (_generate_resv_id()) {
+			error("%s, Recurring reservation %s is being "
+			      "rescheduled but has the same ID.",
+			      __func__, resv_ptr->name);
+		} else {
+			resv_ptr->resv_id = top_suffix;
+			/*
+			 * Update pending jobs for this reservation with the new
+			 * reservation ID out of band.
+			 */
+			slurm_thread_create_detached(
+				NULL, _update_resv_jobs, &resv_ptr->resv_id);
+		}
+
+		verbose("Advance reservation %s by %d day(s)", resv_ptr->name,
+			day_cnt);
 		resv_ptr->start_time = resv_ptr->start_time_first;
 		_advance_time(&resv_ptr->start_time, day_cnt);
 		resv_ptr->start_time_prev = resv_ptr->start_time;
@@ -5310,10 +5560,7 @@ fini:	_free_script_arg(args);
 
 static void _run_script(char *script, slurmctld_resv_t *resv_ptr)
 {
-	int rc;
 	resv_thread_args_t *args;
-	pthread_t thread_id_prolog;
-	pthread_attr_t thread_attr_prolog;
 
 	if (!script || !script[0])
 		return;
@@ -5322,25 +5569,11 @@ static void _run_script(char *script, slurmctld_resv_t *resv_ptr)
 		return;
 	}
 
-	slurm_attr_init(&thread_attr_prolog);
-	pthread_attr_setdetachstate(&thread_attr_prolog,
-				    PTHREAD_CREATE_DETACHED);
 	args = xmalloc(sizeof(resv_thread_args_t));
 	args->script    = xstrdup(script);
 	args->resv_name = xstrdup(resv_ptr->name);
-	while (1) {
-		rc = pthread_create(&thread_id_prolog, &thread_attr_prolog,
-				    _fork_script, (void *) args);
-		if (rc != 0) {
-			if (errno == EAGAIN)
-				continue;
-			error("pthread_create: %m");
-		}
-		break;
-	}
-	slurm_attr_destroy(&thread_attr_prolog);
-	if (rc != 0)
-		_free_script_arg(args);
+
+	slurm_thread_create_detached(NULL, _fork_script, args);
 }
 
 /* Return the count of incomplete jobs associated with a given reservation */
@@ -5414,8 +5647,10 @@ extern void job_resv_check(void)
 		}
 		_advance_resv_time(resv_ptr);
 		if ((resv_ptr->job_run_cnt    == 0) &&
-		    ((resv_ptr->flags & RESERVE_FLAG_DAILY ) == 0) &&
-		    ((resv_ptr->flags & RESERVE_FLAG_WEEKLY) == 0)) {
+		    ((resv_ptr->flags & RESERVE_FLAG_DAILY )  == 0) &&
+		    ((resv_ptr->flags & RESERVE_FLAG_WEEKDAY) == 0) &&
+		    ((resv_ptr->flags & RESERVE_FLAG_WEEKEND) == 0) &&
+		    ((resv_ptr->flags & RESERVE_FLAG_WEEKLY)  == 0)) {
 			if (resv_ptr->job_pend_cnt) {
 				info("Purging vestigial reservation %s "
 				     "with %u pending jobs",
@@ -5436,7 +5671,7 @@ extern void job_resv_check(void)
 /* send all reservations to accounting.  Only needed at
  * first registration
  */
-extern int send_resvs_to_accounting(void)
+extern int send_resvs_to_accounting(int db_rc)
 {
 	ListIterator itr = NULL;
 	slurmctld_resv_t *resv_ptr;
@@ -5449,8 +5684,21 @@ extern int send_resvs_to_accounting(void)
 	lock_slurmctld(node_write_lock);
 
 	itr = list_iterator_create(resv_list);
-	while ((resv_ptr = list_next(itr)))
-		_post_resv_create(resv_ptr);
+	while ((resv_ptr = list_next(itr))) {
+		if (db_rc == ACCOUNTING_FIRST_REG)
+			_post_resv_create(resv_ptr);
+		else if (db_rc == ACCOUNTING_NODES_CHANGE_DB) {
+			/*
+			 * This makes it so we always get the correct node
+			 * indexes in the database.
+			 */
+			slurmctld_resv_t tmp_resv = {0};
+			_post_resv_update(resv_ptr, &tmp_resv);
+		} else {
+			error("%s: unknown db_rc %d", __func__, db_rc);
+			break;
+		}
+	}
 	list_iterator_destroy(itr);
 
 	unlock_slurmctld(node_write_lock);

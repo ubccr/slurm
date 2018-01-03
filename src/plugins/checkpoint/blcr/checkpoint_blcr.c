@@ -172,8 +172,6 @@ extern int slurm_ckpt_op (uint32_t job_id, uint32_t step_id,
 	uint16_t done_sig = 0;
 	struct job_record *job_ptr;
 	struct node_record *node_ptr;
-	pthread_attr_t attr;
-	pthread_t ckpt_agent_tid = 0;
 	char *nodelist;
 	struct ckpt_req *req_ptr;
 
@@ -233,10 +231,6 @@ extern int slurm_ckpt_op (uint32_t job_id, uint32_t step_id,
 		xfree(check_ptr->error_msg);
 
 		req_ptr = xmalloc(sizeof(struct ckpt_req));
-		if (!req_ptr) {
-			rc = ENOMEM;
-			break;
-		}
 		req_ptr->gid = job_ptr->group_id;
 		req_ptr->uid = job_ptr->user_id;
 		req_ptr->job_id = job_id;
@@ -248,21 +242,7 @@ extern int slurm_ckpt_op (uint32_t job_id, uint32_t step_id,
 		req_ptr->sig_done = done_sig;
 		req_ptr->op = op;
 
-		slurm_attr_init(&attr);
-		if (pthread_attr_setdetachstate(&attr,
-						PTHREAD_CREATE_DETACHED)) {
-			error("pthread_attr_setdetachstate: %m");
-			rc = errno;
-			break;
-		}
-
-		if (pthread_create(&ckpt_agent_tid, &attr, _ckpt_agent_thr,
-				   req_ptr)) {
-			error("pthread_create: %m");
-			rc = errno;
-			break;
-		}
-		slurm_attr_destroy(&attr);
+		slurm_thread_create_detached(NULL, _ckpt_agent_thr, req_ptr);
 
 		break;
 
@@ -413,13 +393,13 @@ extern int slurm_ckpt_stepd_prefork(stepd_step_rec_t *job)
 	/* set LD_PRELOAD for batch script shell */
 	old_env = getenvp(job->env, "LD_PRELOAD");
 	if (old_env) {
-		/* search and replace all libcr_run and libcr_omit
+		/*
+		 * search and replace all libcr_run and libcr_omit
 		 * the old env value is messed up --
-		 * it will be replaced */
+		 * it will be replaced
+		 */
 		while ((ptr = strtok_r(old_env, " :", &save_ptr))) {
 			old_env = NULL;
-			if (!ptr)
-				break;
 			if (!xstrncmp(ptr, "libcr_run.so", 12) ||
 			    !xstrncmp(ptr, "libcr_omit.so", 13))
 				continue;
@@ -576,20 +556,20 @@ static void _send_sig(uint32_t job_id, uint32_t step_id, uint16_t signal,
 		      char *nodelist)
 {
 	agent_arg_t *agent_args;
-	kill_tasks_msg_t *kill_tasks_msg;
+	signal_tasks_msg_t *signal_tasks_msg;
 	hostlist_iterator_t hi;
 	char *host;
 	struct node_record *node_ptr;
 
-	kill_tasks_msg = xmalloc(sizeof(kill_tasks_msg_t));
-	kill_tasks_msg->job_id		= job_id;
-	kill_tasks_msg->job_step_id	= step_id;
-	kill_tasks_msg->signal		= signal;
+	signal_tasks_msg = xmalloc(sizeof(signal_tasks_msg_t));
+	signal_tasks_msg->job_id		= job_id;
+	signal_tasks_msg->job_step_id	= step_id;
+	signal_tasks_msg->signal		= signal;
 
 	agent_args = xmalloc(sizeof(agent_arg_t));
 	agent_args->msg_type		= REQUEST_SIGNAL_TASKS;
 	agent_args->retry		= 1;
-	agent_args->msg_args		= kill_tasks_msg;
+	agent_args->msg_args		= signal_tasks_msg;
 	agent_args->hostlist		= hostlist_create(nodelist);
 	agent_args->node_count		= hostlist_count(agent_args->hostlist);
 	agent_args->protocol_version = SLURM_PROTOCOL_VERSION;
@@ -616,12 +596,18 @@ static void _requeue_when_finished(uint32_t job_id)
 	while (1) {
 		lock_slurmctld(job_write_lock);
 		job_ptr = find_job_record(job_id);
-		if (IS_JOB_FINISHED(job_ptr)) {
+		if (!job_ptr) {
+			error("%s: Job %u not found", __func__, job_id);
+			unlock_slurmctld(job_write_lock);
+			break;
+		} else if (IS_JOB_FINISHED(job_ptr)) {
 			job_ptr->job_state = JOB_PENDING;
 			job_ptr->details->submit_time = time(NULL);
 			job_ptr->restart_cnt++;
-			/* Since the job completion logger
-			 * removes the submit we need to add it again. */
+			/*
+			 * Since the job completion logger
+			 * removes the submit we need to add it again.
+			 */
 			acct_policy_add_job_submit(job_ptr);
 			unlock_slurmctld(job_write_lock);
 			break;
