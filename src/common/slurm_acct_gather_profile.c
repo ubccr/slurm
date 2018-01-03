@@ -53,7 +53,7 @@
 #include "src/common/plugin.h"
 #include "src/common/plugrack.h"
 #include "src/common/read_config.h"
-#include "src/common/slurm_acct_gather_infiniband.h"
+#include "src/common/slurm_acct_gather_interconnect.h"
 #include "src/common/slurm_acct_gather_profile.h"
 #include "src/common/slurm_acct_gather_energy.h"
 #include "src/common/slurm_jobacct_gather.h"
@@ -77,8 +77,8 @@ typedef struct slurm_acct_gather_profile_ops {
 	int (*node_step_end)    (void);
 	int (*task_start)       (uint32_t);
 	int (*task_end)         (pid_t);
-	int (*create_group)     (const char*);
-	int (*create_dataset)   (const char*, int,
+	int64_t (*create_group)(const char*);
+	int (*create_dataset)   (const char*, int64_t,
 				 acct_gather_profile_dataset_t *);
 	int (*add_sample_data)  (uint32_t, void*, time_t);
 	void (*conf_values)     (List *data);
@@ -171,7 +171,7 @@ static void *_timer_thread(void *args)
 				continue;
 			if (!acct_gather_profile_test())
 				break;	/* Shutting down */
-			debug2("profile signalling type %s",
+			debug2("profile signaling type %s",
 			       acct_gather_profile_type_t_name(i));
 
 			/* signal poller to start */
@@ -220,9 +220,11 @@ extern int acct_gather_profile_init(void)
 
 done:
 	slurm_mutex_unlock(&g_context_lock);
-	xfree(type);
 	if (retval == SLURM_SUCCESS)
 		retval = acct_gather_conf_init();
+	if (retval != SLURM_SUCCESS)
+		fatal("can not open the %s plugin", type);
+	xfree(type);
 
 	return retval;
 }
@@ -253,7 +255,7 @@ extern int acct_gather_profile_fini(void)
 			acct_gather_filesystem_fini();
 			break;
 		case PROFILE_NETWORK:
-			acct_gather_infiniband_fini();
+			acct_gather_interconnect_fini();
 			break;
 		default:
 			fatal("Unhandled profile option %d please update "
@@ -422,8 +424,6 @@ extern char *acct_gather_profile_dataset_str(
 
 extern int acct_gather_profile_startpoll(char *freq, char *freq_def)
 {
-	int retval = SLURM_SUCCESS;
-	pthread_attr_t attr;
 	int i;
 	uint32_t profile = ACCT_GATHER_PROFILE_NOT_SET;
 
@@ -434,7 +434,7 @@ extern int acct_gather_profile_startpoll(char *freq, char *freq_def)
 	if (acct_gather_profile_running) {
 		slurm_mutex_unlock(&profile_running_mutex);
 		error("acct_gather_profile_startpoll: poll already started!");
-		return retval;
+		return SLURM_SUCCESS;
 	}
 	acct_gather_profile_running = true;
 	slurm_mutex_unlock(&profile_running_mutex);
@@ -482,7 +482,7 @@ extern int acct_gather_profile_startpoll(char *freq, char *freq_def)
 				break;
 			_set_freq(i, freq, freq_def);
 
-			acct_gather_infiniband_startpoll(
+			acct_gather_interconnect_startpoll(
 				acct_gather_profile_timer[i].freq);
 			break;
 		default:
@@ -493,17 +493,11 @@ extern int acct_gather_profile_startpoll(char *freq, char *freq_def)
 	}
 
 	/* create polling thread */
-	slurm_attr_init(&attr);
+	slurm_thread_create(&timer_thread_id, _timer_thread, NULL);
 
-	if  (pthread_create(&timer_thread_id, &attr,
-			    &_timer_thread, NULL)) {
-		debug("acct_gather_profile_startpoll failed to create "
-		      "_timer_thread: %m");
-	} else
-		debug3("acct_gather_profile_startpoll dynamic logging enabled");
-	slurm_attr_destroy(&attr);
+	debug3("acct_gather_profile_startpoll dynamic logging enabled");
 
-	return retval;
+	return SLURM_SUCCESS;
 }
 
 extern void acct_gather_profile_endpoll(void)
@@ -622,9 +616,9 @@ extern int acct_gather_profile_g_task_end(pid_t taskpid)
 	return retval;
 }
 
-extern int acct_gather_profile_g_create_group(const char *name)
+extern int64_t acct_gather_profile_g_create_group(const char *name)
 {
-	int retval = SLURM_ERROR;
+	int64_t retval = SLURM_ERROR;
 
 	if (acct_gather_profile_init() < 0)
 		return retval;
@@ -636,7 +630,7 @@ extern int acct_gather_profile_g_create_group(const char *name)
 }
 
 extern int acct_gather_profile_g_create_dataset(
-	const char *name, int parent,
+	const char *name, int64_t parent,
 	acct_gather_profile_dataset_t *dataset)
 {
 	int retval = SLURM_ERROR;

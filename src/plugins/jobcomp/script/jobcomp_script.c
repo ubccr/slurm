@@ -37,10 +37,15 @@
  *****************************************************************************
  *  Here is a list of the environment variables set
  *
+ *  CLUSTER		Job's cluster name (if any)
  *  ACCOUNT		Account name
  *  BATCH		"yes" if submitted via sbatch, "no" otherwise
+ *  DEPENDENCY		Original list of jobids dependencies
+ *  DERIVED_EC		Derived exit code and after : the signal number (if any)
  *  END			Time of job termination, UTS
+ *  EXITCODE		Job's exit code and after : the signal number (if any)
  *  GID			Group ID of job owner
+ *  GROUPNAME		Group name of job owner
  *  JOBID		SLURM Job ID
  *  JOBNAME		Job name
  *  JOBSTATE		Termination state of job (FIXME
@@ -48,12 +53,15 @@
  *  NODES		List of allocated nodes
  *  PARTITION		Partition name used to run job
  *  PROCS		Count of allocated CPUs
+ *  QOS			Job's QOS name (if any)
+ *  RESERVATION		Job's reservation name (if any)
  *  START		Time of job start, UTS
  *  STDERR		Job's stderr file name (if any)
  *  STDIN		Job's stdin file name (if any)
  *  STDOUT		Job's stdout file name (if any)
  *  SUBMIT		Time of job submission, UTS
  *  UID			User ID of job owner
+ *  USERNAME		User name of job owner
  *  WORK_DIR		Job's working directory
  *
  *  BlueGene specific environment variables:
@@ -87,8 +95,10 @@
 #include "src/common/list.h"
 #include "src/common/macros.h"
 #include "src/common/node_select.h"
+#include "src/common/parse_time.h"
 #include "src/common/slurm_jobcomp.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/slurmctld/slurmctld.h"
@@ -168,6 +178,10 @@ struct jobcomp_info {
 	uint32_t jobid;
 	uint32_t array_job_id;
 	uint32_t array_task_id;
+	uint32_t exit_code;
+	uint32_t derived_ec;
+	uint32_t pack_job_id;
+	uint32_t pack_job_offset;
 	uint32_t uid;
 	uint32_t gid;
 	uint32_t limit;
@@ -177,12 +191,18 @@ struct jobcomp_info {
 	time_t submit;
 	time_t start;
 	time_t end;
+	char *cluster;
+	char *group_name;
+	char *orig_dependency;
 	char *nodes;
 	char *name;
 	char *partition;
+	char *qos;
 	char *jobstate;
 	char *account;
 	char *work_dir;
+	char *user_name;
+	char *reservation;
 	char *std_in;
 	char *std_out;
 	char *std_err;
@@ -199,11 +219,31 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 	struct jobcomp_info * j = xmalloc (sizeof (*j));
 
 	j->jobid = job->job_id;
+	j->exit_code = job->exit_code;
+	j->derived_ec = job->derived_ec;
 	j->uid = job->user_id;
+	j->user_name = xstrdup(uid_to_string_cached((uid_t)job->user_id));
 	j->gid = job->group_id;
+	j->group_name = gid_to_string((gid_t)job->group_id);
 	j->name = xstrdup (job->name);
+	if (job->assoc_ptr && job->assoc_ptr->cluster &&
+	    job->assoc_ptr->cluster[0])
+		j->cluster = xstrdup(job->assoc_ptr->cluster);
+	else
+		j->cluster = NULL;
+	if (job->details && (job->details->orig_dependency &&
+	    job->details->orig_dependency[0]))
+		j->orig_dependency = xstrdup(job->details->orig_dependency);
+	else
+		j->orig_dependency = NULL;
+	if (job->qos_ptr && job->qos_ptr->name && job->qos_ptr->name[0]) {
+		j->qos = xstrdup(job->qos_ptr->name);
+	} else
+		j->qos = NULL;
 	j->array_job_id = job->array_job_id;
 	j->array_task_id = job->array_task_id;
+	j->pack_job_id = job->pack_job_id;
+	j->pack_job_offset = job->pack_job_offset;
 
 	if (IS_JOB_RESIZING(job)) {
 		state = JOB_RESIZING;
@@ -241,6 +281,10 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 	j->nprocs = job->total_cpus;
 	j->nnodes = job->node_cnt;
 	j->account = job->account ? xstrdup (job->account) : NULL;
+	if (job->resv_name && job->resv_name[0])
+		j->reservation = xstrdup(job->resv_name);
+	else
+		j->reservation = NULL;
 	if (job->details && job->details->work_dir)
 		j->work_dir = xstrdup(job->details->work_dir);
 	else
@@ -265,23 +309,31 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 	return (j);
 }
 
-static void _jobcomp_info_destroy (struct jobcomp_info *j)
+static void _jobcomp_info_destroy(void *arg)
 {
+	struct jobcomp_info *j = (struct jobcomp_info *) arg;
+
 	if (j == NULL)
 		return;
-	xfree (j->name);
-	xfree (j->partition);
-	xfree (j->nodes);
-	xfree (j->jobstate);
 	xfree (j->account);
-	xfree (j->work_dir);
+	xfree (j->cluster);
+	xfree (j->group_name);
+	xfree (j->jobstate);
+	xfree (j->name);
+	xfree (j->nodes);
+	xfree (j->orig_dependency);
+	xfree (j->partition);
+	xfree (j->qos);
+	xfree (j->reservation);
 	xfree (j->std_in);
 	xfree (j->std_out);
 	xfree (j->std_err);
+	xfree (j->user_name);
+	xfree (j->work_dir);
 #ifdef HAVE_BG
+	xfree (j->blockid);
 	xfree (j->connect_type);
 	xfree (j->geometry);
-	xfree (j->blockid);
 #endif
 	xfree (j);
 }
@@ -370,13 +422,34 @@ static char ** _create_environment (struct jobcomp_info *job)
 {
 	char **env;
 	char *tz;
+	char time_str[32];
+	int tmp_int = 0, tmp_int2 = 0;
 
 	env = xmalloc (1 * sizeof (*env));
 	env[0] = NULL;
 
 	_env_append_fmt (&env, "JOBID", "%u",  job->jobid);
+	if (job->exit_code != NO_VAL) {
+		if (WIFSIGNALED(job->exit_code))
+			tmp_int2 = WTERMSIG(job->exit_code);
+		else if (WIFEXITED(job->exit_code))
+			tmp_int = WEXITSTATUS(job->exit_code);
+	}
+	_env_append_fmt (&env, "EXITCODE", "%d:%d", tmp_int, tmp_int2);
+	tmp_int = tmp_int2 = 0;
+	if (job->derived_ec != NO_VAL) {
+		if (WIFSIGNALED(job->derived_ec))
+			tmp_int2 = WTERMSIG(job->derived_ec);
+		else if (WIFEXITED(job->derived_ec))
+			tmp_int = WEXITSTATUS(job->derived_ec);
+	}
+	_env_append_fmt (&env, "DERIVED_EC", "%d:%d", tmp_int, tmp_int2);
 	_env_append_fmt (&env, "ARRAYJOBID", "%u", job->array_job_id);
 	_env_append_fmt (&env, "ARRAYTASKID", "%u", job->array_task_id);
+	if (job->pack_job_id) {
+		_env_append_fmt (&env, "PACKJOBID", "%u", job->pack_job_id);
+		_env_append_fmt (&env, "PACKJOBOFFSET", "%u", job->pack_job_offset);
+	}
 	_env_append_fmt (&env, "UID",   "%u",  job->uid);
 	_env_append_fmt (&env, "GID",   "%u",  job->gid);
 	_env_append_fmt (&env, "START", "%ld", (long)job->start);
@@ -386,30 +459,32 @@ static char ** _create_environment (struct jobcomp_info *job)
 	_env_append_fmt (&env, "NODECNT", "%u", job->nnodes);
 
 	_env_append (&env, "BATCH", (job->batch_flag ? "yes" : "no"));
+	_env_append (&env, "CLUSTER",	job->cluster);
 	_env_append (&env, "NODES",     job->nodes);
 	_env_append (&env, "ACCOUNT",   job->account);
 	_env_append (&env, "JOBNAME",   job->name);
 	_env_append (&env, "JOBSTATE",  job->jobstate);
 	_env_append (&env, "PARTITION", job->partition);
+	_env_append (&env, "QOS",	job->qos);
+	_env_append (&env, "DEPENDENCY", job->orig_dependency);
 	_env_append (&env, "WORK_DIR",  job->work_dir);
+	_env_append (&env, "RESERVATION", job->reservation);
+	_env_append (&env, "USERNAME", job->user_name);
+	_env_append (&env, "GROUPNAME", job->group_name);
 	if (job->std_in)
 		_env_append (&env, "STDIN",     job->std_in);
 	if (job->std_out)
 		_env_append (&env, "STDOUT",     job->std_out);
 	if (job->std_err)
 		_env_append (&env, "STDERR",     job->std_err);
+	mins2time_str(job->limit, time_str, sizeof(time_str));
+	_env_append (&env, "LIMIT", time_str);
 
 #ifdef HAVE_BG
 	_env_append (&env, "BLOCKID",      job->blockid);
 	_env_append (&env, "CONNECT_TYPE", job->connect_type);
 	_env_append (&env, "GEOMETRY",     job->geometry);
 #endif
-
-	if (job->limit == INFINITE)
-		_env_append (&env, "LIMIT", "UNLIMITED");
-	else
-		_env_append_fmt (&env, "LIMIT", "%lu",
-		                 (unsigned long) job->limit);
 
 	if ((tz = getenv ("TZ")))
 		_env_append_fmt (&env, "TZ", "%s", tz);
@@ -545,33 +620,22 @@ static void * _script_agent (void *args)
  * init() is called when the plugin is loaded, before any other functions
  * are called.  Put global initialization here.
  */
-extern int init (void)
+extern int init(void)
 {
-	pthread_attr_t attr;
-
 	verbose("jobcomp/script plugin loaded init");
 
 	slurm_mutex_lock(&thread_flag_mutex);
 
-	if (comp_list)
-		error("Creating duplicate comp_list, possible memory leak");
-	if (!(comp_list = list_create((ListDelF) _jobcomp_info_destroy))) {
+	if (comp_list) {
 		slurm_mutex_unlock(&thread_flag_mutex);
 		return SLURM_ERROR;
 	}
 
-	if (script_thread) {
-		debug2( "Script thread already running, not starting another");
-		slurm_mutex_unlock(&thread_flag_mutex);
-		return SLURM_ERROR;
-	}
+	comp_list = list_create(_jobcomp_info_destroy);
 
-	slurm_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	pthread_create(&script_thread, &attr, _script_agent, NULL);
+	slurm_thread_create(&script_thread, _script_agent, NULL);
 
 	slurm_mutex_unlock(&thread_flag_mutex);
-	slurm_attr_destroy(&attr);
 
 	return SLURM_SUCCESS;
 }
@@ -622,43 +686,25 @@ extern const char * slurm_jobcomp_strerror(int errnum)
 	return _jobcomp_script_strerror (errnum);
 }
 
-static int _wait_for_thread (pthread_t thread_id)
-{
-	int i;
-
-	for (i=0; i<20; i++) {
-		slurm_cond_broadcast(&comp_list_cond);
-		usleep(1000 * i);
-		if (pthread_kill(thread_id, 0))
-			return SLURM_SUCCESS;
-	}
-
-	error("Could not kill jobcomp script pthread");
-	return SLURM_ERROR;
-}
-
 /* Called when script unloads */
 extern int fini ( void )
 {
-	int rc = SLURM_SUCCESS;
-
 	slurm_mutex_lock(&thread_flag_mutex);
 	if (script_thread) {
 		verbose("Script Job Completion plugin shutting down");
 		agent_exit = 1;
-		rc = _wait_for_thread(script_thread);
+		slurm_cond_broadcast(&comp_list_cond);
+		pthread_join(script_thread, NULL);
 		script_thread = 0;
 	}
 	slurm_mutex_unlock(&thread_flag_mutex);
 
 	xfree(script);
-	if (rc == SLURM_SUCCESS) {
-		slurm_mutex_lock(&comp_list_mutex);
-		FREE_NULL_LIST(comp_list);
-		slurm_mutex_unlock(&comp_list_mutex);
-	}
+	slurm_mutex_lock(&comp_list_mutex);
+	FREE_NULL_LIST(comp_list);
+	slurm_mutex_unlock(&comp_list_mutex);
 
-	return rc;
+	return SLURM_SUCCESS;
 }
 
 /*

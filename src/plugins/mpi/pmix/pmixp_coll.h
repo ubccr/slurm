@@ -1,8 +1,8 @@
-/*****************************************************************************\
+﻿/*****************************************************************************\
  **  pmix_coll.h - PMIx collective primitives
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
@@ -40,12 +40,61 @@
 #include "pmixp_common.h"
 #include "pmixp_debug.h"
 
+#define PMIXP_COLL_DEBUG 1
+
 typedef enum {
 	PMIXP_COLL_SYNC,
-	PMIXP_COLL_FAN_IN,
-	PMIXP_COLL_FAN_OUT,
-	PMIXP_COLL_FAN_OUT_IN
+	PMIXP_COLL_COLLECT,
+	PMIXP_COLL_UPFWD,
+	PMIXP_COLL_UPFWD_WSC, /* Wait for the upward Send Complete */
+	PMIXP_COLL_UPFWD_WPC, /* Wait for Parent Contrib */
+	PMIXP_COLL_DOWNFWD,
 } pmixp_coll_state_t;
+
+inline static char *
+pmixp_coll_state2str(pmixp_coll_state_t state)
+{
+	switch (state) {
+	case PMIXP_COLL_SYNC:
+		return "COLL_SYNC";
+	case PMIXP_COLL_COLLECT:
+		return "COLL_COLLECT";
+	case PMIXP_COLL_UPFWD:
+		return "COLL_UPFWD";
+	case PMIXP_COLL_UPFWD_WSC:
+		return "COLL_UPFWD_WAITSND";
+	case PMIXP_COLL_UPFWD_WPC:
+		return "COLL_UPFWD_WAITPRNT";
+	case PMIXP_COLL_DOWNFWD:
+		return "COLL_DOWNFWD";
+	default:
+		return "COLL_UNKNOWN";
+	}
+}
+
+typedef enum {
+	PMIXP_COLL_SND_NONE,
+	PMIXP_COLL_SND_ACTIVE,
+	PMIXP_COLL_SND_DONE,
+	PMIXP_COLL_SND_FAILED,
+} pmixp_coll_sndstate_t;
+
+inline static char *
+pmixp_coll_sndstatus2str(pmixp_coll_sndstate_t state)
+{
+	switch (state) {
+	case PMIXP_COLL_SND_NONE:
+		return "COLL_SND_NONE";
+	case PMIXP_COLL_SND_ACTIVE:
+		return "COLL_SND_ACTIVE";
+	case PMIXP_COLL_SND_DONE:
+		return "COLL_SND_DONE";
+	case PMIXP_COLL_SND_FAILED:
+		return "COLL_SND_FAILED";
+	default:
+		return "COLL_UNKNOWN";
+	}
+}
 
 typedef enum {
 	PMIXP_COLL_TYPE_FENCE,
@@ -61,7 +110,7 @@ typedef enum {
 
 typedef struct {
 #ifndef NDEBUG
-#define PMIXP_COLL_STATE_MAGIC 0xCA11CAFE
+#define PMIXP_COLL_STATE_MAGIC 0xC011CAFE
 	int magic;
 #endif
 	/* element-wise lock */
@@ -71,30 +120,44 @@ typedef struct {
 	pmixp_coll_state_t state;
 	pmixp_coll_type_t type;
 	/* PMIx collective id */
-	pmix_proc_t *procs;
-	size_t nprocs;
-	int my_nspace;
-	uint32_t nodeid;
-	/* tree structure */
-	char *parent_host;
-	hostlist_t all_children;
-	uint32_t children_cnt;
+	struct {
+		pmixp_proc_t *procs;
+		size_t nprocs;
+	} pset;
+	int my_peerid;
+	int peers_cnt;
+#ifdef PMIXP_COLL_DEBUG
+	hostlist_t peers_hl;
+#endif
 
-	/* */
+	/* tree topology */
+	char *prnt_host;
+	int prnt_peerid;
+	char *root_host;
+	int root_peerid;
+	int chldrn_cnt;
+	hostlist_t all_chldrn_hl;
+	char *chldrn_str;
+	int *chldrn_ids;
+
+	/* collective state */
 	uint32_t seq;
-	uint32_t contrib_cntr;
 	bool contrib_local;
+	uint32_t contrib_children;
+	bool *contrib_chld;
+	pmixp_coll_sndstate_t ufwd_status;
+	bool contrib_prnt;
+	uint32_t dfwd_cb_cnt, dfwd_cb_wait;
+	pmixp_coll_sndstate_t dfwd_status;
 
-	/* Check who contributes */
-	hostlist_t ch_hosts;
-	bool *ch_contribs;
 
 	/* collective data */
-	Buf buf;
-	size_t serv_offs;
+	Buf ufwd_buf, dfwd_buf;
+	size_t serv_offs, dfwd_offset, ufwd_offset;
+
 
 	/* libpmix callback data */
-	pmix_modex_cbfunc_t cbfunc;
+	void *cbfunc;
 	void *cbdata;
 
 	/* timestamp for stale collectives detection */
@@ -103,25 +166,15 @@ typedef struct {
 
 static inline void pmixp_coll_sanity_check(pmixp_coll_t *coll)
 {
+	xassert(NULL != coll);
 	xassert(coll->magic == PMIXP_COLL_STATE_MAGIC);
 }
 
-int pmixp_coll_init(pmixp_coll_t *coll, const pmix_proc_t *procs,
-		size_t nprocs, pmixp_coll_type_t type);
+int pmixp_coll_init(pmixp_coll_t *coll, const pmixp_proc_t *procs,
+		    size_t nprocs, pmixp_coll_type_t type);
 void pmixp_coll_free(pmixp_coll_t *coll);
 
-static inline void pmixp_coll_set_callback(pmixp_coll_t *coll,
-					   pmix_modex_cbfunc_t cbfunc,
-					   void *cbdata)
-{
-	/* no need to protect coll since:
-	 * - only libpmix thread may touch this data during fan-in stage
-	 * - only slurm thread may touch this data during fan-out stage
-	 */
-	pmixp_coll_sanity_check(coll);
-	coll->cbfunc = cbfunc;
-	coll->cbdata = cbdata;
-}
+pmixp_coll_t *pmixp_coll_from_cbdata(void *cbdata);
 
 /*
  * This is important routine that takes responsibility to decide
@@ -134,12 +187,12 @@ static inline void pmixp_coll_set_callback(pmixp_coll_t *coll,
  *
  *    If we succeed - we are OK. Otherwise we will abort the whole job step.
  *
- * 2. A child of us sends us the message and gets the error, however we
- *    receive this message (false negative). Child will try again while we might be:
+ * 2. A child of us sends us the message and gets the error, however we receive
+ *    this message (false negative). Child will try again while we might be:
  *    (a) at FAN-IN step waiting for other contributions.
  *    (b) at FAN-OUT since we get all we need.
- *    (c) 2 step forward (SYNC) with coll->seq = (child_seq+1) if root of the tree
- *        successfuly broadcasted the whole database to us.
+ *    (c) 2 step forward (SYNC) with coll->seq = (child_seq+1) if root of the
+ *        tree successfuly broadcasted the whole database to us.
  *    (d) 3 step forward (next FAN-IN) with coll->seq = (child_seq+1)
  *        if somebody initiated next collective.
  *    (e) we won't move further because the child with problem won't send us
@@ -157,22 +210,23 @@ static inline void pmixp_coll_set_callback(pmixp_coll_t *coll,
  *
  * 3. Root of the tree broadcasts the data and we get it, however root gets
  *    false negative. In this case root will try again. We might be:
- *    (a) at SYNC since we just got the DB and we are fine (coll->seq == root_seq+1)
- *    (b) at FAN-IN if somebody initiated next collective  (coll->seq == root_seq+1)
- *    (c) at FAN-OUT if we will collect all necessary contributions and send it to
- *        our parent.
- *    (d) we won't be able to switch to SYNC since root will be busy dealing with
- *        previous DB broadcast.
- *    (e) at FAN-OUT waiting for the fan-out msg while receiving next fan-in message
- *        from one of our children (coll->seq + 1 == child_seq).
+ *    (a) at SYNC since we just got the DB and we are fine
+ *        (coll->seq == root_seq+1)
+ *    (b) at FAN-IN if somebody initiated next collective
+ *        (coll->seq == root_seq+1)
+ *    (c) at FAN-OUT if we will collect all necessary contributions and send
+ *        it to our parent.
+ *    (d) we won't be able to switch to SYNC since root will be busy dealing
+ *        with previous DB broadcast.
+ *    (e) at FAN-OUT waiting for the fan-out msg while receiving next fan-in
+ *        message from one of our children (coll->seq + 1 == child_seq).
  */
-static inline int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
-		char *nodename)
+static inline int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq)
 {
 	if (coll->seq == seq) {
 		/* accept this message */
 		return PMIXP_COLL_REQ_PROGRESS;
-	} else if( (coll->seq+1) == seq ){
+	} else if ((coll->seq+1) == seq) {
 		/* practice shows that because of SLURM communication
 		 * infrastructure our child can switch to the next Fence
 		 * and send us the message before the current fan-out message
@@ -188,20 +242,23 @@ static inline int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
 	}
 	/* maybe need more sophisticated handling in presence of
 	 * several steps. However maybe it's enough to just ignore */
-	/* slurm_kill_job_step(pmixp_info_jobid(), pmixp_info_stepid(), SIGKILL); */
 	return PMIXP_COLL_REQ_FAILURE;
 }
 
-int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data,
-			     size_t ndata);
-int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf);
-void pmixp_coll_bcast(pmixp_coll_t *coll, Buf buf);
+int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size,
+			     void *cbfunc, void *cbdata);
+int pmixp_coll_contrib_child(pmixp_coll_t *coll, uint32_t nodeid,
+			     uint32_t seq, Buf buf);
+int pmixp_coll_contrib_parent(pmixp_coll_t *coll, uint32_t nodeid,
+			     uint32_t seq, Buf buf);
+void pmixp_coll_bcast(pmixp_coll_t *coll);
 bool pmixp_coll_progress(pmixp_coll_t *coll, char *fwd_node,
 			 void **data, uint64_t size);
-int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t *type,
-		pmix_proc_t **ranges, size_t *nranges);
+int pmixp_coll_unpack_info(Buf buf, pmixp_coll_type_t *type,
+			   int *nodeid, pmixp_proc_t **r,
+			   size_t *nr);
 int pmixp_coll_belong_chk(pmixp_coll_type_t type,
-			  const pmix_proc_t *procs, size_t nprocs);
+			  const pmixp_proc_t *procs, size_t nprocs);
 void pmixp_coll_reset_if_to(pmixp_coll_t *coll, time_t ts);
 
 #endif /* PMIXP_COLL_H */

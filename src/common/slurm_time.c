@@ -42,7 +42,7 @@
 #include "src/common/macros.h"
 
 static pthread_mutex_t  time_lock = PTHREAD_MUTEX_INITIALIZER;
-static void _atfork_child()  { pthread_mutex_init(&time_lock, NULL); }
+static void _atfork_child()  { slurm_mutex_init(&time_lock); }
 static bool at_forked = false;
 
 inline static void _init(void)
@@ -51,26 +51,6 @@ inline static void _init(void)
 		pthread_atfork(NULL, NULL, _atfork_child);
 		at_forked = true;
 	}
-}
-
-extern char *slurm_asctime(const struct tm *tp)
-{
-	char *rc;
-	slurm_mutex_lock(&time_lock);
-	_init();
-	rc = asctime(tp);
-	slurm_mutex_unlock(&time_lock);
-	return rc;
-}
-
-extern char *slurm_asctime_r(const struct tm *tp, char *buf)
-{
-	char *rc;
-	slurm_mutex_lock(&time_lock);
-	_init();
-	rc = asctime_r(tp, buf);
-	slurm_mutex_unlock(&time_lock);
-	return rc;
 }
 
 extern char *slurm_ctime(const time_t *timep)

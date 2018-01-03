@@ -39,6 +39,7 @@
 \*****************************************************************************/
 
 #include "src/sacctmgr/sacctmgr.h"
+#include "src/common/strlcpy.h"
 #include "src/common/uid.h"
 
 typedef struct {
@@ -247,39 +248,39 @@ static sacctmgr_file_opts_t *_parse_options(char *options)
 			file_opts->name = xstrdup(option);
 		} else if (end && !strlen(option)) {
 			debug("blank field given for %s discarding", sub);
-		} else if (!strncasecmp (sub, "AdminLevel",
+		} else if (!xstrncasecmp(sub, "AdminLevel",
 					 MAX(command_len, 2))) {
 			file_opts->admin = str_2_slurmdb_admin_level(option);
-		} else if (!strncasecmp (sub, "Coordinator",
+		} else if (!xstrncasecmp(sub, "Coordinator",
 					 MAX(command_len, 2))) {
 			if (!file_opts->coord_list)
 				file_opts->coord_list =
 					list_create(slurm_destroy_char);
 			slurm_addto_char_list(file_opts->coord_list, option);
-		} else if (!strncasecmp (sub, "Classification",
+		} else if (!xstrncasecmp(sub, "Classification",
 					 MAX(command_len, 2))) {
 			file_opts->classification =
 				str_2_classification(option);
-		} else if (!strncasecmp (sub, "DefaultAccount",
+		} else if (!xstrncasecmp(sub, "DefaultAccount",
 					 MAX(command_len, 8))) {
 			file_opts->def_acct = xstrdup(option);
-		} else if (!strncasecmp (sub, "DefaultWCKey",
+		} else if (!xstrncasecmp(sub, "DefaultWCKey",
 					 MAX(command_len, 8))) {
 			file_opts->def_wckey = xstrdup(option);
 			if (!file_opts->wckey_list)
 				file_opts->wckey_list =
 					list_create(slurm_destroy_char);
 			slurm_addto_char_list(file_opts->wckey_list, option);
-		} else if (!strncasecmp (sub, "Description",
+		} else if (!xstrncasecmp(sub, "Description",
 					 MAX(command_len, 3))) {
 			file_opts->desc = xstrdup(option);
-		} else if (!strncasecmp (sub, "Organization",
+		} else if (!xstrncasecmp(sub, "Organization",
 					 MAX(command_len, 1))) {
 			file_opts->org = xstrdup(option);
-		} else if (!strncasecmp (sub, "Partition",
+		} else if (!xstrncasecmp(sub, "Partition",
 					 MAX(command_len, 1))) {
 			file_opts->assoc_rec.partition = xstrdup(option);
-		} else if (!strncasecmp (sub, "WCKeys",
+		} else if (!xstrncasecmp(sub, "WCKeys",
 					 MAX(command_len, 2))) {
 			if (!file_opts->wckey_list)
 				file_opts->wckey_list =
@@ -361,8 +362,7 @@ static int _print_out_assoc(List assoc_list, bool user, bool add)
 	list_iterator_destroy(itr2);
 	FREE_NULL_LIST(print_fields_list);
 	if (add)
-		rc = acct_storage_g_add_assocs(db_conn,
-					       my_uid, assoc_list);
+		rc = slurmdb_associations_add(db_conn, assoc_list);
 	printf("--------------------------------------------------------------\n\n");
 
 	return rc;
@@ -669,8 +669,8 @@ static int _mod_assoc(sacctmgr_file_opts_t *file_opts,
 		}
 
 		notice_thread_init();
-		ret_list = acct_storage_g_modify_assocs(
-			db_conn, my_uid,
+		ret_list = slurmdb_associations_modify(
+			db_conn,
 			&assoc_cond,
 			&mod_assoc);
 		notice_thread_fini();
@@ -734,9 +734,9 @@ static int _mod_cluster(sacctmgr_file_opts_t *file_opts,
 		list_append(cluster_cond.cluster_list, cluster->name);
 
 		notice_thread_init();
-		ret_list = acct_storage_g_modify_clusters(db_conn, my_uid,
-							  &cluster_cond,
-							  &mod_cluster);
+		ret_list = slurmdb_clusters_modify(db_conn,
+						   &cluster_cond,
+						   &mod_cluster);
 		notice_thread_fini();
 
 		FREE_NULL_LIST(cluster_cond.cluster_list);
@@ -822,9 +822,9 @@ static int _mod_acct(sacctmgr_file_opts_t *file_opts,
 		acct_cond.assoc_cond = &assoc_cond;
 
 		notice_thread_init();
-		ret_list = acct_storage_g_modify_accounts(db_conn, my_uid,
-							  &acct_cond,
-							  &mod_acct);
+		ret_list = slurmdb_accounts_modify(db_conn,
+						   &acct_cond,
+						   &mod_acct);
 		notice_thread_fini();
 
 		FREE_NULL_LIST(assoc_cond.acct_list);
@@ -921,8 +921,8 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 
 	if (changed) {
 		notice_thread_init();
-		ret_list = acct_storage_g_modify_users(
-			db_conn, my_uid,
+		ret_list = slurmdb_users_modify(
+			db_conn,
 			&user_cond,
 			&mod_user);
 		notice_thread_fini();
@@ -955,9 +955,9 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 		slurmdb_coord_rec_t *coord = NULL;
 		int first = 1;
 		notice_thread_init();
-		(void) acct_storage_g_add_coord(db_conn, my_uid,
-						file_opts->coord_list,
-						&user_cond);
+		(void) slurmdb_coord_add(db_conn,
+					 file_opts->coord_list,
+					 &user_cond);
 		notice_thread_fini();
 
 		user->coord_accts = list_create(slurmdb_destroy_coord_rec);
@@ -1015,8 +1015,8 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 
 		if (list_count(add_list)) {
 			notice_thread_init();
-			(void) acct_storage_g_add_coord(db_conn, my_uid,
-							add_list, &user_cond);
+			(void) slurmdb_coord_add(db_conn,
+						 add_list, &user_cond);
 			notice_thread_fini();
 			set = 1;
 		}
@@ -1053,7 +1053,7 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 		printf(" for user '%s'\n", user->name);
 		set = 1;
 		notice_thread_init();
-		acct_storage_g_add_wckeys(db_conn, my_uid, user->wckey_list);
+		slurmdb_wckeys_add(db_conn, user->wckey_list);
 		notice_thread_fini();
 	} else if ((user->wckey_list && list_count(user->wckey_list))
 		   && (file_opts->wckey_list
@@ -1092,7 +1092,7 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 
 		if (list_count(add_list)) {
 			notice_thread_init();
-			acct_storage_g_add_wckeys(db_conn, my_uid, add_list);
+			slurmdb_wckeys_add(db_conn, add_list);
 			notice_thread_fini();
 			set = 1;
 		}
@@ -1139,9 +1139,9 @@ static slurmdb_user_rec_t *_set_user_up(sacctmgr_file_opts_t *file_opts,
 		user_cond.assoc_cond = &assoc_cond;
 
 		notice_thread_init();
-		acct_storage_g_add_coord(db_conn, my_uid,
-					 file_opts->coord_list,
-					 &user_cond);
+		slurmdb_coord_add(db_conn,
+				  file_opts->coord_list,
+				  &user_cond);
 		notice_thread_fini();
 		FREE_NULL_LIST(assoc_cond.user_list);
 		user->coord_accts = list_create(slurmdb_destroy_coord_rec);
@@ -1173,7 +1173,7 @@ static slurmdb_user_rec_t *_set_user_up(sacctmgr_file_opts_t *file_opts,
 		}
 		list_iterator_destroy(wckey_itr);
 		notice_thread_init();
-		acct_storage_g_add_wckeys(db_conn, my_uid, user->wckey_list);
+		slurmdb_wckeys_add(db_conn, user->wckey_list);
 		notice_thread_fini();
 	}
 	return user;
@@ -1399,8 +1399,8 @@ extern int print_file_add_limits_to_line(char **line,
 
 	if (assoc->def_qos_id && (assoc->def_qos_id != NO_VAL)) {
 		if (!g_qos_list)
-			g_qos_list = acct_storage_g_get_qos(
-				db_conn, my_uid, NULL);
+			g_qos_list = slurmdb_qos_get(
+				db_conn, NULL);
 		if ((tmp_char = slurmdb_qos_str(g_qos_list, assoc->def_qos_id)))
 			xstrfmtcat(*line, ":DefaultQOS='%s'", tmp_char);
 	}
@@ -1492,8 +1492,8 @@ extern int print_file_add_limits_to_line(char **line,
 	if (assoc->qos_list && list_count(assoc->qos_list)) {
 		char *temp_char = NULL;
 		if (!g_qos_list)
-			g_qos_list = acct_storage_g_get_qos(
-				db_conn, my_uid, NULL);
+			g_qos_list = slurmdb_qos_get(
+				db_conn, NULL);
 
 		temp_char = get_qos_complete_str(g_qos_list, assoc->qos_list);
 		xstrfmtcat(*line, ":QOS='%s'", temp_char);
@@ -1593,7 +1593,7 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 	}
 
 	/* reset the connection to get the most recent stuff */
-	acct_storage_g_commit(db_conn, 0);
+	slurmdb_connection_commit(db_conn, 0);
 
 	for (i = 0; i < argc; i++) {
 		int end = parse_option_end(argv[i]);
@@ -1605,10 +1605,10 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 				end++;
 			}
 		}
-		if (!end && !strncasecmp(argv[i], "clean",
-					 MAX(command_len, 3))) {
+		if (!end && !xstrncasecmp(argv[i], "clean",
+					  MAX(command_len, 3))) {
 			start_clean = 1;
-		} else if (!end || !strncasecmp (argv[i], "File",
+		} else if (!end || !xstrncasecmp(argv[i], "File",
 						 MAX(command_len, 1))) {
 			if (file_name) {
 				exit_code=1;
@@ -1618,7 +1618,7 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 				continue;
 			}
 			file_name = xstrdup(argv[i]+end);
-		} else if (!strncasecmp (argv[i], "Cluster",
+		} else if (!xstrncasecmp(argv[i], "Cluster",
 					 MAX(command_len, 3))) {
 			if (cluster_name) {
 				exit_code=1;
@@ -1654,7 +1654,7 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 		return;
 	}
 
-	curr_acct_list = acct_storage_g_get_accounts(db_conn, my_uid, NULL);
+	curr_acct_list = slurmdb_accounts_get(db_conn, NULL);
 
 	/* These are new info so they need to be freed here */
 	acct_list = list_create(slurmdb_destroy_account_rec);
@@ -1679,14 +1679,16 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 		memset(object, 0, sizeof(object));
 
 		/* first find the object */
-		start=0;
-		for(i=0; i<len; i++) {
+		start = 0;
+		for (i = 0; i < len; i++) {
 			if (line[i] == '-') {
 				start = i;
 				if (line[i-1] == ' ')
 					i--;
-				if (i<sizeof(object))
-					strncpy(object, line, i);
+				if (i < sizeof(object)) {
+					i++;	/* Append '\0' */
+					strlcpy(object, line, i);
+				}
 				break;
 			}
 		}
@@ -1745,8 +1747,7 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 			assoc_cond.without_parent_limits = 1;
 			list_append(assoc_cond.cluster_list, cluster_name);
 			user_cond.assoc_cond = &assoc_cond;
-			curr_user_list = acct_storage_g_get_users(
-				db_conn, my_uid, &user_cond);
+			curr_user_list = slurmdb_users_get(db_conn, &user_cond);
 
 			user_cond.assoc_cond = NULL;
 			assoc_cond.only_defs = 0;
@@ -1805,8 +1806,8 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 					    cluster_name);
 
 				notice_thread_init();
-				ret_list = acct_storage_g_remove_clusters(
-					db_conn, my_uid, &cluster_cond);
+				ret_list = slurmdb_clusters_remove(
+					db_conn, &cluster_cond);
 				notice_thread_fini();
 				FREE_NULL_LIST(cluster_cond.cluster_list);
 
@@ -1819,10 +1820,10 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 				}
 				/* This needs to be commited or
 				   problems may arise */
-				acct_storage_g_commit(db_conn, 1);
+				slurmdb_connection_commit(db_conn, 1);
 			}
-			curr_cluster_list = acct_storage_g_get_clusters(
-				db_conn, my_uid, NULL);
+			curr_cluster_list = slurmdb_clusters_get(
+				db_conn, NULL);
 
 			if (cluster_name)
 				printf("For cluster %s\n", cluster_name);
@@ -1857,8 +1858,8 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 				FREE_NULL_LIST(temp_assoc_list);
 				notice_thread_init();
 
-				rc = acct_storage_g_add_clusters(
-					db_conn, my_uid, cluster_list);
+				rc = slurmdb_clusters_add(
+					db_conn, cluster_list);
 				notice_thread_fini();
 				FREE_NULL_LIST(cluster_list);
 
@@ -1874,7 +1875,7 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 				}
 				/* This needs to be commited or
 				   problems may arise */
-				acct_storage_g_commit(db_conn, 1);
+				slurmdb_connection_commit(db_conn, 1);
 				set = 1;
 			} else {
 				set = _mod_cluster(file_opts,
@@ -1885,8 +1886,8 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 			file_opts = NULL;
 
 			/* assoc_cond if set up above */
-			curr_assoc_list = acct_storage_g_get_assocs(
-				db_conn, my_uid, &assoc_cond);
+			curr_assoc_list = slurmdb_associations_get(
+				db_conn, &assoc_cond);
 			FREE_NULL_LIST(assoc_cond.cluster_list);
 
 			if (!curr_assoc_list) {
@@ -1951,10 +1952,14 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 			}
 
 			//info("got a project %s of %s", file_opts->name, parent);
-			if (!(acct = sacctmgr_find_account_from_list(
-				      curr_acct_list, file_opts->name))
-			    && !sacctmgr_find_account_from_list(
-				    acct_list, file_opts->name)) {
+
+			acct = sacctmgr_find_account_from_list(
+				curr_acct_list, file_opts->name);
+			if (!acct)
+				acct = sacctmgr_find_account_from_list(
+					acct_list, file_opts->name);
+
+			if (!acct) {
 				acct = _set_acct_up(file_opts, parent);
 				list_append(acct_list, acct);
 				/* don't add anything to the
@@ -2196,7 +2201,7 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 		list_iterator_destroy(itr);
 		list_iterator_destroy(itr2);
 		FREE_NULL_LIST(print_fields_list);
-		rc = acct_storage_g_add_accounts(db_conn, my_uid, acct_list);
+		rc = slurmdb_accounts_add(db_conn, acct_list);
 		printf("-----------------------------"
 		       "----------------------\n\n");
 		set = 1;
@@ -2264,7 +2269,7 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 		list_iterator_destroy(itr2);
 		FREE_NULL_LIST(print_fields_list);
 
-		rc = acct_storage_g_add_users(db_conn, my_uid, user_list);
+		rc = slurmdb_users_add(db_conn, user_list);
 		printf("---------------------------"
 		       "------------------------\n\n");
 		set = 1;
@@ -2283,10 +2288,10 @@ extern void load_sacctmgr_cfg_file (int argc, char **argv)
 	if (rc == SLURM_SUCCESS) {
 		if (set) {
 			if (commit_check("Would you like to commit changes?")) {
-				acct_storage_g_commit(db_conn, 1);
+				slurmdb_connection_commit(db_conn, 1);
 			} else {
 				printf(" Changes Discarded\n");
-				acct_storage_g_commit(db_conn, 0);
+				slurmdb_connection_commit(db_conn, 0);
 			}
 		} else {
 			printf(" Nothing new added.\n");

@@ -68,8 +68,6 @@ strong_alias(secs2time_str, slurm_secs2time_str);
 strong_alias(mins2time_str, slurm_mins2time_str);
 strong_alias(mon_abbr, slurm_mon_abbr);
 
-#define _RUN_STAND_ALONE 0
-
 time_t     time_now;
 struct tm *time_now_tm;
 
@@ -176,9 +174,6 @@ _is_valid_timespec(const char *s)
 		return false;
 
 	if (dash) {
-		if (colon == 0
-		    && digit < 1)
-			return false;
 		if (colon == 1
 		    && digit < 3)
 			return false;
@@ -215,7 +210,7 @@ static int _get_delta(char *time_str, int *pos, long *delta)
 		if (isspace((int)time_str[offset]))
 			continue;
 		for (i=0; un[i].name; i++) {
-			if (!strncasecmp((time_str + offset),
+			if (!xstrncasecmp((time_str + offset),
 					 un[i].name, un[i].name_len)) {
 				offset += un[i].name_len;
 				cnt    *= un[i].multiplier;
@@ -303,7 +298,7 @@ _get_time(char *time_str, int *pos, int *hour, int *minute, int * second)
 	while (isspace((int)time_str[offset])) {
 		offset++;
 	}
-	if (strncasecmp(time_str+offset, "pm", 2)== 0) {
+	if (xstrncasecmp(time_str+offset, "pm", 2)== 0) {
 		hr += 12;
 		if (hr > 23) {
 			if (hr == 24)
@@ -312,7 +307,7 @@ _get_time(char *time_str, int *pos, int *hour, int *minute, int * second)
 				goto prob;
 		}
 		offset += 2;
-	} else if (strncasecmp(time_str+offset, "am", 2) == 0) {
+	} else if (xstrncasecmp(time_str+offset, "am", 2) == 0) {
 		if (hr > 11) {
 			if (hr == 12)
 				hr = 0;
@@ -470,7 +465,7 @@ extern time_t parse_time(char *time_str, int past)
 	struct tm res_tm;
 	time_t ret_time;
 
-	if (strncasecmp(time_str, "uts", 3) == 0) {
+	if (xstrncasecmp(time_str, "uts", 3) == 0) {
 		char *last = NULL;
 		long uts = strtol(time_str+3, &last, 10);
 		if ((uts < 1000000) || (uts == LONG_MAX) ||
@@ -487,14 +482,14 @@ extern time_t parse_time(char *time_str, int past)
 		if (isblank((int)time_str[pos]) ||
 		    (time_str[pos] == '-') || (time_str[pos] == 'T'))
 			continue;
-		if (strncasecmp(time_str+pos, "today", 5) == 0) {
+		if (xstrncasecmp(time_str+pos, "today", 5) == 0) {
 			month = time_now_tm->tm_mon;
 			mday  = time_now_tm->tm_mday;
 			year  = time_now_tm->tm_year;
 			pos += 4;
 			continue;
 		}
-		if (strncasecmp(time_str+pos, "tomorrow", 8) == 0) {
+		if (xstrncasecmp(time_str+pos, "tomorrow", 8) == 0) {
 			time_t later = time_now + (24 * 60 * 60);
 			struct tm *later_tm = slurm_localtime(&later);
 			month = later_tm->tm_mon;
@@ -503,35 +498,35 @@ extern time_t parse_time(char *time_str, int past)
 			pos += 7;
 			continue;
 		}
-		if (strncasecmp(time_str+pos, "midnight", 8) == 0) {
+		if (xstrncasecmp(time_str+pos, "midnight", 8) == 0) {
 			hour   = 0;
 			minute = 0;
 			second = 0;
 			pos += 7;
 			continue;
 		}
-		if (strncasecmp(time_str+pos, "noon", 4) == 0) {
+		if (xstrncasecmp(time_str+pos, "noon", 4) == 0) {
 			hour   = 12;
 			minute = 0;
 			second = 0;
 			pos += 3;
 			continue;
 		}
-		if (strncasecmp(time_str+pos, "fika", 4) == 0) {
+		if (xstrncasecmp(time_str+pos, "fika", 4) == 0) {
 			hour   = 15;
 			minute = 0;
 			second = 0;
 			pos += 3;
 			continue;
 		}
-		if (strncasecmp(time_str+pos, "teatime", 7) == 0) {
+		if (xstrncasecmp(time_str+pos, "teatime", 7) == 0) {
 			hour   = 16;
 			minute = 0;
 			second = 0;
 			pos += 6;
 			continue;
 		}
-		if (strncasecmp(time_str+pos, "now", 3) == 0) {
+		if (xstrncasecmp(time_str+pos, "now", 3) == 0) {
 			int i;
 			long delta = 0;
 			time_t later;
@@ -649,23 +644,6 @@ extern time_t parse_time(char *time_str, int past)
 	errno = ESLURM_INVALID_TIME_VALUE;
 	return (time_t) 0;
 }
-
-#if _RUN_STAND_ALONE
-int main(int argc, char **argv)
-{
-	char in_line[128];
-	time_t when;
-
-	while (1) {
-		printf("time> ");
-		if ((fgets(in_line, sizeof(in_line), stdin) == NULL)
-		||  (in_line[0] == '\n'))
-			break;
-		when = parse_time(in_line);
-		printf("%s", slurm_asctime(slurm_localtime(&when)));
-	}
-}
-#endif
 
 /*
  * Smart date for @epoch, relative to current date.

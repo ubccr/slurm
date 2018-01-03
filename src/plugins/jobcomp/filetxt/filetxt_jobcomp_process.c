@@ -97,8 +97,8 @@ static jobcomp_job_rec_t *_parse_line(List job_info_list)
 	time_t end_time = 0;
 
 	itr = list_iterator_create(job_info_list);
-	while((jobcomp_info = list_next(itr))) {
-		if (!xstrcasecmp("JobID", jobcomp_info->name)) {
+	while ((jobcomp_info = list_next(itr))) {
+		if (!xstrcasecmp("JobId", jobcomp_info->name)) {
 			job->jobid = atoi(jobcomp_info->val);
 		} else if (!xstrcasecmp("Partition", jobcomp_info->name)) {
 			job->partition = xstrdup(jobcomp_info->val);
@@ -108,7 +108,7 @@ static jobcomp_job_rec_t *_parse_line(List job_info_list)
 		} else if (!xstrcasecmp("EndTime", jobcomp_info->name)) {
 			job->end_time = xstrdup(jobcomp_info->val);
 			end_time = parse_time(job->end_time, 1);
-		} else if (!xstrcasecmp("Userid", jobcomp_info->name)) {
+		} else if (!xstrcasecmp("UserId", jobcomp_info->name)) {
 			temp = strstr(jobcomp_info->val, "(");
 			if (!temp) {
 				job->uid = atoi(jobcomp_info->val);
@@ -198,7 +198,7 @@ extern List filetxt_jobcomp_process_get_jobs(slurmdb_job_cond_t *job_cond)
 		jobid = 0;
 		partition = NULL;
 		job_info_list = list_create(_destroy_filetxt_jobcomp_info);
-		while(fptr) {
+		while (fptr) {
 			jobcomp_info =
 				xmalloc(sizeof(filetxt_jobcomp_info_t));
 			list_append(job_info_list, jobcomp_info);
@@ -233,7 +233,7 @@ extern List filetxt_jobcomp_process_get_jobs(slurmdb_job_cond_t *job_cond)
 			if (!jobid)
 				continue;
 			itr = list_iterator_create(job_cond->step_list);
-			while((selected_step = list_next(itr))) {
+			while ((selected_step = list_next(itr))) {
 				if (selected_step->jobid == jobid)
 					continue;
 				/* job matches */
@@ -250,7 +250,7 @@ extern List filetxt_jobcomp_process_get_jobs(slurmdb_job_cond_t *job_cond)
 			if (!partition)
 				continue;
 			itr = list_iterator_create(job_cond->partition_list);
-			while((selected_part = list_next(itr)))
+			while ((selected_part = list_next(itr)))
 				if (!xstrcasecmp(selected_part, partition)) {
 					list_iterator_destroy(itr);
 					goto foundp;

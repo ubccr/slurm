@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <https://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2017 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov> and
  *  Morris Jette <jette1@llnl.gov>
@@ -72,7 +72,7 @@ static int   _build_free_mem_min_max_64(char *buffer, int buf_size,
 					bool range);
 static void  _print_reservation(reserve_info_t *resv_ptr, int width);
 static int   _print_secs(long time, int width, bool right, bool cut_output);
-static int   _print_str(char *str, int width, bool right, bool cut_output);
+static int   _print_str(const char *str, int width, bool right, bool cut_output);
 static int   _resv_name_width(reserve_info_t *resv_ptr);
 static void  _set_node_field_size(List sinfo_list);
 static void  _set_part_field_size(List sinfo_list);
@@ -178,7 +178,7 @@ static void _print_reservation(reserve_info_t *resv_ptr, int width)
 	return;
 }
 
-static int _print_str(char *str, int width, bool right, bool cut_output)
+static int _print_str(const char *str, int width, bool right, bool cut_output)
 {
 	char format[64];
 	int printed = 0;
@@ -250,7 +250,7 @@ _build_min_max_16_string(char *buffer, int buf_size, uint16_t min, uint16_t max,
 	if (max == min)
 		return snprintf(buffer, buf_size, "%s", tmp_max);
 	else if (range) {
-		if (max == (uint16_t) INFINITE)
+		if (max == INFINITE16)
 			return snprintf(buffer, buf_size, "%s-infinite",
 					tmp_min);
 		else
@@ -951,7 +951,7 @@ int _print_preempt_mode(sinfo_data_t * sinfo_data, int width,
 {
 	if (sinfo_data) {
 		uint16_t preempt_mode = sinfo_data->part_info->preempt_mode;
-		if (preempt_mode == (uint16_t) NO_VAL)
+		if (preempt_mode == NO_VAL16)
 			preempt_mode =  slurm_get_preempt_mode();
 		_print_str(preempt_mode_string(preempt_mode),
 			   width, right_justify, true);
@@ -1353,4 +1353,25 @@ int _print_alloc_mem(sinfo_data_t * sinfo_data, int width,
 		printf ("%s", suffix);
 	}
 	return SLURM_SUCCESS;
+}
+
+
+int _print_cluster_name(sinfo_data_t *sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	if (sinfo_data) {
+		if (sinfo_data->cluster_name == NULL) {
+			_print_str("N/A", width, right_justify, true);
+		} else {
+			_print_str(sinfo_data->cluster_name, width,
+				   right_justify, true);
+		}
+	} else {
+		_print_str("CLUSTER", width, right_justify, true);
+	}
+	if (suffix) {
+		printf ("%s", suffix);
+	}
+	return SLURM_SUCCESS;
+
 }

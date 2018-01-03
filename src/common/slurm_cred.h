@@ -137,7 +137,11 @@ int  slurm_cred_ctx_unpack(slurm_cred_ctx_t ctx, Buf buffer);
 typedef struct {
 	uint32_t  jobid;
 	uint32_t  stepid;
-	uid_t     uid;
+	uid_t uid;
+	gid_t gid;
+	char *user_name;
+	int ngids;
+	gid_t *gids;
 
 	/* job_core_bitmap and step_core_bitmap cover the same set of nodes,
 	 * namely the set of nodes allocated to the job. The core and socket
@@ -156,6 +160,7 @@ typedef struct {
 					 * default=0 (no limit) */
 	uint32_t  job_nhosts;		/* count of nodes allocated to JOB */
 	List job_gres_list;		/* Generic resources allocated to JOB */
+	uint16_t  x11;			/* x11 flag set on job */
 
 	/* STEP specific info */
 	bitstr_t *step_core_bitmap;	/* cores allocated to STEP */
@@ -333,15 +338,31 @@ void slurm_cred_print(slurm_cred_t *cred);
  * Functions to create, delete, pack, and unpack an sbcast credential
  * Caller of extract_sbcast_cred() must xfree returned node string
  */
+
+typedef struct {
+	uint32_t job_id;
+	uid_t uid;
+	gid_t gid;
+	char *user_name;
+	int ngids;
+	gid_t *gids;
+
+	time_t expiration;
+	char *nodes;
+} sbcast_cred_arg_t;
+
 sbcast_cred_t *create_sbcast_cred(slurm_cred_ctx_t ctx,
-				  uint32_t job_id, char *nodes,
-				  time_t expiration);
-void          delete_sbcast_cred(sbcast_cred_t *sbcast_cred);
-int           extract_sbcast_cred(slurm_cred_ctx_t ctx,
-				  sbcast_cred_t *sbcast_cred, uint16_t block_no,
-				  uint32_t *job_id, char **nodes);
-void          pack_sbcast_cred(sbcast_cred_t *sbcast_cred, Buf buffer);
-sbcast_cred_t *unpack_sbcast_cred(Buf buffer);
-void          print_sbcast_cred(sbcast_cred_t *sbcast_cred);
+				  sbcast_cred_arg_t *arg,
+				  uint16_t protocol_version);
+void delete_sbcast_cred(sbcast_cred_t *sbcast_cred);
+sbcast_cred_arg_t *extract_sbcast_cred(slurm_cred_ctx_t ctx,
+				       sbcast_cred_t *sbcast_cred,
+				       uint16_t block_no,
+				       uint16_t protocol_version);
+void pack_sbcast_cred(sbcast_cred_t *sbcast_cred, Buf buffer,
+		      uint16_t protocol_Version);
+sbcast_cred_t *unpack_sbcast_cred(Buf buffer, uint16_t protocol_version);
+void print_sbcast_cred(sbcast_cred_t *sbcast_cred);
+void sbcast_cred_arg_free(sbcast_cred_arg_t *arg);
 
 #endif  /* _HAVE_SLURM_CREDS_H */

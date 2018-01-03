@@ -1,11 +1,16 @@
-.TH salloc "1" "Slurm Commands" "March 2016" "Slurm Commands"
+.TH salloc "1" "Slurm Commands" "December 2017" "Slurm Commands"
 
 .SH "NAME"
 salloc \- Obtain a Slurm job allocation (a set of nodes), execute a command,
 and then release the allocation when the command is finished.
 
 .SH "SYNOPSIS"
-salloc [\fIoptions\fP] [<\fIcommand\fP> [\fIcommand args\fR]]
+\fBsalloc\fR [\fIOPTIONS(0)\fR...] \fR[ : \fR[\fIOPTIONS(n)\fR...]\fR] \fIscript(0) \fR[\fIargs(0)\fR...]
+
+Option(s) define multiple jobs in a co-scheduled heterogeneous job.
+For more details about heterogeneous jobs see the document
+.br
+http://slurm.schedmd.com/heterogeneous_jobs.html
 
 .SH "DESCRIPTION"
 salloc is used to allocate a Slurm job allocation, which is a set of resources
@@ -112,7 +117,7 @@ desired:
     \fB\-\-threads\-per\-core\fR=<\fIthreads\fR>
 .fi
 If task/affinity plugin is enabled, then specifying an allocation in this
-manner also sets a default \fB\-\-cpu_bind\fR option of \fIthreads\fR
+manner also results in subsequently launched tasks being bound to threads
 if the \fB\-B\fR option specifies a thread count, otherwise an option of
 \fIcores\fR if a core count is specified, otherwise an option of \fIsockets\fR.
 If SelectType is configured to select/cons_res, it must have a parameter of
@@ -192,6 +197,12 @@ Force salloc to ring the terminal bell when the job allocation is granted
 (and only if stdout is a tty).  By default, salloc only rings the bell
 if the allocation is pending for more than ten seconds (and only if stdout
 is a tty). Also see the option \fB\-\-no\-bell\fR.
+
+.TP
+\fB\-\-cluster\-constraint\fR=<\fIlist\fR>
+Specifies features that a federated cluster must have to have a sibling job
+submitted to it. Slurm will attempt to submit a sibling job to a cluster if it
+has at least one of the specified features.
 
 .TP
 \fB\-\-comment\fR=<\fIstring\fR>
@@ -615,6 +626,16 @@ Multiple license names should be comma separated (e.g.
 "\-\-licenses=foo:4,bar").
 
 .TP
+\fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
+Clusters to issue commands to.  Multiple cluster names may be comma separated.
+The job will be submitted to the one cluster providing the earliest expected
+job initiation time. The default value is the current cluster. A value of
+\(aq\fIall\fR' will query to run on all clusters.  Note the
+\fB\-\-export\fR option to control environment variables exported
+between clusters.
+Note that the SlurmDBD must be up for this option to work properly.
+
+.TP
 \fB\-m\fR, \fB\-\-distribution\fR=
 \fIarbitrary\fR|<\fIblock\fR|\fIcyclic\fR|\fIplane=<options>\fR[:\fIblock\fR|\fIcyclic\fR|\fIfcyclic\fR]>
 
@@ -785,7 +806,7 @@ Also see \fB\-\-mem\fR.
 \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
 
 .TP
-\fB\-\-mem_bind\fR=[{\fIquiet,verbose\fR},]\fItype\fR
+\fB\-\-mem\-bind\fR=[{\fIquiet,verbose\fR},]\fItype\fR
 Bind tasks to memory. Used only when the task/affinity plugin is enabled
 and the NUMA memory functions are available.
 \fBNote that the resolution of CPU and memory binding
@@ -794,11 +815,11 @@ at the level of the cores within a processor while memory binding will
 be performed at the level of nodes, where the definition of "nodes"
 may differ from system to system.
 By default no memory binding is performed; any task using any CPU can use
-any memory. This option is typically used to insure that each task is bound to
+any memory. This option is typically used to ensure that each task is bound to
 the memory closest to it's assigned CPU. \fBThe use of any type other than
 "none" or "local" is not recommended.\fR
 If you want greater control, try running a simple test code with the
-options "\-\-cpu_bind=verbose,none \-\-mem_bind=verbose,none" to determine
+options "\-\-cpu\-bind=verbose,none \-\-mem\-bind=verbose,none" to determine
 the specific configuration.
 
 NOTE: To have Slurm always report on the selected memory binding for
@@ -806,7 +827,7 @@ all commands executed in a shell, you can enable verbose mode by
 setting the SLURM_MEM_BIND environment variable value to "verbose".
 
 The following informational environment variables are set when
-\fB\-\-mem_bind\fR is in use:
+\fB\-\-mem\-bind\fR is in use:
 
 .nf
 	SLURM_MEM_BIND_LIST
@@ -899,7 +920,7 @@ limit is changed.
 If a job node limit exceeds the number of nodes configured in the
 partition, the job will be rejected.
 Note that the environment
-variable \fBSLURM_NNODES\fR will be set to the count of nodes actually
+variable \fBSLURM_JOB_NODES\fR will be set to the count of nodes actually
 allocated to the job. See the \fBENVIRONMENT VARIABLES \fR section
 for more information.  If \fB\-N\fR is not specified, the default
 behavior is to allocate enough nodes to satisfy the requirements of
@@ -1200,16 +1221,16 @@ Network (InfiniBand) data is collected.
 .RE
 
 .TP
-\fB\-Q\fR, \fB\-\-quiet\fR
-Suppress informational messages from salloc. Errors will still be displayed.
-
-.TP
-\fB\-\-qos\fR=<\fIqos\fR>
+\fB\-q\fR, \fB\-\-qos\fR=<\fIqos\fR>
 Request a quality of service for the job.  QOS values can be defined
 for each user/cluster/account association in the Slurm database.
 Users will be limited to their association's defined set of qos's when
 the Slurm configuration parameter, AccountingStorageEnforce, includes
 "qos" in it's definition.
+
+.TP
+\fB\-Q\fR, \fB\-\-quiet\fR
+Suppress informational messages from salloc. Errors will still be displayed.
 
 .TP
 \fB\-\-reboot\fR
@@ -1496,6 +1517,9 @@ Same as \fB\-\-bell\fR
 \fBSALLOC_BURST_BUFFER\fR
 Same as \fB\-\-bb\fR
 .TP
+\fBSALLOC_CLUSTERS\fR or \fBSLURM_CLUSTERS\fR
+Same as \fB\-\-clusters\fR
+.TP
 \fBSALLOC_CONN_TYPE\fR
 Same as \fB\-\-conn\-type\fR
 .TP
@@ -1533,7 +1557,7 @@ Same as \fB\-\-jobid\fR
 Same as \fB\-K\fR, \fB\-\-kill\-command\fR
 .TP
 \fBSALLOC_MEM_BIND\fR
-Same as \fB\-\-mem_bind\fR
+Same as \fB\-\-mem\-bind\fR
 .TP
 \fBSALLOC_NETWORK\fR
 Same as \fB\-\-network\fR
@@ -1616,9 +1640,6 @@ the executed program:
 \fBBASIL_RESERVATION_ID\fR
 The reservation ID on Cray systems running ALPS/BASIL only.
 .TP
-\fBSLURM_CLUSTER_NAME\fR
-Name of the cluster on which the job is executing.
-.TP
 \fBMPIRUN_NOALLOCATE\fR
 Do not allocate a block on Blue Gene L/P systems only.
 .TP
@@ -1627,6 +1648,13 @@ Do not free a block on Blue Gene L/P systems only.
 .TP
 \fBMPIRUN_PARTITION\fR
 The block name on Blue Gene systems only.
+.TP
+\fBSLURM_*_PACK_GROUP_#\fR
+For a heterogenous job allocation, the environment variables are set separately
+for each component.
+.TP
+\fBSLURM_CLUSTER_NAME\fR
+Name of the cluster on which the job is executing.
 .TP
 \fBSLURM_CPUS_PER_TASK\fR
 Number of cpus requested per task.
@@ -1665,23 +1693,23 @@ Quality Of Service (QOS) of the job allocation.
 Advanced reservation containing the job allocation, if any.
 .TP
 \fBSLURM_MEM_BIND\fR
-Set to value of the \-\-mem_bind\fR option.
+Set to value of the \-\-mem\-bind\fR option.
 .TP
 \fBSLURM_MEM_BIND_LIST\fR
 Set to bit mask used for memory binding.
 .TP
 \fBSLURM_MEM_BIND_PREFER\fR
-Set to "prefer" if the \-\-mem_bind\fR option includes the prefer option.
+Set to "prefer" if the \-\-mem\-bind\fR option includes the prefer option.
 .TP
 \fBSLURM_MEM_BIND_SORT\fR
 Sort free cache pages (run zonesort on Intel KNL nodes)
 .TP
 \fBSLURM_MEM_BIND_TYPE\fR
-Set to the memory binding type specified with the \-\-mem_bind\fR option.
+Set to the memory binding type specified with the \-\-mem\-bind\fR option.
 Possible values are "none", "rank", "map_map", "mask_mem" and "local".
 .TP
 \fBSLURM_MEM_BIND_VERBOSE\fR
-Set to "verbose" if the \-\-mem_bind\fR option includes the verbose option.
+Set to "verbose" if the \-\-mem\-bind\fR option includes the verbose option.
 Set to "quiet" otherwise.
 .TP
 \fBSLURM_MEM_PER_CPU\fR
@@ -1689,6 +1717,9 @@ Same as \fB\-\-mem\-per\-cpu\fR
 .TP
 \fBSLURM_MEM_PER_NODE\fR
 Same as \fB\-\-mem\fR
+.TP
+\fBSLURM_PACK_SIZE\fR
+Set to count of components in heterogeneous job.
 .TP
 \fBSLURM_SUBMIT_DIR\fR
 The directory from which \fBsalloc\fR was invoked.
@@ -1713,7 +1744,7 @@ Same as \fB\-\-profile\fR
 .TP
 \fBSLURM_TASKS_PER_NODE\fR
 Number of tasks to be initiated on each node. Values are
-comma separated and in the same order as SLURM_NODELIST.
+comma separated and in the same order as SLURM_JOB_NODELIST.
 If two or more consecutive nodes are to have the same task
 count, that count is followed by "(x#)" where "#" is the
 repetition count. For example, "SLURM_TASKS_PER_NODE=2(x3),1"
@@ -1749,6 +1780,16 @@ To grab an allocation of nodes and launch a parallel application on one command
 line (See the \fBsalloc\fR man page for more examples):
 .IP
 salloc \-N5 srun \-n10 myprogram
+.LP
++To create a heterogeneous job with 3 components, each allocating a unique set of nodes:
+.IP
+salloc -w node[2-3] : -w node4 : -w node[5-7] bash
+.br
+salloc: job 32294 queued and waiting for resources
+.br
+salloc: job 32294 has been allocated resources
+.br
+salloc: Granted job allocation 32294
 
 .SH "COPYING"
 Copyright (C) 2006\-2007 The Regents of the University of California.

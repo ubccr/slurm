@@ -53,6 +53,7 @@
 #include "src/common/log.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/strlcpy.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/read_config.h"
@@ -72,6 +73,8 @@
 static uint16_t cpu_freq_count = 0;
 static uint32_t cpu_freq_govs = 0; /* Governors allowed. */
 static uint64_t debug_flags = NO_VAL; /* init value for slurmd, slurmstepd */
+static int set_batch_freq = -1;
+
 static struct cpu_freq_data {
 	uint8_t  avail_governors;
 	uint8_t  nfreq;
@@ -424,7 +427,16 @@ cpu_freq_cpuset_validate(stepd_step_rec_t *job)
 	char *cpu_str;
 	char *savestr = NULL;
 
-	if ((job->stepid == SLURM_BATCH_SCRIPT) ||
+	if (set_batch_freq == -1) {
+		char *launch_params = slurm_get_launch_params();
+		if (xstrcasestr(launch_params, "batch_step_set_cpu_freq"))
+			set_batch_freq = 1;
+		else
+			set_batch_freq = 0;
+		xfree(launch_params);
+	}
+
+	if (((job->stepid == SLURM_BATCH_SCRIPT) && !set_batch_freq) ||
 	    (job->stepid == SLURM_EXTERN_CONT))
 		return;
 
@@ -513,7 +525,16 @@ cpu_freq_cgroup_validate(stepd_step_rec_t *job, char *step_alloc_cores)
 	uint16_t cpuidx =  0;
 	char *core_range;
 
-	if ((job->stepid == SLURM_BATCH_SCRIPT) ||
+	if (set_batch_freq == -1) {
+		char *launch_params = slurm_get_launch_params();
+		if (xstrcasestr(launch_params, "batch_step_set_cpu_freq"))
+			set_batch_freq = 1;
+		else
+			set_batch_freq = 0;
+		xfree(launch_params);
+	}
+
+	if (((job->stepid == SLURM_BATCH_SCRIPT) && !set_batch_freq) ||
 	    (job->stepid == SLURM_EXTERN_CONT))
 		return;
 
@@ -1011,15 +1032,15 @@ static uint32_t
 _cpu_freq_check_gov(const char* arg, uint32_t illegal)
 {
 	uint32_t rc = 0;
-	if (strncasecmp(arg, "co", 2) == 0) {
+	if (xstrncasecmp(arg, "co", 2) == 0) {
 		rc = CPU_FREQ_CONSERVATIVE;
-	} else if (strncasecmp(arg, "perf", 4) == 0) {
+	} else if (xstrncasecmp(arg, "perf", 4) == 0) {
 		rc = CPU_FREQ_PERFORMANCE;
-	} else if (strncasecmp(arg, "pow", 3) == 0) {
+	} else if (xstrncasecmp(arg, "pow", 3) == 0) {
 		rc = CPU_FREQ_POWERSAVE;
-	} else if (strncasecmp(arg, "user", 4) == 0) {
+	} else if (xstrncasecmp(arg, "user", 4) == 0) {
 		rc = CPU_FREQ_USERSPACE;
-	} else if (strncasecmp(arg, "onde", 4) == 0) {
+	} else if (xstrncasecmp(arg, "onde", 4) == 0) {
 		rc = CPU_FREQ_ONDEMAND;
 	}
 	rc &= (~illegal);
@@ -1043,14 +1064,14 @@ _cpu_freq_check_freq(const char* arg)
 	char *end;
 	uint32_t frequency;
 
-	if (strncasecmp(arg, "lo", 2) == 0) {
+	if (xstrncasecmp(arg, "lo", 2) == 0) {
 		return CPU_FREQ_LOW;
-	} else if (strncasecmp(arg, "him1", 4) == 0 ||
-		   strncasecmp(arg, "highm1", 6) == 0) {
+	} else if (xstrncasecmp(arg, "him1", 4) == 0 ||
+		   xstrncasecmp(arg, "highm1", 6) == 0) {
 		return CPU_FREQ_HIGHM1;
-	} else if (strncasecmp(arg, "hi", 2) == 0) {
+	} else if (xstrncasecmp(arg, "hi", 2) == 0) {
 		return CPU_FREQ_HIGH;
-	} else if (strncasecmp(arg, "med", 3) == 0) {
+	} else if (xstrncasecmp(arg, "med", 3) == 0) {
 		return CPU_FREQ_MEDIUM;
 	}
 	if ( (frequency = strtoul(arg, &end, 10) )) {
@@ -1398,15 +1419,12 @@ cpu_freq_govlist_to_string(char* buf, uint16_t bufsz, uint32_t govs)
 			xstrcat(list,"UserSpace");
 		}
 	}
-	if (list) {
-		if (strlen(list) < bufsz)
-			strcpy(buf, list);
-		else
-			strncpy(buf, list, bufsz-1);
 
+	if (list) {
+		strlcpy(buf, list, bufsz);
 		xfree(list);
 	} else {
-		strncpy(buf,"No Governors defined", bufsz-1);
+		strlcpy(buf, "No Governors defined", bufsz);
 	}
 }
 
@@ -1444,7 +1462,7 @@ cpu_freq_verify_def(const char *arg, uint32_t *freq)
 extern int
 cpu_freq_verify_govlist(const char *arg, uint32_t *govs)
 {
-	char *list, *gov, *savestr;
+	char *list, *gov, *savestr = NULL;
 	uint32_t agov;
 
 	*govs = 0;
@@ -1643,7 +1661,7 @@ cpu_freq_debug(char* label, char* noval_str, char* freq_str, int freq_len,
 	} else {
 		sep1 = "";
 	}
-	if (min != NO_VAL && min != 0) {
+	if ((min != NO_VAL) && (min != 0)) {
 		rc = 1;
 		if (min & CPU_FREQ_RANGE_FLAG) {
 			strcpy(bfmin, "CPU_min_freq=");
@@ -1652,11 +1670,16 @@ cpu_freq_debug(char* label, char* noval_str, char* freq_str, int freq_len,
 			sprintf(bfmin, "CPU_min_freq=%u", min);
 		}
 	} else if (noval_str) {
-		strcpy(bfmin, noval_str);
+		if (strlen(noval_str) >= sizeof(bfmin)) {
+			error("%s: minimum CPU frequency string too large",
+			      __func__);
+		} else {
+			strlcpy(bfmin, noval_str, sizeof(bfmin));
+		}
 	} else {
 		sep2 = "";
 	}
-	if (max != NO_VAL && max != 0) {
+	if ((max != NO_VAL) && (max != 0)) {
 		rc = 1;
 		if (max & CPU_FREQ_RANGE_FLAG) {
 			strcpy(bfmax, "CPU_max_freq=");
@@ -1665,7 +1688,12 @@ cpu_freq_debug(char* label, char* noval_str, char* freq_str, int freq_len,
 			sprintf(bfmax, "CPU_max_freq=%u", max);
 		}
 	} else if (noval_str) {
-		strcpy(bfmax, noval_str);
+		if (strlen(noval_str) >= sizeof(bfmax)) {
+			error("%s: maximum CPU frequency string too large",
+			      __func__);
+		} else {
+			strlcpy(bfmax, noval_str, sizeof(bfmax));
+		}
 	} else {
 		sep3 = "";
 	}
@@ -1674,7 +1702,12 @@ cpu_freq_debug(char* label, char* noval_str, char* freq_str, int freq_len,
 		strcpy(bfgov, "Governor=");
 		cpu_freq_to_string(&bfgov[9], (sizeof(bfgov)-9), gov);
 	} else if (noval_str) {
-		strcpy(bfgov, noval_str);
+		if (strlen(noval_str) >= sizeof(bfgov)) {
+			error("%s: max CPU governor string too large",
+			      __func__);
+		} else {
+			strlcpy(bfgov, noval_str, sizeof(bfgov));
+		}
 	}
 	if (rc) {
 		if (freq_str) {

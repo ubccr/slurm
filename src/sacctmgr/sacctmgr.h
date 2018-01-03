@@ -132,14 +132,15 @@ typedef enum {
 	PRINT_CHOST = 3000,
 	PRINT_CPORT,
 	PRINT_CLASS,
+	PRINT_FEATURES,
 	PRINT_FEDSTATE,
 	PRINT_FEDSTATERAW,
 	PRINT_TRES,
 	PRINT_NODECNT,
+	PRINT_NODEINX,
 	PRINT_CLUSTER_NODES,
 	PRINT_RPC_VERSION,
 	PRINT_SELECT,
-	PRINT_WEIGHT,
 
 	/* ACCT */
 	PRINT_ORG = 4000,
@@ -191,6 +192,7 @@ typedef enum {
 
 	/* RESERVATION */
 	PRINT_ASSOC_NAME = 10000,
+	PRINT_UNUSED,
 
 } sacctmgr_print_t;
 
@@ -275,8 +277,8 @@ extern int sacctmgr_archive_load(int argc, char **argv);
 /* common.c */
 extern int parse_option_end(char *option);
 extern char *strip_quotes(char *option, int *increased, bool make_lower);
-extern int notice_thread_init();
-extern int notice_thread_fini();
+extern void notice_thread_init();
+extern void notice_thread_fini();
 extern int commit_check(char *warning);
 extern int get_uint(char *in_value, uint32_t *out_value, char *type);
 extern int get_uint16(char *in_value, uint16_t *out_value, char *type);

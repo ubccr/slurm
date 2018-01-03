@@ -508,10 +508,6 @@ static List _create_block_list(partition_info_msg_t *part_info_ptr,
 	}
 
 	block_list = list_create(_block_list_del);
-	if (!block_list) {
-		g_print("malloc error\n");
-		return NULL;
-	}
 
 	last_block_info_ptr = block_info_ptr;
 
@@ -880,17 +876,26 @@ extern void admin_edit_block(GtkCellRendererText *cell,
 			     const char *new_text,
 			     gpointer data)
 {
-	GtkTreeStore *treestore = GTK_TREE_STORE(data);
-	GtkTreePath *path = gtk_tree_path_new_from_string(path_string);
+	GtkTreeStore *treestore = NULL;
+	GtkTreePath *path = NULL;
 	GtkTreeIter iter;
-	int column = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cell),
-						       "column"));
+	int column;
 
 	char *blockid = NULL;
 	char *old_text = NULL;
+
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		display_fed_disabled_popup(new_text);
+		goto no_input;
+	}
+
 	if (!new_text || !xstrcmp(new_text, ""))
 		goto no_input;
 
+	column = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cell), "column"));
+
+	treestore = GTK_TREE_STORE(data);
+	path = gtk_tree_path_new_from_string(path_string);
 	gtk_tree_model_get_iter(GTK_TREE_MODEL(treestore), &iter, path);
 	gtk_tree_model_get(GTK_TREE_MODEL(treestore), &iter,
 			   SORTID_BLOCK, &blockid,
@@ -906,8 +911,8 @@ extern void admin_edit_block(GtkCellRendererText *cell,
 
 	g_free(blockid);
 	g_free(old_text);
-no_input:
 	gtk_tree_path_free(path);
+no_input:
 	g_mutex_unlock(sview_mutex);
 }
 
@@ -949,6 +954,17 @@ extern void get_info_block(GtkTable *table, display_data_t *display_data)
 	if (!table) {
 		display_data_block->set_menu = local_display_data->set_menu;
 		goto reset_curs;
+	}
+
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		view = ERROR_VIEW;
+		if (display_widget)
+			gtk_widget_destroy(display_widget);
+		label = gtk_label_new("Not available in a federated view");
+		gtk_table_attach_defaults(GTK_TABLE(table), label, 0, 1, 0, 1);
+		gtk_widget_show(label);
+		display_widget = gtk_widget_ref(label);
+		goto end_it;
 	}
 
 	if (display_widget && toggled) {
@@ -1353,7 +1369,7 @@ extern void set_menus_block(void *arg, void *arg2, GtkTreePath *path, int type)
 extern void popup_all_block(GtkTreeModel *model, GtkTreeIter *iter, int id)
 {
 	char *name = NULL;
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 	GError *error = NULL;
@@ -1471,23 +1487,21 @@ extern void select_admin_block(GtkTreeModel *model, GtkTreeIter *iter,
 			       display_data_t *display_data,
 			       GtkTreeView *treeview)
 {
-	if (treeview) {
-		if (display_data->extra & EXTRA_NODES) {
-			select_admin_nodes(model, iter, display_data,
-					   SORTID_NODELIST, treeview);
-			return;
-		}
-		global_multi_error = false;
-		gtk_tree_selection_selected_foreach(
-			gtk_tree_view_get_selection(treeview),
-			_process_each_block, display_data->name);
-	}
+	select_admin_common(model, iter, display_data, treeview,
+			    SORTID_NODELIST, _process_each_block);
 }
 
 static void _admin_block(GtkTreeModel *model, GtkTreeIter *iter, char *type)
 {
 	char *blockid = NULL;
-	GtkWidget *popup = gtk_dialog_new_with_buttons(
+	GtkWidget *popup = NULL;
+
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		display_fed_disabled_popup(type);
+		return;
+	}
+
+	popup = gtk_dialog_new_with_buttons(
 		type,
 		GTK_WINDOW(main_window),
 		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,

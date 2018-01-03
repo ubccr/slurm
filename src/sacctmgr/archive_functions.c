@@ -166,39 +166,39 @@ static int _set_cond(int *start, int argc, char **argv,
 			}
 		}
 
-		if (!end && !strncasecmp(argv[i], "where",
+		if (!end && !xstrncasecmp(argv[i], "where",
 					MAX(command_len, 5))) {
 			continue;
-		} else if (!end && !strncasecmp(argv[i], "events",
+		} else if (!end && !xstrncasecmp(argv[i], "events",
 					  MAX(command_len, 1))) {
 			arch_cond->purge_event |= SLURMDB_PURGE_ARCHIVE;
 			set = 1;
-		} else if (!end && !strncasecmp(argv[i], "jobs",
+		} else if (!end && !xstrncasecmp(argv[i], "jobs",
 					  MAX(command_len, 1))) {
 			arch_cond->purge_job |= SLURMDB_PURGE_ARCHIVE;
 			set = 1;
-		} else if (!end && !strncasecmp(argv[i], "reservations",
+		} else if (!end && !xstrncasecmp(argv[i], "reservations",
 					  MAX(command_len, 1))) {
 			arch_cond->purge_resv |= SLURMDB_PURGE_ARCHIVE;
 			set = 1;
-		} else if (!end && !strncasecmp(argv[i], "steps",
+		} else if (!end && !xstrncasecmp(argv[i], "steps",
 					  MAX(command_len, 1))) {
 			arch_cond->purge_step |= SLURMDB_PURGE_ARCHIVE;
 			set = 1;
-		} else if (!end && !strncasecmp(argv[i], "suspend",
+		} else if (!end && !xstrncasecmp(argv[i], "suspend",
 					  MAX(command_len, 1))) {
 			arch_cond->purge_suspend |= SLURMDB_PURGE_ARCHIVE;
 			set = 1;
-		} else if (!end && !strncasecmp(argv[i], "txn",
+		} else if (!end && !xstrncasecmp(argv[i], "txn",
 					  MAX(command_len, 1))) {
 			arch_cond->purge_txn |= SLURMDB_PURGE_ARCHIVE;
 			set = 1;
-		} else if (!end && !strncasecmp(argv[i], "usage",
+		} else if (!end && !xstrncasecmp(argv[i], "usage",
 					  MAX(command_len, 1))) {
 			arch_cond->purge_usage |= SLURMDB_PURGE_ARCHIVE;
 			set = 1;
 		} else if (!end
-			  || !strncasecmp(argv[i], "Clusters",
+			  || !xstrncasecmp(argv[i], "Clusters",
 					  MAX(command_len, 1))) {
 			if (!job_cond->cluster_list)
 				job_cond->cluster_list =
@@ -206,7 +206,7 @@ static int _set_cond(int *start, int argc, char **argv,
 			slurm_addto_char_list(job_cond->cluster_list,
 					      argv[i]+end);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Accounts",
+		} else if (!xstrncasecmp(argv[i], "Accounts",
 					 MAX(command_len, 2))) {
 			if (!job_cond->acct_list)
 				job_cond->acct_list =
@@ -214,7 +214,7 @@ static int _set_cond(int *start, int argc, char **argv,
 			slurm_addto_char_list(job_cond->acct_list,
 					      argv[i]+end);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Associations",
+		} else if (!xstrncasecmp(argv[i], "Associations",
 					 MAX(command_len, 2))) {
 			if (!job_cond->associd_list)
 				job_cond->associd_list =
@@ -222,39 +222,40 @@ static int _set_cond(int *start, int argc, char **argv,
 			slurm_addto_char_list(job_cond->associd_list,
 					      argv[i]+end);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Directory",
+		} else if (!xstrncasecmp(argv[i], "Directory",
 					 MAX(command_len, 2))) {
 			arch_cond->archive_dir =
 				strip_quotes(argv[i]+end, NULL, 0);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "End", MAX(command_len, 1))) {
+		} else if (!xstrncasecmp(argv[i], "End", MAX(command_len, 1))) {
 			job_cond->usage_end = parse_time(argv[i]+end, 1);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Gid", MAX(command_len, 2))) {
+		} else if (!xstrncasecmp(argv[i], "Gid", MAX(command_len, 2))) {
 			if (!job_cond->groupid_list)
 				job_cond->groupid_list =
 					list_create(slurm_destroy_char);
 			slurm_addto_char_list(job_cond->groupid_list,
 					      argv[i]+end);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Jobs",
+		} else if (!xstrncasecmp(argv[i], "Jobs",
 					 MAX(command_len, 1))) {
-			char *end_char = NULL, *start_char = argv[i]+end;
+			char *end_char = NULL, *start_char = argv[i] + end;
 			slurmdb_selected_step_t *selected_step = NULL;
 			char *dot = NULL;
 			if (!job_cond->step_list)
 				job_cond->step_list =
 					list_create(slurm_destroy_char);
 
-			while ((end_char = strstr(start_char, ","))
-			       && start_char) {
-				*end_char = 0;
-				while (isspace(*start_char))
+			while ((end_char = strstr(start_char, ","))) {
+				end_char[0] = '\0';
+				while (isspace(start_char[0]))
 					start_char++;  /* discard whitespace */
-				if (!(int)*start_char)
+				if (start_char[0] == '\0')
 					continue;
 				selected_step = xmalloc(
 					sizeof(slurmdb_selected_step_t));
+				selected_step->array_task_id = NO_VAL;
+				selected_step->pack_job_offset = NO_VAL;
 				list_append(job_cond->step_list, selected_step);
 
 				dot = strstr(start_char, ".");
@@ -270,7 +271,7 @@ static int _set_cond(int *start, int argc, char **argv,
 			}
 
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Partitions",
+		} else if (!xstrncasecmp(argv[i], "Partitions",
 					 MAX(command_len, 2))) {
 			if (!job_cond->partition_list)
 				job_cond->partition_list =
@@ -278,7 +279,7 @@ static int _set_cond(int *start, int argc, char **argv,
 			slurm_addto_char_list(job_cond->partition_list,
 					      argv[i]+end);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "PurgeEventAfter",
+		} else if (!xstrncasecmp(argv[i], "PurgeEventAfter",
 					 MAX(command_len, 10))) {
 			if ((tmp = slurmdb_parse_purge(argv[i]+end))
 			    == NO_VAL) {
@@ -287,7 +288,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_event |= tmp;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeJobAfter",
+		} else if (!xstrncasecmp(argv[i], "PurgeJobAfter",
 					 MAX(command_len, 10))) {
 			if ((tmp = slurmdb_parse_purge(argv[i]+end))
 			    == NO_VAL) {
@@ -296,7 +297,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_job |= tmp;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeResvAfter",
+		} else if (!xstrncasecmp(argv[i], "PurgeResvAfter",
 					 MAX(command_len, 10))) {
 			if ((tmp = slurmdb_parse_purge(argv[i]+end))
 			    == NO_VAL) {
@@ -305,7 +306,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_resv |= tmp;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeStepAfter",
+		} else if (!xstrncasecmp(argv[i], "PurgeStepAfter",
 					 MAX(command_len, 10))) {
 			if ((tmp = slurmdb_parse_purge(argv[i]+end))
 			    == NO_VAL) {
@@ -314,7 +315,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_step |= tmp;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeSuspendAfter",
+		} else if (!xstrncasecmp(argv[i], "PurgeSuspendAfter",
 					 MAX(command_len, 10))) {
 			if ((tmp = slurmdb_parse_purge(argv[i]+end))
 			    == NO_VAL) {
@@ -323,7 +324,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_suspend |= tmp;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeTXNAfter",
+		} else if (!xstrncasecmp(argv[i], "PurgeTXNAfter",
 					 MAX(command_len, 10))) {
 			if ((tmp = slurmdb_parse_purge(argv[i]+end))
 			    == NO_VAL) {
@@ -332,7 +333,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_txn |= tmp;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeUsageAfter",
+		} else if (!xstrncasecmp(argv[i], "PurgeUsageAfter",
 					 MAX(command_len, 10))) {
 			if ((tmp = slurmdb_parse_purge(argv[i]+end))
 			    == NO_VAL) {
@@ -341,7 +342,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_usage |= tmp;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeEventMonths",
+		} else if (!xstrncasecmp(argv[i], "PurgeEventMonths",
 					 MAX(command_len, 6))) {
 			if (get_uint(argv[i]+end, &tmp, "PurgeEventMonths")
 			    != SLURM_SUCCESS) {
@@ -351,7 +352,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_event |= SLURMDB_PURGE_MONTHS;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeJobMonths",
+		} else if (!xstrncasecmp(argv[i], "PurgeJobMonths",
 					 MAX(command_len, 6))) {
 			if (get_uint(argv[i]+end, &tmp, "PurgeJobMonths")
 			    != SLURM_SUCCESS) {
@@ -361,7 +362,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_job |= SLURMDB_PURGE_MONTHS;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeResvMonths",
+		} else if (!xstrncasecmp(argv[i], "PurgeResvMonths",
 					 MAX(command_len, 6))) {
 			if (get_uint(argv[i]+end, &tmp, "PurgeResvMonths")
 			    != SLURM_SUCCESS) {
@@ -371,7 +372,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_resv |= SLURMDB_PURGE_MONTHS;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeStepMonths",
+		} else if (!xstrncasecmp(argv[i], "PurgeStepMonths",
 					 MAX(command_len, 7))) {
 			if (get_uint(argv[i]+end, &tmp, "PurgeStepMonths")
 			    != SLURM_SUCCESS) {
@@ -381,7 +382,7 @@ static int _set_cond(int *start, int argc, char **argv,
 				arch_cond->purge_step |= SLURMDB_PURGE_MONTHS;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeSuspendMonths",
+		} else if (!xstrncasecmp(argv[i], "PurgeSuspendMonths",
 					 MAX(command_len, 7))) {
 			if (get_uint(argv[i]+end, &tmp, "PurgeSuspendMonths")
 			    != SLURM_SUCCESS) {
@@ -392,7 +393,7 @@ static int _set_cond(int *start, int argc, char **argv,
 					|= SLURMDB_PURGE_MONTHS;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeTXNMonths",
+		} else if (!xstrncasecmp(argv[i], "PurgeTXNMonths",
 					 MAX(command_len, 6))) {
 			if (get_uint(argv[i]+end, &tmp, "PurgeTXNMonths")
 			    != SLURM_SUCCESS) {
@@ -403,7 +404,7 @@ static int _set_cond(int *start, int argc, char **argv,
 					|= SLURMDB_PURGE_MONTHS;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "PurgeUsageMonths",
+		} else if (!xstrncasecmp(argv[i], "PurgeUsageMonths",
 					 MAX(command_len, 6))) {
 			if (get_uint(argv[i]+end, &tmp, "PurgeUsageMonths")
 			    != SLURM_SUCCESS) {
@@ -414,16 +415,16 @@ static int _set_cond(int *start, int argc, char **argv,
 					|= SLURMDB_PURGE_MONTHS;
 				set = 1;
 			}
-		} else if (!strncasecmp (argv[i], "Start",
+		} else if (!xstrncasecmp(argv[i], "Start",
 					 MAX(command_len, 2))) {
 			job_cond->usage_start = parse_time(argv[i]+end, 1);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Script",
+		} else if (!xstrncasecmp(argv[i], "Script",
 					 MAX(command_len, 2))) {
 			arch_cond->archive_script =
 				strip_quotes(argv[i]+end, NULL, 0);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Users",
+		} else if (!xstrncasecmp(argv[i], "Users",
 					 MAX(command_len, 1))) {
 			if (!job_cond->userid_list)
 				job_cond->userid_list =
@@ -452,8 +453,8 @@ extern int sacctmgr_archive_dump(int argc, char **argv)
 
 	for (i = 0; i < argc; i++) {
 		int command_len = strlen(argv[i]);
-		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
-		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3)))
+		if (!xstrncasecmp(argv[i], "Where", MAX(command_len, 5))
+		    || !xstrncasecmp(argv[i], "Set", MAX(command_len, 3)))
 			i++;
 		_set_cond(&i, argc, argv, arch_cond);
 	}
@@ -539,13 +540,13 @@ extern int sacctmgr_archive_dump(int argc, char **argv)
 		}
 	}
 
-	rc = jobacct_storage_g_archive(db_conn, arch_cond);
+	rc = slurmdb_archive(db_conn, arch_cond);
 	if (rc == SLURM_SUCCESS) {
 		if (commit_check("Would you like to commit changes?")) {
-			acct_storage_g_commit(db_conn, 1);
+			slurmdb_connection_commit(db_conn, 1);
 		} else {
 			printf(" Changes Discarded\n");
-			acct_storage_g_commit(db_conn, 0);
+			slurmdb_connection_commit(db_conn, 0);
 		}
 	} else {
 		exit_code = 1;
@@ -578,10 +579,10 @@ extern int sacctmgr_archive_load(int argc, char **argv)
 		}
 
 		if (!end
-		   || !strncasecmp (argv[i], "File", MAX(command_len, 1))) {
+		   || !xstrncasecmp(argv[i], "File", MAX(command_len, 1))) {
 			arch_rec->archive_file =
 				strip_quotes(argv[i]+end, NULL, 0);
-		} else if (!strncasecmp (argv[i], "Insert",
+		} else if (!xstrncasecmp(argv[i], "Insert",
 					 MAX(command_len, 2))) {
 			arch_rec->insert = strip_quotes(argv[i]+end, NULL, 1);
 		} else {
@@ -620,13 +621,13 @@ extern int sacctmgr_archive_load(int argc, char **argv)
 		}
 	}
 
-	rc = jobacct_storage_g_archive_load(db_conn, arch_rec);
+	rc = slurmdb_archive_load(db_conn, arch_rec);
 	if (rc == SLURM_SUCCESS) {
 		if (commit_check("Would you like to commit changes?")) {
-			acct_storage_g_commit(db_conn, 1);
+			slurmdb_connection_commit(db_conn, 1);
 		} else {
 			printf(" Changes Discarded\n");
-			acct_storage_g_commit(db_conn, 0);
+			slurmdb_connection_commit(db_conn, 0);
 		}
 	} else {
 		exit_code = 1;

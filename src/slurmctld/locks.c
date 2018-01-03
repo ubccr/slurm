@@ -50,12 +50,64 @@ static pthread_cond_t locks_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static slurmctld_lock_flags_t slurmctld_locks;
-static int kill_thread = 0;
 
-static bool _wr_rdlock(lock_datatype_t datatype, bool wait_lock);
+static void _wr_rdlock(lock_datatype_t datatype);
 static void _wr_rdunlock(lock_datatype_t datatype);
-static bool _wr_wrlock(lock_datatype_t datatype, bool wait_lock);
+static void _wr_wrlock(lock_datatype_t datatype);
 static void _wr_wrunlock(lock_datatype_t datatype);
+
+#ifndef NDEBUG
+/*
+ * Used to protect against double-locking within a single thread. Calling
+ * lock_slurmctld() while already holding locks will lead to deadlock;
+ * this will force such instances to abort() in development builds.
+ */
+/*
+ * FIXME: __thread is non-standard, and may cause build failures on unusual
+ * systems. Only used within development builds to mitigate possible problems
+ * with production builds.
+ */
+static __thread bool slurmctld_locked = false;
+
+/*
+ * Used to detect any location where the acquired locks differ from the
+ * release locks.
+ */
+
+static __thread slurmctld_lock_t thread_locks;
+
+static bool _store_locks(slurmctld_lock_t lock_levels)
+{
+	if (slurmctld_locked)
+		return false;
+	slurmctld_locked = true;
+
+	memcpy((void *) &thread_locks, (void *) &lock_levels,
+	       sizeof(slurmctld_lock_t));
+
+	return true;
+}
+
+static bool _clear_locks(slurmctld_lock_t lock_levels)
+{
+	if (!slurmctld_locked)
+		return false;
+	slurmctld_locked = false;
+
+	if (memcmp((void *) &thread_locks, (void *) &lock_levels,
+		       sizeof(slurmctld_lock_t)))
+		return false;
+
+	memset((void *) &thread_locks, 0, sizeof(slurmctld_lock_t));
+
+	return true;
+}
+
+extern bool verify_lock(lock_datatype_t datatype, lock_level_t level)
+{
+	return (((lock_level_t *) &thread_locks)[datatype] >= level);
+}
+#endif
 
 /* init_locks - create locks used for slurmctld data structure access
  *	control */
@@ -68,124 +120,40 @@ void init_locks(void)
 /* lock_slurmctld - Issue the required lock requests in a well defined order */
 extern void lock_slurmctld(slurmctld_lock_t lock_levels)
 {
-	if (lock_levels.config == READ_LOCK)
-		(void) _wr_rdlock(CONFIG_LOCK, true);
-	else if (lock_levels.config == WRITE_LOCK)
-		(void) _wr_wrlock(CONFIG_LOCK, true);
-
-	if (lock_levels.job == READ_LOCK)
-		(void) _wr_rdlock(JOB_LOCK, true);
-	else if (lock_levels.job == WRITE_LOCK)
-		(void) _wr_wrlock(JOB_LOCK, true);
-
-	if (lock_levels.node == READ_LOCK)
-		(void) _wr_rdlock(NODE_LOCK, true);
-	else if (lock_levels.node == WRITE_LOCK)
-		(void) _wr_wrlock(NODE_LOCK, true);
-
-	if (lock_levels.partition == READ_LOCK)
-		(void) _wr_rdlock(PART_LOCK, true);
-	else if (lock_levels.partition == WRITE_LOCK)
-		(void) _wr_wrlock(PART_LOCK, true);
-
-	if (lock_levels.federation == READ_LOCK)
-		(void) _wr_rdlock(FED_LOCK, true);
-	else if (lock_levels.federation == WRITE_LOCK)
-		(void) _wr_wrlock(FED_LOCK, true);
-}
-
-/* try_lock_slurmctld - equivalent to lock_slurmctld() except
- * RET 0 on success or -1 if the locks are currently not available */
-extern int try_lock_slurmctld (slurmctld_lock_t lock_levels)
-{
-	bool success = true;
+	xassert(_store_locks(lock_levels));
 
 	if (lock_levels.config == READ_LOCK)
-		success = _wr_rdlock(CONFIG_LOCK, false);
+		_wr_rdlock(CONFIG_LOCK);
 	else if (lock_levels.config == WRITE_LOCK)
-		success = _wr_wrlock(CONFIG_LOCK, false);
-	if (!success)
-		return -1;
+		_wr_wrlock(CONFIG_LOCK);
 
 	if (lock_levels.job == READ_LOCK)
-		success = _wr_rdlock(JOB_LOCK, false);
+		_wr_rdlock(JOB_LOCK);
 	else if (lock_levels.job == WRITE_LOCK)
-		success = _wr_wrlock(JOB_LOCK, false);
-	if (!success) {
-		if (lock_levels.config == READ_LOCK)
-			_wr_rdunlock(CONFIG_LOCK);
-		else if (lock_levels.config == WRITE_LOCK)
-			_wr_wrunlock(CONFIG_LOCK);
-		return -1;
-	}
+		_wr_wrlock(JOB_LOCK);
 
 	if (lock_levels.node == READ_LOCK)
-		success = _wr_rdlock(NODE_LOCK, false);
+		_wr_rdlock(NODE_LOCK);
 	else if (lock_levels.node == WRITE_LOCK)
-		success = _wr_wrlock(NODE_LOCK, false);
-	if (!success) {
-		if (lock_levels.job == READ_LOCK)
-			_wr_rdunlock(JOB_LOCK);
-		else if (lock_levels.job == WRITE_LOCK)
-			_wr_wrunlock(JOB_LOCK);
-		if (lock_levels.config == READ_LOCK)
-			_wr_rdunlock(CONFIG_LOCK);
-		else if (lock_levels.config == WRITE_LOCK)
-			_wr_wrunlock(CONFIG_LOCK);
-		return -1;
-	}
+		_wr_wrlock(NODE_LOCK);
 
 	if (lock_levels.partition == READ_LOCK)
-		success = _wr_rdlock(PART_LOCK, false);
+		_wr_rdlock(PART_LOCK);
 	else if (lock_levels.partition == WRITE_LOCK)
-		success = _wr_wrlock(PART_LOCK, false);
-	if (!success) {
-		if (lock_levels.node == READ_LOCK)
-			_wr_rdunlock(NODE_LOCK);
-		else if (lock_levels.node == WRITE_LOCK)
-			_wr_wrunlock(NODE_LOCK);
-		if (lock_levels.job == READ_LOCK)
-			_wr_rdunlock(JOB_LOCK);
-		else if (lock_levels.job == WRITE_LOCK)
-			_wr_wrunlock(JOB_LOCK);
-		if (lock_levels.config == READ_LOCK)
-			_wr_rdunlock(CONFIG_LOCK);
-		else if (lock_levels.config == WRITE_LOCK)
-			_wr_wrunlock(CONFIG_LOCK);
-		return -1;
-	}
+		_wr_wrlock(PART_LOCK);
 
 	if (lock_levels.federation == READ_LOCK)
-		success = _wr_rdlock(FED_LOCK, false);
+		_wr_rdlock(FED_LOCK);
 	else if (lock_levels.federation == WRITE_LOCK)
-		success = _wr_wrlock(FED_LOCK, false);
-	if (!success) {
-		if (lock_levels.partition == READ_LOCK)
-			_wr_rdunlock(PART_LOCK);
-		else if (lock_levels.partition == WRITE_LOCK)
-			_wr_wrunlock(PART_LOCK);
-		if (lock_levels.node == READ_LOCK)
-			_wr_rdunlock(NODE_LOCK);
-		else if (lock_levels.node == WRITE_LOCK)
-			_wr_wrunlock(NODE_LOCK);
-		if (lock_levels.job == READ_LOCK)
-			_wr_rdunlock(JOB_LOCK);
-		else if (lock_levels.job == WRITE_LOCK)
-			_wr_wrunlock(JOB_LOCK);
-		if (lock_levels.config == READ_LOCK)
-			_wr_rdunlock(CONFIG_LOCK);
-		else if (lock_levels.config == WRITE_LOCK)
-			_wr_wrunlock(CONFIG_LOCK);
-		return -1;
-	}
-
-	return 0;
+		_wr_wrlock(FED_LOCK);
 }
 
 /* unlock_slurmctld - Issue the required unlock requests in a well
  *	defined order */
 extern void unlock_slurmctld(slurmctld_lock_t lock_levels)
 {
+	xassert(_clear_locks(lock_levels));
+
 	if (lock_levels.federation == READ_LOCK)
 		_wr_rdunlock(FED_LOCK);
 	else if (lock_levels.federation == WRITE_LOCK)
@@ -218,10 +186,8 @@ extern void unlock_slurmctld(slurmctld_lock_t lock_levels)
  *
  *	NOTE: Always favoring write locks could result in starvation for
  *	read locks. */
-static bool _wr_rdlock(lock_datatype_t datatype, bool wait_lock)
+static void _wr_rdlock(lock_datatype_t datatype)
 {
-	bool success = true;
-
 	slurm_mutex_lock(&locks_mutex);
 	while (1) {
 		if ((slurmctld_locks.entity[write_lock(datatype)] == 0) &&
@@ -229,17 +195,11 @@ static bool _wr_rdlock(lock_datatype_t datatype, bool wait_lock)
 			slurmctld_locks.entity[read_lock(datatype)]++;
 			slurmctld_locks.entity[write_cnt_lock(datatype)] = 0;
 			break;
-		} else if (!wait_lock) {
-			success = false;
-			break;
 		} else {	/* wait for state change and retry */
 			slurm_cond_wait(&locks_cond, &locks_mutex);
-			if (kill_thread)
-				pthread_exit(NULL);
 		}
 	}
 	slurm_mutex_unlock(&locks_mutex);
-	return success;
 }
 
 /* _wr_rdunlock - Issue a read unlock on the specified data type */
@@ -247,15 +207,14 @@ static void _wr_rdunlock(lock_datatype_t datatype)
 {
 	slurm_mutex_lock(&locks_mutex);
 	slurmctld_locks.entity[read_lock(datatype)]--;
+	xassert(slurmctld_locks.entity[read_lock(datatype)] >= 0);
 	slurm_cond_broadcast(&locks_cond);
 	slurm_mutex_unlock(&locks_mutex);
 }
 
 /* _wr_wrlock - Issue a write lock on the specified data type */
-static bool _wr_wrlock(lock_datatype_t datatype, bool wait_lock)
+static void _wr_wrlock(lock_datatype_t datatype)
 {
-	bool success = true;
-
 	slurm_mutex_lock(&locks_mutex);
 	slurmctld_locks.entity[write_wait_lock(datatype)]++;
 
@@ -266,18 +225,11 @@ static bool _wr_wrlock(lock_datatype_t datatype, bool wait_lock)
 			slurmctld_locks.entity[write_wait_lock(datatype)]--;
 			slurmctld_locks.entity[write_cnt_lock(datatype)]++;
 			break;
-		} else if (!wait_lock) {
-			slurmctld_locks.entity[write_wait_lock(datatype)]--;
-			success = false;
-			break;
 		} else {	/* wait for state change and retry */
 			slurm_cond_wait(&locks_cond, &locks_mutex);
-			if (kill_thread)
-				pthread_exit(NULL);
 		}
 	}
 	slurm_mutex_unlock(&locks_mutex);
-	return success;
 }
 
 /* _wr_wrunlock - Issue a write unlock on the specified data type */
@@ -285,6 +237,7 @@ static void _wr_wrunlock(lock_datatype_t datatype)
 {
 	slurm_mutex_lock(&locks_mutex);
 	slurmctld_locks.entity[write_lock(datatype)]--;
+	xassert(slurmctld_locks.entity[write_lock(datatype)] >= 0);
 	slurm_cond_broadcast(&locks_cond);
 	slurm_mutex_unlock(&locks_mutex);
 }
@@ -296,13 +249,6 @@ void get_lock_values(slurmctld_lock_flags_t * lock_flags)
 	xassert(lock_flags);
 	memcpy((void *) lock_flags, (void *) &slurmctld_locks,
 	       sizeof(slurmctld_locks));
-}
-
-/* kill_locked_threads - Kill all threads waiting on semaphores */
-extern void kill_locked_threads(void)
-{
-	kill_thread = 1;
-	slurm_cond_broadcast(&locks_cond);
 }
 
 /* un/lock semaphore used for saving state of slurmctld */

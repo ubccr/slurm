@@ -58,7 +58,7 @@
 
 /* This version string is defined at configure time of libsmd. The
  * META of libsmd needs to reflect this version. */
-char *version_string = "VERSION:17.02";
+char *version_string = "VERSION:17.11";
 
 /* When a remote socket closes on AIX, we have seen poll() return EAGAIN
  * indefinitely for a pending write request. Rather than locking up
@@ -338,7 +338,7 @@ static void *_msg_thread(void *no_data)
 			_proc_msg(new_fd, msg, cli_addr);
 			xfree(msg);
 		}
-		slurm_close(new_fd);
+		close(new_fd);
 	}
 	debug("slurmctld/nonstop: message engine shutdown");
 	if (sock_fd > 0)
@@ -349,8 +349,6 @@ static void *_msg_thread(void *no_data)
 
 extern int spawn_msg_thread(void)
 {
-	pthread_attr_t thread_attr_msg;
-
 	slurm_mutex_lock(&thread_flag_mutex);
 	if (thread_running) {
 		error("nonstop thread already running");
@@ -358,11 +356,7 @@ extern int spawn_msg_thread(void)
 		return SLURM_ERROR;
 	}
 
-	slurm_attr_init(&thread_attr_msg);
-	if (pthread_create(&msg_thread_id, &thread_attr_msg,
-	                   _msg_thread, NULL))
-		fatal("pthread_create %m");
-	slurm_attr_destroy(&thread_attr_msg);
+	slurm_thread_create(&msg_thread_id, _msg_thread, NULL);
 	thread_running = true;
 	slurm_mutex_unlock(&thread_flag_mutex);
 
@@ -386,7 +380,7 @@ extern void term_msg_thread(void)
 		fd = slurm_open_stream(&addr, true);
 		if (fd != -1) {
 			/* we don't care if the open failed */
-			slurm_close(fd);
+			close(fd);
 		}
 
 		debug2("waiting for slurmctld/nonstop thread to exit");

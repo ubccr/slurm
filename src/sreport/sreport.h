@@ -86,15 +86,17 @@ extern char *time_format_string;
 extern char *command_name;
 extern int exit_code;	/* sacctmgr's exit code, =1 on any error at any time */
 extern int exit_flag;	/* program to terminate if =1 */
+extern char *fed_name;	/* Set if operating in federation mode */
 extern int input_words;	/* number of words of input permitted */
 extern int quiet_flag;	/* quiet=1, verbose=-1, normal=0 */
 extern char *tres_str;	/* --tres= value */
-List tres_list;		/* TRES to report, built from --tres= value */
+extern List g_tres_list;/* tres list from database - unaltered */
+extern List tres_list;	/* TRES list based of tres_str (--tres=str) */
 extern void *db_conn;
-extern uint32_t my_uid;
 extern int all_clusters_flag;
 extern slurmdb_report_sort_t sort_flag;
 extern char *cluster_flag;
+extern char *tres_usage_str;
 
 extern void slurmdb_report_print_time(print_field_t *field,
 			       uint64_t value, uint64_t total_time, int last);
@@ -125,5 +127,17 @@ extern void sreport_set_usage_col_width(print_field_t *field, uint64_t number);
 extern void sreport_set_usage_column_width(print_field_t *usage_field,
 					   print_field_t *energy_field,
 					   List slurmdb_report_cluster_list);
+
+/* For duplicate user/account records, combine TRES records into the original
+ * list and purge the duplicate records */
+extern void combine_assoc_tres(List first_assoc_list, List new_assoc_list);
+
+/* Given two TRES lists, combine the content of the second with the first,
+ * adding the counts for duplicate TRES IDs */
+extern void combine_tres_list(List orig_tres_list, List dup_tres_list);
+
+/* For duplicate user/account records, combine TRES records into the original
+ * list and purge the duplicate records */
+extern void combine_user_tres(List first_user_list, List new_user_list);
 
 #endif /* HAVE_SREPORT_H */

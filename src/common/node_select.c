@@ -126,6 +126,33 @@ static slurm_select_ops_t *ops = NULL;
 static plugin_context_t **select_context = NULL;
 static pthread_mutex_t select_context_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool init_run = false;
+
+typedef struct _plugin_args {
+	char *plugin_type;
+	char *default_plugin;
+} _plugin_args_t;
+
+static int _load_plugins(void *x, void *arg)
+{
+	char *plugin_name     = (char *)x;
+	_plugin_args_t *pargs = (_plugin_args_t *)arg;
+
+	select_context[select_context_cnt] =
+		plugin_context_create(pargs->plugin_type, plugin_name,
+				      (void **)&ops[select_context_cnt],
+				      node_select_syms,
+				      sizeof(node_select_syms));
+
+	if (select_context[select_context_cnt]) {
+		/* set the default */
+		if (!xstrcmp(plugin_name, pargs->default_plugin))
+			select_context_default = select_context_cnt;
+		select_context_cnt++;
+	}
+
+	return 0;
+}
+
 /**
  * delete a block request
  */
@@ -190,12 +217,11 @@ extern int select_char2coord(char coord)
 extern int slurm_select_init(bool only_default)
 {
 	int retval = SLURM_SUCCESS;
-	char *type = NULL;
-	int i, j, len;
-	DIR *dirp;
-	struct dirent *e;
-	char *dir_array = NULL, *head = NULL;
+	char *select_type = NULL;
+	int i, j, plugin_cnt;
 	char *plugin_type = "select";
+	List plugin_names = NULL;
+	_plugin_args_t plugin_args = {0};
 
 	if ( init_run && select_context )
 		return retval;
@@ -205,17 +231,17 @@ extern int slurm_select_init(bool only_default)
 	if ( select_context )
 		goto done;
 
-	type = slurm_get_select_type();
+	select_type = slurm_get_select_type();
 	if (working_cluster_rec) {
 		/* just ignore warnings here */
 	} else {
 #ifdef HAVE_BG
-		if (xstrcasecmp(type, "select/bluegene")) {
-			error("%s is incompatible with BlueGene", type);
+		if (xstrcasecmp(select_type, "select/bluegene")) {
+			error("%s is incompatible with BlueGene", select_type);
 			fatal("Use SelectType=select/bluegene");
 		}
 #else
-		if (!xstrcasecmp(type, "select/bluegene")) {
+		if (!xstrcasecmp(select_type, "select/bluegene")) {
 			fatal("Requested SelectType=select/bluegene "
 			      "in slurm.conf, but not running on a BG[L|P|Q] "
 			      "system.  If looking to emulate a BG[L|P|Q] "
@@ -225,13 +251,13 @@ extern int slurm_select_init(bool only_default)
 #endif
 
 #ifdef HAVE_ALPS_CRAY
-		if (xstrcasecmp(type, "select/alps")) {
+		if (xstrcasecmp(select_type, "select/alps")) {
 			error("%s is incompatible with Cray system "
-			      "running alps", type);
+			      "running alps", select_type);
 			fatal("Use SelectType=select/alps");
 		}
 #else
-		if (!xstrcasecmp(type, "select/alps")) {
+		if (!xstrcasecmp(select_type, "select/alps")) {
 			fatal("Requested SelectType=select/alps "
 			      "in slurm.conf, but not running on a ALPS Cray "
 			      "system.  If looking to emulate a Alps Cray "
@@ -240,13 +266,13 @@ extern int slurm_select_init(bool only_default)
 #endif
 
 #ifdef HAVE_NATIVE_CRAY
-		if (xstrcasecmp(type, "select/cray")) {
+		if (xstrcasecmp(select_type, "select/cray")) {
 			error("%s is incompatible with a native Cray system.",
-			      type);
+			      select_type);
 			fatal("Use SelectType=select/cray");
 		}
 #else
-		/* if (!xstrcasecmp(type, "select/cray")) { */
+		/* if (!xstrcasecmp(select_type, "select/cray")) { */
 		/* 	fatal("Requested SelectType=select/cray " */
 		/* 	      "in slurm.conf, but not running on a native Cray " */
 		/* 	      "system.  If looking to run on a Cray " */
@@ -256,99 +282,28 @@ extern int slurm_select_init(bool only_default)
 	}
 
 	select_context_cnt = 0;
+
+	plugin_args.plugin_type    = plugin_type;
+	plugin_args.default_plugin = select_type;
+
 	if (only_default) {
-		ops = xmalloc(sizeof(slurm_select_ops_t));
-		select_context = xmalloc(sizeof(plugin_context_t));
-		if ((select_context[0] = plugin_context_create(
-			     plugin_type, type, (void **)&ops[0],
-			     node_select_syms, sizeof(node_select_syms)))) {
-			select_context_default = 0;
-			select_context_cnt++;
-		}
-		goto skip_load_all;
+		plugin_names = list_create(slurm_destroy_char);
+		list_append(plugin_names, xstrdup(select_type));
+	} else {
+		plugin_names = plugin_get_plugins_of_type(plugin_type);
+	}
+	if (plugin_names && (plugin_cnt = list_count(plugin_names))) {
+		ops = xmalloc(sizeof(slurm_select_ops_t) * plugin_cnt);
+		select_context = xmalloc(sizeof(plugin_context_t *) *
+					 plugin_cnt);
+		list_for_each(plugin_names, _load_plugins, &plugin_args);
 	}
 
-	if (!(dir_array = slurm_get_plugin_dir())) {
-		error("plugin_load_and_link: No plugin dir given");
-		goto done;
-	}
 
-	head = dir_array;
-	for (i=0; ; i++) {
-		bool got_colon = 0;
-		if (dir_array[i] == ':') {
-			dir_array[i] = '\0';
-			got_colon = 1;
-		} else if (dir_array[i] != '\0')
-			continue;
-
-		/* Open the directory. */
-		if (!(dirp = opendir(head))) {
-			error("cannot open plugin directory %s", head);
-			goto done;
-		}
-
-		while (1) {
-			char full_name[128];
-
-			if (!(e = readdir( dirp )))
-				break;
-			/* Check only files with select_ in them. */
-			if (xstrncmp(e->d_name, "select_", 7))
-				continue;
-
-			len = strlen(e->d_name);
-			len -= 3;
-			/* Check only shared object files */
-			if (xstrcmp(e->d_name+len, ".so"))
-				continue;
-			/* add one for the / */
-			len++;
-			xassert(len<sizeof(full_name));
-			snprintf(full_name, len, "select/%s", e->d_name+7);
-			for (j=0; j<select_context_cnt; j++) {
-				if (!xstrcmp(full_name,
-					     select_context[j]->type))
-					break;
-			}
-			if (j >= select_context_cnt) {
-				xrealloc(ops,
-					 (sizeof(slurm_select_ops_t) *
-					  (select_context_cnt + 1)));
-				xrealloc(select_context,
-					 (sizeof(plugin_context_t) *
-					  (select_context_cnt + 1)));
-
-				select_context[select_context_cnt] =
-					plugin_context_create(
-						plugin_type, full_name,
-						(void **)&ops[
-							select_context_cnt],
-						node_select_syms,
-						sizeof(node_select_syms));
-				if (select_context[select_context_cnt]) {
-					/* set the default */
-					if (!xstrcmp(full_name, type))
-						select_context_default =
-							select_context_cnt;
-					select_context_cnt++;
-				}
-			}
-		}
-
-		closedir(dirp);
-
-		if (got_colon) {
-			head = dir_array + i + 1;
-		} else
-			break;
-	}
-
-skip_load_all:
 	if (select_context_default == -1)
-		fatal("Can't find plugin for %s", type);
+		fatal("Can't find plugin for %s", select_type);
 
-	/* Insure that plugin_id is valid and unique */
+	/* Ensure that plugin_id is valid and unique */
 	for (i=0; i<select_context_cnt; i++) {
 		for (j=i+1; j<select_context_cnt; j++) {
 			if (*(ops[i].plugin_id) !=
@@ -377,15 +332,15 @@ done:
 				fatal("Invalid SelectTypeParameters for "
 				      "%s: %s (%u), it's can't contain "
 				      "CR_(CPU|CORE|SOCKET).",
-				      type,
+				      select_type,
 				      select_type_param_string(cr_type),
 				      cr_type);
 			}
 		}
 	}
 
-	xfree(type);
-	xfree(dir_array);
+	xfree(select_type);
+	FREE_NULL_LIST(plugin_names);
 
 	return retval;
 }
@@ -416,16 +371,62 @@ fini:	slurm_mutex_unlock(&select_context_lock);
 extern int select_get_plugin_id_pos(uint32_t plugin_id)
 {
 	int i;
+	static bool cray_other_cons_res = false;
 
 	if (slurm_select_init(0) < 0)
 		return SLURM_ERROR;
-
+again:
 	for (i=0; i<select_context_cnt; i++) {
 		if (*(ops[i].plugin_id) == plugin_id)
 			break;
 	}
-	if (i >= select_context_cnt)
+	if (i >= select_context_cnt) {
+		/*
+		 * Put on the extra cray plugin that doesn't get generated
+		 * automatically.
+		 */
+		if (!cray_other_cons_res &&
+		    ((plugin_id == SELECT_PLUGIN_CRAY_CONS_RES) ||
+		     (plugin_id == SELECT_PLUGIN_CRAY_LINEAR))) {
+			char *type = "select", *name = "select/cray";
+			uint16_t save_params = slurm_get_select_type_param();
+			uint16_t params;
+			int cray_plugin_id;
+
+			cray_other_cons_res = true;
+
+			if (plugin_id == SELECT_PLUGIN_CRAY_LINEAR) {
+				params = save_params & ~CR_OTHER_CONS_RES;
+				cray_plugin_id = SELECT_PLUGIN_CRAY_CONS_RES;
+			} else {
+				params = save_params | CR_OTHER_CONS_RES;
+				cray_plugin_id = SELECT_PLUGIN_CRAY_LINEAR;
+			}
+
+			for (i=0; i<select_context_cnt; i++) {
+				if (*(ops[i].plugin_id) == cray_plugin_id)
+					break;
+			}
+
+			if (i >= select_context_cnt)
+				goto end_it;
+
+			slurm_mutex_lock(&select_context_lock);
+			slurm_set_select_type_param(params);
+			plugin_context_destroy(select_context[i]);
+			select_context[i] =
+				plugin_context_create(type, name,
+						      (void **)&ops[i],
+						      node_select_syms,
+						      sizeof(node_select_syms));
+			slurm_set_select_type_param(save_params);
+			slurm_mutex_unlock(&select_context_lock);
+			goto again;
+		}
+
+	end_it:
 		return SLURM_ERROR;
+	}
 	return i;
 }
 
@@ -659,9 +660,9 @@ extern int select_g_job_resized(struct job_record *job_ptr,
 }
 
 /*
- * Pass job-step signal to plugin before signalling any job steps, so that
+ * Pass job-step signal to plugin before signaling any job steps, so that
  * any signal-dependent actions can be taken.
- * IN job_ptr - job to be signalled
+ * IN job_ptr - job to be signaled
  * IN signal  - signal(7) number
  */
 extern int select_g_job_signal(struct job_record *job_ptr, int signal)

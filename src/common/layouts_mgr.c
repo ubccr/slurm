@@ -193,6 +193,7 @@ static const char* layouts_keydef_idfunc(void* item)
  */
 typedef struct layouts_mgr_st {
 	pthread_mutex_t lock;
+	bool	init_done;	/* Set if memory allocated for arrays/List */
 	layout_plugin_t *plugins;
 	uint32_t plugins_count;
 	List    layouts_desc;  /* list of the layouts requested in conf */
@@ -206,7 +207,7 @@ typedef struct layouts_mgr_st {
 \*****************************************************************************/
 
 /** global structure holding layouts and entities */
-static layouts_mgr_t layouts_mgr = {PTHREAD_MUTEX_INITIALIZER};
+static layouts_mgr_t layouts_mgr = {PTHREAD_MUTEX_INITIALIZER, false};
 static layouts_mgr_t* mgr = &layouts_mgr;
 
 /*****************************************************************************\
@@ -266,7 +267,7 @@ static char* _cat(char* dest, const char* src, size_t n)
 	return r;
 }
 
-static char* trim(char* str)
+static char* _trim(char* str)
 {
 	char* str_modifier;
 	if (!str)
@@ -550,6 +551,9 @@ int _layouts_entity_set_kv(layout_t* l, entity_t* e, char* key, void* value,
 	case L_T_LONG_DOUBLE:
 		size = sizeof(long double);
 		break;
+	default:
+		value = NULL;
+		return SLURM_ERROR;
 	}
 	return entity_set_data(e, key_keydef, value, size);
 }
@@ -613,8 +617,6 @@ int _layouts_entity_get_kv(layout_t* l, entity_t* e, char* key, void* value,
 	}
 
 	switch(real_type) {
-	case L_T_ERROR:
-		return SLURM_ERROR;
 	case L_T_STRING:
 		pstr = (char**) value;
 		*pstr = xstrdup(data);
@@ -645,6 +647,9 @@ int _layouts_entity_get_kv(layout_t* l, entity_t* e, char* key, void* value,
 	case L_T_LONG_DOUBLE:
 		size = sizeof(long double);
 		break;
+	case L_T_ERROR:
+	default:
+		return SLURM_ERROR;
 	}
 	memcpy(value, data, size);
 	return SLURM_SUCCESS;
@@ -888,7 +893,7 @@ static void _layouts_mgr_parse_global_conf(layouts_mgr_t* mgr)
 {
 	char* layouts;
 	char* parser;
-	char* saveptr;
+	char* saveptr = NULL;
 	char* slash;
 	layouts_conf_spec_t* nspec;
 
@@ -898,14 +903,14 @@ static void _layouts_mgr_parse_global_conf(layouts_mgr_t* mgr)
 	while (parser) {
 		nspec = (layouts_conf_spec_t*)xmalloc(
 			sizeof(layouts_conf_spec_t));
-		nspec->whole_name = xstrdup(trim(parser));
+		nspec->whole_name = xstrdup(_trim(parser));
 		slash = strchr(parser, '/');
 		if (slash) {
 			*slash = 0;
-			nspec->type = xstrdup(trim(parser));
-			nspec->name = xstrdup(trim(slash+1));
+			nspec->type = xstrdup(_trim(parser));
+			nspec->name = xstrdup(_trim(slash+1));
 		} else {
-			nspec->type = xstrdup(trim(parser));
+			nspec->type = xstrdup(_trim(parser));
 			nspec->name = xstrdup("default");
 		}
 		list_append(mgr->layouts_desc, nspec);
@@ -914,29 +919,32 @@ static void _layouts_mgr_parse_global_conf(layouts_mgr_t* mgr)
 	xfree(layouts);
 }
 
-static void layouts_mgr_init(layouts_mgr_t* mgr)
+static void _layouts_mgr_free(layouts_mgr_t* mgr)
 {
-	_layouts_mgr_parse_global_conf(mgr);
+	/* free the configuration details */
+	FREE_NULL_LIST(mgr->layouts_desc);
 
+	/* FIXME: can we do a faster free here? since each node removal will
+	 * modify either the entities or layouts for back (or forward)
+	 * references. */
+	xhash_free(mgr->layouts);
+	xhash_free(mgr->entities);
+	xhash_free(mgr->keydefs);
+	mgr->init_done = false;
+}
+
+static void _layouts_mgr_init(layouts_mgr_t* mgr)
+{
+	if (mgr->init_done)
+		_layouts_mgr_free(mgr);
+	mgr->init_done = true;
+	_layouts_mgr_parse_global_conf(mgr);
 	mgr->layouts = xhash_init(layout_hashable_identify_by_type,
 				  (xhash_freefunc_t)_layout_free, NULL, 0);
 	mgr->entities = xhash_init(entity_hashable_identify,
 				   (xhash_freefunc_t)_entity_free, NULL, 0);
 	mgr->keydefs = xhash_init(layouts_keydef_idfunc,
 				  _layouts_keydef_free, NULL, 0);
-}
-
-static void layouts_mgr_free(layouts_mgr_t* mgr)
-{
-	/* free the configuration details */
-	FREE_NULL_LIST(mgr->layouts_desc);
-
-	/* FIXME: can we do a faster free here ? since each node removal will
-	 * modify either the entities or layouts for back (or forward)
-	 * references. */
-	xhash_free(mgr->layouts);
-	xhash_free(mgr->entities);
-	xhash_free(mgr->keydefs);
 }
 
 /*****************************************************************************\
@@ -1153,10 +1161,10 @@ static int _layouts_read_config_post(layout_plugin_t* plugin,
 			xfree(root_nodename);
 			return SLURM_ERROR;
 		}
-		e = xhash_get(mgr->entities, trim(root_nodename));
+		e = xhash_get(mgr->entities, _trim(root_nodename));
 		if (!e) {
 			error("layouts: unable to find specified root "
-			      "entity `%s'", trim(root_nodename));
+			      "entity `%s'", _trim(root_nodename));
 			xfree(root_nodename);
 			return SLURM_ERROR;
 		}
@@ -1889,8 +1897,8 @@ static int _autoupdate_entity_kv(layouts_keydef_t* keydef,
 /*
  * helper function used to update KVs of an entity using its xtree_node
  * looking for known inheritance in the neighborhood (parents/children) */
-static void _tree_update_node_entity_data(void* item, void* arg) {
-
+static void _tree_update_node_entity_data(void* item, void* arg)
+{
 	uint32_t action;
 	entity_data_t* data;
 	_autoupdate_tree_args_t *pargs;
@@ -1954,6 +1962,8 @@ static void _tree_update_node_entity_data(void* item, void* arg) {
 
 		/* get current node value reference */
 		oldvalue = entity_get_data_ref(cnode->entity, keydef->key);
+		if (!oldvalue)
+			return;
 
 		/* get siblings count */
 		child = node->start;
@@ -1988,6 +1998,8 @@ static void _tree_update_node_entity_data(void* item, void* arg) {
 
 		/* get current node value reference */
 		oldvalue = entity_get_data_ref(cnode->entity, keydef->key);
+		if (!oldvalue)
+			return;
 
 		/* get children count */
 		node = (xtree_node_t*)cnode->node;
@@ -2273,7 +2285,7 @@ int layouts_init(void)
 
 	slurm_mutex_lock(&layouts_mgr.lock);
 
-	layouts_mgr_init(&layouts_mgr);
+	_layouts_mgr_init(&layouts_mgr);
 	layouts_count = list_count(layouts_mgr.layouts_desc);
 	if (layouts_count == 0)
 		info("layouts: no layout to initialize");
@@ -2316,10 +2328,12 @@ int layouts_fini(void)
 
 	slurm_mutex_lock(&mgr->lock);
 
-	/* free the layouts before destroying the plugins,
+	/*
+	 * free the layouts before destroying the plugins,
 	 * otherwise we will get trouble xfreeing the layouts whose
-	 * memory is owned by the plugins structs */
-	layouts_mgr_free(mgr);
+	 * memory is owned by the plugins structs
+	 */
+	_layouts_mgr_free(mgr);
 
 	for (i = 0; i < mgr->plugins_count; i++) {
 		_layout_plugins_destroy(&mgr->plugins[i]);

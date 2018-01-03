@@ -47,6 +47,7 @@
 #include <sys/stat.h>
 
 #include "src/common/slurm_xlator.h"
+#include "src/common/strlcpy.h"
 #include "filetxt_jobacct_process.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmdbd/read_config.h"
@@ -293,7 +294,7 @@ static slurmdb_job_rec_t *_slurmdb_create_job_rec(
 	    && list_count(job_cond->state_list)) {
 		char *object = NULL;
 		itr = list_iterator_create(job_cond->state_list);
-		while((object = list_next(itr))) {
+		while ((object = list_next(itr))) {
 			if (atoi(object) == filetxt_job->status) {
 				list_iterator_destroy(itr);
 				goto foundstate;
@@ -340,7 +341,7 @@ no_cond:
 	slurmdb_job->steps = list_create(slurmdb_destroy_step_rec);
 	if (filetxt_job->steps) {
 		itr = list_iterator_create(filetxt_job->steps);
-		while((filetxt_step = list_next(itr))) {
+		while ((filetxt_step = list_next(itr))) {
 			slurmdb_step_rec_t *step =
 				_slurmdb_create_step_rec(filetxt_step);
 			if (step) {
@@ -404,16 +405,16 @@ static filetxt_step_rec_t *_create_filetxt_step_rec(filetxt_header_t header)
 	memcpy(&step->header, &header, sizeof(filetxt_header_t));
 	memset(&step->rusage, 0, sizeof(struct rusage));
 	memset(&step->stats, 0, sizeof(slurmdb_stats_t));
-	step->stepnum = (uint32_t)NO_VAL;
+	step->stepnum = NO_VAL;
 	step->nodes = NULL;
 	step->stepname = NULL;
 	step->status = NO_VAL;
 	step->exitcode = NO_VAL;
-	step->ntasks = (uint32_t)NO_VAL;
-	step->ncpus = (uint32_t)NO_VAL;
-	step->elapsed = (uint32_t)NO_VAL;
-	step->tot_cpu_sec = (uint32_t)NO_VAL;
-	step->tot_cpu_usec = (uint32_t)NO_VAL;
+	step->ntasks = NO_VAL;
+	step->ncpus = NO_VAL;
+	step->elapsed = NO_VAL;
+	step->tot_cpu_sec = NO_VAL;
+	step->tot_cpu_usec = NO_VAL;
 	step->account = NULL;
 	step->requid = -1;
 
@@ -440,8 +441,7 @@ static char *_prefix_filename(char *path, char *prefix) {
 		}
 	i++;
 	*out = 0;
-	strncpy(out, path, i);
-	out[i] = 0;
+	strlcpy(out, path, i);
 	strcat(out, prefix);
 	strcat(out, path+i);
 	return(out);
@@ -499,7 +499,7 @@ static filetxt_job_rec_t *_find_job_record(List job_list,
 	filetxt_job_rec_t *job = NULL;
 	ListIterator itr = list_iterator_create(job_list);
 
-	while((job = (filetxt_job_rec_t *)list_next(itr)) != NULL) {
+	while ((job = (filetxt_job_rec_t *)list_next(itr)) != NULL) {
 		if (job->header.jobnum == header.jobnum) {
 			if (job->header.job_submit == 0 && type == JOB_START) {
 				list_remove(itr);
@@ -541,7 +541,7 @@ static filetxt_step_rec_t *_find_step_record(filetxt_job_rec_t *job,
 		return step;
 
 	itr = list_iterator_create(job->steps);
-	while((step = (filetxt_step_rec_t *)list_next(itr)) != NULL) {
+	while ((step = (filetxt_step_rec_t *)list_next(itr)) != NULL) {
 		if (step->stepnum == stepnum)
 			break;
 	}
@@ -570,7 +570,7 @@ static int _parse_line(char *f[], void **data, int len)
 	filetxt_header_t header;
 	_parse_header(f, &header);
 
-	switch(i) {
+	switch (i) {
 	case JOB_START:
 		*job = _create_filetxt_job_rec(header);
 		(*job)->jobname = xstrdup(f[F_JOBNAME]);
@@ -644,16 +644,16 @@ static int _parse_line(char *f[], void **data, int len)
 			(*step)->stepname = xstrdup(f[F_STEPNAME]);
 			(*step)->nodes = xstrdup(f[F_STEPNODES]);
 		} else {
-			(*step)->stats.vsize_max_taskid = (uint16_t)NO_VAL;
+			(*step)->stats.vsize_max_taskid = NO_VAL16;
 			(*step)->stats.vsize_ave = (float)NO_VAL;
 			(*step)->stats.rss_max = NO_VAL;
-			(*step)->stats.rss_max_taskid = (uint16_t)NO_VAL;
+			(*step)->stats.rss_max_taskid = NO_VAL16;
 			(*step)->stats.rss_ave = (float)NO_VAL;
 			(*step)->stats.pages_max = NO_VAL;
-			(*step)->stats.pages_max_taskid = (uint16_t)NO_VAL;
+			(*step)->stats.pages_max_taskid = NO_VAL16;
 			(*step)->stats.pages_ave = (float)NO_VAL;
 			(*step)->stats.cpu_min = NO_VAL;
-			(*step)->stats.cpu_min_taskid = (uint16_t)NO_VAL;
+			(*step)->stats.cpu_min_taskid = NO_VAL16;
 			(*step)->stats.cpu_ave =  (float)NO_VAL;
 			(*step)->stepname = NULL;
 			(*step)->nodes = NULL;
@@ -975,7 +975,7 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 		if (job_cond->userid_list
 		    && list_count(job_cond->userid_list)) {
 			itr = list_iterator_create(job_cond->userid_list);
-			while((object = list_next(itr))) {
+			while ((object = list_next(itr))) {
 				if (atoi(object) == uid) {
 					list_iterator_destroy(itr);
 					goto founduid;
@@ -989,7 +989,7 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 		if (job_cond->groupid_list
 		    && list_count(job_cond->groupid_list)) {
 			itr = list_iterator_create(job_cond->groupid_list);
-			while((object = list_next(itr))) {
+			while ((object = list_next(itr))) {
 				if (atoi(object) == gid) {
 					list_iterator_destroy(itr);
 					goto foundgid;
@@ -1003,7 +1003,7 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 		if ((rec_type == JOB_START) && job_cond->jobname_list
 		    && list_count(job_cond->jobname_list)) {
 			itr = list_iterator_create(job_cond->jobname_list);
-			while((object = list_next(itr))) {
+			while ((object = list_next(itr))) {
 				if (!xstrcasecmp(f[F_JOBNAME], object)) {
 					list_iterator_destroy(itr);
 					goto foundjobname;
@@ -1017,7 +1017,7 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 		if (job_cond->step_list
 		    && list_count(job_cond->step_list)) {
 			itr = list_iterator_create(job_cond->step_list);
-			while((selected_step = list_next(itr))) {
+			while ((selected_step = list_next(itr))) {
 				if (selected_step->jobid != job_id)
 					continue;
 				/* job matches; does the step? */
@@ -1042,7 +1042,7 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 		if ((rec_type == JOB_START) && job_cond->partition_list
 		    && list_count(job_cond->partition_list)) {
 			itr = list_iterator_create(job_cond->partition_list);
-			while((object = list_next(itr)))
+			while ((object = list_next(itr)))
 				if (!xstrcasecmp(f[F_PARTITION], object)) {
 					list_iterator_destroy(itr);
 					goto foundp;
@@ -1055,7 +1055,7 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 	no_cond:
 
 		/* Build suitable tables with all the data */
-		switch(rec_type) {
+		switch (rec_type) {
 		case JOB_START:
 			if (i < F_JOB_ACCOUNT) {
 				error("Bad data on a Job Start");
@@ -1101,14 +1101,14 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 
 	itr = list_iterator_create(job_list);
 
-	while((filetxt_job = list_next(itr))) {
+	while ((filetxt_job = list_next(itr))) {
 		slurmdb_job_rec_t *slurmdb_job =
 			_slurmdb_create_job_rec(filetxt_job, job_cond);
 		if (slurmdb_job) {
 			slurmdb_job_rec_t *curr_job = NULL;
 			if (itr2) {
 				list_iterator_reset(itr2);
-				while((curr_job = list_next(itr2))) {
+				while ((curr_job = list_next(itr2))) {
 					if (curr_job->jobid ==
 					    slurmdb_job->jobid) {
 						list_delete_item(itr2);
@@ -1248,20 +1248,21 @@ extern int filetxt_jobacct_process_archive(slurmdb_archive_cond_t *arch_cond)
 				list_append(keep_list, exp_rec);
 				continue;
 			}
-			if ((rec_type == JOB_START) && job_cond->partition_list
+			if (job_cond->partition_list
 			    && list_count(job_cond->partition_list)) {
 				itr = list_iterator_create(
 					job_cond->partition_list);
-				while((object = list_next(itr)))
+				while ((object = list_next(itr)))
 					if (!xstrcasecmp(f[F_PARTITION],
 							 object))
 						break;
 
 				list_iterator_destroy(itr);
-				if (!object)
+				if (!object) {
+					_destroy_exp(exp_rec);
 					continue;	/* no match */
+				}
 			}
-
 			list_append(exp_list, exp_rec);
 			debug2("Selected: %8d %d",
 			       exp_rec->job,
@@ -1286,10 +1287,12 @@ extern int filetxt_jobacct_process_archive(slurmdb_archive_cond_t *arch_cond)
 	}
 
 	if (new_file) {  /* By default, the expired file looks like the log */
-		chmod(logfile_name, prot);
-		if (chown(logfile_name, uid, gid) == -1)
-			error("Couldn't change ownership of %s to %u:%u",
-			      logfile_name, uid, gid);
+		if (chmod(logfile_name, prot) == -1)
+			error("%s: chmod(%s): %m", __func__, logfile_name);
+		if (chown(logfile_name, uid, gid) == -1) {
+			error("%s(1): chown(%s, %u, %u)",
+			      __func__, logfile_name, uid, gid);
+		}
 	}
 	xfree(logfile_name);
 
@@ -1301,12 +1304,16 @@ extern int filetxt_jobacct_process_archive(slurmdb_archive_cond_t *arch_cond)
 		fclose(expired_logfile);
 		goto finished;
 	}
-	chmod(logfile_name, prot);     /* preserve file protection */
-	if (chown(logfile_name, uid, gid) == -1)/* and ownership */
-		error("2 Couldn't change ownership of %s to %u:%u",
-		      logfile_name, uid, gid);
-	/* Use line buffering to allow us to safely write
-	 * to the log file at the same time as slurmctld. */
+	if (chmod(logfile_name, prot) == -1)
+		error("%s(2): chmod(%s): %m", __func__, logfile_name);
+	if (chown(logfile_name, uid, gid) == -1) {
+		error("%s(2): chown(%s, %u, %u)",
+		      __func__, logfile_name, uid, gid);
+	}
+	/*
+	 * Use line buffering to allow us to safely write
+	 * to the log file at the same time as slurmctld.
+	 */
 	if (setvbuf(new_logfile, NULL, _IOLBF, 0)) {
 		perror("setvbuf()");
 		fclose(expired_logfile);
@@ -1319,16 +1326,16 @@ extern int filetxt_jobacct_process_archive(slurmdb_archive_cond_t *arch_cond)
 	/* if (params->opt_verbose > 2) { */
 /* 		error("--- contents of exp_list ---"); */
 /* 		itr = list_iterator_create(exp_list); */
-/* 		while((exp_rec = list_next(itr))) */
+/* 		while ((exp_rec = list_next(itr))) */
 /* 			error("%d", exp_rec->job); */
 /* 		error("---- end of exp_list ---"); */
 /* 		list_iterator_destroy(itr); */
 /* 	} */
 	/* write the expired file */
 	itr = list_iterator_create(exp_list);
-	while((exp_rec = list_next(itr))) {
+	while ((exp_rec = list_next(itr))) {
 		itr2 = list_iterator_create(other_list);
-		while((exp_rec2 = list_next(itr2))) {
+		while ((exp_rec2 = list_next(itr2))) {
 			if ((exp_rec2->job != exp_rec->job)
 			   || (exp_rec2->job_submit != exp_rec->job_submit))
 				continue;
@@ -1355,9 +1362,9 @@ extern int filetxt_jobacct_process_archive(slurmdb_archive_cond_t *arch_cond)
 
 	/* write the new log */
 	itr = list_iterator_create(keep_list);
-	while((exp_rec = list_next(itr))) {
+	while ((exp_rec = list_next(itr))) {
 		itr2 = list_iterator_create(other_list);
-		while((exp_rec2 = list_next(itr2))) {
+		while ((exp_rec2 = list_next(itr2))) {
 			if (exp_rec2->job != exp_rec->job)
 				continue;
 			if (fputs(exp_rec2->line, new_logfile)<0) {
@@ -1380,7 +1387,7 @@ extern int filetxt_jobacct_process_archive(slurmdb_archive_cond_t *arch_cond)
 
 	/* write records in other_list to new log */
 	itr = list_iterator_create(other_list);
-	while((exp_rec = list_next(itr))) {
+	while ((exp_rec = list_next(itr))) {
 		if (fputs(exp_rec->line, new_logfile)<0) {
 			perror("writing keep_logfile");
 			list_iterator_destroy(itr);

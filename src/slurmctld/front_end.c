@@ -311,7 +311,7 @@ extern int update_front_end(update_front_end_msg_t *msg_ptr)
 			xassert(front_end_ptr->magic == FRONT_END_MAGIC);
 			if (xstrcmp(this_node_name, front_end_ptr->name))
 				continue;
-			if (msg_ptr->node_state == (uint32_t)NO_VAL) {
+			if (msg_ptr->node_state == NO_VAL) {
 				;	/* No change in node state */
 			} else if (msg_ptr->node_state == NODE_RESUME) {
 				front_end_ptr->node_state = NODE_STATE_IDLE;
@@ -332,7 +332,7 @@ extern int update_front_end(update_front_end_msg_t *msg_ptr)
 				set_front_end_down(front_end_ptr,
 						   msg_ptr->reason);
 			}
-			if (msg_ptr->node_state != (uint32_t) NO_VAL) {
+			if (msg_ptr->node_state != NO_VAL) {
 				info("update_front_end: set state of %s to %s",
 				     this_node_name,
 				     node_state_string(front_end_ptr->
@@ -783,14 +783,16 @@ extern int load_all_front_end_state(bool state_only)
 	time_t time_stamp;
 	Buf buffer;
 	char *ver_str = NULL;
-	uint16_t protocol_version = (uint16_t) NO_VAL;
+	uint16_t protocol_version = NO_VAL16;
 
 	/* read the file */
 	lock_state_files ();
 	state_fd = _open_front_end_state_file(&state_file);
 	if (state_fd < 0) {
-		info ("No node state file (%s) to recover", state_file);
-		error_code = ENOENT;
+		info("No node state file (%s) to recover", state_file);
+		xfree(state_file);
+		unlock_state_files();
+		return ENOENT;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -822,7 +824,9 @@ extern int load_all_front_end_state(bool state_only)
 	if (ver_str && !xstrcmp(ver_str, FRONT_END_STATE_VERSION))
 		safe_unpack16(&protocol_version, buffer);
 
-	if (protocol_version == (uint16_t) NO_VAL) {
+	if (protocol_version == NO_VAL16) {
+		if (!ignore_state_errors)
+			fatal("Can not recover front_end state, version incompatible, start with '-i' to ignore this");
 		error("*****************************************************");
 		error("Can not recover front_end state, version incompatible");
 		error("*****************************************************");
@@ -835,8 +839,8 @@ extern int load_all_front_end_state(bool state_only)
 	safe_unpack_time(&time_stamp, buffer);
 
 	while (remaining_buf (buffer) > 0) {
-		uint32_t base_state = (uint32_t)NO_VAL;
-		uint16_t obj_protocol_version = (uint16_t)NO_VAL;;
+		uint32_t base_state = NO_VAL;
+		uint16_t obj_protocol_version = NO_VAL16;
 
 		if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 			safe_unpackstr_xmalloc (&node_name, &name_len, buffer);
@@ -893,7 +897,7 @@ extern int load_all_front_end_state(bool state_only)
 
 		if (front_end_ptr) {
 			node_cnt++;
-			if (obj_protocol_version != (uint16_t)NO_VAL)
+			if (obj_protocol_version != NO_VAL16)
 				front_end_ptr->protocol_version =
 					obj_protocol_version;
 			else
@@ -918,6 +922,8 @@ fini:	info("Recovered state of %d front_end nodes", node_cnt);
 	return error_code;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete front_end node data checkpoint file, start with '-i' to ignore this");
 	error("Incomplete front_end node data checkpoint file");
 	error_code = EFAULT;
 	xfree (node_name);

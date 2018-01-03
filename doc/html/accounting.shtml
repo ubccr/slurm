@@ -21,12 +21,11 @@ these plugins include:</p>
 <ul>
 <li><b>AccountingStorageType</b> controls how detailed job and job
 step information is recorded. You can store this information in a
-text file, <a href="http://www.mysql.com/">MySQL</a>
-or MariaDB database (using the InnoDB storage engine), optionally using SlurmDBD for added security.</li>
+text file or into SlurmDBD.</li>
 <li><b>JobAcctGatherType</b> is operating system dependent and
 controls what mechanism is used to collect accounting information.
 Supported values are <i>jobacct_gather/linux</i> (recommended),
-<i>jobacct_gather/cgroup<i> and <i>jobacct_gather/none</i>
+<i>jobacct_gather/cgroup</i> and <i>jobacct_gather/none</i>
 (no information collected).</li>
 <li><b>JobCompType</b> controls how job completion information is
 recorded. This can be used to record basic job information such
@@ -56,7 +55,7 @@ pathname of the file (e.g.
 <i>JobCompLoc=/var/log/slurm/job_completions</i>).
 Use the <i>logrotate</i> or similar tool to prevent the
 log files from getting too large.
-Send a SIGHUP signal to the <i>slurmctld</i> daemon
+Send a SIGUSR2 signal to the <i>slurmctld</i> daemon
 after moving the files, but before compressing them so
 that new log files will be created.</p>
 
@@ -133,7 +132,7 @@ users should have consistent names and IDs.</p>
 
 <p><b>NOTE:</b> Only lowercase usernames are supported.
 
-<p>The best way to insure security of the data is by authenticating
+<p>The best way to ensure security of the data is by authenticating
 communications to the SlurmDBD and we recommend
 <a href="https://dun.github.io/munge/">MUNGE</a> for that purpose.
 If you have one cluster managed by Slurm and execute the SlurmDBD

@@ -31,6 +31,7 @@
 #include "src/sview/sview.h"
 #include "src/common/parse_time.h"
 #include "src/common/proc_args.h"
+#include "src/common/state_control.h"
 #include "src/common/xstring.h"
 
 #define _DEBUG 0
@@ -91,11 +92,11 @@ static char *_initial_page_opts = "Name,Node_Count,Core_Count,NodeList,"
 static display_data_t display_data_resv[] = {
 	{G_TYPE_INT, SORTID_POS, NULL, false, EDIT_NONE,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_NAME,       "Name", false, EDIT_NONE,
+	{G_TYPE_STRING, SORTID_NAME, "Name", false, EDIT_NONE,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_COLOR,      NULL, true, EDIT_COLOR,
+	{G_TYPE_STRING, SORTID_COLOR, NULL, true, EDIT_COLOR,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_ACTION,     "Action", false, EDIT_MODEL,
+	{G_TYPE_STRING, SORTID_ACTION, "Action", false, EDIT_MODEL,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_NODE_CNT,
 #ifdef HAVE_BG
@@ -120,33 +121,33 @@ static display_data_t display_data_resv[] = {
 	 false, EDIT_TEXTBOX, refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_TIME_START, "Time Start", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_TIME_END,   "Time End", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_TIME_END, "Time End", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_DURATION,   "Duration", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_DURATION, "Duration", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_ACCOUNTS,   "Accounts", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_ACCOUNTS, "Accounts", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_BURST_BUFFER,  "BurstBuffer", false,
+	{G_TYPE_STRING, SORTID_BURST_BUFFER, "BurstBuffer", false,
 	 EDIT_TEXTBOX, refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_LICENSES,   "Licenses", true, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_LICENSES, "Licenses", true, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_USERS,      "Users", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_USERS, "Users", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_PARTITION,  "Partition", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_PARTITION, "Partition", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_FEATURES,   "Features", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_FEATURES, "Features", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_FLAGS,      "Flags", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_FLAGS, "Flags", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_POINTER, SORTID_NODE_INX,  NULL, false, EDIT_NONE,
+	{G_TYPE_POINTER, SORTID_NODE_INX, NULL, false, EDIT_NONE,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_INT, SORTID_COLOR_INX,  NULL, false, EDIT_NONE,
+	{G_TYPE_INT, SORTID_COLOR_INX, NULL, false, EDIT_NONE,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_TRES,   "TRES", false, EDIT_NONE,
+	{G_TYPE_STRING, SORTID_TRES, "TRES", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_INT,    SORTID_UPDATED,    NULL, false, EDIT_NONE,
+	{G_TYPE_INT, SORTID_UPDATED, NULL, false, EDIT_NONE,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_WATTS,    "Watts", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_WATTS, "Watts", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_NONE, -1, NULL, false, EDIT_NONE}
 };
@@ -154,7 +155,7 @@ static display_data_t display_data_resv[] = {
 static display_data_t create_data_resv[] = {
 	{G_TYPE_INT, SORTID_POS, NULL, false, EDIT_NONE,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_NAME,  "Name", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_NAME, "Name", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_NODE_CNT,
 #ifdef HAVE_BG
@@ -181,21 +182,23 @@ static display_data_t create_data_resv[] = {
 	{G_TYPE_STRING, SORTID_TIME_START, "Time_Start",
 	 false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_TIME_END,   "Time_End", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_TIME_END, "Time_End", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_DURATION,   "Duration", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_DURATION, "Duration", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_ACCOUNTS,   "Accounts", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_ACCOUNTS, "Accounts", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_BURST_BUFFER,  "BurstBuffer", false,
+	{G_TYPE_STRING, SORTID_BURST_BUFFER, "BurstBuffer", false,
 	 EDIT_TEXTBOX, refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_USERS,      "Users", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_USERS, "Users", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_PARTITION,  "Partition", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_PARTITION, "Partition", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_FEATURES,   "Features", false, EDIT_TEXTBOX,
+	{G_TYPE_STRING, SORTID_FEATURES, "Features", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_FLAGS, "Flags", false, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_TRES, "TRES", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_WATTS, "Watts", false, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
@@ -257,78 +260,23 @@ end_it:
 
 }
 
-static uint32_t _parse_watts(char * watts_str)
-{
-	uint32_t watts_num = 0;
-	char *end_ptr = NULL;
-
-	if (!xstrcasecmp(watts_str, "n/a") || !xstrcasecmp(watts_str, "none"))
-		return watts_num;
-	if (!xstrcasecmp(watts_str, "INFINITE"))
-		return INFINITE;
-	watts_num = strtol(watts_str, &end_ptr, 10);
-	if ((end_ptr[0] == 'k') || (end_ptr[0] == 'K')) {
-		watts_num *= 1000;
-	} else if ((end_ptr[0] == 'm') || (end_ptr[0] == 'M')) {
-		watts_num *= 1000000;
-	} else if (end_ptr[0] != '\0') {
-		g_printerr("invalid watts value\n");
-		watts_num = NO_VAL;
-	}
-	return watts_num;
-}
-
-/* Inspired by same func in src/scontrol/create_res.c, without error msgs */
-static int _parse_resv_core_cnt(resv_desc_msg_t *resv_msg_ptr, const char *val)
-{
-
-        char *endptr = NULL, *core_cnt = NULL, *tok = NULL;
-	char *type = NULL, *ptrptr = NULL;
-        int node_inx = 0;
-	uint32_t select_type = slurmdb_setup_plugin_id_select();
-
-	/* only have this on a cons_res machine */
-	if (select_type != SELECT_PLUGIN_CONS_RES &&
-	    select_type != SELECT_PLUGIN_CRAY_CONS_RES)
-		return SLURM_ERROR;
-
-        xfree(type);
-        core_cnt = xstrdup(val);
-        tok = strtok_r(core_cnt, ",", &ptrptr);
-        while (tok) {
-                xrealloc(resv_msg_ptr->core_cnt,
-                         sizeof(uint32_t) * (node_inx + 2));
-                resv_msg_ptr->core_cnt[node_inx] =
-                        strtol(tok, &endptr, 10);
-                if ((endptr == NULL) ||
-                    (endptr[0] != '\0') ||
-                    (tok[0] == '\0')) {
-                        xfree(core_cnt);
-                        return SLURM_ERROR;
-                }
-                node_inx++;
-                tok = strtok_r(NULL, ",", &ptrptr);
-        }
-
-        xfree(core_cnt);
-        return SLURM_SUCCESS;
-}
-
 
 /* don't free this char */
 static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 				 const char *new_text,
 				 int column)
 {
-	char *type = "", *temp_str;
-	char *tmp_text, *last = NULL, *tok;
-	int block_inx, temp_int = 0;
+	char *type = "";
+	char *err_msg = NULL;
+	int free_tres_license = 0;
+	int free_tres_bb = 0;
+	int free_tres_corecnt = 0;
+	int free_tres_nodecnt = 0;
+	int temp_int = 0;
 	uint32_t f;
 
 	/* need to clear global_edit_error here (just in case) */
 	global_edit_error = 0;
-	if (global_edit_error_msg)
-		g_free(global_edit_error_msg);
 
 	if (!resv_msg)
 		return NULL;
@@ -349,18 +297,27 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 		resv_msg->burst_buffer = xstrdup(new_text);
 		type = "burst_buffer";
 		break;
-        case SORTID_CORE_CNT:
+	case SORTID_CORE_CNT:
 		if (cluster_flags & CLUSTER_FLAG_BG)
 			type = "Cnode Count";
 		else
 			type = "Core Count";
-                if (_parse_resv_core_cnt(resv_msg, new_text) == SLURM_ERROR) {
-			global_edit_error_msg = g_strdup_printf(
-				"Can't use %s when system "
-				"is not running cons_res select plugin", type);
+		if (state_control_corecnt_supported() != SLURM_SUCCESS) {
+			if (global_edit_error_msg)
+				g_free(global_edit_error_msg);
+			global_edit_error_msg = g_strdup("CoreCnt or CPUCnt is only supported when SelectType includes select/cons_res or SelectTypeParameters includes OTHER_CONS_RES on a Cray.");
 			goto return_error;
-                }
-                break;
+		}
+		if (state_control_parse_resv_corecnt(resv_msg, (char *)new_text,
+						     &free_tres_corecnt, false,
+						     &err_msg) == SLURM_ERROR) {
+			if (global_edit_error_msg)
+				g_free(global_edit_error_msg);
+			global_edit_error_msg = g_strdup(err_msg);
+			xfree(err_msg);
+			goto return_error;
+		}
+		break;
 	case SORTID_DURATION:
 		temp_int = time_str2mins((char *)new_text);
 		if (temp_int <= 0)
@@ -379,7 +336,7 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 	case SORTID_FLAGS:
 		f = parse_resv_flags(new_text, __func__);
 		type = "flags";
-		if (f == (uint32_t)NO_VAL)
+		if (f == NO_VAL)
 			goto return_error;
 		resv_msg->flags = f;
 		break;
@@ -396,26 +353,15 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 			type = "Midplane Count";
 		else
 			type = "Node Count";
-		block_inx = 0;
-		tmp_text = xstrdup(new_text);
-		tok = strtok_r(tmp_text, ",", &last);
-		while (tok) {
-			temp_int = strtol(tok, &temp_str, 10);
-			if ((temp_str[0] == 'k') || (temp_str[0] == 'K'))
-				temp_int *= 1024;
-			if ((temp_str[0] == 'm') || (temp_str[0] == 'M'))
-				temp_int *= (1024 * 1024);
-			xrealloc(resv_msg->node_cnt,
-				 (sizeof(uint32_t) * (block_inx + 2)));
-			resv_msg->node_cnt[block_inx++] = temp_int;
-			if (temp_int <= 0) {
-				xfree(tmp_text);
-				xfree(resv_msg->node_cnt);
-				goto return_error;
-			}
-			tok = strtok_r(NULL, ",", &last);
+		if (parse_resv_nodecnt(resv_msg, (char *)new_text,
+				       &free_tres_nodecnt, false,
+				       &err_msg) == SLURM_ERROR) {
+			if (global_edit_error_msg)
+				g_free(global_edit_error_msg);
+			global_edit_error_msg = g_strdup(err_msg);
+			xfree(err_msg);
+			goto return_error;
 		}
-		xfree(tmp_text);
 		break;
 	case SORTID_NODELIST:
 		resv_msg->node_list = xstrdup(new_text);
@@ -436,8 +382,29 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 		resv_msg->users = xstrdup(new_text);
 		type = "users";
 		break;
+	case SORTID_TRES:
+		if (state_control_parse_resv_tres((char *)new_text, resv_msg,
+						  &free_tres_license,
+						  &free_tres_bb,
+						  &free_tres_corecnt,
+						  &free_tres_nodecnt, &err_msg)
+		    == SLURM_ERROR) {
+			if (global_edit_error_msg)
+				g_free(global_edit_error_msg);
+			global_edit_error_msg = g_strdup(err_msg);
+			xfree(err_msg);
+			goto return_error;
+		}
+		break;
 	case SORTID_WATTS:
-		resv_msg->resv_watts = _parse_watts((char *) new_text);
+		if (state_control_parse_resv_watts((char *) new_text, resv_msg,
+						   &err_msg) == SLURM_ERROR) {
+			if (global_edit_error_msg)
+				g_free(global_edit_error_msg);
+			global_edit_error_msg = g_strdup(err_msg);
+			xfree(err_msg);
+			goto return_error;
+		}
 		type = "watts";
 		break;
 	default:
@@ -574,7 +541,7 @@ static void _layout_resv_record(GtkTreeView *treeview,
 				int update)
 {
 	GtkTreeIter iter;
-	char time_buf[20], power_buf[20];
+	char time_buf[20];
 	reserve_info_t *resv_ptr = sview_resv_info->resv_ptr;
 	char *temp_char = NULL;
 
@@ -665,30 +632,21 @@ static void _layout_resv_record(GtkTreeView *treeview,
 						 SORTID_USERS),
 				   resv_ptr->users);
 
-	if ((resv_ptr->resv_watts == NO_VAL) || (resv_ptr->resv_watts == 0)) {
-		snprintf(power_buf, sizeof(power_buf), "0");
-	} else if ((resv_ptr->resv_watts % 1000000) == 0) {
-		snprintf(power_buf, sizeof(power_buf), "%uM",
-			 resv_ptr->resv_watts / 1000000);
-	} else if ((resv_ptr->resv_watts % 1000) == 0) {
-		snprintf(power_buf, sizeof(power_buf), "%uK",
-			 resv_ptr->resv_watts / 1000);
-	} else {
-		snprintf(power_buf, sizeof(power_buf), "%u",
-			 resv_ptr->resv_watts);
-	}
+	temp_char = state_control_watts_to_str(resv_ptr->resv_watts);
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_resv,
 						 SORTID_WATTS),
-				   power_buf);
+				   temp_char);
+	xfree(temp_char);
 }
 
 static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 				GtkTreeStore *treestore)
 {
 	char tmp_duration[40], tmp_end[40], tmp_nodes[40], tmp_start[40];
-	char tmp_cores[40], power_buf[40];
+	char tmp_cores[40];
 	char *tmp_flags;
+	char *tmp_watts = NULL;
 	reserve_info_t *resv_ptr = sview_resv_info_ptr->resv_ptr;
 
 	secs2time_str((uint32_t)difftime(resv_ptr->end_time,
@@ -711,18 +669,7 @@ static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 	slurm_make_time_str((time_t *)&resv_ptr->start_time, tmp_start,
 			    sizeof(tmp_start));
 
-	if ((resv_ptr->resv_watts == NO_VAL) || (resv_ptr->resv_watts == 0)) {
-		snprintf(power_buf, sizeof(power_buf), "0");
-	} else if ((resv_ptr->resv_watts % 1000000) == 0) {
-		snprintf(power_buf, sizeof(power_buf), "%uM",
-			 resv_ptr->resv_watts / 1000000);
-	} else if ((resv_ptr->resv_watts % 1000) == 0) {
-		snprintf(power_buf, sizeof(power_buf), "%uK",
-			 resv_ptr->resv_watts / 1000);
-	} else {
-		snprintf(power_buf, sizeof(power_buf), "%u",
-			 resv_ptr->resv_watts);
-	}
+	tmp_watts = state_control_watts_to_str(resv_ptr->resv_watts);
 
 	/* Combining these records provides a slight performance improvement */
 	gtk_tree_store_set(treestore, &sview_resv_info_ptr->iter_ptr,
@@ -746,10 +693,11 @@ static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 			   SORTID_TRES,       resv_ptr->tres_str,
 			   SORTID_UPDATED,    1,
 			   SORTID_USERS,      resv_ptr->users,
-			   SORTID_WATTS,      power_buf,
+			   SORTID_WATTS,      tmp_watts,
 			   -1);
 
 	xfree(tmp_flags);
+	xfree(tmp_watts);
 
 	return;
 }
@@ -851,10 +799,6 @@ static List _create_resv_info_list(reserve_info_msg_t *resv_info_ptr)
 		last_list = info_list;
 
 	info_list = list_create(_resv_info_list_del);
-	if (!info_list) {
-		g_print("malloc error\n");
-		return NULL;
-	}
 
 	if (last_list)
 		last_list_itr = list_iterator_create(last_list);
@@ -1108,28 +1052,37 @@ extern void admin_edit_resv(GtkCellRendererText *cell,
 			    const char *new_text,
 			    gpointer data)
 {
-	GtkTreeStore *treestore = GTK_TREE_STORE(data);
-	GtkTreePath *path = gtk_tree_path_new_from_string(path_string);
+	GtkTreeStore *treestore = NULL;
+	GtkTreePath *path = NULL;
 	GtkTreeIter iter;
-	resv_desc_msg_t *resv_msg = xmalloc(sizeof(resv_desc_msg_t));
+	resv_desc_msg_t *resv_msg = NULL;
 
 	char *temp = NULL;
 	char *old_text = NULL;
 	const char *type = NULL;
 
-	int column = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cell),
-						       "column"));
+	int column;
 
 	if (!new_text || !xstrcmp(new_text, ""))
 		goto no_input;
 
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		display_fed_disabled_popup(type);
+		goto no_input;
+	}
+
+	column = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cell), "column"));
+	path = gtk_tree_path_new_from_string(path_string);
+	treestore = GTK_TREE_STORE(data);
 	gtk_tree_model_get_iter(GTK_TREE_MODEL(treestore), &iter, path);
 
-	slurm_init_resv_desc_msg(resv_msg);
 	gtk_tree_model_get(GTK_TREE_MODEL(treestore), &iter,
 			   SORTID_NAME, &temp,
 			   column, &old_text,
 			   -1);
+
+	resv_msg = xmalloc(sizeof(resv_desc_msg_t));
+	slurm_init_resv_desc_msg(resv_msg);
 	resv_msg->name = xstrdup(temp);
 	g_free(temp);
 
@@ -1173,7 +1126,7 @@ extern void admin_edit_resv(GtkCellRendererText *cell,
 no_input:
 	slurm_free_resv_desc_msg(resv_msg);
 
-	gtk_tree_path_free (path);
+	gtk_tree_path_free(path);
 	g_free(old_text);
 	g_mutex_unlock(sview_mutex);
 }
@@ -1216,6 +1169,18 @@ extern void get_info_resv(GtkTable *table, display_data_t *display_data)
 		display_data_resv->set_menu = local_display_data->set_menu;
 		goto reset_curs;
 	}
+
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		view = ERROR_VIEW;
+		if (display_widget)
+			gtk_widget_destroy(display_widget);
+		label = gtk_label_new("Not available in a federated view");
+		gtk_table_attach_defaults(GTK_TABLE(table), label, 0, 1, 0, 1);
+		gtk_widget_show(label);
+		display_widget = gtk_widget_ref(label);
+		goto end_it;
+	}
+
 	if (display_widget && toggled) {
 		gtk_widget_destroy(display_widget);
 		display_widget = NULL;
@@ -1513,7 +1478,7 @@ extern void set_menus_resv(void *arg, void *arg2, GtkTreePath *path, int type)
 extern void popup_all_resv(GtkTreeModel *model, GtkTreeIter *iter, int id)
 {
 	char *name = NULL;
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 	GError *error = NULL;
@@ -1621,22 +1586,13 @@ extern void select_admin_resv(GtkTreeModel *model, GtkTreeIter *iter,
 			      display_data_t *display_data,
 			      GtkTreeView *treeview)
 {
-	if (treeview) {
-		if (display_data->extra & EXTRA_NODES) {
-			select_admin_nodes(model, iter, display_data,
-					   SORTID_NODELIST, treeview);
-			return;
-		}
-		global_multi_error = false;
-		gtk_tree_selection_selected_foreach(
-			gtk_tree_view_get_selection(treeview),
-			_process_each_resv, display_data->name);
-	}
+	select_admin_common(model, iter, display_data, treeview,
+			    SORTID_NODELIST, _process_each_resv);
 }
 
 static void _admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type)
 {
-	resv_desc_msg_t *resv_msg = xmalloc(sizeof(resv_desc_msg_t));
+	resv_desc_msg_t *resv_msg = NULL;
 	reservation_name_msg_t resv_name_msg;
 	char *resvid = NULL;
 	char tmp_char[100];
@@ -1645,7 +1601,15 @@ static void _admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type)
 	int response = 0;
 	GtkWidget *label = NULL;
 	GtkWidget *entry = NULL;
-	GtkWidget *popup = gtk_dialog_new_with_buttons(
+	GtkWidget *popup = NULL;
+
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		display_fed_disabled_popup(type);
+		global_entry_changed = 0;
+		return;
+	}
+
+	popup = gtk_dialog_new_with_buttons(
 		type,
 		GTK_WINDOW(main_window),
 		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
@@ -1657,6 +1621,7 @@ static void _admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type)
 
 	gtk_tree_model_get(model, iter, SORTID_NAME, &resvid, -1);
 
+	resv_msg = xmalloc(sizeof(resv_desc_msg_t));
 	slurm_init_resv_desc_msg(resv_msg);
 	memset(&resv_name_msg, 0, sizeof(reservation_name_msg_t));
 
@@ -1727,6 +1692,8 @@ static void _admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type)
 					"values you wanted to change: %s",
 					global_edit_error_msg ?
 					global_edit_error_msg : "unknown");
+				if (global_edit_error_msg)
+					g_free(global_edit_error_msg);
 			} else if (!global_send_update_msg) {
 				temp = g_strdup_printf("No change detected.");
 			} else if (slurm_update_reservation(resv_msg)

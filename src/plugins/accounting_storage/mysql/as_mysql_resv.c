@@ -427,7 +427,7 @@ try_again:
 				       "where deleted=0 && id_resv=%u "
 				       "and time_start=%ld;",
 				       resv->cluster, resv_table,
-				       resv->time_start-1,
+				       resv->time_start,
 				       resv->id, start);
 		xstrfmtcat(query,
 			   "insert into \"%s_%s\" (id_resv%s) "
@@ -536,7 +536,8 @@ extern List as_mysql_get_resvs(mysql_conn_t *mysql_conn, uid_t uid,
 		"resv_name",
 		"time_start",
 		"time_end",
-		"tres"
+		"tres",
+		"unused_wall"
 	};
 
 	enum {
@@ -549,6 +550,7 @@ extern List as_mysql_get_resvs(mysql_conn_t *mysql_conn, uid_t uid,
 		RESV_REQ_START,
 		RESV_REQ_END,
 		RESV_REQ_TRES,
+		RESV_REQ_UNUSED,
 		RESV_REQ_COUNT
 	};
 
@@ -570,11 +572,23 @@ extern List as_mysql_get_resvs(mysql_conn_t *mysql_conn, uid_t uid,
 		}
 	}
 
+	with_usage = resv_cond->with_usage;
+
 	memset(&job_cond, 0, sizeof(slurmdb_job_cond_t));
 	if (resv_cond->nodes) {
 		job_cond.usage_start = resv_cond->time_start;
 		job_cond.usage_end = resv_cond->time_end;
 		job_cond.used_nodes = resv_cond->nodes;
+		if (!resv_cond->cluster_list)
+			resv_cond->cluster_list =
+				list_create(slurm_destroy_char);
+		/*
+		 * If they didn't specify a cluster, give them the one they are
+		 * calling from.
+		 */
+		if (!list_count(resv_cond->cluster_list))
+			list_append(resv_cond->cluster_list,
+				    xstrdup(mysql_conn->cluster_name));
 		job_cond.cluster_list = resv_cond->cluster_list;
 		local_cluster_list = setup_cluster_list_with_inx(
 			mysql_conn, &job_cond, (void **)&curr_cluster);
@@ -584,8 +598,6 @@ extern List as_mysql_get_resvs(mysql_conn_t *mysql_conn, uid_t uid,
 	}
 
 	(void) _setup_resv_cond_limits(resv_cond, &extra);
-
-	with_usage = resv_cond->with_usage;
 
 	if (resv_cond->cluster_list && list_count(resv_cond->cluster_list))
 		use_cluster_list = resv_cond->cluster_list;
@@ -614,7 +626,7 @@ empty:
 		slurm_mutex_unlock(&as_mysql_cluster_list_lock);
 
 	if (query)
-		xstrcat(query, " order by cluster, resv_name;");
+		xstrcat(query, " order by cluster, time_start, resv_name;");
 
 	xfree(tmp);
 	xfree(extra);
@@ -630,15 +642,15 @@ empty:
 	resv_list = list_create(slurmdb_destroy_reservation_rec);
 
 	while ((row = mysql_fetch_row(result))) {
-		slurmdb_reservation_rec_t *resv =
-			xmalloc(sizeof(slurmdb_reservation_rec_t));
+		slurmdb_reservation_rec_t *resv;
 		int start = slurm_atoul(row[RESV_REQ_START]);
-		list_append(resv_list, resv);
 
 		if (!good_nodes_from_inx(local_cluster_list, &curr_cluster,
 					 row[RESV_REQ_NODE_INX], start))
 			continue;
 
+		resv = xmalloc(sizeof(slurmdb_reservation_rec_t));
+		list_append(resv_list, resv);
 		resv->id = slurm_atoul(row[RESV_REQ_ID]);
 		if (with_usage) {
 			if (!job_cond.resvid_list)
@@ -646,6 +658,7 @@ empty:
 			list_append(job_cond.resvid_list, row[RESV_REQ_ID]);
 		}
 		resv->name = xstrdup(row[RESV_REQ_NAME]);
+		resv->node_inx = xstrdup(row[RESV_REQ_NODE_INX]);
 		resv->cluster = xstrdup(row[RESV_REQ_COUNT]);
 		resv->assocs = xstrdup(row[RESV_REQ_ASSOCS]);
 		resv->nodes = xstrdup(row[RESV_REQ_NODES]);
@@ -653,6 +666,7 @@ empty:
 		resv->time_end = slurm_atoul(row[RESV_REQ_END]);
 		resv->flags = slurm_atoul(row[RESV_REQ_FLAGS]);
 		resv->tres_str = xstrdup(row[RESV_REQ_TRES]);
+		resv->unused_wall = atof(row[RESV_REQ_UNUSED]);
 	}
 
 	FREE_NULL_LIST(local_cluster_list);

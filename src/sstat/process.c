@@ -44,7 +44,7 @@ char *find_hostname(uint32_t pos, char *hosts)
 	hostlist_t hostlist = NULL;
 	char *temp = NULL, *host = NULL;
 
-	if (!hosts || (pos == (uint32_t)NO_VAL))
+	if (!hosts || (pos == NO_VAL))
 		return NULL;
 
 	hostlist = hostlist_create(hosts);
@@ -87,9 +87,9 @@ void aggregate_stats(slurmdb_stats_t *dest, slurmdb_stats_t *from)
 		dest->cpu_min_taskid = from->cpu_min_taskid;
 	}
 	dest->cpu_ave += from->cpu_ave;
-	if ((from->consumed_energy == NO_VAL) ||
-	    (dest->consumed_energy == NO_VAL))
-		dest->consumed_energy = NO_VAL;
+	if ((from->consumed_energy == NO_VAL64) ||
+	    (dest->consumed_energy == NO_VAL64))
+		dest->consumed_energy = NO_VAL64;
 	else
 		dest->consumed_energy += from->consumed_energy;
 	dest->act_cpufreq += from->act_cpufreq;

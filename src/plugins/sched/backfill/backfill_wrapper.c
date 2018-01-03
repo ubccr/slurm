@@ -55,19 +55,13 @@ const char		plugin_name[]	= "SLURM Backfill Scheduler plugin";
 const char		plugin_type[]	= "sched/backfill";
 const uint32_t		plugin_version	= SLURM_VERSION_NUMBER;
 
-/* A plugin-global errno. */
-static int plugin_errno = SLURM_SUCCESS;
-
 static pthread_t backfill_thread = 0;
 static pthread_mutex_t thread_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int init( void )
 {
-	pthread_attr_t attr;
-
 	if (slurmctld_config.scheduling_disabled)
 		return SLURM_SUCCESS;
-
 
 	verbose( "sched: Backfill scheduler plugin loaded" );
 
@@ -79,12 +73,10 @@ int init( void )
 		return SLURM_ERROR;
 	}
 
-	slurm_attr_init( &attr );
 	/* since we do a join on this later we don't make it detached */
-	if (pthread_create( &backfill_thread, &attr, backfill_agent, NULL))
-		error("Unable to start backfill thread: %m");
+	slurm_thread_create(&backfill_thread, backfill_agent, NULL);
+
 	slurm_mutex_unlock( &thread_flag_mutex );
-	slurm_attr_destroy( &attr );
 
 	return SLURM_SUCCESS;
 }
@@ -107,53 +99,8 @@ int slurm_sched_p_reconfig( void )
 	return SLURM_SUCCESS;
 }
 
-int slurm_sched_p_schedule(void)
-{
-	return SLURM_SUCCESS;
-}
-
-int slurm_sched_p_newalloc(struct job_record *job_ptr)
-{
-	return SLURM_SUCCESS;
-}
-
-int slurm_sched_p_freealloc(struct job_record *job_ptr)
-{
-	return SLURM_SUCCESS;
-}
-
 uint32_t slurm_sched_p_initial_priority(uint32_t last_prio,
 					struct job_record *job_ptr)
 {
 	return priority_g_set(last_prio, job_ptr);
-}
-
-void slurm_sched_p_job_is_pending( void )
-{
-	/* Empty. */
-}
-
-void slurm_sched_p_partition_change( void )
-{
-	/* Empty. */
-}
-
-int slurm_sched_p_get_errno( void )
-{
-	return plugin_errno;
-}
-
-char *slurm_sched_p_strerror( int errnum )
-{
-	return NULL;
-}
-
-void slurm_sched_p_requeue( struct job_record *job_ptr, char *reason )
-{
-	/* Empty. */
-}
-
-char *slurm_sched_p_get_conf( void )
-{
-	return NULL;
 }

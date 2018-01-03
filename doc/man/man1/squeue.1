@@ -1,4 +1,4 @@
-.TH squeue "1" "Slurm Commands" "April 2016" "Slurm Commands"
+.TH squeue "1" "Slurm Commands" "December 2017" "Slurm Commands"
 
 .SH "NAME"
 squeue \- view information about jobs located in the Slurm scheduling queue.
@@ -38,6 +38,10 @@ optimize the display.  This can also be set with the environment variable
 SQUEUE_ARRAY_UNIQUE.
 
 .TP
+\fB\-\-federation\fR
+Show jobs from the federation if a member of one.
+
+.TP
 \fB\-h\fR, \fB\-\-noheader\fR
 Do not print a header on the output.
 
@@ -75,6 +79,11 @@ Use the environment variable SLURM_BITSTR_LEN to specify larger field sizes.
 
 
 .TP
+\fB\-\-local\fR
+Show only jobs local to this cluster. Ignore other clusters in this federation
+(if any). Overrides \-\-federation.
+
+.TP
 \fB\-l\fR, \fB\-\-long\fR
 Report more of the available information for the selected jobs or job steps,
 subject to any constraints specified.
@@ -88,6 +97,7 @@ The license list consists of a comma separated list of license names.
 \fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
 Clusters to issue commands to.  Multiple cluster names may be comma separated.
 A value of of '\fIall\fR' will query to run on all clusters.
+This option implicitly sets the \fB\-\-local\fR option.
 
 .TP
 \fB\-n\fR, \fB\-\-name=<name_list>\fR
@@ -252,6 +262,9 @@ In the case of job arrays, the job ID format will be of the form
 By default, the job array index field size will be limited to 64 bytes.
 Use the environment variable SLURM_BITSTR_LEN to specify larger field sizes.
 (Valid for jobs and job steps)
+In the case of heterogeneous job allocations, the job ID format will be of the
+form "#+#" where the first number is the "heterogeneous job leader" and the
+second number the zero origin offset for each component of the job.
 .TP
 \fB%I\fR
 Number of cores per socket requested by the job.
@@ -521,6 +534,13 @@ Prints the directory where the job checkpoint will be written to.
 Prints the time interval of the checkpoint.
 (Valid for job steps only)
 .TP
+\fBcluster\fR
+Name of the cluster that is running the job or job step.
+.TP
+\fBclusterfeature\fR
+Cluster features required by the job.
+(Valid for jobs only)
+.TP
 \fBcommand\fR
 The command to be executed.
 (Valid for jobs only)
@@ -606,7 +626,12 @@ For non\-array jobs, this is the job ID.
 .TP
 \fBjobid\fR
 Job id.
-This will have a unique value for each element of job arrays.
+This will have a unique value for each element of job arrays and each
+component of heterogeneous jobs.
+(Valid for jobs only)
+.TP
+\fBlastschedeval\fR
+Prints the last time the job was evaluated for scheduling.
 (Valid for jobs only)
 .TP
 \fBlicenses\fR
@@ -705,6 +730,14 @@ Number of tasks requested by a job or job step.
 This reports the value of the \fB\-\-ntasks\fR option.
 (Valid for jobs and job steps)
 .TP
+\fBorigin\fR
+Cluster name where federated job originated from.
+(Valid for federated jobs only)
+.TP
+\fBoriginraw\fR
+Cluster ID where federated job originated from.
+(Valid for federated jobs only)
+.TP
 \fBoversubscribe\fR
 Can the compute resources allocated to the job be over subscribed by other jobs.
 The resources to be over subscribed can be nodes, sockets, cores, or
@@ -717,6 +750,15 @@ or the partition is configured with OverSubscribe=Force,
 (See MCSPlugin and MCSParameters configuration parameters for more information),
 "OK" otherwise (typically allocated dedicated CPUs),
 (Valid for jobs only)
+.TP
+\fBpackjobid\fR
+Job ID of the heterogeneous job leader.
+.TP
+\fBpackjoboffset\fR
+Zero origin offset within a collection of heterogeneous jobs.
+.TP
+\fBpackjobidset\fR
+Expression identifying all job IDs within a heterogeneous job.
 .TP
 \fBpartition\fR
 Partition of the job or job step.
@@ -808,6 +850,22 @@ Connection type (TORUS, MESH, or NAV == torus else mesh),
 Permit rotation of geometry (yes or no),
 Node use (VIRTUAL or COPROCESSOR), etc.
 (Valid for jobs only)
+.TP
+\fBsiblingsactive\fR
+Cluster names of where federated sibling jobs exist.
+(Valid for federated jobs only)
+.TP
+\fBsiblingsactiveraw\fR
+Cluster IDs of where federated sibling jobs exist.
+(Valid for federated jobs only)
+.TP
+\fBsiblingsviable\fR
+Cluster names of where federated sibling jobs are viable to run.
+(Valid for federated jobs only)
+.TP
+\fBsiblingsviableraw\fR
+Cluster IDs of where federated sibling jobs viable to run.
+(Valid for federated jobs only)
 .TP
 \fBsockets\fR
 Number of sockets per node requested by the job.
@@ -951,9 +1009,15 @@ and not include a space between them. For example "\-s1008.0" and not
 "\-s 1008.0".
 
 .TP
+\fB\-\-sibling\fR
+Show all sibling jobs on a federated cluster. Implies \-\-federation.
+
+.TP
 \fB\-S <sort_list>\fR, \fB\-\-sort=<sort_list>\fR
 Specification of the order in which records should be reported.
 This uses the same field specification as the <output_format>.
+The long format option "cluster" can also be used to sort jobs or job steps by
+cluster name (e.g. federated jobs).
 Multiple sorts may be performed by listing multiple sort fields
 separated by commas.
 The field specifications may be preceded by "+" or "\-" for
@@ -1242,6 +1306,9 @@ A valid strftime() format can also be specified. For example, a value of
 \fBSQUEUE_NAMES\fR
 \fB\-\-name=<name_list>\fR
 .TP
+\fBSQUEUE_FEDERATION\fR
+\fB\-\-federation\fR
+.TP
 \fBSQUEUE_FORMAT\fR
 \fB\-o <output_format>, \-\-format=<output_format>\fR
 .TP
@@ -1251,6 +1318,9 @@ A valid strftime() format can also be specified. For example, a value of
 \fBSQUEUE_LICENSES\fR
 \fB\-p-l <license_list>, \-\-license=<license_list>\fR
 .TP
+\fBSQUEUE_LOCAL\fR
+\fB\-\-local\fR
+.TP
 \fBSQUEUE_PARTITION\fR
 \fB\-p <part_list>, \-\-partition=<part_list>\fR
 .TP
@@ -1259,6 +1329,9 @@ A valid strftime() format can also be specified. For example, a value of
 .TP
 \fBSQUEUE_QOS\fR
 \fB\-p <qos_list>, \-\-qos=<qos_list>\fR
+.TP
+\fBSQUEUE_SIBLING\fR
+\\fB\-\-sibling\fR
 .TP
 \fBSQUEUE_SORT\fR
 \fB\-S <sort_list>, \-\-sort=<sort_list>\fR

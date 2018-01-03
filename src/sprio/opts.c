@@ -1,6 +1,7 @@
 /****************************************************************************\
  *  opts.c - sprio command line option parsing
  *****************************************************************************
+ *  Portions Copyright (C) 2010-2017 SchedMD LLC <https://www.schedmd.com>.
  *  Copyright (C) 2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Don Lipari <lipari1@llnl.gov>
@@ -52,8 +53,11 @@
 #include "src/sprio/sprio.h"
 
 /* getopt_long options, integers but not characters */
-#define OPT_LONG_HELP  0x100
-#define OPT_LONG_USAGE 0x101
+#define OPT_LONG_HELP      0x100
+#define OPT_LONG_USAGE     0x101
+#define OPT_LONG_LOCAL     0x102
+#define OPT_LONG_SIBLING   0x103
+#define OPT_LONG_FEDR      0x104
 
 /* FUNCTIONS */
 static List  _build_job_list( char* str );
@@ -69,12 +73,23 @@ static void _opt_env(void)
 {
 	char *env_val;
 
+	if (slurmctld_conf.fed_params &&
+	    strstr(slurmctld_conf.fed_params, "fed_display"))
+		params.federation = true;
+
 	if ((env_val = getenv("SLURM_CLUSTERS"))) {
 		if (!(params.clusters = slurmdb_get_info_cluster(env_val))) {
 			print_db_notok(env_val, 1);
 			exit(1);
 		}
+		params.local = true;
 	}
+	if (getenv("SPRIO_FEDERATION"))
+		params.federation = true;
+	if (getenv("SPRIO_LOCAL"))
+		params.local = true;
+	if (getenv("SPRIO_SIBLING"))
+		params.sibling = true;
 }
 
 /*
@@ -93,12 +108,17 @@ parse_command_line( int argc, char* *argv )
 		{"clusters",   required_argument, 0, 'M'},
 		{"norm",       no_argument,       0, 'n'},
 		{"format",     required_argument, 0, 'o'},
+		{"partition",  required_argument, 0, 'p'},
 		{"user",       required_argument, 0, 'u'},
 		{"users",      required_argument, 0, 'u'},
 		{"verbose",    no_argument,       0, 'v'},
 		{"version",    no_argument,       0, 'V'},
 		{"weights",    no_argument,       0, 'w'},
+		{"federation", no_argument,       0, OPT_LONG_FEDR},
 		{"help",       no_argument,       0, OPT_LONG_HELP},
+		{"local",      no_argument,       0, OPT_LONG_LOCAL},
+		{"sib",        no_argument,       0, OPT_LONG_SIBLING},
+		{"sibling",    no_argument,       0, OPT_LONG_SIBLING},
 		{"usage",      no_argument,       0, OPT_LONG_USAGE},
 		{NULL,         0,                 0, 0}
 	};
@@ -106,8 +126,8 @@ parse_command_line( int argc, char* *argv )
 	/* get defaults from environment */
 	_opt_env();
 
-	while((opt_char = getopt_long(argc, argv, "hj::lM:no:u:vVw",
-				      long_options, &option_index)) != -1) {
+	while ((opt_char = getopt_long(argc, argv, "hj::lM:no:p:u:vVw",
+				       long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
 			fprintf(stderr, "Try \"sprio --help\" "
@@ -133,6 +153,7 @@ parse_command_line( int argc, char* *argv )
 				print_db_notok(optarg, 0);
 				exit(1);
 			}
+			params.local = true;
 			break;
 		case (int) 'n':
 			params.normalized = true;
@@ -140,6 +161,10 @@ parse_command_line( int argc, char* *argv )
 		case (int) 'o':
 			xfree(params.format);
 			params.format = xstrdup(optarg);
+			break;
+		case (int) 'p':
+			xfree(params.parts);
+			params.parts = xstrdup(optarg);
 			break;
 		case (int) 'u':
 			xfree(params.users);
@@ -155,9 +180,18 @@ parse_command_line( int argc, char* *argv )
 		case (int) 'w':
 			params.weights = true;
 			break;
+		case OPT_LONG_FEDR:
+			params.federation = true;
+			break;
 		case OPT_LONG_HELP:
 			_help();
 			exit(0);
+		case OPT_LONG_LOCAL:
+			params.local = true;
+			break;
+		case OPT_LONG_SIBLING:
+			params.sibling = true;
+			break;
 		case OPT_LONG_USAGE:
 			_usage();
 			exit(0);
@@ -212,9 +246,7 @@ extern int parse_format( char* format )
 		job_format_add_prefix( params.format_list, 0, 0, prefix);
 	}
 
-	field_size = strlen( format );
-	tmp_format = xmalloc( field_size + 1 );
-	strcpy( tmp_format, format );
+	tmp_format = xstrdup(format);
 
 	token = strtok_r( tmp_format, "%", &tmp_char);
 	if (token && (format[0] != '%'))	/* toss header */
@@ -232,6 +264,10 @@ extern int parse_format( char* format )
 							     field_size,
 							     right_justify,
 							     suffix );
+		else if (field[0] == 'c')
+			job_format_add_cluster_name(params.format_list,
+						    field_size, right_justify,
+						    suffix);
 		else if (field[0] == 'f')
 			job_format_add_fs_priority_normalized(params.format_list,
 							      field_size,
@@ -272,6 +308,10 @@ extern int parse_format( char* format )
 							      field_size,
 							      right_justify,
 							      suffix );
+		else if (field[0] == 'r')
+			job_format_add_partition(params.format_list,
+						 field_size, right_justify,
+						 suffix);
 		else if (field[0] == 'q')
 			job_format_add_qos_priority_normalized(params.format_list,
 							       field_size,
@@ -373,7 +413,7 @@ _parse_token( char *token, char *field, int *field_size, bool *right_justify,
 
 /* print the parameters specified */
 static void
-_print_options()
+_print_options(void)
 {
 	ListIterator iterator;
 	int i;
@@ -384,6 +424,7 @@ _print_options()
 	printf( "format     = %s\n", params.format );
 	printf( "job_flag   = %d\n", params.job_flag );
 	printf( "jobs       = %s\n", params.jobs );
+	printf( "partition  = %s\n", params.parts );
 	printf( "users      = %s\n", params.users );
 	printf( "verbose    = %d\n", params.verbose );
 
@@ -406,7 +447,7 @@ _print_options()
 	}
 
 	printf( "-----------------------------\n\n\n" );
-} ;
+}
 
 
 /*
@@ -478,16 +519,19 @@ _build_user_list(char* str)
 
 static void _usage(void)
 {
-	printf("Usage: sprio [-j jid[s]] [-u user_name[s]] [-o format] [--usage] [-hlnvVw]\n");
+	printf("Usage: sprio [-j jid[s]] [-u user_name[s]] [-o format] [-p partitions]\n");
+	printf("   [--federation] [--local] [--sibling] [--usage] [-hlnvVw]\n");
 }
 
 static void _help(void)
 {
 	printf("\
 Usage: sprio [OPTIONS]\n\
+      --federation                display jobs in federation if a member of one\n\
   -h, --noheader                  no headers on output\n\
   -j, --jobs                      comma separated list of jobs\n\
                                   to view, default is all\n\
+      --local                     display jobs on local cluster only\n\
   -l, --long                      long report\n\
   -M, --cluster=cluster_name      cluster to issue commands to.  Default is\n\
                                   current cluster.  cluster with no name will\n\
@@ -495,6 +539,8 @@ Usage: sprio [OPTIONS]\n\
                                   NOTE: SlurmDBD must be up.\n\
   -n, --norm                      display normalized values\n\
   -o, --format=format             format specification\n\
+      --sibling                   display job records separately for each federation cluster\n\
+  -p, --partition=partition_name  comma separated list of partitions\n\
   -u, --user=user_name            comma separated list of users to view\n\
   -v, --verbose                   verbosity level\n\
   -V, --version                   output version information and exit\n\

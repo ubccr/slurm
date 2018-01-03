@@ -66,6 +66,7 @@
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/stepd_api.h"
+#include "src/common/strlcpy.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
@@ -73,6 +74,7 @@ strong_alias(stepd_available, slurm_stepd_available);
 strong_alias(stepd_connect, slurm_stepd_connect);
 strong_alias(stepd_get_uid, slurm_stepd_get_uid);
 strong_alias(stepd_add_extern_pid, slurm_stepd_add_extern_pid);
+strong_alias(stepd_get_x11_display, slurm_stepd_get_x11_display);
 
 static bool
 _slurm_authorized_user()
@@ -164,7 +166,7 @@ _step_connect(const char *directory, const char *nodename,
 
 	xstrfmtcat(name, "%s/%s_%u.%u", directory, nodename, jobid, stepid);
 
-	strcpy(addr.sun_path, name);
+	strlcpy(addr.sun_path, name, sizeof(addr.sun_path));
 	len = strlen(addr.sun_path) + 1 + sizeof(addr.sun_family);
 
 	if (connect(fd, (struct sockaddr *) &addr, len) < 0) {
@@ -444,14 +446,21 @@ rwfail:
  * Send a signal to the proctrack container of a job step.
  */
 int
-stepd_signal_container(int fd, uint16_t protocol_version, int signal)
+stepd_signal_container(int fd, uint16_t protocol_version, int signal, int flags)
 {
 	int req = REQUEST_SIGNAL_CONTAINER;
 	int rc;
 	int errnum = 0;
 
 	safe_write(fd, &req, sizeof(int));
-	safe_write(fd, &signal, sizeof(int));
+	if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
+		safe_write(fd, &signal, sizeof(int));
+		safe_write(fd, &flags, sizeof(int));
+	} else {
+		int tmp_signal = (uint32_t)signal | (uint32_t)(flags << 24);
+		safe_write(fd, &tmp_signal, sizeof(int));
+
+	}
 
 	/* Receive the return code and errno */
 	safe_read(fd, &rc, sizeof(int));
@@ -698,7 +707,8 @@ stepd_cleanup_sockets(const char *directory, const char *nodename)
 				debug("Unable to connect to socket %s", path);
 			} else {
 				if (stepd_signal_container(
-					fd, protocol_version, SIGKILL) == -1) {
+					    fd, protocol_version, SIGKILL, 0)
+				    == -1) {
 					debug("Error sending SIGKILL to job step %u.%u",
 					      jobid, stepid);
 				}
@@ -760,6 +770,25 @@ extern int stepd_add_extern_pid(int fd, uint16_t protocol_version, pid_t pid)
 
 	debug("Leaving stepd_add_extern_pid");
 	return rc;
+rwfail:
+	return SLURM_ERROR;
+}
+
+extern int stepd_get_x11_display(int fd, uint16_t protocol_version)
+{
+	int req = REQUEST_X11_DISPLAY;
+	int display = 0;
+
+	safe_write(fd, &req, sizeof(int));
+
+	/*
+	 * Receive the display number,
+	 * or zero if x11 forwarding is not setup
+	 */
+	safe_read(fd, &display, sizeof(int));
+
+	debug("Leaving stepd_get_x11_display");
+	return display;
 rwfail:
 	return SLURM_ERROR;
 }
@@ -934,7 +963,7 @@ stepd_completion(int fd, uint16_t protocol_version, step_complete_msg_t *sent)
 		len = get_buf_offset(buffer);
 		safe_write(fd, &len, sizeof(int));
 		safe_write(fd, get_buf_data(buffer), len);
-		free_buf(buffer);
+		FREE_NULL_BUFFER(buffer);
 
 		/* Receive the return code and errno */
 		safe_read(fd, &rc, sizeof(int));

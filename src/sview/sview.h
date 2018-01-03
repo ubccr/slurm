@@ -225,6 +225,7 @@ struct popup_positioner {
 
 typedef struct {
 	sview_search_type_t search_type;
+	gchar *cluster_name;
 	gchar *gchar_data;
 	int  int_data;
 	int  int_data2;
@@ -329,9 +330,10 @@ extern int cpus_per_node;
 extern int g_node_scaling;
 extern char *sview_colors[];
 extern int sview_colors_cnt;
-extern uint32_t cluster_flags;
 extern int cluster_dims;
+extern uint32_t cluster_flags;
 extern List cluster_list;
+extern char *orig_cluster_name;
 extern block_info_msg_t *g_block_info_ptr;
 extern front_end_info_msg_t *g_front_end_info_ptr;
 extern job_info_msg_t *g_job_info_ptr;
@@ -345,6 +347,7 @@ extern topo_info_response_msg_t *g_topo_info_msg_ptr;
 extern switch_record_bitmaps_t *g_switch_nodes_maps;
 extern popup_positioner_t main_popup_positioner[];
 extern popup_pos_t popup_pos;
+extern char *federation_name;
 
 extern void init_grid(node_info_msg_t *node_info_ptr);
 extern int set_grid(int start, int end, int count);
@@ -370,6 +373,7 @@ extern void change_refresh_popup(GtkAction *action, gpointer user_data);
 extern void change_grid_popup(GtkAction *action, gpointer user_data);
 extern void about_popup(GtkAction *action, gpointer user_data);
 extern void usage_popup(GtkAction *action, gpointer user_data);
+extern void display_fed_disabled_popup(const char *title);
 
 //grid.c
 extern void destroy_grid_button(void *arg);
@@ -405,7 +409,6 @@ extern void post_setup_popup_grid_list(popup_info_t *popup_win);
 // part_info.c
 extern GtkWidget *create_part_entry(update_part_msg_t *part_msg,
 				    GtkTreeModel *model, GtkTreeIter *iter);
-extern bool visible_part(char* part_name);
 extern bool check_part_includes_node(int node_dx);
 extern void refresh_part(GtkAction *action, gpointer user_data);
 extern GtkListStore *create_model_part(int type);
@@ -513,7 +516,7 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data);
 extern void specific_info_node(popup_info_t *popup_win);
 extern void set_menus_node(void *arg, void *arg2, GtkTreePath *path, int type);
 extern void popup_all_node(GtkTreeModel *model, GtkTreeIter *iter, int id);
-extern void popup_all_node_name(char *name, int id);
+extern void popup_all_node_name(char *name, int id, char *cluster_name);
 extern void admin_menu_node_name(char *name, GdkEventButton *event);
 extern void admin_node(GtkTreeModel *model, GtkTreeIter *iter, char *type);
 extern void admin_node_name(char *name, char *old_value, char *type);
@@ -631,7 +634,8 @@ extern void display_edit_note(char *edit_note);
 extern void add_display_treestore_line(int update,
 				       GtkTreeStore *treestore,
 				       GtkTreeIter *iter,
-				       const char *name, char *value);
+				       const char *name,
+				       const char *value);
 extern void add_display_treestore_line_with_font(
 	int update,
 	GtkTreeStore *treestore,
@@ -646,6 +650,14 @@ extern char *page_to_str(int page);
 extern char *tab_pos_to_str(int tab_pos);
 extern char *visible_to_str(sview_config_t *sview_config);
 extern gboolean entry_changed(GtkWidget *widget, void *msg);
+extern void select_admin_common(GtkTreeModel *model, GtkTreeIter *iter,
+				display_data_t *display_data,
+				GtkTreeView *treeview,
+				uint32_t node_col,
+				void (*process_each)(GtkTreeModel *model,
+						     GtkTreePath *path,
+						     GtkTreeIter *iter,
+						     gpointer userdata));
 
 // defaults.c
 extern int load_defaults(void);

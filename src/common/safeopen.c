@@ -61,6 +61,7 @@ FILE * safeopen(const char *path, const char *mode, int flags)
 	} else
 		oflags = O_RDONLY;
 
+	oflags |= O_CLOEXEC;
 	oflags |= !(flags & SAFEOPEN_NOCREATE)   ? O_CREAT : 0;
 	oflags |= (flags & SAFEOPEN_CREATE_ONLY) ? O_EXCL  : 0;
 
@@ -68,10 +69,9 @@ FILE * safeopen(const char *path, const char *mode, int flags)
 		return NULL;
 
 	if (!(flags & SAFEOPEN_LINK_OK)) {
-		lstat(path, &fb1);
-		fstat(fd,   &fb2);
-
-		if (fb2.st_ino != fb1.st_ino) {
+		if ((lstat(path, &fb1) != 0) ||
+		    (fstat(fd,   &fb2) != 0) ||
+		    (fb2.st_ino != fb1.st_ino)) {
 			fprintf(stderr,
 				"%s refusing to open file %s: soft link\n",
 				__func__, path);

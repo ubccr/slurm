@@ -122,6 +122,7 @@ typedef struct sw_gen_libstate {
 const char plugin_name[]        = "switch generic plugin";
 const char plugin_type[]        = "switch/generic";
 const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
+const uint32_t plugin_id	= SWITCH_PLUGIN_GENERIC;
 
 uint64_t debug_flags = 0;
 pthread_mutex_t	global_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -435,6 +436,7 @@ void switch_p_free_jobinfo(switch_jobinfo_t *switch_job)
 			xfree(ifa_ptr->ifa_name);
 			xfree(ifa_ptr);
 		}
+		xfree(node_ptr);
 	}
 	xfree(gen_step_info->node_array);
 	xfree(gen_step_info);

@@ -168,12 +168,18 @@ static int
 _print_job ( bool clear_old )
 {
 	static job_info_msg_t *old_job_ptr;
-	job_info_msg_t *new_job_ptr;
+	job_info_msg_t *new_job_ptr = NULL;
 	int error_code;
 	uint16_t show_flags = 0;
 
 	if (params.all_flag || (params.job_list && list_count(params.job_list)))
 		show_flags |= SHOW_ALL;
+	if (params.federation_flag)
+		show_flags |= SHOW_FEDERATION;
+	if (params.local_flag)
+		show_flags |= SHOW_LOCAL;
+	if (params.sibling_flag)
+		show_flags |= SHOW_FEDERATION | SHOW_SIBLING;
 
 	/* We require detail data when CPUs are requested */
 	if (params.format && strstr(params.format, "C"))
@@ -191,6 +197,8 @@ _print_job ( bool clear_old )
 							 params.user_id,
 							 show_flags);
 		} else {
+			if (params.clusters)
+				show_flags |= SHOW_LOCAL;
 			error_code = slurm_load_jobs(
 				old_job_ptr->last_update,
 				&new_job_ptr, show_flags);
@@ -260,6 +268,8 @@ _print_job_steps( bool clear_old )
 
 	if (params.all_flag)
 		show_flags |= SHOW_ALL;
+	if (params.local_flag)
+		show_flags |= SHOW_LOCAL;
 
 	if (old_step_ptr) {
 		if (clear_old)

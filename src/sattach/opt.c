@@ -36,7 +36,7 @@
 #include <stdarg.h>		/* va_start   */
 #include <stdio.h>
 #include <stdlib.h>		/* getenv     */
-#include <string.h>		/* strcpy, strncasecmp */
+#include <string.h>		/* strcpy     */
 #include <sys/param.h>		/* MAXPATHLEN */
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -361,7 +361,7 @@ static void _parse_jobid_stepid(char *jobid_str)
 
 	verbose("jobid/stepid string = %s\n", jobid_str);
 	job = xstrdup(jobid_str);
-	ptr = index(job, '.');
+	ptr = xstrchr(job, '.');
 	if (ptr == NULL) {
 		error("Did not find a period in the step ID string");
 		_usage();

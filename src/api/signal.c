@@ -85,7 +85,7 @@ static int _signal_batch_script_step(const resource_allocation_response_msg_t
 				     *allocation, uint32_t signal)
 {
 	slurm_msg_t msg;
-	kill_tasks_msg_t rpc;
+	signal_tasks_msg_t rpc;
 	int rc = SLURM_SUCCESS;
 	char *name = nodelist_nth_host(allocation->node_list, 0);
 	if (!name) {
@@ -97,6 +97,7 @@ static int _signal_batch_script_step(const resource_allocation_response_msg_t
 	rpc.job_id = allocation->job_id;
 	rpc.job_step_id = SLURM_BATCH_SCRIPT;
 	rpc.signal = signal;
+	rpc.flags = KILL_JOB_BATCH;
 
 	slurm_msg_t_init(&msg);
 	msg.msg_type = REQUEST_SIGNAL_TASKS;
@@ -120,7 +121,7 @@ static int _signal_job_step(const job_step_info_t *step,
 			    const resource_allocation_response_msg_t *
 			    allocation, uint16_t signal)
 {
-	kill_tasks_msg_t rpc;
+	signal_tasks_msg_t rpc;
 	int rc = SLURM_SUCCESS;
 
 	/* same remote procedure call for each node */
@@ -136,7 +137,7 @@ static int _terminate_batch_script_step(const resource_allocation_response_msg_t
 					* allocation)
 {
 	slurm_msg_t msg;
-	kill_tasks_msg_t rpc;
+	signal_tasks_msg_t rpc;
 	int rc = SLURM_SUCCESS;
 	int i;
 	char *name = nodelist_nth_host(allocation->node_list, 0);
@@ -149,7 +150,7 @@ static int _terminate_batch_script_step(const resource_allocation_response_msg_t
 
 	rpc.job_id = allocation->job_id;
 	rpc.job_step_id = SLURM_BATCH_SCRIPT;
-	rpc.signal = (uint32_t)-1; /* not used by slurmd */
+	rpc.signal = (uint16_t)-1; /* not used by slurmd */
 
 	slurm_msg_t_init(&msg);
 	msg.msg_type = REQUEST_TERMINATE_TASKS;
@@ -180,7 +181,7 @@ static int _terminate_job_step(const job_step_info_t *step,
 			       const resource_allocation_response_msg_t *
 			       allocation)
 {
-	kill_tasks_msg_t rpc;
+	signal_tasks_msg_t rpc;
 	int rc = SLURM_SUCCESS;
 
 	/*
@@ -188,7 +189,7 @@ static int _terminate_job_step(const job_step_info_t *step,
 	 */
 	rpc.job_id = step->job_id;
 	rpc.job_step_id = step->step_id;
-	rpc.signal = (uint32_t)-1; /* not used by slurmd */
+	rpc.signal = (uint16_t)-1; /* not used by slurmd */
 	rc = _local_send_recv_rc_msgs(allocation->node_list,
 				      REQUEST_TERMINATE_TASKS, &rpc);
 	if ((rc == -1) && (errno == ESLURM_ALREADY_DONE)) {
@@ -210,9 +211,9 @@ slurm_signal_job (uint32_t job_id, uint16_t signal)
 {
 	int rc = SLURM_SUCCESS;
 	resource_allocation_response_msg_t *alloc_info = NULL;
-	signal_job_msg_t rpc;
+	signal_tasks_msg_t rpc;
 
-	if (slurm_allocation_lookup_lite(job_id, &alloc_info)) {
+	if (slurm_allocation_lookup(job_id, &alloc_info)) {
 		rc = slurm_get_errno();
 		goto fail1;
 	}
@@ -220,9 +221,10 @@ slurm_signal_job (uint32_t job_id, uint16_t signal)
 	/* same remote procedure call for each node */
 	rpc.job_id = job_id;
 	rpc.signal = (uint32_t)signal;
+	rpc.flags = KILL_STEPS_ONLY;
 
 	rc = _local_send_recv_rc_msgs(alloc_info->node_list,
-				      REQUEST_SIGNAL_JOB, &rpc);
+				      REQUEST_SIGNAL_TASKS, &rpc);
 	slurm_free_resource_allocation_response_msg(alloc_info);
 fail1:
 	if (rc) {
@@ -249,7 +251,7 @@ slurm_signal_job_step (uint32_t job_id, uint32_t step_id, uint32_t signal)
 	int i;
 	int save_errno = 0;
 
-	if (slurm_allocation_lookup_lite(job_id, &alloc_info)) {
+	if (slurm_allocation_lookup(job_id, &alloc_info)) {
 		return -1;
 	}
 
@@ -307,7 +309,7 @@ slurm_terminate_job_step (uint32_t job_id, uint32_t step_id)
 	int i;
 	int save_errno = 0;
 
-	if (slurm_allocation_lookup_lite(job_id, &alloc_info)) {
+	if (slurm_allocation_lookup(job_id, &alloc_info)) {
 		return -1;
 	}
 
@@ -371,7 +373,8 @@ extern int slurm_notify_job (uint32_t job_id, char *message)
 	msg.msg_type    = REQUEST_JOB_NOTIFY;
 	msg.data        = &req;
 
-	if (slurm_send_recv_controller_rc_msg(&msg, &rc) < 0)
+	if (slurm_send_recv_controller_rc_msg(&msg, &rc,
+					      working_cluster_rec) < 0)
 		return SLURM_FAILURE;
 
 	if (rc) {

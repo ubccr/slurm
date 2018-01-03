@@ -51,21 +51,20 @@
  * IN job_return_code - the highest exit code of any task of the job
  * RET 0 on success, otherwise return -1 and set errno to indicate the error
  */
-int
-slurm_complete_job (uint32_t job_id, uint32_t job_return_code)
+extern int slurm_complete_job (uint32_t job_id, uint32_t job_return_code)
 {
 	int rc;
 	slurm_msg_t req_msg;
 	complete_job_allocation_msg_t req;
 
 	slurm_msg_t_init(&req_msg);
-	req.job_id      = job_id;
-	req.job_rc      = job_return_code;
+	req.job_id       = job_id;
+	req.job_rc       = job_return_code;
+	req_msg.msg_type = REQUEST_COMPLETE_JOB_ALLOCATION;
+	req_msg.data	 = &req;
 
-	req_msg.msg_type= REQUEST_COMPLETE_JOB_ALLOCATION;
-	req_msg.data	= &req;
-
-	if (slurm_send_recv_controller_rc_msg(&req_msg, &rc) < 0)
+	if (slurm_send_recv_controller_rc_msg(&req_msg, &rc,
+					      working_cluster_rec) < 0)
 	       return SLURM_ERROR;
 
 	if (rc)

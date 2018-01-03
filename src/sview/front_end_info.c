@@ -337,10 +337,6 @@ static List _create_front_end_info_list(
 		last_list = info_list;
 
 	info_list = list_create(_front_end_info_list_del);
-	if (!info_list) {
-		g_print("malloc error\n");
-		return NULL;
-	}
 
 	if (last_list)
 		last_list_itr = list_iterator_create(last_list);
@@ -651,6 +647,17 @@ extern void get_info_front_end(GtkTable *table, display_data_t *display_data)
 		display_data_front_end->set_menu = local_display_data->set_menu;
 		goto reset_curs;
 	}
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		view = ERROR_VIEW;
+		if (display_widget)
+			gtk_widget_destroy(display_widget);
+		label = gtk_label_new("Not available in a federated view");
+		gtk_table_attach_defaults(GTK_TABLE(table), label, 0, 1, 0, 1);
+		gtk_widget_show(label);
+		display_widget = gtk_widget_ref(label);
+		goto end_it;
+	}
+
 	if (display_widget && toggled) {
 		gtk_widget_destroy(display_widget);
 		display_widget = NULL;
@@ -929,7 +936,7 @@ extern void set_menus_front_end(void *arg, void *arg2, GtkTreePath *path,
 extern void popup_all_front_end(GtkTreeModel *model, GtkTreeIter *iter, int id)
 {
 	char *name = NULL;
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 	GError *error = NULL;
@@ -1031,7 +1038,7 @@ extern void select_admin_front_end(GtkTreeModel *model, GtkTreeIter *iter,
 static void _admin_front_end(GtkTreeModel *model, GtkTreeIter *iter, char *type,
 			     char *node_list)
 {
-	uint16_t state = (uint16_t) NO_VAL;
+	uint16_t state = NO_VAL16;
 	update_front_end_msg_t front_end_update_msg;
 	char *new_type = NULL, *reason = NULL;
 	char tmp_char[100];
@@ -1039,7 +1046,15 @@ static void _admin_front_end(GtkTreeModel *model, GtkTreeIter *iter, char *type,
 	int rc;
 	GtkWidget *label = NULL;
 	GtkWidget *entry = NULL;
-	GtkWidget *popup = gtk_dialog_new_with_buttons(
+	GtkWidget *popup = NULL;
+
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		display_fed_disabled_popup(type);
+		global_entry_changed = 0;
+		return;
+	}
+
+	popup = gtk_dialog_new_with_buttons(
 		type,
 		GTK_WINDOW(main_window),
 		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
@@ -1056,12 +1071,12 @@ static void _admin_front_end(GtkTreeModel *model, GtkTreeIter *iter, char *type,
 	gtk_dialog_add_button(GTK_DIALOG(popup),
 			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
 
-	if (!strncasecmp("Drain", type, 5)) {
+	if (!xstrncasecmp("Drain", type, 5)) {
 		new_type = "DRAIN";
 		reason = "\n\nPlease enter reason.";
 		state = NODE_STATE_DRAIN;
 		entry = create_entry();
-	} else if (!strncasecmp("Resume", type, 6)) {
+	} else if (!xstrncasecmp("Resume", type, 6)) {
 		new_type = "RESUME";
 		reason = "";
 		state = NODE_RESUME;

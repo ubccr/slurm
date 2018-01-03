@@ -78,7 +78,7 @@ is a job inspection tool for examining and debugging parallel programs, primaril
 It's an open source, non-interactive, command line, scriptable tool intended for use by programmers and system administrators alike.</li>
 </ul><br>
 
-<li><b>Digital signatures</b> (Cypto plugin) are used to insure message are not altered.</li>
+<li><b>Digital signatures</b> (Cypto plugin) are used to ensure message are not altered.</li>
 <ul>
 <li><b>MUNGE</b> (recommended)<br>
 MUNGE can be used at an alternative to OpenSSL.
@@ -99,7 +99,11 @@ Using DRMAA, grid applications builders, portal developers and ISVs can use
 the same high-level API to link their software with different cluster/resource
 management systems.<br><br>
 There is a variant of PSNC DRMAA providing support for Slurm's --cluster option
-avaiable <a href="https://github.com/natefoo/slurm-drmaa">here</a>.</li><br>
+avaiable from
+<a href="https://github.com/natefoo/slurm-drmaa">https://github.com/natefoo/slurm-drmaa</a>.<br><br>
+Perl 6 DRMAA bindings are available from
+<a href="https://github.com/scovit/Scheduler-DRMAA">https://github.com/scovit/Scheduler-DRMAA</a>.
+</li><br>
 
 <li><b>Hostlist</b><br>
 A Python program used for manipulation of Slurm hostlists including
@@ -144,18 +148,10 @@ https://github.com/grondo/io-watchdog</a></li><br>
 
 <li><b>MPI</b> versions supported</li>
 <ul>
-<li><a href="http://www.mpi-softtech.com/">ChaMPIon, MPI Software Technology</a></li>
-<li><a href="http://www.hp.com/go/mpi">HP-MPI</a></li>
-<li><a href="http://software.intel.com/en-us/articles/intel-mpi-library/">Intel-MPI</a></li>
-<li><a href="http://www.lam-mpi.org/">LAM/MPI</a></li>
-<li><a href="http://www-unix.mcs.anl.gov/mpi/mpich1/">MPICH1</a></li>
-<li><a href="http://www.mcs.anl.gov/research/projects/mpich2/">MPICH2</a></li>
-<li><a href="http://www.myri.com/scs/download-mpichgm.html">MPICH-GM</a></li>
-<li><a href="http://www.myri.com/scs/download-mpichmx.html">MPICH-MX</a></li>
-<li><a href="http://mvapich.cse.ohio-state.edu/">MVAPICH</a></li>
-<li><a href="http://nowlab.cse.ohio-state.edu/projects/mpi-iba">MVAPICH2</a></li>
-<li><a href="http://www.open-mpi.org">Open MPI</a></li>
-<li><a href="http://www.quadrics.com/">Quadrics MPI</a></li>
+<li><a href="https://software.intel.com/en-us/intel-mpi-library">Intel MPI</a></li>
+<li><a href="https://www.mpich.org/">MPICH (a.k.a. MPICH2 / MPICH2)</a></li>
+<li><a href="http://mvapich.cse.ohio-state.edu/">MVAPICH (a.k.a MVAPICH2)</a></li>
+<li><a href="https://www.open-mpi.org">Open MPI</a></li>
 </ul><br>
 
 <li><b>Workload Simulator</b><br>
@@ -417,6 +413,6 @@ Slurm-based HPC supercomputers. The website of Slurm-web, with screenshots:<br>
 
 </ul>
 
-<p style="text-align:center;">Last modified 8 May 2017</p>
+<p style="text-align:center;">Last modified 16 October 2017</p>
 
 <!--#include virtual="footer.txt"-->

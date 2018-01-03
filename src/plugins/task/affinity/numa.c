@@ -138,7 +138,7 @@ void slurm_chk_memset(nodemask_t *mask, stepd_step_rec_t *job)
 		}
 	}
 
-	fprintf(stderr, "mem_bind%s%s - "
+	fprintf(stderr, "mem-bind%s%s - "
 			"%s, task %2u %2u [%u]: mask 0x%s%s\n",
 			mode, bind_type,
 			conf->hostname,
@@ -259,7 +259,7 @@ extern uint16_t slurm_get_numa_node(uint16_t cpuid)
 
 	collective = numa_allocate_cpumask();
 	if (maxcpus > collective->size) {
-		error("%s: Size mismatch!!!! %d %"PRIu64,
+		error("%s: Size mismatch!!!! %d %lu",
 		      __func__, maxcpus, collective->size);
 		numa_free_cpumask(collective);
 		return 0;

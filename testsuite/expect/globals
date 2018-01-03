@@ -209,6 +209,11 @@ cset max_file_delay 90
 cset max_job_state_delay 360
 
 #
+# Max number of iterations that wait_for_all_jobs can use
+#
+cset wait_for_all_jobs_iterations 600
+
+#
 # Specify the maximum number of tasks to use in the stress tests.
 #
 cset max_stress_tasks 4
@@ -779,7 +784,7 @@ proc wait_for_step { step_id } {
 # Wait up to 900 seconds for all jobs to terminate
 # Return 0 if all jobs done, remainin job count otherwise
 proc wait_for_all_jobs { job_name incr_sleep } {
-	global scancel squeue bin_sleep
+	global scancel squeue bin_sleep wait_for_all_jobs_iterations
 
 	set matches 0
 	set my_delay    0
@@ -792,7 +797,7 @@ proc wait_for_all_jobs { job_name incr_sleep } {
 		set sleep_time  1
 	}
 	send_user "Waiting for all jobs to terminate\n"
-	for {set inx 0} {$inx < 600} {incr inx} {
+	for {set inx 0} {$inx < $wait_for_all_jobs_iterations} {incr inx} {
 		log_user 0
 		set matches 0
 		spawn $squeue -o %j
@@ -1932,6 +1937,37 @@ proc test_launch_type { } {
 
 ################################################################
 #
+# Proc: test_launch_test_exec
+#
+# Purpose: Determine launch type plugin.
+#
+# Returns the launch plugin type
+#
+################################################################
+
+proc test_launch_test_exec { } {
+	global scontrol bin_bash bin_grep alpha_numeric_under
+
+	log_user 0
+	set test_exec 0
+	set type ""
+	spawn -noecho $bin_bash -c "exec $scontrol show config | $bin_grep LaunchParameters"
+	expect {
+		-re "test_exec" {
+			set test_exec 1
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+
+	return $test_exec
+}
+
+################################################################
+#
 # Proc: test_node_features_plugin
 #
 # Purpose: Determine NodeFeaturesPlugin type.
@@ -2166,10 +2202,8 @@ proc test_super_user { } {
 #
 #	Check if user root
 #
-	log_user 0
 	set uid [get_my_uid]
 	if {$uid == 0} {
-		log_user 1
 		set super_user 1
 		set super_user_set 1
 		return $super_user
@@ -2180,6 +2214,7 @@ proc test_super_user { } {
 #
 	set user [get_my_user_name]
 
+	log_user 0
 	spawn $scontrol show config
 	set slurm_user ""
 	expect {
@@ -4138,4 +4173,88 @@ proc get_prolog { } {
 	log_user 1
 
 	return $prolog
+}
+
+################################################################
+#
+# Proc: test_pack_step
+#
+# Returns 1 if steps can span multiple heterogeneous job allocations,
+#	  0 otherwise
+#
+################################################################
+proc test_pack_step { } {
+	global scontrol number
+
+	log_user 0
+	set pack_step 0
+	set major 0
+	set minor 0
+	spawn $scontrol -V
+	expect {
+		-re " ($number).($number).($number)" {
+			set version_major $expect_out(1,string)
+			set version_minor $expect_out(2,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+		}
+		eof {
+			wait
+		}
+	}
+	if {$version_major >= 18} {
+		set pack_step 1
+	} elseif {$version_major == 17 && $version_minor == 11} {
+		spawn $scontrol show config
+		expect {
+			-re "disable_hetero_steps" {
+				set pack_step 0
+				exp_continue
+			}
+			-re "enable_hetero_steps" {
+				set pack_step 1
+				exp_continue
+			}
+			timeout {
+				send_user "\nFAILURE: scontrol not responding\n"
+			}
+			eof {
+				wait
+			}
+		}
+	}
+	log_user 1
+	return $pack_step
+}
+
+proc log_error {msg} {
+	send_user "\nFAILURE: $msg\n"
+}
+
+proc log_warn {msg} {
+	send_user "\nWARNING:    $msg\n"
+}
+
+proc log_info {msg} {
+	send_user "INFO:    $msg\n"
+}
+
+proc in_fed {} {
+	global scontrol
+
+	spawn $scontrol show fed
+	expect {
+		-re "Federation" {
+			return 1
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+		}
+		eof {
+			wait
+		}
+	}
+	return 0
 }

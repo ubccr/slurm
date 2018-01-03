@@ -111,6 +111,8 @@ typedef struct slurmd_config {
 	char         *node_topo_pattern;/* node's topology address pattern */
 	char         *conffile;		/* config filename                 */
 	char         *logfile;		/* slurmd logfile, if any          */
+	int          syslog_debug;	/* send output to both logfile and
+					 * syslog */
 	char         *spooldir;		/* SlurmdSpoolDir		   */
 	char         *pidfile;		/* PidFile location		   */
 	char         *health_check_program; /* run on RPC request or at start */
@@ -147,7 +149,7 @@ typedef struct slurmd_config {
 	char           *job_acct_gather_params; /* job accounting gather params */
 	char           *acct_gather_energy_type; /*  */
 	char           *acct_gather_filesystem_type; /*  */
-	char           *acct_gather_infiniband_type; /*  */
+	char           *acct_gather_interconnect_type; /*  */
 	char           *acct_gather_profile_type; /*  */
 	char           *msg_aggr_params;      /* message aggregation params */
 	uint64_t        msg_aggr_window_msgs; /* msg aggr window size in msgs */
@@ -168,6 +170,9 @@ typedef struct slurmd_config {
 } slurmd_conf_t;
 
 extern slurmd_conf_t * conf;
+extern int fini_job_cnt;
+extern uint32_t *fini_job_id;
+extern pthread_mutex_t fini_job_mutex;
 
 /* Send node registration message with status to controller
  * IN status - same values slurm error codes (for node shutdown)

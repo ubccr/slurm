@@ -66,7 +66,6 @@
  * for details.
  */
 strong_alias(net_stream_listen,		slurm_net_stream_listen);
-strong_alias(net_accept_stream,		slurm_net_accept_stream);
 strong_alias(net_set_low_water,		slurm_net_set_low_water);
 
 #ifndef NET_DEFAULT_BACKLOG
@@ -111,8 +110,6 @@ int net_stream_listen(int *fd, uint16_t *port)
 		goto cleanup;
 
 	*port = _sock_bind_wild(*fd);
-#undef SOMAXCONN
-#define SOMAXCONN	1024
 	rc = listen(*fd, NET_DEFAULT_BACKLOG);
 	if (rc < 0)
 		goto cleanup;
@@ -122,24 +119,6 @@ int net_stream_listen(int *fd, uint16_t *port)
   cleanup:
 	close(*fd);
 	return -1;
-}
-
-
-int net_accept_stream(int fd)
-{
-	int sd;
-
-	while ((sd = accept(fd, NULL, NULL)) < 0) {
-		if (errno == EINTR)
-			continue;
-		if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
-			return -1;
-		if (errno == ECONNABORTED)
-			return -1;
-		error("Unable to accept new connection");
-	}
-
-	return sd;
 }
 
 int net_set_low_water(int sock, socklen_t size)
@@ -160,14 +139,14 @@ extern int net_set_keep_alive(int sock)
 	socklen_t opt_len;
 	struct linger opt_linger;
 	static bool keep_alive_set  = false;
-	static int  keep_alive_time = (uint16_t) NO_VAL;
+	static int  keep_alive_time = NO_VAL16;
 
 	if (!keep_alive_set) {
 		keep_alive_time = slurm_get_keep_alive_time();
 		keep_alive_set = true;
 	}
 
-	if (keep_alive_time == (uint16_t) NO_VAL)
+	if (keep_alive_time == NO_VAL16)
 		return 0;
 
 	opt_len = sizeof(struct linger);
@@ -217,8 +196,7 @@ extern int net_set_keep_alive(int sock)
 
 /* net_stream_listen_ports()
  */
-int
-net_stream_listen_ports(int *fd, uint16_t *port, uint16_t *ports)
+int net_stream_listen_ports(int *fd, uint16_t *port, uint16_t *ports, bool local)
 {
 	int cc;
 	int val;
@@ -233,14 +211,13 @@ net_stream_listen_ports(int *fd, uint16_t *port, uint16_t *ports)
 		return -1;
 	}
 
-	cc = sock_bind_range(*fd, ports);
+	cc = sock_bind_range(*fd, ports, local);
 	if (cc < 0) {
 		close(*fd);
 		return -1;
 	}
 	*port = cc;
-#undef SOMAXCONN
-#define SOMAXCONN	1024
+
 	cc = listen(*fd, NET_DEFAULT_BACKLOG);
 	if (cc < 0) {
 		close(*fd);

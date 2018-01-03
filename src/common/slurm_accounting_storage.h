@@ -51,6 +51,7 @@
 #include <pwd.h>
 
 extern int with_slurmdbd;
+extern uid_t db_api_uid;
 
 extern int slurm_acct_storage_init(char *loc); /* load the plugin */
 extern int slurm_acct_storage_fini(void); /* unload the plugin */
@@ -578,7 +579,8 @@ extern int clusteracct_storage_g_node_up(void *db_conn,
 extern int clusteracct_storage_g_cluster_tres(void *db_conn,
 					      char *cluster_nodes,
 					      char *tres_str_in,
-					      time_t event_time);
+					      time_t event_time,
+					      uint16_t rpc_version);
 
 extern int clusteracct_storage_g_register_ctld(void *db_conn, uint16_t port);
 extern int clusteracct_storage_g_register_disconn_ctld(

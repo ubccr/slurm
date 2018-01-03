@@ -84,7 +84,9 @@ const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 
 #define JOB_FORMAT "JobId=%lu UserId=%s(%lu) GroupId=%s(%lu) Name=%s JobState=%s Partition=%s "\
 		"TimeLimit=%s StartTime=%s EndTime=%s NodeList=%s NodeCnt=%u ProcCnt=%u "\
-		"WorkDir=%s %s\n"
+		"WorkDir=%s ReservationName=%s Gres=%s Account=%s QOS=%s "\
+		"WcKey=%s Cluster=%s SubmitTime=%s EligibleTime=%s%s%s "\
+		"DerivedExitCode=%s ExitCode=%s %s\n"
 
 /* Type for error string table entries */
 typedef struct {
@@ -234,9 +236,12 @@ static void _make_time_str (time_t *time, char *string, int size)
 
 extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 {
-	int rc = SLURM_SUCCESS;
+	int rc = SLURM_SUCCESS, tmp_int, tmp_int2;
 	char job_rec[1024];
 	char usr_str[32], grp_str[32], start_str[32], end_str[32], lim_str[32];
+	char *resv_name, *gres, *account, *qos, *wckey, *cluster;
+	char *exit_code_str = NULL, *derived_ec_str = NULL;
+	char submit_time[32], eligible_time[32], array_id[64], pack_id[64];
 	char select_buf[128], *state_string, *work_dir;
 	size_t offset = 0, tot_size, wrote;
 	uint32_t job_state;
@@ -298,6 +303,84 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 	else
 		work_dir = "unknown";
 
+	if (job_ptr->resv_name && job_ptr->resv_name[0])
+		resv_name = job_ptr->resv_name;
+	else
+		resv_name = "";
+
+	if (job_ptr->gres_req && job_ptr->gres_req[0])
+		gres = job_ptr->gres_req;
+	else
+		gres = "";
+
+	if (job_ptr->account && job_ptr->account[0])
+		account = job_ptr->account;
+	else
+		account = "";
+
+	if (job_ptr->qos_ptr != NULL) {
+		qos = job_ptr->qos_ptr->name;
+	} else
+		qos = "";
+
+	if (job_ptr->wckey && job_ptr->wckey[0])
+		wckey = job_ptr->wckey;
+	else
+		wckey = "";
+
+	if (job_ptr->assoc_ptr != NULL)
+		cluster = job_ptr->assoc_ptr->cluster;
+	else
+		cluster = "unknown";
+
+	if (job_ptr->details && job_ptr->details->submit_time) {
+		_make_time_str(&job_ptr->details->submit_time,
+			       submit_time, sizeof(submit_time));
+	} else {
+		snprintf(submit_time, sizeof(submit_time), "unknown");
+	}
+
+	if (job_ptr->details && job_ptr->details->begin_time) {
+		_make_time_str(&job_ptr->details->begin_time,
+			       eligible_time, sizeof(eligible_time));
+	} else {
+		snprintf(eligible_time, sizeof(eligible_time), "unknown");
+	}
+
+	if (job_ptr->array_task_id != NO_VAL) {
+		snprintf(array_id, sizeof(array_id),
+			 " ArrayJobId=%u ArrayTaskId=%u",
+			 job_ptr->array_job_id, job_ptr->array_task_id);
+	} else {
+		array_id[0] = '\0';
+	}
+
+	if (job_ptr->pack_job_id) {
+		snprintf(pack_id, sizeof(pack_id),
+			 " PackJobId=%u PackJobOffset=%u",
+			 job_ptr->pack_job_id, job_ptr->pack_job_offset);
+	} else {
+		pack_id[0] = '\0';
+	}
+
+	tmp_int = tmp_int2 = 0;
+	if (job_ptr->derived_ec == NO_VAL)
+		;
+	else if (WIFSIGNALED(job_ptr->derived_ec))
+		tmp_int2 = WTERMSIG(job_ptr->derived_ec);
+	else if (WIFEXITED(job_ptr->derived_ec))
+		tmp_int = WEXITSTATUS(job_ptr->derived_ec);
+	xstrfmtcat(derived_ec_str, "%d:%d", tmp_int, tmp_int2);
+
+	tmp_int = tmp_int2 = 0;
+	if (job_ptr->exit_code == NO_VAL)
+		;
+	else if (WIFSIGNALED(job_ptr->exit_code))
+		tmp_int2 = WTERMSIG(job_ptr->exit_code);
+	else if (WIFEXITED(job_ptr->exit_code))
+		tmp_int = WEXITSTATUS(job_ptr->exit_code);
+	xstrfmtcat(exit_code_str, "%d:%d", tmp_int, tmp_int2);
+
 	select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
 		select_buf, sizeof(select_buf), SELECT_PRINT_MIXED);
 
@@ -307,11 +390,12 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 		 (unsigned long) job_ptr->group_id, job_ptr->name,
 		 state_string, job_ptr->partition, lim_str, start_str,
 		 end_str, job_ptr->nodes, job_ptr->node_cnt,
-		 job_ptr->total_cpus, work_dir,
-		 select_buf);
+		 job_ptr->total_cpus, work_dir, resv_name, gres, account, qos,
+		 wckey, cluster, submit_time, eligible_time, array_id, pack_id,
+		 derived_ec_str, exit_code_str, select_buf);
 	tot_size = strlen(job_rec);
 
-	while ( offset < tot_size ) {
+	while (offset < tot_size) {
 		wrote = write(job_comp_fd, job_rec + offset,
 			tot_size - offset);
 		if (wrote == -1) {
@@ -325,6 +409,8 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 		}
 		offset += wrote;
 	}
+	xfree(derived_ec_str);
+	xfree(exit_code_str);
 	slurm_mutex_unlock( &file_lock );
 	return rc;
 }

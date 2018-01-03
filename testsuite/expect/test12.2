@@ -45,7 +45,7 @@ set aix         0
 
 # job parameters
 set mem_size    1024000
-set sleep_time  25
+set sleep_time  32
 set ret_code    42
 set file_size   10485760
 print_header $test_id
@@ -330,6 +330,11 @@ if {[wait_for_job $job_id "DONE"] != 0} {
 	send_user "\nFAILURE: waiting for job to complete\n"
 	set exit_code 1
 }
+
+#
+# Wait for accounting data to be propagated to slurmdbd
+#
+sleep 10
 
 #
 # Report basic sacct info

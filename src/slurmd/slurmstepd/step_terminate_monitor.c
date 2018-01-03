@@ -58,7 +58,6 @@ static int _call_external_program(stepd_step_rec_t *job);
 void step_terminate_monitor_start(stepd_step_rec_t *job)
 {
 	slurm_ctl_conf_t *conf;
-	pthread_attr_t attr;
 
 	slurm_mutex_lock(&lock);
 
@@ -72,16 +71,13 @@ void step_terminate_monitor_start(stepd_step_rec_t *job)
 	program_name = xstrdup(conf->unkillable_program);
 	slurm_conf_unlock();
 
-	slurm_attr_init(&attr);
-	pthread_create(&tid, &attr, _monitor, job);
-	slurm_attr_destroy(&attr);
+	slurm_thread_create(&tid, _monitor, job);
+
 	running_flag = 1;
 	recorded_jobid = job->jobid;
 	recorded_stepid = job->stepid;
 
 	slurm_mutex_unlock(&lock);
-
-	return;
 }
 
 void step_terminate_monitor_stop(void)
@@ -99,7 +95,7 @@ void step_terminate_monitor_stop(void)
 	}
 
 	stop_flag = 1;
-	debug("step_terminate_monitor_stop signalling condition");
+	debug("step_terminate_monitor_stop signaling condition");
 	slurm_cond_signal(&cond);
 	slurm_mutex_unlock(&lock);
 

@@ -90,14 +90,34 @@ slurm_update_job2 (job_desc_msg_t * job_msg, job_array_resp_msg_t **resp)
 {
 	int rc = SLURM_SUCCESS;
 	slurm_msg_t req_msg, resp_msg;
+	slurmdb_cluster_rec_t *save_working_cluster_rec = working_cluster_rec;
 
 	slurm_msg_t_init(&req_msg);
-	slurm_msg_t_init(&resp_msg);
 	req_msg.msg_type	= REQUEST_UPDATE_JOB;
 	req_msg.data		= job_msg;
 
-	rc = slurm_send_recv_controller_msg(&req_msg, &resp_msg);
+tryagain:
+	slurm_msg_t_init(&resp_msg);
+
+	rc = slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					    working_cluster_rec);
 	switch (resp_msg.msg_type) {
+	case RESPONSE_SLURM_REROUTE_MSG:
+	{
+		reroute_msg_t *rr_msg = (reroute_msg_t *)resp_msg.data;
+
+		/* Don't expect mutliple hops but in the case it does
+		 * happen, free the previous rr cluster_rec. */
+		if (working_cluster_rec &&
+		    working_cluster_rec != save_working_cluster_rec)
+			slurmdb_destroy_cluster_rec(
+						working_cluster_rec);
+
+		working_cluster_rec = rr_msg->working_cluster_rec;
+		slurmdb_setup_cluster_rec(working_cluster_rec);
+		rr_msg->working_cluster_rec = NULL;
+		goto tryagain;
+	}
 	case RESPONSE_JOB_ARRAY_ERRORS:
 		*resp = (job_array_resp_msg_t *) resp_msg.data;
 		break;
@@ -108,6 +128,11 @@ slurm_update_job2 (job_desc_msg_t * job_msg, job_array_resp_msg_t **resp)
 		break;
 	default:
 		slurm_seterrno(SLURM_UNEXPECTED_MSG_ERROR);
+	}
+
+	if (working_cluster_rec != save_working_cluster_rec) {
+		slurmdb_destroy_cluster_rec(working_cluster_rec);
+		working_cluster_rec = save_working_cluster_rec;
 	}
 
 	return rc;
@@ -203,7 +228,8 @@ slurm_create_reservation (resv_desc_msg_t * resv_msg)
 	req_msg.msg_type = REQUEST_CREATE_RESERVATION;
 	req_msg.data     = resv_msg;
 
-	rc = slurm_send_recv_controller_msg(&req_msg, &resp_msg);
+	rc = slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					    working_cluster_rec);
 	if (rc)
 		slurm_seterrno(rc);
 	switch (resp_msg.msg_type) {
@@ -284,7 +310,8 @@ slurm_top_job(char *job_id_str)
 	req_msg.msg_type       = REQUEST_TOP_JOB;
 	req_msg.data           = &top_job_req;
 
-	if (slurm_send_recv_controller_rc_msg(&req_msg, &rc) < 0)
+	if (slurm_send_recv_controller_rc_msg(&req_msg, &rc,
+					      working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	slurm_seterrno(rc);
@@ -302,7 +329,8 @@ _slurm_update (void *data, slurm_msg_type_t msg_type)
 	req_msg.msg_type = msg_type;
 	req_msg.data     = data;
 
-	if (slurm_send_recv_controller_rc_msg(&req_msg, &rc) < 0)
+	if (slurm_send_recv_controller_rc_msg(&req_msg, &rc,
+					      working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	if (rc != SLURM_SUCCESS)

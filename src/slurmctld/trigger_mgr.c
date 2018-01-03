@@ -165,12 +165,6 @@ static void _dump_trigger_msg(char *header, trigger_info_msg_t *msg)
 	}
 }
 
-
-static int _match_all_triggers(void *x, void *key)
-{
-	return 1;
-}
-
 /* Validate trigger program */
 static bool _validate_trigger(trig_mgr_info_t *trig_in)
 {
@@ -433,7 +427,7 @@ extern int trigger_set(uid_t uid, gid_t gid, trigger_info_msg_t *msg)
 	}
 
 	_dump_trigger_msg("trigger_set", msg);
-	for (i=0; i<msg->record_count; i++) {
+	for (i = 0; i < msg->record_count; i++) {
 		if (msg->trigger_array[i].res_type ==
 		    TRIGGER_RES_TYPE_JOB) {
 			job_id = (uint32_t) atol(
@@ -454,12 +448,14 @@ extern int trigger_set(uid_t uid, gid_t gid, trigger_info_msg_t *msg)
 			    (msg->trigger_array[i].res_id[0] != '*') &&
 			    (node_name2bitmap(msg->trigger_array[i].res_id,
 					      false, &bitmap) != 0)) {
+				FREE_NULL_BITMAP(bitmap);
 				rc = ESLURM_INVALID_NODE_NAME;
 				continue;
 			}
 		}
 		msg->trigger_array[i].user_id = (uint32_t) uid;
 		if (_duplicate_trigger(&msg->trigger_array[i])) {
+			FREE_NULL_BITMAP(bitmap);
 			rc = ESLURM_TRIGGER_DUP;
 			continue;
 		}
@@ -490,6 +486,8 @@ extern int trigger_set(uid_t uid, gid_t gid, trigger_info_msg_t *msg)
 		msg->trigger_array[i].program = NULL;
 		if (!_validate_trigger(trig_add)) {
 			rc = ESLURM_ACCESS_DENIED;
+			FREE_NULL_BITMAP(trig_add->nodes_bitmap);
+			FREE_NULL_BITMAP(trig_add->orig_bitmap);
 			xfree(trig_add->program);
 			xfree(trig_add->res_id);
 			xfree(trig_add);
@@ -923,7 +921,7 @@ extern void trigger_state_restore(void)
 {
 	int data_allocated, data_read = 0;
 	uint32_t data_size = 0;
-	uint16_t protocol_version = (uint16_t) NO_VAL;
+	uint16_t protocol_version = NO_VAL16;
 	int state_fd, trigger_cnt = 0;
 	char *data = NULL, *state_file;
 	Buf buffer;
@@ -936,6 +934,9 @@ extern void trigger_state_restore(void)
 	state_fd = _open_resv_state_file(&state_file);
 	if (state_fd < 0) {
 		info("No trigger state file (%s) to recover", state_file);
+		xfree(state_file);
+		unlock_state_files();
+		return;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -966,7 +967,9 @@ extern void trigger_state_restore(void)
 	if (ver_str && !xstrcmp(ver_str, TRIGGER_STATE_VERSION))
 		safe_unpack16(&protocol_version, buffer);
 
-	if (protocol_version == (uint16_t) NO_VAL) {
+	if (protocol_version == NO_VAL16) {
+		if (!ignore_state_errors)
+			fatal("Can't recover trigger state, data version incompatible, start with '-i' to ignore this");
 		error("Can't recover trigger state, data version "
 		      "incompatible");
 		xfree(ver_str);
@@ -977,7 +980,7 @@ extern void trigger_state_restore(void)
 
 	safe_unpack_time(&buf_time, buffer);
 	if (trigger_list)
-		list_delete_all (trigger_list, _match_all_triggers, NULL);
+		list_flush(trigger_list);
 	while (remaining_buf(buffer) > 0) {
 		if (_load_trigger_state(buffer, protocol_version) !=
 		    SLURM_SUCCESS)
@@ -987,6 +990,8 @@ extern void trigger_state_restore(void)
 	goto fini;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete trigger data checkpoint file, start with '-i' to ignore this");
 	error("Incomplete trigger data checkpoint file");
 fini:	verbose("State of %d triggers recovered", trigger_cnt);
 	free_buf(buffer);

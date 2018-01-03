@@ -223,6 +223,10 @@ account and user associations inside their realm.
 Events like downed or draining nodes on clusters.
 
 .TP
+\fIfederation\fP
+A group of clusters that work together to schedule jobs.
+
+.TP
 \fIjob\fR
 Used to modify specific fields of a job: Derived Exit Code and
 the Comment String.
@@ -701,6 +705,42 @@ The name of a user in the association.
 Type of machine, current classifications are capability and capacity.
 
 .TP
+\fIFeatures\fP=<comma separated list of feature names>
+Features that are specific to the cluster. Federated jobs can be directed to
+clusters that contain the job requested features.
+
+.TP
+\fIFederation\fP=<federation>
+The federation that this cluster should be a member of. A cluster can only be a
+member of one federation at a time.
+
+.TP
+\fIFedState\fP=<state>
+The state of the cluster in the federation.
+.br
+Valid states are:
+.RS
+.TP
+\fIACTIVE\fP
+Cluster will actively accept and schedule federated jobs.
+
+.TP
+\fIINACTIVE\fP
+Cluster will not schedule or accept any jobs.
+
+.TP
+\fIDRAIN\fP
+Cluster will not accept any new jobs and will let existing federated jobs
+complete.
+
+.TP
+\fIDRAIN+REMOVE\fP
+Cluster will not accept any new jobs and will remove itself from the federation
+once all federated jobs have completed. When removed from the federation, the
+cluster will accept jobs as a non\-federated cluster.
+.RE
+
+.TP
 \fIFlags\fP=<flag list>
 Comma separated list of Attributes for a particular cluster.  Current
 Flags include BGL, BGP, BGQ, Bluegene, CrayXT, FrontEnd, and MultipleSlurmd
@@ -714,6 +754,11 @@ configuration file for some Slurm\-managed cluster.
 .TP
 \fIRPC\fP=<rpc list>
 Comma separated list of numeric RPC values.
+
+.TP
+\fIWithFed\fP
+Appends federation related columns to default format options
+(e.g. Federation,ID,Features,FedState).
 
 .TP
 \fIWOLimits\fP
@@ -745,8 +790,29 @@ When a slurmctld registers with the database the port the controller
 is listening on is placed here.
 
 .TP
+\fIFeatures\fP
+The list of features on the cluster (if any).
+
+.TP
+\fIFederation\fP
+The name of the federation this cluster is a member of (if any).
+
+.TP
+\fIFedState\fP
+The state of the cluster in the federation (if a member of one).
+
+.TP
+\fIFedStateRaw\fP
+Numeric value of the name of the FedState.
+
+.TP
 \fIFlags\fP
 Attributes possessed by the cluster.
+
+.TP
+\fIID\fP
+The ID assigned to the cluster when a member of a federation. This ID uniquely
+identifies the cluster and its jobs in the federation.
 
 .TP
 \fINodeCount\fP
@@ -767,8 +833,8 @@ is running is placed here.
 
 .TP
 \fITRES\fP
-Trackable RESources (BB (Burst buffer), CPU, Energy, GRES, License, Memory, and
-Node) this cluster is accounting for.
+Trackable RESources (Billing, BB (Burst buffer), CPU, Energy, GRES, License,
+Memory, and Node) this cluster is accounting for.
 
 .P
 NOTE: You can also view the information about the root association for
@@ -923,6 +989,49 @@ Number of TRES involved with the event.
 On a node event this is the user who caused the event to happen.
 
 
+.SH "SPECIFICATIONS FOR FEDERATION"
+
+.TP
+\fIClusters\fP[+|\-]=<comma separated list of cluster names>
+List of clusters to add/remove to a federation. A blank value (e.g. clusters=)
+will remove all federations for the federation. NOTE: a cluster can only be a
+member of one federation.
+
+.TP
+\fIName\fP=<name>
+The name of the federation.
+
+.TP
+\fITree\fP
+Display federations in a hierarchical fashion.
+
+.SH "LIST/SHOW FEDERATION FORMAT OPTIONS"
+
+.TP
+\fIFeatures\fP
+The list of features on the cluster.
+
+.TP
+\fIFederation\fP
+The name of the federation.
+
+.TP
+\fICluster\fP
+Name of the cluster that is a member of the federation.
+
+.TP
+\fIFedState\fP
+The state of the cluster in the federation.
+
+.TP
+\fIFedStateRaw\fP
+Numeric value of the name of the FedState.
+
+.TP
+\fIIndex\fP
+The index of the cluster in the federation.
+
+
 .SH "SPECIFICATIONS FOR JOB"
 
 .TP
@@ -1004,6 +1113,19 @@ If set jobs using this QOS must designate a reservation when submitting a job.
 This option can be useful in restricting usage of a QOS that may have greater
 preemptive capability or additional resources to be allowed only within a
 reservation.
+.TP
+\fINoDecay\fP
+If set, this QOS will not have its GrpTRESMins,
+GrpWall and UsageRaw decayed by the slurm.conf PriorityDecayHalfLife or
+PriorityUsageResetPeriod settings.  This allows a QOS to provide aggregate
+limits that, once consumed, will not be replenished automatically.  Such a
+QOS will act as a time-limited quota of resources for an association
+that has access to it.  Account/user usage will still be decayed for
+associations using the QOS.  The QOS GrpTRESMins and
+GrpWall limits can be increased or the QOS RawUsage value reset to 0
+(zero) to again allow jobs submitted with this QOS to be queued (if
+DenyOnLimit is set) or run (pending with QOSGrp{TRES}MinutesLimit
+or QOSGrpWallLimit reasons, where {TRES} is some type of trackable resource).
 .RE
 
 .TP
@@ -1295,6 +1417,95 @@ of the time.  Setting this value to 0 will make it so that running
 jobs will not add time to fairshare or association/qos limits.  To
 clear a previously set value use the modify command with a new value of \-1.
 
+.SH "SPECIFICATIONS FOR RESERVATIONS"
+
+.TP
+\fIClusters\fP=<comma separated list of cluster names>
+List the reservations of the cluster(s).  Default is the cluster where the
+command was run.
+
+.TP
+\fIEnd\fP=<OPT>
+Period ending of reservations. Default is now.
+
+Valid time formats are...
+.sp
+HH:MM[:SS] [AM|PM]
+.br
+MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]
+.br
+MM/DD[/YY]\-HH:MM[:SS]
+.br
+YYYY\-MM\-DD[THH:MM[:SS]]
+
+.TP
+\fIID\fP=<OPT>
+Comma separated list of reservation ids.
+
+.TP
+\fINames\fP=<OPT>
+Comma separated list of reservation names.
+
+.TP
+\fINodes\fP=<comma separated list of node names>
+Node names where reservation ran.
+
+.TP
+\fIStart\fP=<OPT>
+Period start of reservations.  Default is 00:00:00 of current day.
+
+Valid time formats are...
+.sp
+HH:MM[:SS] [AM|PM]
+.br
+MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]
+.br
+MM/DD[/YY]\-HH:MM[:SS]
+.br
+YYYY\-MM\-DD[THH:MM[:SS]]
+
+.SH "LIST/SHOW RESERVATION FORMAT OPTIONS"
+
+.TP
+\fIAssociations\fP
+The id's of the associations able to run in the reservation.
+
+.TP
+\fICluster\fP
+Name of cluster reservation was on.
+
+.TP
+\fIEnd\fP
+End time of reservation.
+
+.TP
+\fIFlags\fP
+Flags on the reservation.
+
+.TP
+\fIID\fP
+Reservation ID.
+
+.TP
+\fIName\fP
+Name of this reservation.
+
+.TP
+\fINodeNames\fP
+List of nodes in the reservation.
+
+.TP
+\fIStart\fP
+Start time of reservation.
+
+.TP
+\fITRES\fP
+List of TRES in the reservation.
+
+.TP
+\fIUnusedWall\fP
+Wall clock time in seconds unused by any job.
+
 
 .SH "SPECIFICATIONS FOR RESOURCE"
 
@@ -1351,7 +1562,6 @@ been given to a cluster the resource will not be displayed with this flag.
 .P
 NOTE:  Resource is used to define each resource configured on a system
 available for usage by Slurm clusters.
-
 
 .SH "LIST/SHOW RESOURCE FORMAT OPTIONS"
 
@@ -1614,6 +1824,12 @@ allocation is counted separately (i.e. if a single node has resources
 allocated to two jobs, this is counted as two allocated nodes).
 
 NOTE: When dealing with Memory as a TRES all limits are in MB.
+
+NOTE: The Billing TRES is calculated from a partition's TRESBillingWeights. It
+is temporarily calculated during scheduling for each partition to enforce
+billing TRES limits. The final Billing TRES is calculated after the job has been
+allocated resources. The final number can be seen in \fBscontrol show jobs\fP
+and \fBsacct\fP output.
 
 .SH "GLOBAL FORMAT OPTION"
 When using the format option for listing various fields you can put a
@@ -2143,6 +2359,8 @@ An example of listing trackable resources
     energy                          3
 .br
       node                          4
+.br
+   billing                          5
 .br
       gres         gpu:tesla     1001
 .br

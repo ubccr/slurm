@@ -161,6 +161,22 @@
 #define	hostset_shift_range	slurm_hostset_shift_range
 #define	hostset_within		slurm_hostset_within
 
+/* gres.[ch] functions */
+#define gres_gresid_to_gresname	slurm_gres_gresid_to_gresname
+#define gres_get_node_used	slurm_gres_get_node_used
+#define gres_get_system_cnt	slurm_gres_get_system_cnt
+#define gres_get_value_by_type	slurm_gres_get_value_by_type
+#define gres_get_job_info	slurm_gres_get_job_info
+#define gres_build_job_details	slurm_gres_build_job_details
+#define gres_get_step_info	slurm_gres_get_step_info
+#define gres_get_step_state	slurm_gres_get_step_state
+#define gres_get_job_state	slurm_gres_get_job_state
+#define gres_2_tres_str		slurm_gres_2_tres_str
+#define gres_set_job_tres_cnt	slurm_gres_set_job_tres_cnt
+#define gres_set_node_tres_cnt	slurm_gres_set_node_tres_cnt
+#define gres_device_major	slurm_gres_device_major
+#define destroy_gres_device	slurm_destroy_gres_device
+
 /* list.[ch] functions */
 #define	list_create		slurm_list_create
 #define	list_destroy		slurm_list_destroy
@@ -197,12 +213,6 @@
 #define	log_fp			slurm_log_fp
 #define	log_has_data		slurm_log_has_data
 #define	log_flush		slurm_log_flush
-#define	dump_cleanup_list	slurm_dump_cleanup_list
-#define	fatal_add_cleanup	slurm_fatal_add_cleanup
-#define	fatal_add_cleanup_job	slurm_fatal_add_cleanup_job
-#define	fatal_remove_cleanup	slurm_fatal_remove_cleanup
-#define	fatal_remove_cleanup_job slurm_fatal_remove_cleanup_job
-#define	fatal_cleanup		slurm_fatal_cleanup
 #define	fatal			slurm_fatal
 #define	error			slurm_error
 #define	info			slurm_info
@@ -219,7 +229,6 @@
 
 /* net.[ch] functions */
 #define net_stream_listen	slurm_net_stream_listen
-#define net_accept_stream	slurm_net_accept_stream
 #define net_set_low_water	slurm_net_set_low_water
 
 /* pack.[ch] functions */
@@ -274,6 +283,7 @@
 #define env_array_append_fmt	slurm_env_array_append_fmt
 #define env_array_overwrite	slurm_env_array_overwrite
 #define env_array_overwrite_fmt slurm_env_array_overwrite_fmt
+#define env_array_overwrite_pack_fmt  slurm_env_array_overwrite_pack_fmt
 
 /* read_config.[ch] functions */
 #define destroy_config_key_pair	slurm_destroy_config_key_pair
@@ -322,6 +332,7 @@
 #define xstring_is_whitespace   slurm_xstring_is_whitespace
 #define	xstrtolower		slurm_xstrtolower
 #define xstrchr			slurm_xstrchr
+#define xstrrchr		slurm_xstrrchr
 #define xstrcmp			slurm_xstrcmp
 #define xstrncmp		slurm_xstrncmp
 #define xstrcasecmp		slurm_xstrcasecmp
@@ -427,6 +438,7 @@
 #define stepd_connect			slurm_stepd_connect
 #define stepd_get_uid			slurm_stepd_get_uid
 #define stepd_add_extern_pid		slurm_stepd_add_extern_pid
+#define stepd_get_x11_display		slurm_stepd_get_x11_display
 
 
 #endif /* USE_ALIAS */

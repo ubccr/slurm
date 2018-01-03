@@ -49,31 +49,6 @@
 
 #define POLL_SLEEP	3	/* retry interval in seconds  */
 
-static bool	_in_node_bit_list(int inx, int *node_list_array);
-
-/*
- * Determine if a node index is in a node list pair array.
- * RET -  true if specified index is in the array
- */
-static bool
-_in_node_bit_list(int inx, int *node_list_array)
-{
-	int i;
-	bool rc = false;
-
-	for (i=0; ; i+=2) {
-		if (node_list_array[i] == -1)
-			break;
-		if ((inx >= node_list_array[i]) &&
-		    (inx <= node_list_array[i+1])) {
-			rc = true;
-			break;
-		}
-	}
-
-	return rc;
-}
-
 /* Load current job table information into *job_buffer_pptr */
 extern int
 scontrol_load_job(job_info_msg_t ** job_buffer_pptr, uint32_t job_id)
@@ -91,6 +66,12 @@ scontrol_load_job(job_info_msg_t ** job_buffer_pptr, uint32_t job_id)
 		if (detail_flag > 1)
 			show_flags |= SHOW_DETAIL2;
 	}
+	if (federation_flag)
+		show_flags |= SHOW_FEDERATION;
+	if (local_flag)
+		show_flags |= SHOW_LOCAL;
+	if (sibling_flag)
+		show_flags |= SHOW_FEDERATION | SHOW_SIBLING;
 
 	if (old_job_info_ptr) {
 		if (last_show_flags != show_flags)
@@ -188,7 +169,11 @@ scontrol_print_completing (void)
 	 * from job's node_inx to node table to work */
 	/*if (all_flag)		Always set this flag */
 	show_flags |= SHOW_ALL;
-	error_code = scontrol_load_nodes (&node_info_msg, show_flags);
+	if (federation_flag)
+		show_flags |= SHOW_FEDERATION;
+	if (local_flag)
+		show_flags |= SHOW_LOCAL;
+	error_code = scontrol_load_nodes(&node_info_msg, show_flags);
 	if (error_code) {
 		exit_code = 1;
 		if (quiet_flag != 1)
@@ -198,34 +183,42 @@ scontrol_print_completing (void)
 
 	/* Scan the jobs for completing state */
 	job_info = job_info_msg->job_array;
-	for (i=0; i<job_info_msg->record_count; i++) {
+	for (i = 0; i < job_info_msg->record_count; i++) {
 		if (job_info[i].job_state & JOB_COMPLETING)
 			scontrol_print_completing_job(&job_info[i],
 						      node_info_msg);
 	}
+	slurm_free_node_info_msg(node_info_msg);
 }
 
 extern void
 scontrol_print_completing_job(job_info_t *job_ptr,
 			      node_info_msg_t *node_info_msg)
 {
-	int i;
+	int i, c_offset = 0;
 	node_info_t *node_info;
-	hostlist_t all_nodes, comp_nodes, down_nodes;
+	hostlist_t comp_nodes, down_nodes;
 	char *node_buf;
 
-	all_nodes  = hostlist_create(job_ptr->nodes);
 	comp_nodes = hostlist_create(NULL);
 	down_nodes = hostlist_create(NULL);
 
-	for (i=0; i<node_info_msg->record_count; i++) {
-		node_info = &(node_info_msg->node_array[i]);
-		if (IS_NODE_COMPLETING(node_info) &&
-		    (_in_node_bit_list(i, job_ptr->node_inx)))
-			hostlist_push_host(comp_nodes, node_info->name);
-		else if (IS_NODE_DOWN(node_info) &&
-			 (hostlist_find(all_nodes, node_info->name) != -1))
-			hostlist_push_host(down_nodes, node_info->name);
+	if (job_ptr->cluster && federation_flag && !local_flag)
+		c_offset = get_cluster_node_offset(job_ptr->cluster,
+						   node_info_msg);
+
+	for (i = 0; job_ptr->node_inx[i] != -1; i+=2) {
+		int j = job_ptr->node_inx[i];
+		for (; j <= job_ptr->node_inx[i+1]; j++) {
+			int node_inx = j + c_offset;
+			if (node_inx >= node_info_msg->record_count)
+				break;
+			node_info = &(node_info_msg->node_array[node_inx]);
+			if (IS_NODE_COMPLETING(node_info))
+				hostlist_push_host(comp_nodes, node_info->name);
+			else if (IS_NODE_DOWN(node_info))
+				hostlist_push_host(down_nodes, node_info->name);
+		}
 	}
 
 	fprintf(stdout, "JobId=%u ", job_ptr->job_id);
@@ -241,7 +234,6 @@ scontrol_print_completing_job(job_info_t *job_ptr,
 	xfree(node_buf);
 	fprintf(stdout, "\n");
 
-	hostlist_destroy(all_nodes);
 	hostlist_destroy(comp_nodes);
 	hostlist_destroy(down_nodes);
 }
@@ -258,7 +250,7 @@ scontrol_get_job_state(uint32_t job_id)
 		exit_code = 1;
 		if (quiet_flag == -1)
 			slurm_perror ("slurm_load_job error");
-		return (uint16_t) NO_VAL;
+		return NO_VAL16;
 	}
 	if (quiet_flag == -1) {
 		char time_str[32];
@@ -275,7 +267,15 @@ scontrol_get_job_state(uint32_t job_id)
 	}
 	if (quiet_flag == -1)
 		printf("Could not find job %u", job_id);
-	return (uint16_t) NO_VAL;
+	return NO_VAL16;
+}
+
+static bool _pack_id_match(job_info_t *job_ptr, uint32_t pack_job_offset)
+{
+	if ((pack_job_offset == NO_VAL) ||
+	    (pack_job_offset == job_ptr->pack_job_offset))
+		return true;
+	return false;
 }
 
 static bool _task_id_in_job(job_info_t *job_ptr, uint32_t array_id)
@@ -302,12 +302,11 @@ static bool _task_id_in_job(job_info_t *job_ptr, uint32_t array_id)
  * scontrol_print_job - print the specified job's information
  * IN job_id - job's id or NULL to print information about all jobs
  */
-extern void
-scontrol_print_job (char * job_id_str)
+extern void scontrol_print_job(char * job_id_str)
 {
 	int error_code = SLURM_SUCCESS, i, print_cnt = 0;
 	uint32_t job_id = 0;
-	uint32_t array_id = NO_VAL;
+	uint32_t array_id = NO_VAL, pack_job_offset = NO_VAL;
 	job_info_msg_t * job_buffer_ptr = NULL;
 	job_info_t *job_ptr = NULL;
 	char *end_ptr = NULL;
@@ -318,7 +317,8 @@ scontrol_print_job (char * job_id_str)
 		 * Check that the input is a valid job id (i.e. 123 or 123_456).
 		 */
 		while (*tmp_job_ptr) {
-			if (!isdigit(*tmp_job_ptr) && (*tmp_job_ptr != '_')) {
+			if (!isdigit(*tmp_job_ptr) &&
+			    (*tmp_job_ptr != '_') && (*tmp_job_ptr != '+')) {
 				exit_code = 1;
 				slurm_seterrno(ESLURM_INVALID_JOB_ID);
 				if (quiet_flag != 1)
@@ -329,7 +329,9 @@ scontrol_print_job (char * job_id_str)
 		}
 		job_id = (uint32_t) strtol (job_id_str, &end_ptr, 10);
 		if (end_ptr[0] == '_')
-			array_id = strtol( end_ptr + 1, &end_ptr, 10 );
+			array_id = strtol(end_ptr + 1, &end_ptr, 10);
+		if (end_ptr[0] == '+')
+			pack_job_offset = strtol(end_ptr + 1, &end_ptr, 10);
 	}
 
 	error_code = scontrol_load_job(&job_buffer_ptr, job_id);
@@ -351,6 +353,8 @@ scontrol_print_job (char * job_id_str)
 	     i < job_buffer_ptr->record_count; i++, job_ptr++) {
 		char *save_array_str = NULL;
 		uint32_t save_task_id = 0;
+		if (!_pack_id_match(job_ptr, pack_job_offset))
+			continue;
 		if (!_task_id_in_job(job_ptr, array_id))
 			continue;
 		if ((array_id != NO_VAL) && job_ptr->array_task_str) {
@@ -371,11 +375,14 @@ scontrol_print_job (char * job_id_str)
 		if (job_id_str) {
 			exit_code = 1;
 			if (quiet_flag != 1) {
-				if (array_id == (uint16_t) NO_VAL) {
-					printf("Job %u not found\n", job_id);
-				} else {
+				if (array_id != NO_VAL) {
 					printf("Job %u_%u not found\n",
 					       job_id, array_id);
+				} else if (pack_job_offset != NO_VAL) {
+					printf("Job %u+%u not found\n",
+					       job_id, pack_job_offset);
+				} else {
+					printf("Job %u not found\n", job_id);
 				}
 			}
 		} else if (quiet_flag != 1)
@@ -405,19 +412,21 @@ scontrol_print_step (char *job_step_id_str)
 	if (job_step_id_str) {
 		job_id = (uint32_t) strtol (job_step_id_str, &next_str, 10);
 		if (next_str[0] == '_')
-			array_id = (uint16_t) strtol(next_str+1, &next_str, 10);
-		if (next_str[0] == '.')
+			array_id = (uint32_t) strtol(next_str+1, &next_str, 10);
+		else if (next_str[0] == '.')
 			step_id = (uint32_t) strtol (next_str+1, NULL, 10);
 	}
 
 	if (all_flag)
 		show_flags |= SHOW_ALL;
+	if (local_flag)
+		show_flags |= SHOW_LOCAL;
 
 	if ((old_job_step_info_ptr) && (last_job_id == job_id) &&
 	    (last_array_id == array_id) && (last_step_id == step_id)) {
 		if (last_show_flags != show_flags)
 			old_job_step_info_ptr->last_update = (time_t) 0;
-		error_code = slurm_get_job_steps (
+		error_code = slurm_get_job_steps(
 			old_job_step_info_ptr->last_update,
 			job_id, step_id, &job_step_info_ptr,
 			show_flags);
@@ -428,7 +437,7 @@ scontrol_print_step (char *job_step_id_str)
 			job_step_info_ptr = old_job_step_info_ptr;
 			error_code = SLURM_SUCCESS;
 			if (quiet_flag == -1)
-				printf ("slurm_get_job_steps no change in data\n");
+				printf("slurm_get_job_steps no change in data\n");
 		}
 	} else {
 		if (old_job_step_info_ptr) {
@@ -494,7 +503,7 @@ static int _parse_jobid(const char *jobid_str, uint32_t *out_jobid)
 	long jobid;
 
 	job = xstrdup(jobid_str);
-	ptr = index(job, '.');
+	ptr = xstrchr(job, '.');
 	if (ptr != NULL) {
 		*ptr = '\0';
 	}
@@ -518,7 +527,7 @@ static int _parse_stepid(const char *jobid_str, uint32_t *out_stepid)
 	long stepid;
 
 	job = xstrdup(jobid_str);
-	ptr = index(job, '.');
+	ptr = xstrchr(job, '.');
 	if (ptr == NULL) {
 		/* did not find a period, so no step ID in this string */
 		xfree(job);
@@ -841,7 +850,7 @@ static int _blocks_dealloc(void)
 	}
 
 	if (error_code) {
-		error("slurm_load_partitions: %s",
+		error("slurm_load_block_info: %s",
 		      slurm_strerror(slurm_get_errno()));
 		return -1;
 	}
@@ -967,12 +976,12 @@ extern int scontrol_job_ready(char *job_id_str)
 
 	if (cluster_flags & CLUSTER_FLAG_BG) {
 		resource_allocation_response_msg_t *alloc;
-		rc = slurm_allocation_lookup_lite(job_id, &alloc);
+		rc = slurm_allocation_lookup(job_id, &alloc);
 		if (rc == SLURM_SUCCESS) {
 			rc = _wait_bluegene_block_ready(alloc);
 			slurm_free_resource_allocation_response_msg(alloc);
 		} else {
-			error("slurm_allocation_lookup_lite: %m");
+			error("slurm_allocation_lookup: %m");
 			rc = SLURM_ERROR;
 		}
 	} else
@@ -1037,7 +1046,7 @@ extern int scontrol_callerid(int argc, char **argv)
 		fprintf(stderr,
 			"slurm_network_callerid: unable to retrieve callerid data from remote slurmd\n");
 		return SLURM_FAILURE;
-	} else if (job_id == (uint32_t)NO_VAL) {
+	} else if (job_id == NO_VAL) {
 		fprintf(stderr,
 			"slurm_network_callerid: remote job id indeterminate\n");
 		return SLURM_FAILURE;
@@ -1045,4 +1054,41 @@ extern int scontrol_callerid(int argc, char **argv)
 		printf("%u %s\n", job_id, node_name);
 		return SLURM_SUCCESS;
 	}
+}
+
+extern int scontrol_batch_script(int argc, char **argv)
+{
+	char *filename;
+	FILE *out;
+	int exit_code;
+	uint32_t jobid;
+
+	if (argc < 1)
+		return SLURM_ERROR;
+
+	jobid = atoll(argv[0]);
+
+	if (argc > 1)
+		filename = xstrdup(argv[1]);
+	else
+		filename = xstrdup_printf("slurm-%u.sh", jobid);
+
+	if (!(out = fopen(filename, "w"))) {
+		fprintf(stderr, "failed to open file `%s`: %m\n", filename);
+		xfree(filename);
+		return errno;
+	}
+
+	exit_code = slurm_job_batch_script(out, jobid);
+	fclose(out);
+	if (exit_code != SLURM_SUCCESS) {
+		unlink(filename);
+		slurm_perror("job script retrieval failed");
+	} else if (quiet_flag != 1) {
+		printf("batch script for job %u written to %s\n",
+		       jobid, filename);
+	}
+	xfree(filename);
+
+	return exit_code;
 }

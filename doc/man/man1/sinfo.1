@@ -34,6 +34,10 @@ with the minimum value followed by a "+" for nodes with the
 same partition and state (e.g., "250+").
 
 .TP
+\fB\-\-federation\fR
+Show all partitions from the federation if a member of one.
+
+.TP
 \fB\-h\fR, \fB\-\-noheader\fR
 Do not print a header on the output.
 
@@ -54,6 +58,11 @@ Sleep for the indicated number of seconds between reports.
 By default, prints a time stamp with the header.
 
 .TP
+\fB\-\-local\fR
+Show only jobs local to this cluster. Ignore other clusters in this federation
+(if any). Overrides \-\-federation.
+
+.TP
 \fB\-l\fR, \fB\-\-long\fR
 Print more detailed information.
 This is ignored if the \fB\-\-format\fR option is specified.
@@ -63,6 +72,7 @@ This is ignored if the \fB\-\-format\fR option is specified.
 Clusters to issue commands to.  Multiple cluster names may be comma separated.
 A value of of '\fIall\fR' will query to run on all clusters.
 Note that the SlurmDBD must be up for this option to work properly.
+This option implicitly sets the \fB\-\-local\fR option.
 
 .TP
 \fB\-n <nodes>\fR, \fB\-\-nodes=<nodes>\fR
@@ -246,6 +256,9 @@ Print the user name and uid of who set the reason a node is unavailable.
 \fB%v\fR
 Print the version of the running slurmd daemon.
 .TP
+\fB%V\fR
+Print the cluster name if running in a federation
+.TP
 \fB%w\fR
 Scheduling weight of the nodes
 .TP
@@ -305,6 +318,9 @@ Allowed allocating nodes.
 .TP
 \fBavailable\fR
 State/availability of a partition.
+.TP
+\fBcluster\fR
+Print the cluster name if running in a federation
 .TP
 \fBcpus\fR
 Number of CPUs per node.
@@ -731,8 +747,14 @@ Commandline options will always override these settings.)
 \fBSINFO_ALL\fR
 \fB\-a, \-\-all\fR
 .TP
+\fBSINFO_FEDERATION\fR
+Same as \fB\-\-federation\fR
+.TP
 \fBSINFO_FORMAT\fR
 \fB\-o <output_format>, \-\-format=<output_format>\fR
+.TP
+\fBSINFO_LOCAL\fR
+Same as \fB\-\-local\fR
 .TP
 \fBSINFO_PARTITION\fR
 \fB\-p <partition>, \-\-partition=<partition>\fR
@@ -830,7 +852,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2009 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010-2016 SchedMD LLC.
+Copyright (C) 2010-2017 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <https://slurm.schedmd.com/>.

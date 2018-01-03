@@ -89,18 +89,18 @@ proc setup_federation { fed_name } {
 	set count 0
 	foreach cluster [list $fedc1 $fedc2 $fedc3] {
 		incr count
-		set my_pid [spawn $sacctmgr -i mod cluster $cluster set federation=$fed_name weight=1]
+		set my_pid [spawn $sacctmgr -i mod cluster $cluster set federation=$fed_name features=]
 		set matches 0
 		expect {
 			-re "Setting$eol" {
 				incr matches
 					exp_continue
 			}
-			-re "^\\s+Federation\\s+=\\s+$fed_name$eol" {
+			-re "^\\s+Feature\\s+=\\s+$eol" {
 				incr matches
 				exp_continue
 			}
-			-re "^\\s+Weight\\s+=\\s+1$eol" {
+			-re "^\\s+Federation\\s+=\\s+$fed_name$eol" {
 				incr matches
 				exp_continue
 			}
@@ -137,6 +137,7 @@ proc setup_federation { fed_name } {
 proc test_cluster_up { cname } {
 	set rc 0
 	set matches 0
+	set timeout 2
 	global fed_slurm_base fedc1 fedc2 fedc3
 	set my_scontrol "${fed_slurm_base}/$cname/bin/scontrol"
 	log_user 0
@@ -146,7 +147,7 @@ proc test_cluster_up { cname } {
 			incr matches
 		}
 		timeout {
-			send_user "\nFAILURE: $cname not responding\n"
+			send_user "\nWARNING: $cname not responding\n"
 			slow_kill $my_pid
 			set rc 1
 		}
@@ -159,6 +160,22 @@ proc test_cluster_up { cname } {
 		set rc 1
 	}
 	log_user 1
+	return $rc
+}
+
+
+proc test_all_up {} {
+	set rc 0
+	global fedc1 fedc2 fedc3
+
+	if {[test_cluster_up $fedc1] ||
+	    [test_cluster_up $fedc2] ||
+	    [test_cluster_up $fedc3]} {
+		log_warn "This test can't be run if any clusters--$fedc1,\
+			$fedc2, or $fedc3--are down."
+		set rc 1
+	}
+
 	return $rc
 }
 
@@ -220,17 +237,17 @@ proc get_clusterfed_info { fed_name } {
 	set matches 0
 	array set clusters {}
 	set my_pid [spawn $sacctmgr show cluster federation=$fed_name \
-		    format="cluster%20,federation%20,id,controlhost,controlport,weight,fedstate"]
+		    format="cluster%20,federation%20,id,controlhost,controlport,features,fedstate"]
 	expect {
-		-re "Cluster\\s+Federation\\s+ID\\s+ControlHost\\s+ControlPort\\s+Weight\\s+FedState $eol" {
+		-re "Cluster\\s+Federation\\s+ID\\s+ControlHost\\s+ControlPort\\s+Features\\s+FedState $eol" {
 			incr matches
 			exp_continue
 		}
-		-re "\\s+(\\S+)\\s+$fed_name\\s+(\\d+)\\s+(\\S+)\\s+(\\d+)\\s+(\\d+)\\s+(\\S*) $eol" {
+		-re "\\s+(\\S+)\\s+$fed_name\\s+(\\d+)\\s+(\\S+)\\s+(\\d+)\\s+(\\S*)\\s+(\\S*) $eol" {
 			set clusters($expect_out(1,string)) [dict create id     $expect_out(2,string) \
 									 host   $expect_out(3,string) \
 									 port   $expect_out(4,string) \
-									 weight $expect_out(5,string) \
+									 features $expect_out(5,string) \
 									 state  $expect_out(6,string)]
 			incr matches
 			exp_continue
@@ -381,55 +398,6 @@ proc modify_federation_flags {fed_name mode flags} {
 	}
 }
 
-proc modify_cluster_weight {cname weight} {
-	global sacctmgr eol
-	set matches 0
-	set my_pid [spawn $sacctmgr -i mod cluster $cname set weight=$weight]
-	expect {
-		-re "Setting$eol" {
-			incr matches
-			exp_continue
-		}
-		-re "^\\s+Weight\\s+=\\s+$weight$eol" {
-			incr matches
-			exp_continue
-		}
-		-re "Modified cluster...$eol" {
-			incr matches
-			exp_continue
-		}
-		-re "^\\s+$cname$eol" {
-			incr matches
-			exp_continue
-		}
-		timeout {
-			send_user "\nFAILURE: sacctmgr add not responding\n"
-			slow_kill $my_pid
-			end_it 1
-		}
-		eof {
-			wait
-		}
-	}
-	if {$matches != 4} {
-		send_user "$matches FAILURE: failed to set weight for $cname\n"
-		end_it 1
-	}
-}
-
-
-proc log_error {msg} {
-	send_user "\nFAILURE: $msg\n"
-}
-
-proc log_warn {msg} {
-	send_user "\nWARNING:    $msg\n"
-}
-
-proc log_info {msg} {
-	send_user "INFO:    $msg\n"
-}
-
 
 ################################################################
 #
@@ -461,6 +429,7 @@ proc wait_for_fed_job { job_id desired_state clusters } {
 	switch $desired_state {
 		"DONE" {}
 		"PENDING" {}
+		"REVOKED" {}
 		"RUNNING" {}
 		"SUSPENDED" {}
 		"SPECIAL_EXIT" {}
@@ -482,12 +451,12 @@ proc wait_for_fed_job { job_id desired_state clusters } {
 	if {[string compare $clusters ""]} {
 		set spec_clusters [split $clusters ","]
 	}
-	log_info "checking for $desired_state on [join $spec_clusters ,]"
+	log_info "checking for job '$job_id' in state '$desired_state' on [join $spec_clusters ,]"
 
 	while 1 {
 		foreach cluster $spec_clusters {
 			log_info "checking $cluster"
-			set fd [open "|$scontrol -M$cluster -a -o show job $job_id"]
+			set fd [open "|$scontrol -M$cluster --local -a -o show job $job_id"]
 			gets $fd line
 			catch {close $fd}
 			if {[regexp {JobState\s*=\s*(\w+)} $line foo state] != 1} {
@@ -522,6 +491,14 @@ proc wait_for_fed_job { job_id desired_state clusters } {
 				"PENDING" {
 					if {[string compare $desired_state "PENDING"] == 0} {
 						send_user "Job $job_id is PENDING on $cluster\n"
+						return $cluster
+					}
+					send_user "Job $job_id is in state $state, "
+					send_user "desire $desired_state\n"
+				}
+				"REVOKED" {
+					if {[string compare $desired_state "REVOKED"] == 0} {
+						send_user "Job $job_id is REVOKED on $cluster\n"
 						return $cluster
 					}
 					send_user "Job $job_id is in state $state, "

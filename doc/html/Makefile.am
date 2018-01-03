@@ -32,11 +32,13 @@ generated_html = \
 	elastic_computing.html \
 	ext_sensorsplugins.html \
 	faq.html \
+	federation.html \
 	gang_scheduling.html \
 	gres.html \
 	gres_design.html \
 	gres_plugins.html \
 	hdf5_profile_user_guide.html \
+	heterogeneous_jobs.html \
 	high_throughput.html \
 	ibm-pe.html \
 	intel_knl.html \
@@ -62,6 +64,7 @@ generated_html = \
 	news.html \
 	node_features_plugins.html \
 	overview.html \
+	pam_slurm_adopt.html \
 	platforms.html \
 	plugins.html \
 	power_mgmt.html \

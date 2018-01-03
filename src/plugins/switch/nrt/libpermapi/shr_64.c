@@ -336,7 +336,7 @@ static void _agent_proc_connect(int fe_comm_socket,uint32_t fe_auth_key)
 	}
 
 fini:	if (fe_comm_conn >= 0)
-		slurm_close(fe_comm_conn);
+		close(fe_comm_conn);
 	if (buffer)
 		free_buf(buffer);
 }
@@ -399,8 +399,6 @@ static void _spawn_fe_agent(void)
 	int fe_comm_socket = -1;
 	slurm_addr_t comm_addr;
 	uint16_t comm_port;
-	pthread_attr_t agent_attr;
-	pthread_t agent_tid;
 	agent_data_t *agent_data_ptr;
 
 	/* Open socket for back-end program to communicate with */
@@ -425,15 +423,8 @@ static void _spawn_fe_agent(void)
 	agent_data_ptr = xmalloc(sizeof(agent_data_t));
 	agent_data_ptr->fe_auth_key = fe_auth_key;
 	agent_data_ptr->fe_comm_socket = fe_comm_socket;
-	slurm_attr_init(&agent_attr);
-	pthread_attr_setdetachstate(&agent_attr, PTHREAD_CREATE_DETACHED);
-	while ((pthread_create(&agent_tid, &agent_attr, &_agent_thread,
-			       (void *) agent_data_ptr))) {
-		if (errno != EAGAIN)
-			fatal("pthread_create(): %m");
-		sleep(1);
-	}
-	slurm_attr_destroy(&agent_attr);
+
+	slurm_thread_create_detached(NULL, _agent_thread, agent_data_ptr);
 }
 
 /*
@@ -931,7 +922,7 @@ extern int pe_rm_connect(rmhandle_t resource_mgr,
 		job->ntasks = 1 + task_num;
 	} else if (pm_type == PM_POE) {
 		debug("got pe_rm_connect called");
-		launch_common_set_stdio_fds(job, &cio_fds);
+		launch_common_set_stdio_fds(job, &cio_fds, &opt);
 	} else {
 		*error_msg = malloc(sizeof(char) * err_msg_len);
 		snprintf(*error_msg, err_msg_len,
@@ -989,12 +980,12 @@ extern int pe_rm_connect(rmhandle_t resource_mgr,
 	total_node_list = hostlist_ranged_string_xmalloc(total_hl);
 	node_cnt = hostlist_count(total_hl);
 
-	opt.argc = my_argc;
-	opt.argv = my_argv;
-	opt.user_managed_io = true;
+	sropt.argc = my_argc;
+	sropt.argv = my_argv;
+	sropt.user_managed_io = true;
 	/* Disable binding of the pvmd12 task so it has access to all resources
 	 * allocated to the job step and can use them for spawned tasks. */
-	opt.cpu_bind_type = CPU_BIND_NONE;
+	sropt.cpu_bind_type = CPU_BIND_NONE;
 	orig_task_num = task_num;
 	if (slurm_step_ctx_daemon_per_node_hack(job->step_ctx,
 						total_node_list,
@@ -1016,7 +1007,8 @@ extern int pe_rm_connect(rmhandle_t resource_mgr,
 	step_callbacks.step_signal   = _self_signal;
 	step_callbacks.step_timeout  = _self_timeout;
 
-	if (launch_g_step_launch(job, &cio_fds, &global_rc, &step_callbacks)) {
+	if (launch_g_step_launch(job, &cio_fds, &global_rc,
+				 &step_callbacks, &opt)) {
 		*error_msg = malloc(sizeof(char) * err_msg_len);
 		snprintf(*error_msg, err_msg_len,
 			 "pe_rm_connect: problem with launch: %s",
@@ -1052,7 +1044,7 @@ extern int pe_rm_connect(rmhandle_t resource_mgr,
 	   dangling reference set here.  This shouldn't matter, but
 	   Clang reported it so we are making things quite here.
 	*/
-	opt.argv = NULL;
+	sropt.argv = NULL;
 	return 0;
 }
 
@@ -1074,7 +1066,7 @@ extern void pe_rm_free(rmhandle_t *resource_mgr)
 		/* Since we can't relaunch the step here don't worry about the
 		   return code.
 		*/
-		launch_g_step_wait(job, got_alloc);
+		launch_g_step_wait(job, got_alloc, &opt);
 		/* We are at the end so don't worry about freeing the
 		   srun_job_t pointer */
 		fini_srun(job, got_alloc, &rc, slurm_started);
@@ -1273,9 +1265,9 @@ extern int pe_rm_get_job_info(rmhandle_t resource_mgr, job_info_t **job_info,
 		      "pe_rm_submit_job was called.  I am guessing "
 		      "PE_RM_BATCH is set somehow.  It things don't work well "
 		      "using this mode unset the env var and retry.");
-		create_srun_job(&job, &got_alloc, slurm_started, 0);
+		create_srun_job((void **)&job, &got_alloc, slurm_started, 0);
 		/* make sure we set up a signal handler */
-		pre_launch_srun_job(job, slurm_started, 0);
+		pre_launch_srun_job(job, slurm_started, 0, &opt);
 	}
 
 	*job_info = ret_info;
@@ -1411,7 +1403,7 @@ extern int pe_rm_get_job_info(rmhandle_t resource_mgr, job_info_t **job_info,
 		setenv("SLURM_JOB_NODELIST", job->nodelist, 1);
 	}
 
-	if (!opt.preserve_env) {
+	if (!sropt.preserve_env) {
 		snprintf(value, sizeof(value), "%u", job->ntasks);
 		setenv("SLURM_NTASKS", value, 1);
 		snprintf(value, sizeof(value), "%u", job->nhosts);
@@ -1659,7 +1651,7 @@ extern int pe_rm_init(int *rmapi_version, rmhandle_t *resource_mgr, char *rm_id,
 			xfree(opt.network);
 			if (adapter_use) {
 				if (!xstrcmp(adapter_use, "dedicated"))
-					opt.exclusive = true;
+					sropt.exclusive = true;
 				xfree(adapter_use);
 			}
 			if (collectives) {
@@ -1716,14 +1708,14 @@ extern int pe_rm_init(int *rmapi_version, rmhandle_t *resource_mgr, char *rm_id,
 	/* This has to be done after init_srun so as to not get over
 	   written. */
 	if (getenv("SLURM_PRESERVE_ENV"))
-		opt.preserve_env = true;
+		sropt.preserve_env = true;
 	if ((tmp_char = getenv("SRUN_EXC_NODES")))
 		opt.exc_nodes = xstrdup(tmp_char);
 	if ((tmp_char = getenv("SRUN_WITH_NODES")))
 		opt.nodelist = xstrdup(tmp_char);
 	if ((tmp_char = getenv("SRUN_RELATIVE"))) {
-		opt.relative = atoi(tmp_char);
-		opt.relative_set = 1;
+		sropt.relative = atoi(tmp_char);
+		sropt.relative_set = 1;
 	}
 
 	if (pm_type == PM_PMD) {
@@ -1754,8 +1746,8 @@ extern int pe_rm_init(int *rmapi_version, rmhandle_t *resource_mgr, char *rm_id,
 		job->jobid = job_id;
 		job->stepid = step_id;
 
-		opt.ifname = opt.ofname = opt.efname = "/dev/null";
-		job_update_io_fnames(job);
+		sropt.ifname = sropt.ofname = sropt.efname = "/dev/null";
+		job_update_io_fnames(job, &opt);
 	} else if (pm_type == PM_POE) {
 		/* Create agent thread to forward job credential needed for
 		 * PMD to fanout child processes on other nodes */
@@ -1929,12 +1921,12 @@ int pe_rm_submit_job(rmhandle_t resource_mgr, job_command_t job_cmd,
 		opt.ntasks = pe_job_req->total_tasks;
 	}
 
-	create_srun_job(&job, &got_alloc, slurm_started, 0);
+	create_srun_job((void **)&job, &got_alloc, slurm_started, 0);
 	_re_write_cmdfile(slurm_cmd_fname, poe_cmd_fname, job->stepid,
 			  pe_job_req->total_tasks);
 
 	/* make sure we set up a signal handler */
-	pre_launch_srun_job(job, slurm_started, 0);
+	pre_launch_srun_job(job, slurm_started, 0, &opt);
 
 	return 0;
 }

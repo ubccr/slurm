@@ -2,6 +2,9 @@
 
 <h1>BlueGene/Q User and Administrator Guide</h1>
 
+<p><b>Support for BlueGene/Q systems is deprecated as of 17.11, and will be
+removed in a future release.</b></p>
+
 <p><b>Beginning with the 17.02 release only BlueGene/Q systems are supported
 by Slurm. Support for the BlueGene/L and BlueGene/P systems has been removed.
 </b></p>
@@ -371,7 +374,7 @@ will wait until the job's block has relinquished the resources acquired
 by the job and is no longer usable by this job. It is recommended that
 you construct a script that serves this function and calls the
 supplied program <i>sbin/slurm_epilog</i>.
-The prolog and epilog programs are used to insure proper synchronization
+The prolog and epilog programs are used to ensure proper synchronization
 between the <i>slurmctld</i> daemon, the user job, and MMCS.
 A multitude of other functions may also be placed into the prolog and
 epilog as desired (e.g. enabling/disabling user logins, purging file systems,
@@ -499,7 +502,7 @@ Make sure you know what you doing to assure the blocks will
 boot without dependency on the state of any midplane
 not included the block.</p>
 
-<p>In the two previous modes you must insure that the midplanes
+<p>In the two previous modes you must ensure that the midplanes
 defined in <i>bluegene.conf</i> are consistent with
 those defined in <i>slurm.conf</i>.
 Note the <i>bluegene.conf</i> file contains only the numeric
@@ -744,10 +747,9 @@ and <i>slurmctld</i> due to blocks that previously existed being deleted.</p>
 
 <p>Slurm's advance reservation mechanism can accept a node count specification
 as input rather than identification of specific nodes/midplanes.
-Beginning In Slurm version 14.11 cnodes can be reserved instead of
-full midplanes, so asking for 32 nodes will result in a reservation
-consisting of 32 cnodes.  Also beginning in 14.11 you can request
-specific cnodes in your reservation as well (e.g. <i>scontrol create reservation
+Cnodes can be reserved instead of full midplanes, so asking for 32 nodes will
+result in a reservation consisting of 32 cnodes. Also you can request specific
+cnodes in your reservation as well (e.g. <i>scontrol create reservation
 nodes=bgq0000[00000x11111]</i> will result in the first nodecard of
 midplane bgq0000 being reserved).  Multiple block sizes can also be
 specified and a reservation will be made that includes those block sizes
@@ -789,6 +791,6 @@ scheduling logic, etc. </p>
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 28 September 2016</p>
+<p style="text-align:center;">Last modified 7 November 2017</p>
 
 <!--#include virtual="footer.txt"-->

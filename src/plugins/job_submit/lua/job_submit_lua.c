@@ -209,9 +209,17 @@ static int _log_lua_error (lua_State *L)
 static int _log_lua_user_msg (lua_State *L)
 {
 	const char *msg = lua_tostring(L, -1);
+	char *tmp = NULL;
 
-	xfree(user_msg);
-	user_msg = xstrdup(msg);
+	if (user_msg) {
+		xstrfmtcat(tmp, "%s\n%s", user_msg, msg);
+		xfree(user_msg);
+		user_msg = tmp;
+		tmp = NULL;
+	} else {
+		user_msg = xstrdup(msg);
+	}
+
 	return (0);
 }
 
@@ -345,7 +353,13 @@ static int _job_rec_field(const struct job_record *job_ptr,
 		if (job_ptr->details)
 			lua_pushnumber (L, job_ptr->details->nice);
 		else
-			lua_pushnumber (L, (uint16_t)NO_VAL);
+			lua_pushnumber (L, NO_VAL16);
+	} else if (!xstrcmp(name, "pack_job_id")) {
+		lua_pushnumber (L, job_ptr->pack_job_id);
+	} else if (!xstrcmp(name, "pack_job_id_set")) {
+		lua_pushstring (L, job_ptr->pack_job_id_set);
+	} else if (!xstrcmp(name, "pack_job_offset")) {
+		lua_pushnumber (L, job_ptr->pack_job_offset);
 	} else if (!xstrcmp(name, "partition")) {
 		lua_pushstring (L, job_ptr->partition);
 	} else if (!xstrcmp(name, "pn_min_cpus")) {
@@ -366,9 +380,7 @@ static int _job_rec_field(const struct job_record *job_ptr,
 		lua_pushnumber (L, job_ptr->priority);
 	} else if (!xstrcmp(name, "qos")) {
 		if (job_ptr->qos_ptr) {
-			slurmdb_qos_rec_t *qos_ptr =
-				(slurmdb_qos_rec_t *)job_ptr->qos_ptr;
-			lua_pushstring (L, qos_ptr->name);
+			lua_pushstring (L, job_ptr->qos_ptr->name);
 		} else {
 			lua_pushnil (L);
 		}
@@ -574,6 +586,9 @@ static int _set_job_env_field(lua_State *L)
 	job_desc = lua_touserdata(L, -1);
 	if (job_desc == NULL) {
 		error("%s: job_desc is NULL", __func__);
+	} else if (job_desc->environment == NULL) {
+		error("%s: job_desc->environment is NULL", __func__);
+		lua_pushnil(L);
 	} else {
 		value_str = luaL_checkstring(L, 3);
 		for (i = 0; job_desc->environment[i]; i++) {
@@ -593,6 +608,7 @@ static int _set_job_env_field(lua_State *L)
 			}
 			job_desc->environment[0] = xstrdup(name_eq);
 			xstrcat(job_desc->environment[0], value_str);
+			job_desc->env_size++;
 		}
 	}
 	xfree(name_eq);
@@ -726,6 +742,8 @@ static int _get_job_req_field(const struct job_descriptor *job_desc,
 		lua_pushnumber (L, job_desc->end_time);
 	} else if (!xstrcmp(name, "environment")) {
 		_push_job_env ((struct job_descriptor *)job_desc); // No const
+	} else if (!xstrcmp(name, "extra")) {
+		lua_pushstring (L, job_desc->extra);
 	} else if (!xstrcmp(name, "exc_nodes")) {
 		lua_pushstring (L, job_desc->exc_nodes);
 	} else if (!xstrcmp(name, "features")) {
@@ -770,6 +788,8 @@ static int _get_job_req_field(const struct job_descriptor *job_desc,
 		lua_pushnumber (L, job_desc->ntasks_per_socket);
 	} else if (!xstrcmp(name, "num_tasks")) {
 		lua_pushnumber (L, job_desc->num_tasks);
+	} else if (!xstrcmp(name, "pack_job_offset")) {
+		lua_pushnumber (L, job_desc->pack_job_offset);
 	} else if (!xstrcmp(name, "partition")) {
 		lua_pushstring (L, job_desc->partition);
 	} else if (!xstrcmp(name, "power_flags")) {
@@ -945,6 +965,11 @@ static int _set_job_req_field(lua_State *L)
 		job_desc->delay_boot = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "end_time")) {
 		job_desc->end_time = luaL_checknumber(L, 3);
+	} else if (!xstrcmp(name, "extra")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->extra);
+		if (strlen(value_str))
+			job_desc->extra = xstrdup(value_str);
 	} else if (!xstrcmp(name, "exc_nodes")) {
 		value_str = luaL_checkstring(L, 3);
 		xfree(job_desc->exc_nodes);
@@ -1369,9 +1394,9 @@ static void _register_lua_slurm_output_functions (void)
 	lua_setfield (L, -2, "NO_VAL64");
 	lua_pushnumber (L, NO_VAL);
 	lua_setfield (L, -2, "NO_VAL");
-	lua_pushnumber (L, (uint16_t) NO_VAL);
+	lua_pushnumber (L, NO_VAL16);
 	lua_setfield (L, -2, "NO_VAL16");
-	lua_pushnumber (L, (uint8_t) NO_VAL);
+	lua_pushnumber (L, NO_VAL8);
 	lua_setfield (L, -2, "NO_VAL8");
 
 	/*
@@ -1621,11 +1646,8 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid,
 	}
 	_stack_dump("job_submit, after lua_pcall", L);
 	if (user_msg) {
-		if (err_msg) {
-			*err_msg = user_msg;
-			user_msg = NULL;
-		} else
-			xfree(user_msg);
+		*err_msg = user_msg;
+		user_msg = NULL;
 	}
 
 out:	slurm_mutex_unlock (&lua_lock);

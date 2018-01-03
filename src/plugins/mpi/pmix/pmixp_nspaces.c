@@ -2,7 +2,7 @@
  **  pmix_db.c - PMIx KVS database
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
@@ -69,7 +69,7 @@ int pmixp_nspaces_init(void)
 	hl = pmixp_info_step_hostlist();
 	/* Initialize local namespace */
 	rc = pmixp_nspaces_add(mynspace, nnodes, nodeid, ntasks, task_cnts,
-				task_map, hostlist_copy(hl));
+			       task_map, hostlist_copy(hl));
 	_pmixp_nspaces.local = pmixp_nspaces_find(mynspace);
 	return rc;
 }
@@ -104,7 +104,7 @@ int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
 	}
 	nsptr->task_map_packed = xstrdup(task_map_packed);
 	nsptr->task_map = unpack_process_mapping_flat(task_map_packed, nnodes,
-							ntasks, NULL);
+						      ntasks, NULL);
 	if (nsptr->task_map == NULL) {
 		xfree(nsptr->task_cnts);
 		xfree(nsptr->task_map_packed);
@@ -115,7 +115,7 @@ int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
 	return SLURM_SUCCESS;
 }
 
-pmixp_namespace_t *pmixp_nspaces_local()
+pmixp_namespace_t *pmixp_nspaces_local(void)
 {
 	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC);
 	return _pmixp_nspaces.local;
@@ -139,8 +139,8 @@ exit:
 	return nsptr;
 }
 
-hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr, const int *ranks,
-		size_t nranks)
+hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr, const uint32_t *ranks,
+				  size_t nranks)
 {
 	hostlist_t hl = hostlist_create("");
 	int i;
@@ -155,7 +155,7 @@ hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr, const int *ranks,
 	return hl;
 }
 
-char *pmixp_nspace_resolve(const char *name, int rank)
+int pmixp_nspace_resolve(const char *name, int rank)
 {
 	pmixp_namespace_t *nsptr;
 
@@ -170,28 +170,9 @@ char *pmixp_nspace_resolve(const char *name, int rank)
 	}
 
 	if (NULL == nsptr) {
-		return NULL;
+		return SLURM_ERROR;
 	}
 	xassert(rank < nsptr->ntasks);
 
-	return hostlist_nth(nsptr->hl, nsptr->task_map[rank]);
-}
-
-size_t pmixp_nspace_mdx_lsize(List l)
-{
-	ListIterator it = list_iterator_create(l);
-	pmix_modex_data_t *data;
-	size_t ret = 0;
-
-	while (NULL != (data = list_next(it))) {
-		/* we need to save:
-		 * - rank (uint32_t)
-		 * - scope (uint32_t)
-		 * - size of the blob (uint32_t)
-		 * - blob data (data->size)
-		 */
-		ret += data->size + 3 * sizeof(int);
-	}
-	list_iterator_destroy(it);
-	return ret;
+	return nsptr->task_map[rank];
 }

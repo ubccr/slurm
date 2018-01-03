@@ -47,11 +47,13 @@
 #include <time.h>
 
 #include "slurm/slurm_errno.h"
+#include "slurm/slurm.h"
 
 #include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/xmalloc.h"
+#include "src/common/xassert.h"
 
 /*
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h
@@ -378,6 +380,8 @@ void pack16_array(uint16_t * valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
 
+	xassert(valp || !size_val);
+
 	pack32(size_val, buffer);
 
 	for (i = 0; i < size_val; i++) {
@@ -393,6 +397,8 @@ int unpack16_array(uint16_t ** valp, uint32_t * size_val, Buf buffer)
 
 	if (unpack32(size_val, buffer))
 		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL)
+		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(uint16_t));
 	for (i = 0; i < *size_val; i++) {
@@ -406,6 +412,8 @@ int unpack16_array(uint16_t ** valp, uint32_t * size_val, Buf buffer)
 void pack32_array(uint32_t * valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
+
+	xassert(valp || !size_val);
 
 	pack32(size_val, buffer);
 
@@ -422,6 +430,8 @@ int unpack32_array(uint32_t ** valp, uint32_t * size_val, Buf buffer)
 
 	if (unpack32(size_val, buffer))
 		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL)
+		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(uint32_t));
 	for (i = 0; i < *size_val; i++) {
@@ -436,6 +446,8 @@ void pack64_array(uint64_t * valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
 
+	xassert(valp || !size_val);
+
 	pack32(size_val, buffer);
 
 	for (i = 0; i < size_val; i++) {
@@ -448,6 +460,8 @@ void pack64_array(uint64_t * valp, uint32_t size_val, Buf buffer)
 void pack64_array_as_32(uint64_t * valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
+
+	xassert(valp || !size_val);
 
 	pack32(size_val, buffer);
 
@@ -463,6 +477,8 @@ int unpack64_array(uint64_t ** valp, uint32_t * size_val, Buf buffer)
 	uint32_t i = 0;
 
 	if (unpack32(size_val, buffer))
+		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL)
 		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(uint64_t));
@@ -481,6 +497,8 @@ int unpack64_array_from_32(uint64_t ** valp, uint32_t * size_val, Buf buffer)
 
 	if (unpack32(size_val, buffer))
 		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL)
+		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(uint64_t));
 	for (i = 0; i < *size_val; i++) {
@@ -495,6 +513,8 @@ void packdouble_array(double *valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
 
+	xassert(valp || !size_val);
+
 	pack32(size_val, buffer);
 
 	for (i = 0; i < size_val; i++) {
@@ -507,6 +527,8 @@ int unpackdouble_array(double **valp, uint32_t* size_val, Buf buffer)
 	uint32_t i = 0;
 
 	if (unpack32(size_val, buffer))
+		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL)
 		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(double));
@@ -521,6 +543,8 @@ void packlongdouble_array(long double *valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
 
+	xassert(valp || !size_val);
+
 	pack32(size_val, buffer);
 
 	for (i = 0; i < size_val; i++) {
@@ -533,6 +557,8 @@ int unpacklongdouble_array(long double **valp, uint32_t* size_val, Buf buffer)
 	uint32_t i = 0;
 
 	if (unpack32(size_val, buffer))
+		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL)
 		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(long double));

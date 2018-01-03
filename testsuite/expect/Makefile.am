@@ -165,6 +165,7 @@ EXTRA_DIST = \
 	test2.23			\
 	test2.24			\
 	test2.25			\
+	test2.26			\
 	test3.1				\
 	test3.2				\
 	test3.3				\
@@ -368,7 +369,6 @@ EXTRA_DIST = \
 	test15.14			\
 	test15.15			\
 	test15.16			\
-	test15.17			\
 	test15.18			\
 	test15.19			\
 	test15.20			\
@@ -612,7 +612,37 @@ EXTRA_DIST = \
 	test37.2			\
 	test37.3			\
 	test37.4			\
-	test37.5
+	test37.5			\
+	test37.6			\
+	test37.7			\
+	test37.8			\
+	test37.9			\
+	test37.10			\
+	test37.11			\
+	test37.12			\
+	test37.13			\
+	test37.14			\
+	test37.15			\
+	test37.16			\
+	test38.1                        \
+	test38.2                        \
+	test38.3                        \
+	test38.4                        \
+	test38.5                        \
+	test38.6                        \
+	test38.6.prog.c			\
+	test38.7			\
+	test38.7.prog.c			\
+	test38.8			\
+	test38.9			\
+	test38.10			\
+	test38.11			\
+	test38.12			\
+	test38.13			\
+	test38.14			\
+	test38.15			\
+	test38.16			\
+	test38.17
 
 distclean-local:
 	rm -rf *error *output

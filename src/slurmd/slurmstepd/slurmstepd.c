@@ -72,8 +72,7 @@
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 static int _init_from_slurmd(int sock, char **argv, slurm_addr_t **_cli,
-			     slurm_addr_t **_self, slurm_msg_t **_msg,
-			     int *_ngids, gid_t **_gids);
+			     slurm_addr_t **_self, slurm_msg_t **_msg);
 
 static void _dump_user_env(void);
 static void _send_ok_to_slurmd(int sock);
@@ -101,8 +100,6 @@ main (int argc, char **argv)
 	slurm_addr_t *self;
 	slurm_msg_t *msg;
 	stepd_step_rec_t *job;
-	int ngids;
-	gid_t *gids;
 	int rc = 0;
 	char *launch_params;
 
@@ -120,8 +117,7 @@ main (int argc, char **argv)
 		fatal( "failed to initialize authentication plugin" );
 
 	/* Receive job parameters from the slurmd */
-	_init_from_slurmd(STDIN_FILENO, argv, &cli, &self, &msg,
-			  &ngids, &gids);
+	_init_from_slurmd(STDIN_FILENO, argv, &cli, &self, &msg);
 
 	/* Create the stepd_step_rec_t, mostly from info in a
 	 * launch_tasks_request_msg_t or a batch_job_launch_msg_t */
@@ -130,8 +126,6 @@ main (int argc, char **argv)
 		rc = SLURM_FAILURE;
 		goto ending;
 	}
-	job->ngids = ngids;
-	job->gids = gids;
 
 	/* fork handlers cause mutexes on some global data structures
 	 * to be re-initialized after the fork. */
@@ -145,18 +139,8 @@ main (int argc, char **argv)
 		goto ending;
 	}
 
-	_send_ok_to_slurmd(STDOUT_FILENO);
-	_got_ack_from_slurmd(STDIN_FILENO);
-
-	/* Fancy way of closing stdin that keeps STDIN_FILENO from being
-	 * allocated to any random file.  The slurmd already opened /dev/null
-	 * on STDERR_FILENO for us. */
-	dup2(STDERR_FILENO, STDIN_FILENO);
-
-	/* Fancy way of closing stdout that keeps STDOUT_FILENO from being
-	 * allocated to any random file.  The slurmd already opened /dev/null
-	 * on STDERR_FILENO for us. */
-	dup2(STDERR_FILENO, STDOUT_FILENO);
+	if (job->stepid != SLURM_EXTERN_CONT)
+		close_slurmd_conn();
 
 	/* slurmstepd is the only daemon that should survive upgrade. If it
 	 * had been swapped out before upgrade happened it could easily lead
@@ -213,17 +197,36 @@ extern int stepd_cleanup(slurm_msg_t *msg, stepd_step_rec_t *job,
 	xfree(conf->block_map);
 	xfree(conf->block_map_inv);
 	xfree(conf->hostname);
+	xfree(conf->job_acct_gather_freq);
+	xfree(conf->job_acct_gather_type);
 	xfree(conf->logfile);
 	xfree(conf->node_name);
 	xfree(conf->node_topo_addr);
 	xfree(conf->node_topo_pattern);
 	xfree(conf->spooldir);
+	xfree(conf->task_epilog);
+	xfree(conf->task_prolog);
 	xfree(conf);
 #endif
 	info("done with job");
 	return rc;
 }
 
+extern void close_slurmd_conn(void)
+{
+	_send_ok_to_slurmd(STDOUT_FILENO);
+	_got_ack_from_slurmd(STDIN_FILENO);
+
+	/* Fancy way of closing stdin that keeps STDIN_FILENO from being
+	 * allocated to any random file.  The slurmd already opened /dev/null
+	 * on STDERR_FILENO for us. */
+	dup2(STDERR_FILENO, STDIN_FILENO);
+
+	/* Fancy way of closing stdout that keeps STDOUT_FILENO from being
+	 * allocated to any random file.  The slurmd already opened /dev/null
+	 * on STDERR_FILENO for us. */
+	dup2(STDERR_FILENO, STDOUT_FILENO);
+}
 
 static slurmd_conf_t *read_slurmd_conf_lite(int fd)
 {
@@ -272,7 +275,7 @@ static slurmd_conf_t *read_slurmd_conf_lite(int fd)
 	} else
 		confl->log_opts.syslog_level  = LOG_LEVEL_QUIET;
 
-	confl->acct_freq_task = (uint16_t)NO_VAL;
+	confl->acct_freq_task = NO_VAL16;
 	tmp_int = acct_gather_parse_freq(PROFILE_TASK,
 				       confl->job_acct_gather_freq);
 	if (tmp_int != -1)
@@ -311,7 +314,7 @@ static int get_jobid_uid_from_env (uint32_t *jobidp, uid_t *uidp)
 
 static int _handle_spank_mode (int argc, char **argv)
 {
-	char prefix[64] = "spank-";
+	char *prefix = NULL;
 	const char *mode = argv[2];
 	uid_t uid = (uid_t) -1;
 	uint32_t jobid = (uint32_t) -1;
@@ -325,8 +328,9 @@ static int _handle_spank_mode (int argc, char **argv)
 	/*
 	 *  Make our log prefix into spank-prolog: or spank-epilog:
 	 */
-	strcat (prefix, mode);
+	xstrfmtcat(prefix, "spank-%s", mode);
 	log_init(prefix, lopts, LOG_DAEMON, NULL);
+	xfree(prefix);
 
 	/*
 	 *  When we are started from slurmd, a lightweight config is
@@ -427,14 +431,31 @@ rwfail:
 #endif
 }
 
+static void _set_job_log_prefix(uint32_t jobid, uint32_t stepid)
+{
+	char *buf;
+
+	if (stepid == SLURM_BATCH_SCRIPT)
+		buf = xstrdup_printf("[%u.batch]", jobid);
+	else if (stepid == SLURM_EXTERN_CONT)
+		buf = xstrdup_printf("[%u.extern]", jobid);
+	else
+		buf = xstrdup_printf("[%u.%u]", jobid, stepid);
+
+	setproctitle("%s", buf);
+
+	/* note: will claim ownership of buf, do not free */
+	xstrcat(buf, " ");
+	log_set_fpfx(&buf);
+}
+
 /*
  *  This function handles the initialization information from slurmd
  *  sent by _send_slurmstepd_init() in src/slurmd/slurmd/req.c.
  */
 static int
 _init_from_slurmd(int sock, char **argv,
-		  slurm_addr_t **_cli, slurm_addr_t **_self, slurm_msg_t **_msg,
-		  int *_ngids, gid_t **_gids)
+		  slurm_addr_t **_cli, slurm_addr_t **_self, slurm_msg_t **_msg)
 {
 	char *incoming_buffer = NULL;
 	Buf buffer;
@@ -443,11 +464,10 @@ _init_from_slurmd(int sock, char **argv,
 	slurm_addr_t *cli = NULL;
 	slurm_addr_t *self = NULL;
 	slurm_msg_t *msg = NULL;
-	int ngids = 0;
-	gid_t *gids = NULL;
 	uint16_t port;
 	char buf[16];
 	log_options_t lopts = LOG_OPTS_INITIALIZER;
+	uint32_t jobid = 0, stepid = 0;
 
 	log_init(argv[0], lopts, LOG_DAEMON, NULL);
 
@@ -471,6 +491,10 @@ _init_from_slurmd(int sock, char **argv,
 	if ((conf = read_slurmd_conf_lite (sock)) == NULL)
 		fatal("Failed to read conf from slurmd");
 
+	/*
+	 * LOGGING BEFORE THIS WILL NOT WORK!  Only afterwards will it show
+	 * up in the log.
+	 */
 	log_alter(conf->log_opts, 0, conf->logfile);
 	log_set_timefmt(conf->log_fmt);
 
@@ -528,7 +552,8 @@ _init_from_slurmd(int sock, char **argv,
 
 	msg = xmalloc(sizeof(slurm_msg_t));
 	slurm_msg_t_init(msg);
-	msg->protocol_version = (uint16_t)proto;
+	/* Always unpack as the current version. */
+	msg->protocol_version = SLURM_PROTOCOL_VERSION;
 
 	switch (step_type) {
 	case LAUNCH_BATCH_JOB:
@@ -545,25 +570,33 @@ _init_from_slurmd(int sock, char **argv,
 		fatal("slurmstepd: we didn't unpack the request correctly");
 	free_buf(buffer);
 
-	/* receive cached group ids array for the relevant uid */
-	safe_read(sock, &ngids, sizeof(int));
-	if (ngids > 0) {
-		int i;
-		uint32_t tmp32;
-
-		gids = (gid_t *)xmalloc(sizeof(gid_t) * ngids);
-		for (i = 0; i < ngids; i++) {
-			safe_read(sock, &tmp32, sizeof(uint32_t));
-			gids[i] = (gid_t)tmp32;
-			debug2("got gid %d", gids[i]);
-		}
+	switch (step_type) {
+	case LAUNCH_BATCH_JOB:
+		jobid = ((batch_job_launch_msg_t *)msg->data)->job_id;
+		stepid = ((batch_job_launch_msg_t *)msg->data)->step_id;
+		break;
+	case LAUNCH_TASKS:
+		jobid = ((launch_tasks_request_msg_t *)msg->data)->job_id;
+		stepid = ((launch_tasks_request_msg_t *)msg->data)->job_step_id;
+		break;
+	default:
+		fatal("%s: Unrecognized launch RPC (%d)", __func__, step_type);
+		break;
 	}
+
+	_set_job_log_prefix(jobid, stepid);
+
+	/*
+	 * Swap the field to the srun client version, which will eventually
+	 * end up stored as protocol_version in srun_info_t. It's a hack to
+	 * pass it in-band, while still using the correct version to unpack
+	 * the launch request message above.
+	 */
+	msg->protocol_version = proto;
 
 	*_cli = cli;
 	*_self = self;
 	*_msg = msg;
-	*_ngids = ngids;
-	*_gids = gids;
 
 	return 1;
 

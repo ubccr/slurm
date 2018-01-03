@@ -26,6 +26,8 @@ slurmctld_SOURCES =     \
 	gang.h		\
 	groups.c	\
 	groups.h	\
+	heartbeat.c	\
+	heartbeat.h	\
 	job_mgr.c 	\
 	job_scheduler.c	\
 	job_scheduler.h	\
@@ -72,11 +74,13 @@ slurmctld_SOURCES =     \
 
 sbin_PROGRAMS = slurmctld
 
-slurmctld_LDADD = 				    \
-	$(top_builddir)/src/common/libdaemonize.la  \
-	$(top_builddir)/src/api/libslurm.o $(DL_LIBS)
+depend_libs = $(top_builddir)/src/common/libdaemonize.la
+
+slurmctld_LDADD = $(depend_libs) $(LIB_SLURM) $(DL_LIBS)
 slurmctld_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
 
+slurmctld_DEPENDENCIES = $(LIB_SLURM_BUILD) $(depend_libs)
+
 force:
-$(slurmctld_LDADD) : force
+$(slurmctld_DEPENDENCIES) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`

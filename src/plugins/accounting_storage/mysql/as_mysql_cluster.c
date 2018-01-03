@@ -45,8 +45,6 @@
 #include "as_mysql_wckey.h"
 #include "src/common/node_select.h"
 
-#define MAX_FED_CLUSTERS 63
-
 extern int as_mysql_get_fed_cluster_id(mysql_conn_t *mysql_conn,
 				       const char *cluster,
 				       const char *federation,
@@ -255,9 +253,6 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 		if ((rc = create_cluster_tables(mysql_conn,
 						object->name))
 		    != SLURM_SUCCESS) {
-			xfree(extra);
-			xfree(cols);
-			xfree(vals);
 			added = 0;
 			if (mysql_errno(mysql_conn->db_conn)
 			    == ER_WRONG_TABLE_NAME)
@@ -273,7 +268,7 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 	while ((object = list_next(itr))) {
 		int fed_id = 0;
 		uint16_t fed_state = CLUSTER_FED_STATE_NA;
-		uint32_t fed_weight = 1; /* default */
+		char *features = NULL;
 		xstrcat(cols, "creation_time, mod_time, acct");
 		xstrfmtcat(vals, "%ld, %ld, 'root'", now, now);
 		xstrfmtcat(extra, ", mod_time=%ld", now);
@@ -304,25 +299,29 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 				fed_state = CLUSTER_FED_STATE_ACTIVE;
 		}
 
-		if (object->fed.weight != NO_VAL)
-			fed_weight = object->fed.weight;
+		if (object->fed.feature_list) {
+			features =
+				slurm_char_list_to_xstr(
+						object->fed.feature_list);
+			has_feds = 1;
+		}
 
 		xstrfmtcat(query,
 			   "insert into %s (creation_time, mod_time, "
 			   "name, classification, federation, fed_id, "
-			   "fed_state, fed_weight) "
-			   "values (%ld, %ld, '%s', %u, '%s', %d, %u, %u) "
+			   "fed_state, features) "
+			   "values (%ld, %ld, '%s', %u, '%s', %d, %u, '%s') "
 			   "on duplicate key update deleted=0, mod_time=%ld, "
 			   "control_host='', control_port=0, "
 			   "classification=%u, flags=0, federation='%s', "
-			   "fed_id=%d, fed_state=%u, fed_weight=%u",
+			   "fed_id=%d, fed_state=%u, features='%s'",
 			   cluster_table,
 			   now, now, object->name, object->classification,
 			   (object->fed.name) ? object->fed.name : "",
-			   fed_id, fed_state, fed_weight,
+			   fed_id, fed_state, (features) ? features : "",
 			   now, object->classification,
 			   (object->fed.name) ? object->fed.name : "",
-			   fed_id, fed_state, fed_weight);
+			   fed_id, fed_state, (features) ? features : "");
 		if (debug_flags & DEBUG_FLAG_DB_ASSOC)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 		rc = mysql_db_query(mysql_conn, query);
@@ -332,6 +331,7 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 			xfree(extra);
 			xfree(cols);
 			xfree(vals);
+			xfree(features);
 			added=0;
 			break;
 		}
@@ -343,6 +343,7 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 			xfree(extra);
 			xfree(cols);
 			xfree(vals);
+			xfree(features);
 			continue;
 		}
 
@@ -366,9 +367,17 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 		if (rc != SLURM_SUCCESS) {
 			error("Couldn't add cluster root assoc");
 			xfree(extra);
+			xfree(features);
 			added=0;
 			break;
 		}
+
+		/* Build up extra with cluster specfic values for txn table */
+		xstrfmtcat(extra, ", federation='%s', fed_id=%d, fed_state=%u, "
+				  "features='%s'",
+			   (object->fed.name) ? object->fed.name : "",
+			   fed_id, fed_state, (features) ? features : "");
+		xfree(features);
 
 		/* we always have a ', ' as the first 2 chars */
 		tmp_extra = slurm_add_slash_to_quotes(extra+2);
@@ -443,6 +452,22 @@ end_it:
 		as_mysql_add_feds_to_update_list(mysql_conn);
 
 	return rc;
+}
+
+static int _reconcile_existing_features(void *object, void *arg)
+{
+	char *new_feature = (char *)object;
+	List existing_features = (List)arg;
+
+	if (new_feature[0] == '-')
+		list_delete_all(existing_features, slurm_find_char_in_list,
+				new_feature + 1);
+	else if (new_feature[0] == '+')
+		list_append(existing_features, xstrdup(new_feature + 1));
+	else
+		list_append(existing_features, xstrdup(new_feature));
+
+	return SLURM_SUCCESS;
 }
 
 extern List as_mysql_modify_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
@@ -539,12 +564,7 @@ extern List as_mysql_modify_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 		fed_update = true;
 	}
 
-	if (cluster->fed.weight != NO_VAL) {
-		xstrfmtcat(vals, ", fed_weight=%d", cluster->fed.weight);
-		fed_update = true;
-	}
-
-	if (!vals) {
+	if (!vals && !cluster->fed.feature_list) {
 		xfree(extra);
 		errno = SLURM_NO_CHANGE_IN_DATA;
 		error("Nothing to change");
@@ -558,7 +578,7 @@ extern List as_mysql_modify_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 		return NULL;
 	}
 
-	xstrfmtcat(query, "select name, control_port, federation from %s%s;",
+	xstrfmtcat(query, "select name, control_port, federation, features from %s%s;",
 		   cluster_table, extra);
 
 	if (debug_flags & DEBUG_FLAG_DB_ASSOC)
@@ -619,6 +639,38 @@ extern List as_mysql_modify_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 					   set_state);
 
 			xfree(curr_fed);
+		}
+
+		if (cluster->fed.feature_list) {
+			if (!list_count(cluster->fed.feature_list)) {
+				/* clear all existing features */
+				xstrfmtcat(tmp_vals, ", features=''");
+			} else {
+				char *features = NULL, *feature = NULL;
+				List existing_features =
+					list_create(slurm_destroy_char);
+
+				if ((feature =
+				     list_peek(cluster->fed.feature_list)) &&
+				    (feature[0] == '+' || feature[0] == '-'))
+					slurm_addto_char_list(existing_features,
+							      row[3]);
+
+				list_for_each(cluster->fed.feature_list,
+					      _reconcile_existing_features,
+					      existing_features);
+
+				features =
+					slurm_char_list_to_xstr(
+							existing_features);
+				xstrfmtcat(tmp_vals, ", features='%s'",
+					   features ? features : "");
+
+				xfree(features);
+				FREE_NULL_LIST(existing_features);
+			}
+
+			fed_update = true;
 		}
 
 		list_append(ret_list, object);
@@ -842,10 +894,10 @@ extern List as_mysql_get_clusters(mysql_conn_t *mysql_conn, uid_t uid,
 		"classification",
 		"control_host",
 		"control_port",
+		"features",
 		"federation",
 		"fed_id",
 		"fed_state",
-		"fed_weight",
 		"rpc_version",
 		"dimensions",
 		"flags",
@@ -856,10 +908,10 @@ extern List as_mysql_get_clusters(mysql_conn_t *mysql_conn, uid_t uid,
 		CLUSTER_REQ_CLASS,
 		CLUSTER_REQ_CH,
 		CLUSTER_REQ_CP,
+		CLUSTER_REQ_FEATURES,
 		CLUSTER_REQ_FEDR,
 		CLUSTER_REQ_FEDID,
 		CLUSTER_REQ_FEDSTATE,
-		CLUSTER_REQ_FEDWEIGHT,
 		CLUSTER_REQ_VERSION,
 		CLUSTER_REQ_DIMS,
 		CLUSTER_REQ_FLAGS,
@@ -916,6 +968,7 @@ empty:
 	while ((row = mysql_fetch_row(result))) {
 		MYSQL_RES *result2 = NULL;
 		MYSQL_ROW row2;
+		char *features = NULL;
 		cluster = xmalloc(sizeof(slurmdb_cluster_rec_t));
 		slurmdb_init_cluster_rec(cluster, 0);
 		list_append(cluster_list, cluster);
@@ -928,9 +981,15 @@ empty:
 		cluster->control_host = xstrdup(row[CLUSTER_REQ_CH]);
 		cluster->control_port = slurm_atoul(row[CLUSTER_REQ_CP]);
 		cluster->fed.name     = xstrdup(row[CLUSTER_REQ_FEDR]);
+		features              = row[CLUSTER_REQ_FEATURES];
+		if (features && *features) {
+			cluster->fed.feature_list =
+				list_create(slurm_destroy_char);
+			slurm_addto_char_list(cluster->fed.feature_list,
+					      features);
+		}
 		cluster->fed.id       = slurm_atoul(row[CLUSTER_REQ_FEDID]);
 		cluster->fed.state    = slurm_atoul(row[CLUSTER_REQ_FEDSTATE]);
-		cluster->fed.weight   = slurm_atoul(row[CLUSTER_REQ_FEDWEIGHT]);
 		cluster->rpc_version = slurm_atoul(row[CLUSTER_REQ_VERSION]);
 		cluster->dimensions = slurm_atoul(row[CLUSTER_REQ_DIMS]);
 		cluster->flags = slurm_atoul(row[CLUSTER_REQ_FLAGS]);
@@ -1026,8 +1085,10 @@ extern List as_mysql_get_cluster_events(mysql_conn_t *mysql_conn, uint32_t uid,
 	int i=0;
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
+	uint16_t private_data = 0;
 	time_t now = time(NULL);
 	List use_cluster_list = as_mysql_cluster_list;
+	slurmdb_user_rec_t user;
 
 	/* if this changes you will need to edit the corresponding enum */
 	char *event_req_inx[] = {
@@ -1055,6 +1116,21 @@ extern List as_mysql_get_cluster_events(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return NULL;
+
+	memset(&user, 0, sizeof(slurmdb_user_rec_t));
+	user.uid = uid;
+
+	private_data = slurm_get_private_data();
+
+	if (private_data & PRIVATE_DATA_EVENTS) {
+		if (!is_user_min_admin_level(
+			      mysql_conn, uid, SLURMDB_ADMIN_OPERATOR)) {
+			error("UID %u tried to access events, only administrators can look at events",
+			      uid);
+			errno = ESLURM_ACCESS_DENIED;
+			return NULL;
+		}
+	}
 
 	if (!event_cond)
 		goto empty;
@@ -1314,17 +1390,23 @@ extern int as_mysql_node_down(mysql_conn_t *mysql_conn,
 	if (row && (node_ptr->node_state == slurm_atoul(row[0])) &&
 	    my_reason && row[1] &&
 	    !xstrcasecmp(my_reason, row[1])) {
-		debug("as_mysql_node_down: no change needed %u == %s "
-		      "and %s == %s",
-		     node_ptr->node_state, row[0], my_reason, row[1]);
+		if (debug_flags & DEBUG_FLAG_DB_EVENT)
+			DB_DEBUG(mysql_conn->conn,
+				 "no change to %s(%s) needed %u == %s and %s == %s",
+				 node_ptr->name, mysql_conn->cluster_name,
+				 node_ptr->node_state, row[0],
+				 my_reason, row[1]);
 		xfree(my_reason);
 		mysql_free_result(result);
 		return SLURM_SUCCESS;
 	}
 	mysql_free_result(result);
 
-	debug2("inserting %s(%s) with tres of '%s'",
-	       node_ptr->name, mysql_conn->cluster_name, node_ptr->tres_str);
+	if (debug_flags & DEBUG_FLAG_DB_EVENT)
+		DB_DEBUG(mysql_conn->conn,
+			 "inserting %s(%s) with tres of '%s'",
+			 node_ptr->name, mysql_conn->cluster_name,
+			 node_ptr->tres_str);
 
 	query = xstrdup_printf(
 		"update \"%s_%s\" set time_end=%ld where "
@@ -1348,8 +1430,8 @@ extern int as_mysql_node_down(mysql_conn_t *mysql_conn,
 		   mysql_conn->cluster_name, event_table,
 		   node_ptr->name, node_ptr->node_state,
 		   node_ptr->tres_str, event_time, my_reason, reason_uid);
-	debug2("%d(%s:%d) query\n%s",
-	       mysql_conn->conn, THIS_FILE, __LINE__, query);
+	if (debug_flags & DEBUG_FLAG_DB_EVENT)
+		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
 	xfree(my_reason);
@@ -1376,8 +1458,8 @@ extern int as_mysql_node_up(mysql_conn_t *mysql_conn,
 		"time_end=0 and node_name='%s';",
 		mysql_conn->cluster_name, event_table,
 		event_time, node_ptr->name);
-	debug4("%d(%s:%d) query\n%s",
-	       mysql_conn->conn, THIS_FILE, __LINE__, query);
+	if (debug_flags & DEBUG_FLAG_DB_EVENT)
+		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
 	return rc;
@@ -1485,7 +1567,8 @@ extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
 		free_it = true;
 		as_mysql_cluster_tres(
 			mysql_conn, cluster_rec->control_host,
-			&cluster_rec->tres_str, now);
+			&cluster_rec->tres_str, now,
+			cluster_rec->rpc_version);
 	}
 
 	/* Since as_mysql_cluster_tres could change the
@@ -1521,13 +1604,14 @@ extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
 
 extern int as_mysql_cluster_tres(mysql_conn_t *mysql_conn,
 				 char *cluster_nodes, char **tres_str_in,
-				 time_t event_time)
+				 time_t event_time, uint16_t rpc_version)
 {
 	char* query;
 	int rc = SLURM_SUCCESS;
-	int first = 0;
+	int response = 0;
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
+	bool handle_disconnect = true;
 
 	xassert(tres_str_in);
 
@@ -1573,7 +1657,7 @@ extern int as_mysql_cluster_tres(mysql_conn_t *mysql_conn,
 			goto end_it;
 		}
 
-		first = 1;
+		response = ACCOUNTING_FIRST_REG;
 		goto add_it;
 	}
 
@@ -1585,50 +1669,44 @@ extern int as_mysql_cluster_tres(mysql_conn_t *mysql_conn,
 		debug("%s has changed tres from %s to %s",
 		      mysql_conn->cluster_name,
 		      row[0], *tres_str_in);
+
+		/*
+		 * Reset all the entries for this cluster since the tres changed
+		 * some of the downed nodes may have gone away.
+		 * Request them again with ACCOUNTING_NODES_CHANGE_DB
+		 */
+
+		/* 2 version after 17.02 this first if can go away */
+		if (rpc_version <= SLURM_17_02_PROTOCOL_VERSION)
+			response = ACCOUNTING_FIRST_REG;
+		else if (xstrcmp(cluster_nodes, row[1])) {
+			if (debug_flags & DEBUG_FLAG_DB_EVENT)
+				DB_DEBUG(mysql_conn->conn,
+					 "Nodes on the cluster have changed.");
+			response = ACCOUNTING_NODES_CHANGE_DB;
+		} else
+			response = ACCOUNTING_TRES_CHANGE_DB;
+	} else if (xstrcmp(cluster_nodes, row[1])) {
+		if (debug_flags & DEBUG_FLAG_DB_EVENT)
+			DB_DEBUG(mysql_conn->conn,
+				 "Node names on the cluster have changed.");
+		response = ACCOUNTING_NODES_CHANGE_DB;
 	} else {
 		if (debug_flags & DEBUG_FLAG_DB_EVENT)
 			DB_DEBUG(mysql_conn->conn,
-				 "We have the same tres as before for %s, "
-				 "no need to update the database.",
+				 "We have the same TRES and node names as before for %s, no need to update the database.",
 				 mysql_conn->cluster_name);
-
-		if (cluster_nodes) {
-			if (!row[1][0]) {
-				debug("Adding cluster nodes '%s' to "
-				      "last instance of cluster '%s'.",
-				      cluster_nodes, mysql_conn->cluster_name);
-				query = xstrdup_printf(
-					"update \"%s_%s\" set "
-					"cluster_nodes='%s' "
-					"where time_end=0 and node_name=''",
-					mysql_conn->cluster_name,
-					event_table, cluster_nodes);
-				(void) mysql_db_query(mysql_conn, query);
-				xfree(query);
-				goto update_it;
-			} else if (!xstrcmp(cluster_nodes, row[1])) {
-				if (debug_flags & DEBUG_FLAG_DB_EVENT)
-					DB_DEBUG(mysql_conn->conn,
-						 "we have the same nodes "
-						 "in the cluster "
-						 "as before no need to "
-						 "update the database.");
-				goto update_it;
-			}
-		}
-
-		goto end_it;
+		goto remove_disconnect;
 	}
 
-	/* reset all the entries for this cluster since the tres
-	   changed some of the downed nodes may have gone away.
-	   Request them again with ACCOUNTING_FIRST_REG */
 	query = xstrdup_printf(
 		"update \"%s_%s\" set time_end=%ld where time_end=0",
 		mysql_conn->cluster_name, event_table, event_time);
+
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
-	first = 1;
+	handle_disconnect = false;
+
 	if (rc != SLURM_SUCCESS)
 		goto end_it;
 add_it:
@@ -1638,20 +1716,32 @@ add_it:
 		"values ('%s', '%s', %ld, 'Cluster Registered TRES');",
 		mysql_conn->cluster_name, event_table,
 		cluster_nodes, *tres_str_in, event_time);
-	(void) mysql_db_query(mysql_conn, query);
-	xfree(query);
-update_it:
-	query = xstrdup_printf(
-		"update \"%s_%s\" set time_end=%ld where time_end=0 "
-		"and state=%u and node_name='';",
-		mysql_conn->cluster_name, event_table, event_time,
-		NODE_STATE_DOWN);
+
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
+
+	if (rc != SLURM_SUCCESS)
+		goto end_it;
+
+remove_disconnect:
+	/*
+	 * The above update clears all with time_end=0, so no
+	 * need to do this again.
+	 */
+	if (handle_disconnect) {
+		query = xstrdup_printf(
+			"update \"%s_%s\" set time_end=%ld where time_end=0 and state=%u and node_name='';",
+			mysql_conn->cluster_name,
+			event_table, event_time,
+			NODE_STATE_DOWN);
+		(void) mysql_db_query(mysql_conn, query);
+		xfree(query);
+	}
+
 end_it:
 	mysql_free_result(result);
-	if (first && rc == SLURM_SUCCESS)
-		rc = ACCOUNTING_FIRST_REG;
+	if (response && rc == SLURM_SUCCESS)
+		rc = response;
 
 	return rc;
 }

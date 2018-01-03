@@ -46,12 +46,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "src/common/log.h"
 #include "src/common/env.h" /* For unsetenvp() */
-#include "src/common/strlcpy.h"
-#include "src/common/xmalloc.h"
+#include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/slurm_rlimits_info.h"
+#include "src/common/strlcpy.h"
+#include "src/common/xmalloc.h"
+#include "src/common/xstring.h"
 
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
@@ -216,32 +217,34 @@ _set_limit(char **env, slurm_rlimits_info_t *rli)
 	char max[24], cur[24], req[24];
 	struct rlimit r;
 	bool u_req_propagate;  /* e.g. true if 'srun --propagate' */
+	char *env_name = NULL, *rlimit_name;
+	int rc = SLURM_SUCCESS;
 
-	char env_name[25] = "SLURM_RLIMIT_";
-	char *rlimit_name = &env_name[6];
-
-	strcpy( &env_name[sizeof("SLURM_RLIMIT_")-1], rli->name );
-
-	if (_get_env_val( env, env_name, &env_value, &u_req_propagate )){
-		debug( "Couldn't find %s in environment", env_name );
+	xstrfmtcat(env_name, "SLURM_RLIMIT_%s", rli->name);
+	rlimit_name = xstrdup(env_name + 6);
+	if (_get_env_val(env, env_name, &env_value, &u_req_propagate)) {
+		debug("Couldn't find %s in environment", env_name);
+		xfree(env_name);
 		return SLURM_ERROR;
 	}
 
 	/*
 	 * Users shouldn't get the SLURM_RLIMIT_* env vars in their environ
 	 */
-	unsetenvp( env, env_name );
+	unsetenvp(env, env_name);
+	xfree(env_name);
 
 	/*
 	 * We'll only attempt to set the propagated soft rlimit when indicated
 	 * by the slurm conf file settings, or the user requested it.
 	 */
 	if ( ! (rli->propagate_flag == PROPAGATE_RLIMITS || u_req_propagate))
-		return SLURM_SUCCESS;
+		goto cleanup;
 
 	if (getrlimit( rli->resource, &r ) < 0) {
 		error("getrlimit(%s): %m", rlimit_name);
-		return SLURM_ERROR;
+		rc = SLURM_ERROR;
+		goto cleanup;
 	}
 
 	/*
@@ -251,7 +254,7 @@ _set_limit(char **env, slurm_rlimits_info_t *rli)
 		debug2( "_set_limit: %s setrlimit %s no change in value: %lu",
 			u_req_propagate?"user":"conf", rlimit_name,
 			(unsigned long) r.rlim_cur);
-		return SLURM_SUCCESS;
+		goto cleanup;
 	}
 
 	debug2("_set_limit: %-14s: max:%s cur:%s req:%s", rlimit_name,
@@ -278,12 +281,15 @@ _set_limit(char **env, slurm_rlimits_info_t *rli)
 				r.rlim_cur == RLIM_INFINITY ? "'unlimited'" :
 				rlim_to_string( r.rlim_cur, cur, sizeof(cur)));
 		}
-		return SLURM_ERROR;
+		rc = SLURM_ERROR;
+		goto cleanup;
 	}
 	debug2( "_set_limit: %s setrlimit %s succeeded",
 			u_req_propagate?"user":"conf", rlimit_name );
 
-	return SLURM_SUCCESS;
+cleanup:
+	xfree(rlimit_name);
+	return rc;
 }
 
 /*

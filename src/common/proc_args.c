@@ -57,7 +57,7 @@
 #include <stdarg.h>		/* va_start   */
 #include <stdio.h>
 #include <stdlib.h>		/* getenv, strtoll */
-#include <string.h>		/* strcpy, strncasecmp */
+#include <string.h>		/* strcpy */
 #include <sys/param.h>		/* MAXPATHLEN */
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -363,20 +363,20 @@ task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size)
 				result = SLURM_DIST_BLOCK_CFULL_CFULL;
 			}
 		} else if (plane_dist) {
-			if (strncasecmp(tok, "plane", len) == 0) {
+			if (xstrncasecmp(tok, "plane", len) == 0) {
 				result = SLURM_DIST_PLANE;
 			}
 		} else {
-			if (strncasecmp(tok, "cyclic", len) == 0) {
+			if (xstrncasecmp(tok, "cyclic", len) == 0) {
 				result = SLURM_DIST_CYCLIC;
-			} else if (strncasecmp(tok, "block", len) == 0) {
+			} else if (xstrncasecmp(tok, "block", len) == 0) {
 				result = SLURM_DIST_BLOCK;
-			} else if ((strncasecmp(tok, "arbitrary", len) == 0) ||
-				   (strncasecmp(tok, "hostfile", len) == 0)) {
+			} else if ((xstrncasecmp(tok, "arbitrary", len) == 0) ||
+				   (xstrncasecmp(tok, "hostfile", len) == 0)) {
 				result = SLURM_DIST_ARBITRARY;
-			} else if (strncasecmp(tok, "nopack", len) == 0) {
+			} else if (xstrncasecmp(tok, "nopack", len) == 0) {
 				no_pack_nodes = true;
-			} else if (strncasecmp(tok, "pack", len) == 0) {
+			} else if (xstrncasecmp(tok, "pack", len) == 0) {
 				pack_nodes = true;
 			}
 		}
@@ -462,29 +462,29 @@ static uint16_t _get_conn_type(char *arg, bool bgp)
 	if (!len) {
 		/* no input given */
 		error("no conn-type argument given.");
-		return (uint16_t)NO_VAL;
-	} else if (!strncasecmp(arg, "MESH", len))
+		return NO_VAL16;
+	} else if (!xstrncasecmp(arg, "MESH", len))
 		return SELECT_MESH;
-	else if (!strncasecmp(arg, "TORUS", len))
+	else if (!xstrncasecmp(arg, "TORUS", len))
 		return SELECT_TORUS;
-	else if (!strncasecmp(arg, "NAV", len))
+	else if (!xstrncasecmp(arg, "NAV", len))
 		return SELECT_NAV;
-	else if (!strncasecmp(arg, "SMALL", len))
+	else if (!xstrncasecmp(arg, "SMALL", len))
 		return SELECT_SMALL;
 	else if (bgp) {
-		if (!strncasecmp(arg, "HTC", len) ||
-		    !strncasecmp(arg, "HTC_S", len))
+		if (!xstrncasecmp(arg, "HTC", len) ||
+		    !xstrncasecmp(arg, "HTC_S", len))
 			return SELECT_HTC_S;
-		else if (!strncasecmp(arg, "HTC_D", len))
+		else if (!xstrncasecmp(arg, "HTC_D", len))
 			return SELECT_HTC_D;
-		else if (!strncasecmp(arg, "HTC_V", len))
+		else if (!xstrncasecmp(arg, "HTC_V", len))
 			return SELECT_HTC_V;
-		else if (!strncasecmp(arg, "HTC_L", len))
+		else if (!xstrncasecmp(arg, "HTC_L", len))
 			return SELECT_HTC_L;
 	}
 
 	error("invalid conn-type argument '%s' ignored.", arg);
-	return (uint16_t)NO_VAL;
+	return NO_VAL16;
 }
 
 /*
@@ -522,7 +522,7 @@ extern void verify_conn_type(const char *arg, uint16_t *conn_type)
 	 * instead of highest_dims since that is the size of the
 	 * array. */
 	for ( ; inx < HIGHEST_DIMENSIONS; inx++) {
-		conn_type[inx] = (uint16_t)NO_VAL;
+		conn_type[inx] = NO_VAL16;
 	}
 
 	xfree(arg_tmp);
@@ -548,7 +548,7 @@ int verify_geometry(const char *arg, uint16_t *geometry)
 			break;
 		}
 		geometry[i] = (uint16_t)atoi(token);
-		if (geometry[i] == 0 || geometry[i] == (uint16_t)NO_VAL) {
+		if (geometry[i] == 0 || geometry[i] == NO_VAL16) {
 			error("invalid --geometry argument");
 			rc = -1;
 			break;
@@ -682,7 +682,7 @@ bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes)
 
 	/* Does the string contain a "-" character?  If so, treat as a range.
 	 * otherwise treat as an absolute node count. */
-	if ((ptr = index(arg, '-')) != NULL) {
+	if ((ptr = xstrchr(arg, '-')) != NULL) {
 		min_str = xstrndup(arg, ptr-arg);
 		*min_nodes = _str_to_nodes(min_str, &leftover);
 		if (!xstring_is_whitespace(leftover)) {
@@ -1001,7 +1001,7 @@ uint16_t parse_mail_type(const char *arg)
 	bool none_set = false;
 
 	if (!arg)
-		return (uint16_t)INFINITE;
+		return INFINITE16;
 
 	buf = xstrdup(arg);
 	tok = strtok_r(buf, ",", &save_ptr);
@@ -1038,7 +1038,7 @@ uint16_t parse_mail_type(const char *arg)
 	}
 	xfree(buf);
 	if (!rc && !none_set)
-		rc = (uint16_t)INFINITE;
+		rc = INFINITE16;
 
 	return rc;
 }
@@ -1225,7 +1225,7 @@ char *print_geometry(const uint16_t *geometry)
 	int dims = slurmdb_setup_cluster_dims();
 
 	if ((dims == 0) || !geometry[0]
-	    ||  (geometry[0] == (uint16_t)NO_VAL))
+	    ||  (geometry[0] == NO_VAL16))
 		return NULL;
 
 	for (i=0; i<dims; i++) {
@@ -1251,7 +1251,7 @@ int get_signal_opts(char *optarg, uint16_t *warn_signal, uint16_t *warn_time,
 	if (optarg == NULL)
 		return -1;
 
-	if (!strncasecmp(optarg, "B:", 2)) {
+	if (!xstrncasecmp(optarg, "B:", 2)) {
 		*warn_flags = KILL_JOB_BATCH;
 		optarg += 2;
 	}
@@ -1281,46 +1281,61 @@ int get_signal_opts(char *optarg, uint16_t *warn_signal, uint16_t *warn_time,
 }
 
 /* Convert a signal name to it's numeric equivalent.
- * Return -1 on failure */
+ * Return 0 on failure */
 int sig_name2num(char *signal_name)
 {
-	char *sig_name[] = {"HUP", "INT", "QUIT", "KILL", "TERM",
-			    "USR1", "USR2", "CONT", NULL};
-	int sig_num[] = {SIGHUP, SIGINT, SIGQUIT, SIGKILL, SIGTERM,
-			       SIGUSR1, SIGUSR2, SIGCONT};
+	struct signal_name_value {
+		char *name;
+		uint16_t val;
+	} signals[] = {
+		{ "HUP",	SIGHUP	},
+		{ "INT",	SIGINT	},
+		{ "QUIT",	SIGQUIT	},
+		{ "ABRT",	SIGABRT	},
+		{ "KILL",	SIGKILL	},
+		{ "ALRM",	SIGALRM	},
+		{ "TERM",	SIGTERM	},
+		{ "USR1",	SIGUSR1	},
+		{ "USR2",	SIGUSR2	},
+		{ "URG",	SIGURG	},
+		{ "CONT",	SIGCONT	},
+		{ "STOP",	SIGSTOP	},
+		{ "TSTP",	SIGTSTP	},
+		{ "TTIN",	SIGTTIN	},
+		{ "TTOU",	SIGTTOU	},
+		{ NULL,		0	}	/* terminate array */
+	};
 	char *ptr;
 	long tmp;
-	int sig;
 	int i;
 
 	tmp = strtol(signal_name, &ptr, 10);
 	if (ptr != signal_name) { /* found a number */
 		if (xstring_is_whitespace(ptr))
-			sig = (int)tmp;
+			return (int)tmp;
 		else
 			return 0;
-	} else {
-		ptr = (char *)signal_name;
-		while (isspace((int)*ptr))
-			ptr++;
-		if (strncasecmp(ptr, "SIG", 3) == 0)
-			ptr += 3;
-		for (i = 0; ; i++) {
-			if (sig_name[i] == NULL)
-				return 0;
-			if (strncasecmp(ptr, sig_name[i],
-					strlen(sig_name[i])) == 0) {
-				/* found the signal name */
-				if (!xstring_is_whitespace(ptr +
-							   strlen(sig_name[i])))
-					return 0;
-				sig = sig_num[i];
-				break;
-			}
+	}
+
+	/* search the array */
+	ptr = signal_name;
+	while (isspace((int)*ptr))
+		ptr++;
+	if (xstrncasecmp(ptr, "SIG", 3) == 0)
+		ptr += 3;
+	for (i = 0; ; i++) {
+		int siglen;
+		if (signals[i].name == NULL)
+			return 0;
+		siglen = strlen(signals[i].name);
+		if ((!xstrncasecmp(ptr, signals[i].name, siglen)
+		    && xstring_is_whitespace(ptr + siglen))) {
+			/* found the signal name */
+			return signals[i].val;
 		}
 	}
 
-	return sig;
+	return 0;	/* not found */
 }
 
 /*
@@ -1334,11 +1349,11 @@ extern int parse_uint16(char *aval, uint16_t *ival)
 	/*
 	 * First,  convert the ascii value it to a
 	 * long long int. If the result is greater then
-	 * or equal to 0 and less than (uint16_t) NO_VAL
+	 * or equal to 0 and less than NO_VAL16
 	 * set the value and return. Otherwise
 	 * return an error.
 	 */
-	uint16_t max16uint = (uint16_t) NO_VAL;
+	uint16_t max16uint = NO_VAL16;
 	long long tval;
 	char *p;
 
@@ -1370,7 +1385,7 @@ extern int parse_uint32(char *aval, uint32_t *ival)
 	 * set the value and return. Otherwise return
 	 * an error.
 	 */
-	uint32_t max32uint = (uint32_t) NO_VAL;
+	uint32_t max32uint = NO_VAL;
 	long long tval;
 	char *p;
 
@@ -1423,25 +1438,24 @@ extern int parse_uint64(char *aval, uint64_t *ival)
  *  Get a decimal integer from arg.
  *
  *  Returns the integer on success, exits program on failure.
- *
  */
 extern int parse_int(const char *name, const char *val, bool positive)
 {
 	char *p = NULL;
-	int result = 0;
+	long int result = 0;
 
 	if (val)
 		result = strtol(val, &p, 10);
 
-	if ((p == NULL) || (p[0] != '\0') || (result < 0L)
-	||  (positive && (result <= 0L))) {
+	if ((p == NULL) || (p[0] != '\0') || (result < 0L) ||
+	    (positive && (result <= 0L))) {
 		error ("Invalid numeric value \"%s\" for %s.", val, name);
 		exit(1);
-	} else if (result > INT_MAX) {
-		error ("Numeric argument (%d) to big for %s.", result, name);
+	} else if (result == LONG_MAX) {
+		error ("Numeric argument (%ld) to big for %s.", result, name);
 		exit(1);
-	} else if (result < INT_MIN) {
-		error ("Numeric argument %d to small for %s.", result, name);
+	} else if (result == LONG_MIN) {
+		error ("Numeric argument (%ld) to small for %s.", result, name);
 		exit(1);
 	}
 
@@ -1695,75 +1709,97 @@ parse_resv_flags(const char *flagstr, const char *msg)
 		while (curr[taglen] != ',' && curr[taglen] != '\0')
 			taglen++;
 
-		if (strncasecmp(curr, "Maintenance", MAX(taglen,1)) == 0) {
+		if (xstrncasecmp(curr, "Maintenance", MAX(taglen,1)) == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_MAINT;
 			else
 				outflags |= RESERVE_FLAG_MAINT;
-		} else if ((strncasecmp(curr, "Overlap", MAX(taglen,1))
+		} else if ((xstrncasecmp(curr, "Overlap", MAX(taglen,1))
 			    == 0) && (!flip)) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_OVERLAP;
 			/* "-OVERLAP" is not supported since that's the
 			 * default behavior and the option only applies
 			 * for reservation creation, not updates */
-		} else if (strncasecmp(curr, "Ignore_Jobs", MAX(taglen,1))
+		} else if (xstrncasecmp(curr, "Flex", MAX(taglen,1)) == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_FLEX;
+			else
+				outflags |= RESERVE_FLAG_FLEX;
+		} else if (xstrncasecmp(curr, "Ignore_Jobs", MAX(taglen,1))
 			   == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_IGN_JOB;
 			else
 				outflags |= RESERVE_FLAG_IGN_JOBS;
-		} else if (strncasecmp(curr, "Daily", MAX(taglen,1)) == 0) {
+		} else if (xstrncasecmp(curr, "Daily", MAX(taglen,1)) == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_DAILY;
 			else
 				outflags |= RESERVE_FLAG_DAILY;
-		} else if (strncasecmp(curr, "Weekly", MAX(taglen,1)) == 0) {
+		} else if (xstrncasecmp(curr, "Weekday", MAX(taglen,1)) == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_WEEKDAY;
+			else
+				outflags |= RESERVE_FLAG_WEEKDAY;
+		} else if (xstrncasecmp(curr, "Weekend", MAX(taglen,1)) == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_WEEKEND;
+			else
+				outflags |= RESERVE_FLAG_WEEKEND;
+		} else if (xstrncasecmp(curr, "Weekly", MAX(taglen,1)) == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_WEEKLY;
 			else
 				outflags |= RESERVE_FLAG_WEEKLY;
-		} else if (!strncasecmp(curr, "Any_Nodes", MAX(taglen,1)) ||
-			   !strncasecmp(curr, "License_Only", MAX(taglen,1))) {
+		} else if (!xstrncasecmp(curr, "Any_Nodes", MAX(taglen,1)) ||
+			   !xstrncasecmp(curr, "License_Only", MAX(taglen,1))) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_ANY_NODES;
 			else
 				outflags |= RESERVE_FLAG_ANY_NODES;
-		} else if (strncasecmp(curr, "Static_Alloc", MAX(taglen,1))
+		} else if (xstrncasecmp(curr, "Static_Alloc", MAX(taglen,1))
 			   == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_STATIC;
 			else
 				outflags |= RESERVE_FLAG_STATIC;
-		} else if (strncasecmp(curr, "Part_Nodes", MAX(taglen, 2))
+		} else if (xstrncasecmp(curr, "Part_Nodes", MAX(taglen, 2))
 			   == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_PART_NODES;
 			else
 				outflags |= RESERVE_FLAG_PART_NODES;
-		} else if (strncasecmp(curr, "PURGE_COMP", MAX(taglen, 2))
+		} else if (xstrncasecmp(curr, "PURGE_COMP", MAX(taglen, 2))
 			   == 0) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_PURGE_COMP;
-		} else if (!strncasecmp(curr, "First_Cores", MAX(taglen,1)) &&
+		} else if (!xstrncasecmp(curr, "First_Cores", MAX(taglen,1)) &&
 			   !flip) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_FIRST_CORES;
-		} else if (!strncasecmp(curr, "Time_Float", MAX(taglen,1)) &&
+		} else if (!xstrncasecmp(curr, "Time_Float", MAX(taglen,1)) &&
 			   !flip) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_TIME_FLOAT;
-		} else if (!strncasecmp(curr, "Replace", MAX(taglen,1)) &&
+		} else if (!xstrncasecmp(curr, "Replace", MAX(taglen,1)) &&
 			   !flip) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_REPLACE;
+		} else if (!xstrncasecmp(curr, "NO_HOLD_JOBS_AFTER_END",
+					 MAX(taglen, 1)) && !flip) {
+			curr += taglen;
+			outflags |= RESERVE_FLAG_NO_HOLD_JOBS;
 		} else {
 			error("Error parsing flags %s.  %s", flagstr, msg);
 			return 0xffffffff;

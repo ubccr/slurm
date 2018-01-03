@@ -50,7 +50,7 @@
 #include "src/common/slurm_protocol_defs.h"
 
 #include "src/api/step_io.h"
-
+#include "src/srun/libsrun/opt.h"
 
 typedef enum {
 	SRUN_JOB_INIT = 0,         /* Job's initial state                   */
@@ -81,6 +81,16 @@ typedef struct srun_job {
 	int fir_nodeid;
 	uint32_t jobid;		/* assigned job id 	                  */
 	uint32_t stepid;	/* assigned step id 	                  */
+	uint32_t node_offset;	/* pack job node offset or NO_VAL */
+
+	uint32_t pack_jobid;	/* pack job leader or NO_VAL */
+	char    *pack_node_list;/* node list for combined pack job */
+	uint32_t pack_nnodes;	/* total node count for entire pack job */
+	uint32_t pack_ntasks;	/* total task count for entire pack job */
+	uint32_t pack_offset;	/* pack job offset or NO_VAL */
+	uint32_t pack_task_offset;/* pack job task offset or NO_VAL */
+	uint16_t *pack_task_cnts; /* tasks invoked on each node of pack job */
+	uint32_t **pack_tids;	/* Task IDs on each node of pack job */
 
 	uint32_t cpu_count;	/* allocated CPUs */
 	uint32_t nhosts;	/* node count */
@@ -97,6 +107,7 @@ typedef struct srun_job {
 	int  rc;                /* srun return code                       */
 
 	char *alias_list;	/* node name/address/hostname aliases */
+	char **env;		/* pack-job specific environment */
 	char *nodelist;		/* nodelist in string form */
 	char *partition;	/* name of partition running job */
 
@@ -108,7 +119,6 @@ typedef struct srun_job {
 	dynamic_plugin_data_t *select_jobinfo;
 
 	/* Pseudo terminial support */
-	pthread_t pty_id;	/* pthread to communicate window size changes */
 	int pty_fd;		/* file to communicate window size changes */
 	uint16_t pty_port;	/* used to communicate window size changes */
 	uint16_t ws_col;	/* window size, columns */
@@ -126,19 +136,31 @@ void    job_force_termination(srun_job_t *job);
 srun_job_state_t job_state(srun_job_t *job);
 
 extern srun_job_t * job_create_noalloc(void);
-extern srun_job_t *job_step_create_allocation(
-	resource_allocation_response_msg_t *resp);
-extern srun_job_t * job_create_allocation(
-	resource_allocation_response_msg_t *resp);
 
-extern void init_srun(int ac, char **av,
+/*
+ * Create an srun job structure for a step w/out an allocation response msg.
+ * (i.e. inside an allocation)
+ */
+extern srun_job_t *job_step_create_allocation(
+			resource_allocation_response_msg_t *resp,
+			slurm_opt_t *opt_local);
+
+/*
+ * Create an srun job structure from a resource allocation response msg
+ */
+extern srun_job_t *job_create_allocation(
+			resource_allocation_response_msg_t *resp,
+			slurm_opt_t *opt_local);
+
+extern void init_srun(int argc, char **argv,
 		      log_options_t *logopt, int debug_level,
 		      bool handle_signals);
 
-extern void create_srun_job(srun_job_t **p_job, bool *got_alloc,
+extern void create_srun_job(void **p_job, bool *got_alloc,
 			    bool slurm_started, bool handle_signals);
+
 extern void pre_launch_srun_job(srun_job_t *job, bool slurm_started,
-				bool handle_signals);
+				bool handle_signals, slurm_opt_t *opt_local);
 
 extern void fini_srun(srun_job_t *job, bool got_alloc, uint32_t *global_rc,
 		      bool slurm_started);
@@ -146,7 +168,7 @@ extern void fini_srun(srun_job_t *job, bool got_alloc, uint32_t *global_rc,
 /*
  *  Update job filenames and modes for stderr, stdout, and stdin.
  */
-void    job_update_io_fnames(srun_job_t *j);
+extern void job_update_io_fnames(srun_job_t *job, slurm_opt_t *opt_local);
 
 /* Set up port to handle messages from slurmctld */
 int slurmctld_msg_init(void);

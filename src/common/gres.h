@@ -54,6 +54,13 @@ enum {
 	GRES_VAL_TYPE_ALLOC  = 3
 };
 
+typedef struct {
+	int alloc;
+	int dev_num;
+	char *major;
+	char *path;
+} gres_device_t;
+
 /* Gres state information gathered by slurmd daemon */
 typedef struct gres_slurmd_conf {
 	/* Count of gres available in this configuration record */
@@ -217,33 +224,14 @@ extern int gres_plugin_node_config_load(uint32_t cpu_cnt, char *node_name,
 extern int gres_plugin_node_config_pack(Buf buffer);
 
 /*
- * Return information about the configured gres devices on the node
- * OUT dev_path - the devices paths as written on gres.conf file
- * OUT gres_name - the names of the devices (ex. gpu, nic,..)
- * IN node_name - Name of this compute node
- * OUT int - number of records in dev_path and gres_name
+ * Set GRES devices as allocated or not for a particular job
+ * IN gres_list - allocated gres devices
+ * IN is_job - if is job function expects gres_job_state_t's else
+ *             gres_step_state_t's
+ * RET - List of gres_device_t containing all devices from all GRES with alloc
+ *       set correctly if the device is allocated to the job/step.
  */
-extern int gres_plugin_node_config_devices_path(char ***dev_path,
-						char ***gres_name,
-						char *node_name);
-
-/*
- * Provide information about the allocate gres devices for a particular job
- * IN gres_list - jobs allocated gres devices
- * IN gres_count - count of gres.conf records for each gres name
- * OUT gres_bit_alloc - the exact devices which are allocated
- */
-extern void gres_plugin_job_state_file(List gres_list, int *gres_bit_alloc,
-				       int *gres_count);
-
-/*
- * Provide information about the allocate gres devices for a particular step
- * IN gres_list - jobs allocated gres devices
- * IN gres_count - count of gres.conf records for each gres name
- * OUT gres_bit_alloc - the exact devices which are allocated
- */
-extern void gres_plugin_step_state_file(List gres_list, int *gres_bit_alloc,
-					int *gres_count);
+extern List gres_plugin_get_allocated_devices(List gres_list, bool is_job);
 
 /* Send GRES information to slurmstepd on the specified file descriptor */
 extern void gres_plugin_send_stepd(int fd);
@@ -808,5 +796,10 @@ extern void gres_set_job_tres_cnt(List gres_list,
  */
 extern void gres_set_node_tres_cnt(List gres_list, uint64_t *tres_cnt,
 				   bool locked);
+
+/* return the major info from a given path of a device */
+extern char *gres_device_major(char *dev_path);
+
+extern void destroy_gres_device(void *p);
 
 #endif /* !_GRES_H */

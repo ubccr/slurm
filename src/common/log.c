@@ -100,12 +100,6 @@ strong_alias(log_fatal,		slurm_log_fatal);
 strong_alias(log_oom,		slurm_log_oom);
 strong_alias(log_has_data,	slurm_log_has_data);
 strong_alias(log_flush,		slurm_log_flush);
-strong_alias(dump_cleanup_list,	slurm_dump_cleanup_list);
-strong_alias(fatal_add_cleanup,	slurm_fatal_add_cleanup);
-strong_alias(fatal_add_cleanup_job,	slurm_fatal_add_cleanup_job);
-strong_alias(fatal_remove_cleanup,	slurm_fatal_remove_cleanup);
-strong_alias(fatal_remove_cleanup_job,	slurm_fatal_remove_cleanup_job);
-strong_alias(fatal_cleanup,	slurm_fatal_cleanup);
 strong_alias(fatal,		slurm_fatal);
 strong_alias(error,		slurm_error);
 strong_alias(info,		slurm_info);
@@ -348,13 +342,8 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
 		log->logfp = fp;
 	}
 
-	if (log->logfp) {
-		int fd;
-		if ((fd = fileno(log->logfp)) < 0)
-			log->logfp = NULL;
-		else
-			fd_set_close_on_exec(fd);
-	}
+	if (log->logfp && (fileno(log->logfp) < 0))
+		log->logfp = NULL;
 
 	log->initialized = 1;
  out:
@@ -430,13 +419,8 @@ _sched_log_init(char *prog, log_options_t opt, log_facility_t fac,
 		sched_log->logfp = fp;
 	}
 
-	if (sched_log->logfp) {
-		int fd;
-		if ((fd = fileno(sched_log->logfp)) < 0)
-			sched_log->logfp = NULL;
-		else
-			fd_set_close_on_exec(fd);
-	}
+	if (sched_log->logfp && (fileno(sched_log->logfp) < 0))
+		sched_log->logfp = NULL;
 
 	sched_log->initialized = 1;
  out:
@@ -513,15 +497,15 @@ void log_reinit(void)
 	slurm_mutex_init(&log_lock);
 }
 
-void log_set_fpfx(char *prefix)
+void log_set_fpfx(char **prefix)
 {
 	slurm_mutex_lock(&log_lock);
 	xfree(log->fpfx);
-	if (!prefix)
+	if (!prefix || !*prefix)
 		log->fpfx = xstrdup("");
 	else {
-		log->fpfx = xstrdup(prefix);
-		xstrcatchar(log->fpfx, ' ');
+		log->fpfx = *prefix;
+		*prefix = NULL;
 	}
 	slurm_mutex_unlock(&log_lock);
 }
@@ -685,7 +669,8 @@ set_idbuf(char *idbuf)
 		(void *)pthread_self());
 }
 
-/* return a heap allocated string formed from fmt and ap arglist
+/*
+ * return a heap allocated string formed from fmt and ap arglist
  * returned string is allocated with xmalloc, so must free with xfree.
  *
  * args are like printf, with the addition of the following format chars:
@@ -695,45 +680,44 @@ set_idbuf(char *idbuf)
  * - %T expands to rfc2822 date time  [ "dd, Mon yyyy hh:mm:ss GMT offset" ]
  *
  * simple format specifiers are handled explicitly to avoid calls to
- * vsnprintf and allow dynamic sizing of the message buffer. If a call
- * is made to vsnprintf, however, the message will be limited to 1024 bytes.
- * (inc. newline)
- *
+ * vsnprintf and allow dynamic sizing of the message buffer.
  */
 static char *vxstrfmt(const char *fmt, va_list ap)
 {
 	char        *buf = NULL;
 	char        *p   = NULL;
-	size_t      len = (size_t) 0;
-	char        tmp[LINEBUFSIZE];
-	int         unprocessed = 0;
 	int         long_long = 0;
 
-	while (*fmt != '\0') {
+	/* Growable temp buffer that starts on the stack: */
+	size_t      tmp_len = LINEBUFSIZE;
+	char        tmp_stack[tmp_len];
+	char        *tmp = tmp_stack;
 
+	while (*fmt != '\0') {
 		if ((p = (char *)strchr(fmt, '%')) == NULL) {
-			/* no more format chars */
+			/*
+			 * no more format sequences, append the rest of fmt and
+			 * exit the loop
+			 */
 			xstrcat(buf, fmt);
 			break;
+		} else {	/* *p == '%' */
+			int was_handled = 1;
 
-		} else {        /* *p == '%' */
-			/* take difference from fmt to just before `%' */
-			len = (size_t) ((long)(p) - (long)fmt);
-			/* append from fmt to p into buf if there's
-			 * anythere there
+			/*
+			 * append from fmt to p (not including p) into buf if
+			 * there's anythere there:
 			 */
-			if (len > 0)
-				xstrncat(buf, fmt, len);
+			if (p > fmt)
+				xstrncat(buf, fmt, p - fmt);
 
 			switch (*(++p)) {
 		        case '%':	/* "%%" => "%" */
 				xstrcatchar(buf, '%');
 				break;
-
 			case 'm':	/* "%m" => strerror(errno) */
 				xslurm_strerrorcat(buf);
 				break;
-
 			case 't': 	/* "%t" => locally preferred date/time*/
 				xstrftimecat(buf, "%x %X");
 				break;
@@ -745,28 +729,35 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 					xiso8601timecat(buf, true);
 				else {
 					switch (log->fmt) {
-					case LOG_FMT_ISO8601_MS: /* "%M" => "yyyy-mm-ddThh:mm:ss.fff"  */
+					case LOG_FMT_ISO8601_MS:
+						/* "%M" => "yyyy-mm-ddThh:mm:ss.fff"  */
 						xiso8601timecat(buf, true);
 						break;
-					case LOG_FMT_ISO8601: /* "%M" => "yyyy-mm-ddThh:mm:ss.fff"  */
+					case LOG_FMT_ISO8601:
+						/* "%M" => "yyyy-mm-ddThh:mm:ss.fff"  */
 						xiso8601timecat(buf, false);
 						break;
-					case LOG_FMT_RFC5424_MS: /* "%M" => "yyyy-mm-ddThh:mm:ss.fff(+/-)hh:mm" */
+					case LOG_FMT_RFC5424_MS:
+						/* "%M" => "yyyy-mm-ddThh:mm:ss.fff(+/-)hh:mm" */
 						xrfc5424timecat(buf, true);
 						break;
-					case LOG_FMT_RFC5424:  /* "%M" => "yyyy-mm-ddThh:mm:ss.fff(+/-)hh:mm" */
+					case LOG_FMT_RFC5424:
+						/* "%M" => "yyyy-mm-ddThh:mm:ss.fff(+/-)hh:mm" */
 						xrfc5424timecat(buf, false);
 						break;
 					case LOG_FMT_CLOCK:
 						/* "%M" => "usec" */
 #if defined(__FreeBSD__)
-						snprintf(tmp, sizeof(tmp), "%d", clock());
+						snprintf(tmp, tmp_len, "%d",
+							 clock());
 #else
-						snprintf(tmp, sizeof(tmp), "%ld", clock());
+						snprintf(tmp, tmp_len, "%ld",
+							 clock());
 #endif
 						xstrcat(buf, tmp);
 						break;
-					case LOG_FMT_SHORT: /* "%M" => "Mon DD hh:mm:ss"         */
+					case LOG_FMT_SHORT:
+						/* "%M" => "Mon DD hh:mm:ss" */
 						xstrftimecat(buf, "%b %d %T");
 						break;
 					case LOG_FMT_THREAD_ID:
@@ -777,126 +768,249 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 				}
 				break;
 			case 's':	/* "%s" => append string */
-				/* we deal with this case for efficiency */
-				if (unprocessed == 0)
-					xstrcat(buf, va_arg(ap, char *));
-				else
-					xstrcat(buf, "%s");
+				xstrcat(buf, va_arg(ap, char *));
 				break;
 			case 'f': 	/* "%f" => append double */
-				/* again, we only handle this for efficiency */
-				if (unprocessed == 0) {
-					snprintf(tmp, sizeof(tmp), "%f",
-						 va_arg(ap, double));
-					xstrcat(buf, tmp);
-				} else
-					xstrcat(buf, "%f");
+				snprintf(tmp, tmp_len, "%f",
+					va_arg(ap, double));
+				xstrcat(buf, tmp);
 				break;
-			case 'd':
-				if (unprocessed == 0) {
-					snprintf(tmp, sizeof(tmp), "%d",
-						 va_arg(ap, int));
-					xstrcat(buf, tmp);
-				} else
-					xstrcat(buf, "%d");
+			case 'd': 	/* "%d" => append int */
+				snprintf(tmp, tmp_len, "%d",
+					va_arg(ap, int));
+				xstrcat(buf, tmp);
 				break;
-			case 'u':
-				if (unprocessed == 0) {
-					snprintf(tmp, sizeof(tmp), "%u",
-						 va_arg(ap, int));
-					xstrcat(buf, tmp);
-				} else
-					xstrcat(buf, "%u");
+			case 'u': 	/* "%u" => append unsigned int */
+				snprintf(tmp, tmp_len, "%u",
+					va_arg(ap, unsigned));
+				xstrcat(buf, tmp);
 				break;
-			case 'l':
-				if ((unprocessed == 0) && (*(p+1) == 'l')) {
+			case 'l':  /* "%l.." => append with long modifier */
+				if (*(p+1) == 'l') {
 					long_long = 1;
 					p++;
 				}
-
-				if ((unprocessed == 0) && (*(p+1) == 'u')) {
+				switch (*(p + 1)) {
+				case 'u':
 					if (long_long) {
-						snprintf(tmp, sizeof(tmp),
+						/* "%llu" => append long long unsigned */
+						snprintf(tmp, tmp_len,
 							"%llu",
-							 va_arg(ap,
-								long long unsigned));
+							va_arg(ap,
+							       long long unsigned));
 						long_long = 0;
-					} else
-						snprintf(tmp, sizeof(tmp),
-							 "%lu",
-							 va_arg(ap,
-								long unsigned));
-					xstrcat(buf, tmp);
-					p++;
-				} else if ((unprocessed==0) && (*(p+1)=='d')) {
+					} else {
+						/* "%lu" => append long unsigned */
+						snprintf(tmp, tmp_len,
+							"%lu",
+							va_arg(ap,
+							       long unsigned));
+					}
+					break;
+				case 'd':
 					if (long_long) {
-						snprintf(tmp, sizeof(tmp),
+						/* "%lld" => append long long int */
+						snprintf(tmp, tmp_len,
 							"%lld",
-							 va_arg(ap,
-								long long int));
+							va_arg(ap,
+							long long int));
 						long_long = 0;
-					} else
-						snprintf(tmp, sizeof(tmp),
-							 "%ld",
-							 va_arg(ap, long int));
-					xstrcat(buf, tmp);
-					p++;
-				} else if ((unprocessed==0) && (*(p+1)=='f')) {
+					} else {
+						/* "%ld" => append long int */
+						snprintf(tmp, tmp_len,
+							"%ld",
+							va_arg(ap, long int));
+					}
+					break;
+
+				case 'f':
 					if (long_long) {
-						xstrcat(buf, "%llf");
+						/* "%llf" behavior iffy, let vsnprintf() do it */
+						was_handled = 0;
 						long_long = 0;
-					} else
-						snprintf(tmp, sizeof(tmp),
-							 "%lf",
-							 va_arg(ap, double));
-					xstrcat(buf, tmp);
-					p++;
-				} else if ((unprocessed==0) && (*(p+1)=='x')) {
+					} else {
+						/* "%lf" => append double */
+						snprintf(tmp, tmp_len,
+							"%lf",
+							va_arg(ap, double));
+					}
+					break;
+				case 'x':
 					if (long_long) {
-						snprintf(tmp, sizeof(tmp),
-							 "%llx",
-							 va_arg(ap,
-								long long int));
+						/* "%llx" => append long long int (hexadecimal) */
+						snprintf(tmp, tmp_len,
+							"%llx",
+							va_arg(ap,
+							long long int));
 						long_long = 0;
-					} else
-						snprintf(tmp, sizeof(tmp),
-							 "%lx",
-							 va_arg(ap, long int));
+					} else {
+						/* "%lx" => append long int (hexadecimal) */
+						snprintf(tmp, tmp_len,
+						"%lx",
+						va_arg(ap, long int));
+					}
+					break;
+
+				default:
+					/* "%l..." isn't one we know, let vsnprintf() do it */
+					was_handled = 0;
+					break;
+				}
+				if ( was_handled ) {
+					/*
+					 * One of the shortcuts above took care
+					 * of this, so append its output to
+					 * buf and move along:
+					 */
 					xstrcat(buf, tmp);
 					p++;
-				} else if (long_long) {
-					xstrcat(buf, "%ll");
-					long_long = 0;
-				} else
-					xstrcat(buf, "%l");
+				}  else if (long_long)
+					p--;
 				break;
 			case 'L':
-				if ((unprocessed==0) && (*(p+1)=='f')) {
-					snprintf(tmp, sizeof(tmp), "%Lf",
-						 va_arg(ap, long double));
+				if (*(p+1)=='f') {
+					snprintf(tmp, tmp_len, "%Lf",
+						va_arg(ap, long double));
 					xstrcat(buf, tmp);
 					p++;
-				} else
-					xstrcat(buf, "%L");
+				} else {
+					was_handled = 0;
+				}
 				break;
-			default:	/* try to handle the rest  */
-				xstrcatchar(buf, '%');
-				xstrcatchar(buf, *p);
-				unprocessed++;
+			default:
+				was_handled = 0;
 				break;
 			}
+			if (!was_handled) {
+				/*
+				 * Anything we don't explicitly process should
+				 * be passed to vsnprintf() to be handled now.
+				 */
+				va_list       ap_local;
+				char          *p_end = strchr(p, '%');
+				char          *fmt_local;
+				int        output_len;
 
+				va_copy(ap_local, ap);
+				if (!p_end) {
+					fmt_local = p - 1;
+				} else {
+					fmt_local = xstrndup(p - 1, p_end - p + 1);
+					if (fmt_local == NULL) {
+						/*
+						 * We must be outta memory...
+						 * guess we're all done.
+						 */
+						break;
+					}
+				}
+
+				/*
+				 * Given our current tmp buffer, try the
+				 * vsnprintf().  Use ap so that we've advanced
+				 * it beyond these arguments no matter what.
+				 */
+				output_len = vsnprintf(tmp, tmp_len, fmt_local, ap);
+				if ((output_len > -1) &&
+				    (output_len < tmp_len)) {
+					/* We had enough space, hurray! */
+				} else if (output_len >= tmp_len) {
+					/*
+					 * If we're lucky enough to be using a C
+					 * library that returns a target length
+					 * for the vsnprintf(), then allocate
+					 * that much space and get out quickly.
+					 *
+					 * glibc >= 2.1 has this behavior,
+					 * previous versions do not
+					 */
+					char      *tmp_new = NULL;
+					size_t    tmp_new_len = output_len + 1;
+
+					/* Match tmp_new_len to a multiple of LINEBUFSIZE */
+					tmp_new_len = (tmp_new_len / LINEBUFSIZE) +
+						      ((tmp_new_len % LINEBUFSIZE) ? 1 : 0);
+					tmp_new_len *= LINEBUFSIZE;
+
+					if (tmp != tmp_stack) {
+						tmp_new = xrealloc(tmp,
+								   tmp_new_len);
+					} else {
+						tmp_new = xmalloc(tmp_new_len);
+					}
+					if (tmp_new) {
+						tmp = tmp_new;
+						tmp_len = tmp_new_len;
+					}
+					vsnprintf(tmp, tmp_len, fmt_local,
+						  ap_local);
+				} else {
+					/*
+					 * We'll need to iteratively increase
+					 * the size of the tmp buffer until
+					 * vsnprintf() succeeds.
+					 */
+					int done = 0;
+					do {
+						va_list   ap_copy;
+						size_t    tmp_new_len;
+						char      *tmp_new;
+
+						tmp_new_len = tmp_len +
+							      LINEBUFSIZE;
+						if (tmp != tmp_stack) {
+							tmp_new = xrealloc(tmp,
+								tmp_new_len);
+						} else {
+							tmp_new = xmalloc(tmp_new_len);
+						}
+						if (tmp_new) {
+							tmp = tmp_new;
+							tmp_len = tmp_new_len;
+						} else {
+							done = 1;
+						}
+						va_copy(ap_copy, ap_local);
+						output_len = vsnprintf(tmp,
+								tmp_len,
+								fmt_local,
+								ap_copy);
+						va_end(ap_copy);
+
+						if ((output_len > -1) &&
+						    (output_len < tmp_len))
+							done = 1;
+					} while (!done);
+				}
+				/*
+				 * Whatever was produced in tmp,
+				 * add it to our output string:
+				 */
+				xstrcat(buf, tmp);
+				/* Dealloc any local copy of the format substring: */
+				if (fmt_local != p - 1)
+					xfree(fmt_local);
+				/* Cleanup our stashed var arg state copy: */
+				va_end(ap_local);
+				if (!p_end) {
+					/* All done, exit the loop: */
+					break;
+				}
+
+				/*
+				 * Start next iteration on the next format
+				 * sequence we already found:
+				 */
+				fmt = p_end;
+				continue;
+			}
 		}
-
 		fmt = p + 1;
 	}
 
-	if (unprocessed > 0) {
-		vsnprintf(tmp, sizeof(tmp)-1, buf, ap);
-		xfree(buf);
-		return xstrdup(tmp);
-	}
-
+	/* Did we end up allocating tmp on the heap? */
+	if (tmp != tmp_stack)
+		xfree(tmp);
 	return buf;
 }
 
@@ -1072,10 +1186,13 @@ static void log_msg(log_level_t level, const char *fmt, va_list args)
 
 	if (level <=  log->opt.syslog_level) {
 
+		/* Avoid changing errno if syslog fails */
+		int orig_errno = slurm_get_errno();
 		xlogfmtcat(&msgbuf, "%s%s", pfx, buf);
 		openlog(log->argv0, LOG_PID, log->facility);
 		syslog(priority, "%.500s", msgbuf);
 		closelog();
+		slurm_seterrno(orig_errno);
 
 		xfree(msgbuf);
 	}
@@ -1127,7 +1244,6 @@ void fatal(const char *fmt, ...)
 	log_msg(LOG_LEVEL_FATAL, fmt, ap);
 	va_end(ap);
 	log_flush();
-	fatal_cleanup();
 
 	exit(1);
 }
@@ -1221,149 +1337,6 @@ void schedlog(const char *fmt, ...)
 	va_start(ap, fmt);
 	log_msg(LOG_LEVEL_SCHED, fmt, ap);
 	va_end(ap);
-}
-
-/* Fatal cleanup */
-
-struct fatal_cleanup {
-	pthread_t thread_id;
-	struct fatal_cleanup *next;
-	void (*proc) (void *);
-	void *context;
-};
-
-/* static variables */
-static pthread_mutex_t  fatal_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct fatal_cleanup *fatal_cleanups = NULL;
-
-/* Registers a cleanup function to be called by fatal() for this thread
-** before exiting. */
-void
-fatal_add_cleanup(void (*proc) (void *), void *context)
-{
-	struct fatal_cleanup *cu;
-
-	slurm_mutex_lock(&fatal_lock);
-	cu = xmalloc(sizeof(*cu));
-	cu->thread_id = pthread_self();
-	cu->proc = proc;
-	cu->context = context;
-	cu->next = fatal_cleanups;
-	fatal_cleanups = cu;
-	slurm_mutex_unlock(&fatal_lock);
-}
-
-/* Registers a cleanup function to be called by fatal() for all threads
-** of the job. */
-void
-fatal_add_cleanup_job(void (*proc) (void *), void *context)
-{
-	struct fatal_cleanup *cu;
-
-	slurm_mutex_lock(&fatal_lock);
-	cu = xmalloc(sizeof(*cu));
-	cu->thread_id = 0;
-	cu->proc = proc;
-	cu->context = context;
-	cu->next = fatal_cleanups;
-	fatal_cleanups = cu;
-	slurm_mutex_unlock(&fatal_lock);
-}
-
-/* Removes a cleanup frunction to be called at fatal() for this thread. */
-void
-fatal_remove_cleanup(void (*proc) (void *context), void *context)
-{
-	struct fatal_cleanup **cup, *cu;
-	pthread_t my_thread_id = pthread_self();
-
-	slurm_mutex_lock(&fatal_lock);
-	for (cup = &fatal_cleanups; *cup; cup = &cu->next) {
-		cu = *cup;
-		if (cu->thread_id == my_thread_id &&
-		    cu->proc == proc &&
-		    cu->context == context) {
-			*cup = cu->next;
-			xfree(cu);
-			slurm_mutex_unlock(&fatal_lock);
-			return;
-		}
-	}
-	slurm_mutex_unlock(&fatal_lock);
-	fatal("fatal_remove_cleanup: no such cleanup function: 0x%lx 0x%lx",
-	    (u_long) proc, (u_long) context);
-}
-
-/* Removes a cleanup frunction to be called at fatal() for all threads of
-** the job. */
-void
-fatal_remove_cleanup_job(void (*proc) (void *context), void *context)
-{
-	struct fatal_cleanup **cup, *cu;
-
-	slurm_mutex_lock(&fatal_lock);
-	for (cup = &fatal_cleanups; *cup; cup = &cu->next) {
-		cu = *cup;
-		if (cu->thread_id == 0 &&
-		    cu->proc == proc &&
-		    cu->context == context) {
-			*cup = cu->next;
-			xfree(cu);
-			slurm_mutex_unlock(&fatal_lock);
-			return;
-		}
-	}
-	slurm_mutex_unlock(&fatal_lock);
-	fatal("fatal_remove_cleanup_job: no such cleanup function: "
-	      "0x%lx 0x%lx", (u_long) proc, (u_long) context);
-}
-
-/* Execute cleanup functions, first thread-specific then those for the
-** whole job */
-void
-fatal_cleanup(void)
-{
-	struct fatal_cleanup **cup, *cu;
-	pthread_t my_thread_id = pthread_self();
-
-	slurm_mutex_lock(&fatal_lock);
-	for (cup = &fatal_cleanups; *cup; ) {
-		cu = *cup;
-		if (cu->thread_id != my_thread_id) {
-			cup = &cu->next;
-			continue;
-		}
-		debug("Calling cleanup 0x%lx(0x%lx)",
-		      (u_long) cu->proc, (u_long) cu->context);
-		(*cu->proc) (cu->context);
-		*cup = cu->next;
-		xfree(cu);
-	}
-	for (cup = &fatal_cleanups; *cup; cup = &cu->next) {
-		cu = *cup;
-		if (cu->thread_id != 0)
-			continue;
-		debug("Calling cleanup 0x%lx(0x%lx)",
-		      (u_long) cu->proc, (u_long) cu->context);
-		(*cu->proc) (cu->context);
-	}
-	slurm_mutex_unlock(&fatal_lock);
-}
-
-/* Print a list of cleanup frunctions to be called at fatal(). */
-void
-dump_cleanup_list(void)
-{
-	struct fatal_cleanup **cup, *cu;
-
-	slurm_mutex_lock(&fatal_lock);
-	for (cup = &fatal_cleanups; *cup; cup = &cu->next) {
-		cu = *cup;
-		info ("loc=%ld thread_id=%ld proc=%ld, context=%ld, next=%ld",
-			(long)cu, (long)cu->thread_id, (long)cu->proc,
-			(long)cu->context, (long)cu->next);
-	}
-	slurm_mutex_unlock(&fatal_lock);
 }
 
 /* Return the highest LOG_LEVEL_* used for any logging mechanism.
