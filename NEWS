@@ -1,6 +1,25 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 17.11.2
+==========================
+ -- jobcomp/elasticsearch - append Content-Type to the HTTP header.
+ -- MYSQL - Fix potential abort of slurmdbd when job has no TRES.
+ -- Add advanced reservation flag of "REPLACE_DOWN" to replace DOWN or DRAINED
+    nodes.
+ -- slurm.spec-legacy - add missing libslurmfull.so to slurm.files.
+ -- Fix squeue job ID filtering for pending job array records.
+ -- Fix potential deadlock in _run_prog() in power save code.
+ -- MYSQL - Add dynamic_offset in the database to force range for auto
+    increment ids for the tres_table.
+ -- MYSQL - Fix fallout from MySQL auto increment bug, see RELEASE_NOTES,
+    only affects current 17.11 users tracking licenses or GRES in the database.
+ -- Refactor logging logic to avoid possible memory corruption on non-x86
+    architectures.
+ -- Fix memory leak when getting jobs from the slurmdbd.
+ -- Fix incorrect logic behind MemorySwappiness, and only set the value when
+    specified in the configuration.
+
 * Changes in Slurm 17.11.1-2
 ============================
  -- MYSQL - Make index for pack_job_id
@@ -504,6 +523,11 @@ documents those changes that are of interest to users and administrators.
     reconfigured.
  -- Fix to properly remove extern steps from the starting_steps list.
  -- Fix Slurm to work correctly with HDF5 1.10+.
+ -- Add support in salloc/srun --bb option for "access_mode" in addition to
+    "access" for consistency with DW options.
+ -- Fix potential deadlock in _run_prog() in power save code.
+ -- MYSQL - Add dynamic_offset in the database to force range for auto
+    increment ids for the tres_table.
 
 * Changes in Slurm 17.02.9
 ==========================
