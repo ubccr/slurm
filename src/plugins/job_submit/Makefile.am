@@ -10,4 +10,5 @@ SUBDIRS = \
 	pbs \
 	require_timelimit \
 	throttle \
-	ccr_qos
+	ccr_qos \
+	save_script
