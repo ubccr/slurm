@@ -1534,7 +1534,8 @@ Repeat the reservation at the same time every day.
 .TP
 \fIFLEX\fR
 Permit jobs requesting the reservation to begin prior to the reservation's
-start time and use resources inside or outside of the reservation. A typical
+start time, end after the reservation's end time, and use resources inside
+and/or outside of the reservation. A typical
 use case is to prevent jobs not explicitlg requesting the reservation from using
 those reserved resources rather than forcing jobs requesting the reservation to
 use those resources in the time frame reserved.
@@ -1576,8 +1577,17 @@ Once the reservation has been created, it must be populated within 5 minutes
 of its start time or it will be purged before any jobs have been run.
 .TP
 \fRREPLACE\fR
-Resources allocated to jobs as automatically replenished using idle resources.
+Nodes which are DOWN, DRAINED, or allocated to jobs as automatically
+replenished using idle resources.
 This option can be used to maintain a constant number of idle resources
+available for pending jobs (subject to availability of idle resources).
+This should be used with the \fINodeCnt\fP reservation option; do not identify
+specific nodes to be included in the reservation.
+This option is not supported on IBM Bluegene systems.
+.TP
+\fRREPLACE_DOWN\fR
+Nodes which are DOWN or DRAINED are automatically replenished using idle resources.
+This option can be used to maintain a constant sized pool of resources
 available for pending jobs (subject to availability of idle resources).
 This should be used with the \fINodeCnt\fP reservation option; do not identify
 specific nodes to be included in the reservation.

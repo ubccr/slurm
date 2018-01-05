@@ -109,7 +109,7 @@ extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	}
 	xcgroup_set_param(&memory_cg, "memory.use_hierarchy","1");
 
-	set_swappiness = (slurm_cgroup_conf->memory_swappiness == NO_VAL64);
+	set_swappiness = (slurm_cgroup_conf->memory_swappiness != NO_VAL64);
 	if (set_swappiness)
 		xcgroup_set_uint64_param(&memory_cg, "memory.swappiness",
 					 slurm_cgroup_conf->memory_swappiness);
@@ -558,7 +558,8 @@ extern int task_cgroup_memory_check_oom(stepd_step_rec_t *job)
 				 * reached the value set in
 				 * memory.memsw.limit_in_bytes.
 				 */
-				error("Exceeded step memory limit at some point.");
+				error("Step %u.%u hit memory+swap limit at least once during execution. This may or may not result in some failure.",
+				      job->jobid, job->stepid);
 				rc = ENOMEM;
 			} else if (failcnt_non_zero(&step_memory_cg,
 						    "memory.failcnt")) {
@@ -566,16 +567,19 @@ extern int task_cgroup_memory_check_oom(stepd_step_rec_t *job)
 				 * memory limit has reached the value set
 				 * in memory.limit_in_bytes.
 				 */
-				error("Exceeded step memory limit at some point.");
+				error("Step %u.%u hit memory limit at least once during execution. This may or may not result in some failure.",
+				      job->jobid, job->stepid);
 				rc = ENOMEM;
 			}
 			if (failcnt_non_zero(&job_memory_cg,
 					     "memory.memsw.failcnt")) {
-				error("Exceeded job memory limit at some point.");
+				error("Job %u hit memory+swap limit at least once during execution. This may or may not result in some failure.",
+				      job->jobid);
 				rc = ENOMEM;
 			} else if (failcnt_non_zero(&job_memory_cg,
 						    "memory.failcnt")) {
-				error("Exceeded job memory limit at some point.");
+				error("Job %u hit memory limit at least once during execution. This may or may not result in some failure.",
+				      job->jobid);
 				rc = ENOMEM;
 			}
 			xcgroup_unlock(&memory_cg);
