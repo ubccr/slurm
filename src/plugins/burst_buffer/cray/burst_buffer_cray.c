@@ -3673,7 +3673,7 @@ extern int bb_p_job_test_stage_in(struct job_record *job_ptr, bool test_only)
 	} else if (bb_job->state == BB_STATE_STAGED_IN) {
 		rc = 1;
 	} else {
-		rc = -1;	/* Requeued job still staging out */
+		rc = -1;	/* Requeued job still staging in */
 	}
 
 	slurm_mutex_unlock(&bb_state.bb_mutex);
@@ -4195,12 +4195,14 @@ static void _free_create_args(create_buf_data_t *create_args)
 	}
 }
 
-/* Create/destroy persistent burst buffers
+/*
+ * Create/destroy persistent burst buffers
  * job_ptr IN - job to operate upon
  * bb_job IN - job's burst buffer data
  * job_ready IN - if true, job is ready to run now, if false then do not
  *                delete persistent buffers
- * Returns count of buffer create/destroy requests which are pending */
+ * Returns count of buffer create/destroy requests which are pending
+ */
 static int _create_bufs(struct job_record *job_ptr, bb_job_t *bb_job,
 			bool job_ready)
 {
@@ -4221,10 +4223,25 @@ static int _create_bufs(struct job_record *job_ptr, bb_job_t *bb_job,
 			bb_alloc = bb_find_name_rec(buf_ptr->name,
 						    job_ptr->user_id,
 						    &bb_state);
-			if (bb_alloc) {
-				info("Attempt by job %u to create duplicate "
-				     "persistent burst buffer named %s",
-				     job_ptr->job_id, buf_ptr->name);
+			if (bb_alloc &&
+			    (bb_alloc->user_id != job_ptr->user_id)) {
+				info("Attempt by job %u user %u to create duplicate persistent burst buffer named %s and currently owned by user %u",
+				      job_ptr->job_id, job_ptr->user_id,
+				      buf_ptr->name, bb_alloc->user_id);
+				job_ptr->priority = 0;
+				job_ptr->state_reason = FAIL_BURST_BUFFER_OP;
+				xfree(job_ptr->state_desc);
+				job_ptr->state_desc = xstrdup(
+					"Burst buffer create_persistent error");
+				buf_ptr->state = BB_STATE_COMPLETE;
+				_update_comment(job_ptr, "create_persistent",
+						"Duplicate buffer name");
+				rc++;
+				break;
+			} else if (bb_alloc) {
+				/* Duplicate create likely result of requeue */
+				debug("Attempt by job %u to create duplicate persistent burst buffer named %s",
+				      job_ptr->job_id, buf_ptr->name);
 				buf_ptr->create = false; /* Creation complete */
 				if (bb_job->persist_add >= bb_alloc->size) {
 					bb_job->persist_add -= bb_alloc->size;

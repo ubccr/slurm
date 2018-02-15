@@ -2260,6 +2260,9 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 
 	bb = bb_g_job_test_stage_in(job_ptr, test_only);
 	if (bb != 1) {
+		if ((bb == -1) &&
+		    (job_ptr->state_reason == FAIL_BURST_BUFFER_OP))
+			return ESLURM_BURST_BUFFER_WAIT; /* Fatal BB event */
 		xfree(job_ptr->state_desc);
 		last_job_update = now;
 		if (bb == 0)
@@ -3019,7 +3022,7 @@ static bool _valid_feature_counts(struct job_record *job_ptr,
 				  bitstr_t *node_bitmap, bool *has_xor)
 {
 	struct job_details *detail_ptr = job_ptr->details;
-	List feature_list;
+	List feature_list = NULL;
 	ListIterator job_feat_iter;
 	job_feature_t *job_feat_ptr;
 	node_feature_t *node_feat_ptr;

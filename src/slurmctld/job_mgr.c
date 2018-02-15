@@ -184,12 +184,13 @@ static slurmdb_qos_rec_t *_determine_and_validate_qos(
 	bool operator, slurmdb_qos_rec_t *qos_rec, int *error_code,
 	bool locked);
 static void _dump_job_details(struct job_details *detail_ptr, Buf buffer);
-static int  _dump_job_state(void *x, void *y);
+static void _dump_job_state(struct job_record *dump_job_ptr, Buf buffer);
 static void _dump_job_fed_details(job_fed_details_t *fed_details_ptr,
 				  Buf buffer);
 static job_fed_details_t *_dup_job_fed_details(job_fed_details_t *src);
 static void _get_batch_job_dir_ids(List batch_dirs);
-static void _job_array_comp(struct job_record *job_ptr, bool was_running);
+static void _job_array_comp(struct job_record *job_ptr, bool was_running,
+			    bool requeue);
 static int  _job_create(job_desc_msg_t * job_specs, int allocate, int will_run,
 			struct job_record **job_rec_ptr, uid_t submit_uid,
 			char **err_msg, uint16_t protocol_version);
@@ -678,6 +679,8 @@ int dump_all_job_state(void)
 	/* Locks: Read config and job */
 	slurmctld_lock_t job_read_lock =
 		{ READ_LOCK, READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
+	ListIterator job_iterator;
+	struct job_record *job_ptr;
 	Buf buffer = init_buf(high_buffer_size);
 	time_t now = time(NULL);
 	time_t last_state_file_time;
@@ -718,7 +721,12 @@ int dump_all_job_state(void)
 
 	/* write individual job records */
 	lock_slurmctld(job_read_lock);
-	list_for_each(job_list, _dump_job_state, buffer);
+	job_iterator = list_iterator_create(job_list);
+	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
+		_dump_job_state(job_ptr, buffer);
+	}
+	list_iterator_destroy(job_iterator);
+
 
 	/* write the buffer to file */
 	old_file = xstrdup(slurmctld_conf.state_save_location);
@@ -1171,10 +1179,8 @@ unpack_error:
  * IN dump_job_ptr - pointer to job for which information is requested
  * IN/OUT buffer - location to store data, pointers automatically advanced
  */
-static int _dump_job_state(void *x, void *arg)
+static void _dump_job_state(struct job_record *dump_job_ptr, Buf buffer)
 {
-	struct job_record *dump_job_ptr = (struct job_record *) x;
-	Buf buffer = (Buf) arg;
 	struct job_details *detail_ptr;
 	uint32_t tmp_32;
 
@@ -1335,8 +1341,6 @@ static int _dump_job_state(void *x, void *arg)
 	_dump_job_fed_details(dump_job_ptr->fed_details, buffer);
 
 	packstr(dump_job_ptr->origin_cluster, buffer);
-
-	return 0;
 }
 
 /* Unpack a job's state information from a buffer */
@@ -2994,6 +2998,7 @@ extern bool test_job_array_finished(uint32_t array_job_id)
 		}
 		job_ptr = job_ptr->job_array_next_j;
 	}
+
 	return true;
 }
 
@@ -4401,6 +4406,13 @@ extern struct job_record *job_array_split(struct job_record *job_ptr)
 	job_details = job_ptr->details;
 	details_new = job_ptr_pend->details;
 	memcpy(details_new, job_details, sizeof(struct job_details));
+
+	/*
+	 * Reset the preempt_start_time or high priority array jobs will hang
+	 * for a period before preempting more jobs.
+	 */
+	details_new->preempt_start_time = 0;
+
 	details_new->acctg_freq = xstrdup(job_details->acctg_freq);
 	if (job_details->argc) {
 		details_new->argv =
@@ -5512,7 +5524,7 @@ extern int job_str_signal(char *job_id_str, uint16_t signal, uint16_t flags,
 				 */
 				job_count -= (orig_task_cnt - 1);
 			} else {
-				_job_array_comp(job_ptr, false);
+				_job_array_comp(job_ptr, false, false);
 				job_count -= (orig_task_cnt - new_task_count);
 			}
 
@@ -9297,15 +9309,6 @@ static void _pack_job(struct job_record *job_ptr,
 	(*pack_info->jobs_packed)++;
 }
 
-static int _foreach_pack_job_ptr(void *object, void *arg)
-{
-	struct job_record *job_ptr = (struct job_record *)object;
-
-	_pack_job(job_ptr, (_foreach_pack_job_info_t *)arg);
-
-	return SLURM_SUCCESS;
-}
-
 static int _foreach_pack_jobid(void *object, void *arg)
 {
 	struct job_record *job_ptr;
@@ -9340,6 +9343,8 @@ extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
 	uint32_t jobs_packed = 0, tmp_offset;
 	_foreach_pack_job_info_t pack_info = {0};
 	Buf buffer;
+	ListIterator itr;
+	struct job_record *job_ptr = NULL;
 
 	buffer_ptr[0] = NULL;
 	*buffer_size = 0;
@@ -9359,7 +9364,11 @@ extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
 	pack_info.show_flags       = show_flags;
 	pack_info.uid              = uid;
 
-	list_for_each(job_list, _foreach_pack_job_ptr, &pack_info);
+	itr = list_iterator_create(job_list);
+	while ((job_ptr = (struct job_record *) list_next(itr))) {
+		_pack_job(job_ptr, &pack_info);
+	}
+	list_iterator_destroy(itr);
 
 	/* put the real record count in the message body header */
 	tmp_offset = get_buf_offset(buffer);
@@ -13706,8 +13715,7 @@ static char *_build_step_id(char *buf, int buf_len,
 /*
  * validate_jobs_on_node - validate that any jobs that should be on the node
  *	are actually running, if not clean up the job records and/or node
- *	records, call this function after validate_node_specs() sets the node
- *	state properly
+ *	records.
  * IN reg_msg - node registration message
  */
 extern void
@@ -14169,6 +14177,7 @@ extern int job_alloc_info(uint32_t uid, uint32_t job_id,
  * All pending batch jobs must have script and environment files
  * No other jobs should have such files
  * NOTE: READ lock_slurmctld config before entry
+ * NOTE: WRITE lock_slurmctld jobs before entry
  */
 int sync_job_files(void)
 {
@@ -14657,7 +14666,8 @@ extern bool job_array_start_test(struct job_record *job_ptr)
 	return true;
 }
 
-static void _job_array_comp(struct job_record *job_ptr, bool was_running)
+static void _job_array_comp(struct job_record *job_ptr, bool was_running,
+			    bool requeue)
 {
 	struct job_record *base_job_ptr;
 	uint32_t status;
@@ -14688,6 +14698,11 @@ static void _job_array_comp(struct job_record *job_ptr, bool was_running)
 			    base_job_ptr->array_recs->tot_run_tasks)
 				base_job_ptr->array_recs->tot_run_tasks--;
 			base_job_ptr->array_recs->tot_comp_tasks++;
+
+			if (requeue) {
+				base_job_ptr->array_recs->array_flags |=
+					ARRAY_TASK_REQUEUED;
+			}
 		}
 	}
 }
@@ -14696,6 +14711,9 @@ static void _job_array_comp(struct job_record *job_ptr, bool was_running)
 extern void job_completion_logger(struct job_record *job_ptr, bool requeue)
 {
 	int base_state;
+	bool arr_finished = false, task_failed = false, task_requeued = false;
+	struct job_record *master_job = NULL;
+	uint32_t max_exit_code = 0;
 
 	xassert(job_ptr);
 
@@ -14703,18 +14721,20 @@ extern void job_completion_logger(struct job_record *job_ptr, bool requeue)
 	if (job_ptr->nodes &&  ((job_ptr->bit_flags & JOB_KILL_HURRY) == 0)) {
 		(void) bb_g_job_start_stage_out(job_ptr);
 	} else {
-		/* Never allocated compute nodes
-		 * Unless it ran, there is nothing to stage-out */
+		/*
+		 * Never allocated compute nodes.
+		 * Unless job ran, there is no data to stage-out
+		 */
 		(void) bb_g_job_cancel(job_ptr);
 	}
 
-	_job_array_comp(job_ptr, true);
+	_job_array_comp(job_ptr, true, requeue);
 
 	if (!IS_JOB_RESIZING(job_ptr) &&
 	    !IS_JOB_PENDING(job_ptr)  &&
 	    ((job_ptr->array_task_id == NO_VAL) ||
 	     (job_ptr->mail_type & MAIL_ARRAY_TASKS) ||
-	     test_job_array_finished(job_ptr->array_job_id))) {
+	     (arr_finished = test_job_array_finished(job_ptr->array_job_id)))) {
 		/* Remove configuring state just to make sure it isn't there
 		 * since it will throw off displays of the job. */
 		job_ptr->job_state &= ~JOB_CONFIGURING;
@@ -14729,18 +14749,59 @@ extern void job_completion_logger(struct job_record *job_ptr, bool requeue)
 			srun_job_complete(job_ptr);
 
 		/* mail out notifications of completion */
-		base_state = job_ptr->job_state & JOB_STATE_BASE;
-		if ((base_state == JOB_COMPLETE) ||
-		    (base_state == JOB_CANCELLED)) {
-			if (requeue && (job_ptr->mail_type & MAIL_JOB_REQUEUE))
-				mail_job_info(job_ptr, MAIL_JOB_REQUEUE);
-			if (!requeue && (job_ptr->mail_type & MAIL_JOB_END))
-				mail_job_info(job_ptr, MAIL_JOB_END);
-		} else {	/* JOB_FAILED, JOB_TIMEOUT, etc. */
-			if (job_ptr->mail_type & MAIL_JOB_FAIL)
-				mail_job_info(job_ptr, MAIL_JOB_FAIL);
-			else if (job_ptr->mail_type & MAIL_JOB_END)
-				mail_job_info(job_ptr, MAIL_JOB_END);
+		if (arr_finished) {
+			/* We need to summarize different tasks states. */
+			master_job = find_job_record(job_ptr->array_job_id);
+			if (master_job && master_job->array_recs) {
+				task_requeued =
+					(master_job->array_recs->array_flags &
+					 ARRAY_TASK_REQUEUED);
+				if (task_requeued &&
+				    (job_ptr->mail_type & MAIL_JOB_REQUEUE)) {
+					/*
+					 * At least 1 task requeued and job
+					 * req. to be notified on requeues.
+					 */
+					mail_job_info(master_job,
+						      MAIL_JOB_REQUEUE);
+				}
+
+				max_exit_code =
+					master_job->array_recs->max_exit_code;
+				task_failed = (WIFEXITED(max_exit_code) &&
+					       WEXITSTATUS(max_exit_code));
+				if (task_failed &&
+				    (job_ptr->mail_type & MAIL_JOB_FAIL)) {
+					/*
+					 * At least 1 task failed and job
+					 * req. to be notified on failures.
+					 */
+					mail_job_info(master_job,
+						      MAIL_JOB_FAIL);
+				} else if (job_ptr->mail_type & MAIL_JOB_END) {
+					/*
+					 * Job req. to be notified on END.
+					 */
+					mail_job_info(job_ptr, MAIL_JOB_END);
+				}
+			}
+		} else {
+			base_state = job_ptr->job_state & JOB_STATE_BASE;
+			if ((base_state == JOB_COMPLETE) ||
+			    (base_state == JOB_CANCELLED)) {
+				if (requeue &&
+				    (job_ptr->mail_type & MAIL_JOB_REQUEUE)) {
+					mail_job_info(job_ptr,
+						      MAIL_JOB_REQUEUE);
+				} else if (job_ptr->mail_type & MAIL_JOB_END) {
+					mail_job_info(job_ptr, MAIL_JOB_END);
+				}
+			} else {	/* JOB_FAILED, JOB_TIMEOUT, etc. */
+				if (job_ptr->mail_type & MAIL_JOB_FAIL)
+					mail_job_info(job_ptr, MAIL_JOB_FAIL);
+				else if (job_ptr->mail_type & MAIL_JOB_END)
+					mail_job_info(job_ptr, MAIL_JOB_END);
+			}
 		}
 	}
 
@@ -14793,7 +14854,8 @@ extern bool job_independent(struct job_record *job_ptr, int will_run)
 	time_t now = time(NULL);
 	int depend_rc;
 
-	if (job_ptr->state_reason == WAIT_HELD
+	if (job_ptr->state_reason == FAIL_BURST_BUFFER_OP
+	    || job_ptr->state_reason == WAIT_HELD
 	    || job_ptr->state_reason == WAIT_HELD_USER
 	    || job_ptr->state_reason == WAIT_MAX_REQUEUE
 	    || job_ptr->state_reason == WAIT_RESV_DELETED

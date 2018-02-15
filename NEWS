@@ -1,6 +1,86 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 17.11.3-2
+==========================
+ -- Revert node_features changes in 17.11.3 that lead to various segfaults on
+    slurmctld startup.
+
+* Changes in Slurm 17.11.3
+==========================
+ -- Send SIG_UME correctly to a step.
+ -- Sort sreport's reservation report by cluster, time_start, resv_name instead
+    of cluster, resv_name, time_start.
+ -- Avoid setting node in COMPLETING state indefinitely if the job initiating
+    the node reboot is cancelled while the reboot in in progress.
+ -- Scheduling fix for changing node features without any NodeFeatures plugins.
+ -- Improve logic when summarizing job arrays mail notifications.
+ -- Add scontrol -F/--future option to display nodes in FUTURE state.
+ -- Fix REASONABLE_BUF_SIZE to actually be 3/4 of MAX_BUF_SIZE.
+ -- When a job array is preempting make it so tasks in the array don't wait
+    to preempt other possible jobs.
+ -- Change free_buffer to FREE_NULL_BUFFER to prevent possible double free
+    in slurmstepd.
+ -- node_feature/knl_cray - Fix memory leaks that occur when slurmctld
+    reconfigured.
+ -- node_feature/knl_cray - Fix memory leak that can occur during normal
+    operation.
+ -- Fix srun environment variables for --prolog script.
+ -- Fix job array dependency with "aftercorr" option and some task arrays in
+    the first job fail. This fix lets all task array elements that can run
+    proceed rather than stopping all subsequent task array elements.
+ -- Fix potential deadlock in the slurmctld when using list_for_each.
+ -- Fix for possible memory corruption in srun when running heterogeneous job
+    steps.
+ -- Fix job array dependency with "aftercorr" option and some task arrays in
+    the first job fail. This fix lets all task array elements that can run
+    proceed rather than stopping all subsequent task array elements.
+ -- Fix output file containing "%t" (task ID) for heterogeneous job step to
+    be based upon global task ID rather than task ID for that component of the
+    heterogeneous job step.
+ -- MYSQL - Fix potential abort when attempting to make an account a parent of
+    itself.
+ -- Fix potentially uninitialized variable in slurmctld.
+ -- MYSQL - Fix issue for multi-dimensional machines when using sacct to
+    find jobs that ran on specific nodes.
+ -- Reject --acctg-freq at submit if invalid.
+ -- Added info string on sh5util when deleting an empty file.
+ -- Correct dragonfly topology support when job allocation specifies desired
+    switch count.
+ -- Fix minor memory leak on an sbcast error path.
+ -- Fix issues when starting the backup slurmdbd.
+ -- Revert uid check when requesting a jobid from a pid.
+ -- task/cgroup - add support to detect OOM_KILL cgroup events.
+ -- Fix whole node allocation cpu counts when --hint=nomultihtread.
+ -- Allow execution of task prolog/epilog when uid has access
+    rights by a secondary group id.
+ -- Validate command existence on the srun *[pro|epi]log options
+    if LaunchParameter test_exec is set.
+ -- Fix potential memory leak if clean starting and the TRES didn't change
+    from when last started.
+ -- Fix for association MaxWall enforcement when none is given at submission.
+ -- Add a job's allocated licenses to the [Pro|Epi]logSlurmctld.
+ -- burst_buffer/cray: Attempts by job to create persistent burst buffer when
+    one already exists owned by a different user will be logged and the job
+    held.
+ -- CRAY - Remove race in the core_spec where we add the slurmstepd to the
+    job container where if the step was canceled would also cancel the stepd
+    erroneously.
+ -- Make sure the slurmstepd blocks signals like SIGTERM correctly.
+ -- SPANK - When slurm_spank_init_post_opt() fails return error correctly.
+ -- When revoking a sibling job in the federation we want to send a start
+    message before purging the job record to get the uid of the revoked job.
+ -- Make JobAcctGatherParams options case-insensitive. Previously, UsePss
+    was the only correct capitialization; UsePSS or usepss were silently
+    ignored.
+ -- Prevent pthread_atfork handlers from being added unnecessarily after
+    'scontrol reconfigure', which can eventually lead to a crash if too
+    many handlers have been registered.
+ -- Better debug messages when MaxSubmitJobs is hit.
+ -- Docs - update squeue man page to describe all possible job states.
+ -- Prevent orphaned step_extern steps when a job is cancelled while the
+    prolog is still running.
+
 * Changes in Slurm 17.11.2
 ==========================
  -- jobcomp/elasticsearch - append Content-Type to the HTTP header.
@@ -34,7 +114,6 @@ documents those changes that are of interest to users and administrators.
  -- Make logging prefix for slurmstepd to happen as soon as possible.
  -- mpi/pmix: Fix the job registration for the PMIx v2.1.
  -- Fix uid check for signaling a step with anything but SIGKILL.
- -- Fix uid check when requesting a jobid from a pid.
  -- Return ESLURM_TRANSITION_STATE_NO_UPDATE instead of EAGAIN when trying to
     signal a step that is still running a prolog.
  -- Update Cray slurm_playbook.yaml with latest recommended version.
@@ -528,6 +607,16 @@ documents those changes that are of interest to users and administrators.
  -- Fix potential deadlock in _run_prog() in power save code.
  -- MYSQL - Add dynamic_offset in the database to force range for auto
     increment ids for the tres_table.
+ -- Avoid setting node in COMPLETING state indefinitely if the job initiating
+    the node reboot is cancelled while the reboot in in progress.
+ -- node_feature/knl_cray - Fix memory leaks that occur when slurmctld
+    reconfigured.
+ -- node_feature/knl_cray - Fix memory leak that can occur during normal
+    operation.
+ -- Fix job array dependency with "aftercorr" option and some task arrays in
+    the first job fail. This fix lets all task array elements that can run
+    proceed rather than stopping all subsequent task array elements.
+ -- Fix whole node allocation cpu counts when --hint=nomultihtread.
 
 * Changes in Slurm 17.02.9
 ==========================
