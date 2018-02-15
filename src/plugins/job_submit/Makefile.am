@@ -1,6 +1,7 @@
 # Makefile for job_submit plugins
 
 SUBDIRS = \
+	ccr_qos \
 	all_partitions \
 	cray \
 	defaults \
@@ -9,5 +10,4 @@ SUBDIRS = \
 	partition \
 	pbs \
 	require_timelimit \
-	throttle \
-	ccr_qos
+	throttle
