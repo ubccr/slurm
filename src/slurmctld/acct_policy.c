@@ -1098,8 +1098,9 @@ static bool _validate_time_limit(uint32_t *time_limit_in,
 	uint64_t out_max_64 = *(uint64_t *)out_max_limit;
 	uint32_t out_max_32 = *(uint32_t *)out_max_limit;
 
-	if (!tres_req_cnt ||
-	    !strict_checking || (*limit_set_time) == ADMIN_SET_LIMIT)
+	if (((*time_limit_in) != NO_VAL) &&
+	    (!tres_req_cnt || !strict_checking ||
+	     (*limit_set_time) == ADMIN_SET_LIMIT))
 		return true;
 
 	if (is64) {
@@ -1472,12 +1473,11 @@ static int _qos_policy_validate(job_desc_msg_t *job_desc,
 		    > qos_ptr->grp_submit_jobs) {
 			if (reason)
 				*reason = WAIT_QOS_GRP_SUB_JOB;
-			debug2("job submit for user %s(%u): "
-			       "group max submit job limit exceeded %u "
-			       "for qos '%s'",
+			debug2("job submit for user %s(%u): group max submit job limit exceeded %u (used:%u + requested:%d) for qos '%s'",
 			       user_name,
 			       job_desc->user_id,
 			       qos_ptr->grp_submit_jobs,
+			       qos_ptr->usage->grp_used_submit_jobs, job_cnt,
 			       qos_ptr->name);
 			rc = false;
 			goto end_it;
@@ -1689,10 +1689,11 @@ static int _qos_policy_validate(job_desc_msg_t *job_desc,
 		    qos_ptr->max_submit_jobs_pa) {
 			if (reason)
 				*reason = WAIT_QOS_MAX_SUB_JOB_PER_ACCT;
-			debug2("job submit for account %s: "
-			       "qos max submit job limit exceeded %u",
+			debug2("job submit for account %s: qos max submit job limit exceeded %u (used:%u + requested:%d) for qos '%s'",
 			       assoc_ptr->acct,
-			       qos_ptr->max_submit_jobs_pa);
+			       qos_ptr->max_submit_jobs_pa,
+			       used_limits->submit_jobs, job_cnt,
+			       qos_ptr->name);
 			rc = false;
 			goto end_it;
 		}
@@ -1711,11 +1712,12 @@ static int _qos_policy_validate(job_desc_msg_t *job_desc,
 		     qos_ptr->max_submit_jobs_pu) {
 			if (reason)
 				*reason = WAIT_QOS_MAX_SUB_JOB;
-			debug2("job submit for user %s(%u): "
-			       "qos max submit job limit exceeded %u",
+			debug2("job submit for user %s(%u): qos max submit job limit exceeded %u (used:%u + requested:%d) for qos '%s'",
 			       user_name,
 			       job_desc->user_id,
-			       qos_ptr->max_submit_jobs_pu);
+			       qos_ptr->max_submit_jobs_pu,
+			       used_limits->submit_jobs, job_cnt,
+			       qos_ptr->name);
 			rc = false;
 			goto end_it;
 		}
@@ -2699,12 +2701,11 @@ static bool _acct_policy_validate(job_desc_msg_t *job_desc,
 		     > assoc_ptr->grp_submit_jobs)) {
 			if (reason)
 				*reason = WAIT_ASSOC_GRP_SUB_JOB;
-			debug2("job submit for user %s(%u): "
-			       "group max submit job limit exceeded %u "
-			       "for account '%s'",
+			debug2("job submit for user %s(%u): group max submit job limit exceeded %u (used:%u + requested:%d) for account '%s'",
 			       user_name,
 			       job_desc->user_id,
 			       assoc_ptr->grp_submit_jobs,
+			       assoc_ptr->usage->used_submit_jobs, job_cnt,
 			       assoc_ptr->acct);
 			rc = false;
 			break;
@@ -2868,11 +2869,12 @@ static bool _acct_policy_validate(job_desc_msg_t *job_desc,
 		     > assoc_ptr->max_submit_jobs)) {
 			if (reason)
 				*reason = WAIT_ASSOC_MAX_SUB_JOB;
-			debug2("job submit for user %s(%u): "
-			       "account max submit job limit exceeded %u",
+			debug2("job submit for user %s(%u): account max submit job limit exceeded %u (used:%u + requested:%d) for account '%s'",
 			       user_name,
 			       job_desc->user_id,
-			       assoc_ptr->max_submit_jobs);
+			       assoc_ptr->max_submit_jobs,
+			       assoc_ptr->usage->used_submit_jobs, job_cnt,
+			       assoc_ptr->acct);
 			rc = false;
 			break;
 		}

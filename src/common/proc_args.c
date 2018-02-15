@@ -69,6 +69,7 @@
 #include "src/common/log.h"
 #include "src/common/proc_args.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_acct_gather_profile.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
@@ -1783,7 +1784,10 @@ parse_resv_flags(const char *flagstr, const char *msg)
 		} else if (xstrncasecmp(curr, "PURGE_COMP", MAX(taglen, 2))
 			   == 0) {
 			curr += taglen;
-			outflags |= RESERVE_FLAG_PURGE_COMP;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_PURGE_COMP;
+			else
+				outflags |= RESERVE_FLAG_PURGE_COMP;
 		} else if (!xstrncasecmp(curr, "First_Cores", MAX(taglen,1)) &&
 			   !flip) {
 			curr += taglen;
@@ -1842,4 +1846,35 @@ uint16_t parse_compress_type(const char *arg)
 	error("Compression type '%s' unknown, disabling compression support.",
 	      arg);
 	return COMPRESS_OFF;
+}
+
+extern int validate_acctg_freq(char *acctg_freq)
+{
+	int i;
+	char *save_ptr = NULL, *tok, *tmp;
+	bool valid;
+	int rc = SLURM_SUCCESS;
+
+	if (!optarg)
+		return rc;
+
+	tmp = xstrdup(optarg);
+	tok = strtok_r(tmp, ",", &save_ptr);
+	while (tok) {
+		valid = false;
+		for (i=0; i < PROFILE_CNT; i++)
+			if (acct_gather_parse_freq(i, tok) != -1) {
+				valid = true;
+				break;
+			}
+
+		if (!valid) {
+			error("Invalid --acctg-freq specification: %s", tok);
+			rc = SLURM_ERROR;
+		}
+		tok = strtok_r(NULL, ",", &save_ptr);
+	}
+	xfree(tmp);
+
+	return rc;
 }

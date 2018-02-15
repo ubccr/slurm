@@ -3861,15 +3861,9 @@ static void  _rpc_pid2jid(slurm_msg_t *msg)
 	slurm_msg_t           resp_msg;
 	job_id_response_msg_t resp;
 	bool         found = false;
-	bool         auth = false;
 	List         steps;
 	ListIterator i;
 	step_loc_t *stepd;
-	uid_t req_uid;
-
-	req_uid = g_slurm_auth_get_uid(msg->auth_cred, conf->auth_info);
-	if (_slurm_authorized_user(req_uid))
-		auth = true;
 
 	steps = stepd_available(conf->spooldir, conf->node_name);
 	i = list_iterator_create(steps);
@@ -3880,13 +3874,7 @@ static void  _rpc_pid2jid(slurm_msg_t *msg)
 				   &stepd->protocol_version);
 		if (fd == -1)
 			continue;
-		if (!auth &&
-		    (stepd_get_uid(fd, stepd->protocol_version) != req_uid)) {
-			close(fd);
-			debug3("%s: REQUEST_JOB_ID from uid=%d but they aren't the owner of job %u",
-			       __func__, req_uid, stepd->jobid);
-			continue;
-		}
+
 		if (stepd_pid_in_container(
 			    fd, stepd->protocol_version,
 			    req->job_pid)
@@ -4139,8 +4127,10 @@ static int _rpc_file_bcast(slurm_msg_t *msg)
 
 	/* first block must register the file and open fd/mmap */
 	if (req->block_no == 1) {
-		if ((rc = _file_bcast_register_file(msg, cred_arg, &key)))
+		if ((rc = _file_bcast_register_file(msg, cred_arg, &key))) {
+			sbcast_cred_arg_free(cred_arg);
 			return rc;
+		}
 	}
 	sbcast_cred_arg_free(cred_arg);
 
@@ -4525,7 +4515,7 @@ extern int ume_notify(void)
 		debug2("container SIG_UME to job %u.%u",
 		       stepd->jobid, stepd->stepid);
 		if (stepd_signal_container(
-			    fd, stepd->protocol_version, 0, SIG_UME) < 0)
+			    fd, stepd->protocol_version, SIG_UME, 0) < 0)
 			debug("kill jobid=%u failed: %m", stepd->jobid);
 		close(fd);
 	}
@@ -5363,6 +5353,24 @@ _rpc_terminate_job(slurm_msg_t *msg)
 		debug("credential for job %u revoked", req->job_id);
 	}
 
+	if (_prolog_is_running(req->job_id)) {
+		if (msg->conn_fd >= 0) {
+			/* If the step hasn't finished running the prolog
+			 * (or finshed starting the extern step) yet just send
+			 * a success to let the controller know we got
+			 * this request.
+			 */
+			debug("%s: sent SUCCESS for %u, waiting for prolog to finish",
+			      __func__, req->job_id);
+			slurm_send_rc_msg(msg, SLURM_SUCCESS);
+			if (close(msg->conn_fd) < 0)
+				error("%s: close(%d): %m",
+				      __func__, msg->conn_fd);
+			msg->conn_fd = -1;
+		}
+		_wait_for_job_running_prolog(req->job_id);
+	}
+
 	/*
 	 * Before signaling steps, if the job has any steps that are still
 	 * in the process of fork/exec/check in with slurmd, wait on a condition
@@ -5391,6 +5399,7 @@ _rpc_terminate_job(slurm_msg_t *msg)
 			error("Error in _wait_for_starting_step");
 		}
 	}
+
 	if (IS_JOB_NODE_FAILED(req))
 		_kill_all_active_steps(req->job_id, SIG_NODE_FAIL, 0, true);
 	if (IS_JOB_PENDING(req))
