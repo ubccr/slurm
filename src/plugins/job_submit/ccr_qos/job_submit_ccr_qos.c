@@ -46,7 +46,7 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 		xstrcat(job_desc->qos, job_desc->partition);
                 info("Adding Missing QOS: %s for UID: %u on Partition: %s", job_desc->qos, submit_uid, job_desc->partition);
                 if (err_msg)
-                    *err_msg = xstrdup("Valid QOS required in batch script.  Usually this is the same as the partition name specified.  See CCR documentation for more info. Jobs without valid QoS will fail to run sometime in the future.");
+                    *err_msg = xstrdup("Valid QOS required in batch script.  Usually this is the same as the partition name specified.  See CCR documentation for more info. Jobs without valid QoS will fail to run after June 25, 2018.");
 	}
 
         /* Not sure what happens if there is no partition or QOS */
