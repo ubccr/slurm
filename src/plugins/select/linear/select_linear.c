@@ -2737,8 +2737,8 @@ static int _rm_job_from_one_node(struct job_record *job_ptr,
 		      node_ptr->name, job_ptr->job_id);
 		return SLURM_ERROR;
 	}
-	job_resrcs_ptr->cpus[node_offset] = 0;
-	build_job_resources_cpu_array(job_resrcs_ptr);
+
+	extract_job_resources_node(job_resrcs_ptr, node_offset);
 
 	if (select_fast_schedule)
 		cpu_cnt = node_ptr->config_ptr->cpus;
@@ -2870,6 +2870,11 @@ static int _add_job_to_nodes(struct cr_record *cr_ptr,
 		}
 	}
 
+	if (alloc_all) {
+		gres_build_job_details(job_ptr->gres_list,
+				        &job_ptr->gres_detail_cnt,
+				       &job_ptr->gres_detail_str);
+	}
 	return rc;
 }
 
@@ -3704,6 +3709,7 @@ extern int select_p_job_begin(struct job_record *job_ptr)
 		_init_node_cr();
 	if (rc == SLURM_SUCCESS)
 		rc = _add_job_to_nodes(cr_ptr, job_ptr, "select_p_job_begin", 1);
+
 	gres_plugin_job_state_log(job_ptr->gres_list, job_ptr->job_id);
 	slurm_mutex_unlock(&cr_mutex);
 	return rc;

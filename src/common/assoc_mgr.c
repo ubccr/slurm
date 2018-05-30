@@ -444,8 +444,6 @@ static void _clear_qos_used_limit_list(List used_limit_list, uint32_t tres_cnt)
 	return;
 }
 
-
-
 static void _clear_qos_acct_limit_info(slurmdb_qos_rec_t *qos_ptr)
 {
 	_clear_qos_used_limit_list(qos_ptr->usage->acct_limit_list,
@@ -1007,6 +1005,7 @@ static int _post_wckey_list(List wckey_list)
 	return SLURM_SUCCESS;
 }
 
+/* NOTE QOS write lock needs to be set before calling this. */
 static int _post_qos_list(List qos_list)
 {
 	slurmdb_qos_rec_t *qos = NULL;
@@ -1389,7 +1388,7 @@ static int _get_assoc_mgr_tres_list(void *db_conn, int enforce)
 
 	assoc_mgr_unlock(&locks);
 
-	if (changed && init_setup.update_cluster_tres) {
+	if (!running_cache && changed && init_setup.update_cluster_tres) {
 		/* update jobs here, this needs to be outside of the
 		 * assoc_mgr locks */
 		init_setup.update_cluster_tres();
@@ -1760,11 +1759,28 @@ static int _refresh_assoc_mgr_qos_list(void *db_conn, int enforce)
 		      "no new list given back keeping cached one.");
 		return SLURM_ERROR;
 	}
-	_post_qos_list(current_qos);
 
 	assoc_mgr_lock(&locks);
 
-	FREE_NULL_LIST(assoc_mgr_qos_list);
+	_post_qos_list(current_qos);
+
+	/* move usage from old list over to the new one */
+	if (assoc_mgr_qos_list) {
+		slurmdb_qos_rec_t *curr_qos = NULL, *qos_rec = NULL;
+		ListIterator itr = list_iterator_create(current_qos);
+
+		while ((curr_qos = list_next(itr))) {
+			if (!(qos_rec = list_find_first(assoc_mgr_qos_list,
+							slurmdb_find_qos_in_list,
+							&curr_qos->id)))
+				continue;
+			slurmdb_destroy_qos_usage(curr_qos->usage);
+			curr_qos->usage = qos_rec->usage;
+			qos_rec->usage = NULL;
+		}
+		list_iterator_destroy(itr);
+		FREE_NULL_LIST(assoc_mgr_qos_list);
+	}
 
 	assoc_mgr_qos_list = current_qos;
 
@@ -5835,7 +5851,6 @@ extern int assoc_mgr_refresh_lists(void *db_conn, uint16_t cache_level)
 		if (_refresh_assoc_wckey_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
-
 	if (cache_level & ASSOC_MGR_CACHE_RES)
 		if (_refresh_assoc_mgr_res_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
@@ -6211,9 +6226,9 @@ extern double assoc_mgr_tres_weighted(uint64_t *tres_cnt, double *weights,
 		if (i == TRES_ARRAY_BILLING)
 			continue;
 
-		debug("TRES Weight: %s = %f * %f = %f",
-		      assoc_mgr_tres_name_array[i], tres_value, tres_weight,
-		      tres_value * tres_weight);
+		debug3("TRES Weight: %s = %f * %f = %f",
+		       assoc_mgr_tres_name_array[i], tres_value, tres_weight,
+		       tres_value * tres_weight);
 
 		tres_value *= tres_weight;
 
@@ -6229,10 +6244,10 @@ extern double assoc_mgr_tres_weighted(uint64_t *tres_cnt, double *weights,
 
 	billable_tres = to_bill_node + to_bill_global;
 
-	debug("TRES Weighted: %s = %f",
-	      (flags & PRIORITY_FLAGS_MAX_TRES) ?
-	      "MAX(node TRES) + SUM(Global TRES)" : "SUM(TRES)",
-	      billable_tres);
+	debug3("TRES Weighted: %s = %f",
+	       (flags & PRIORITY_FLAGS_MAX_TRES) ?
+	       "MAX(node TRES) + SUM(Global TRES)" : "SUM(TRES)",
+	       billable_tres);
 
 	if (!locked)
 		assoc_mgr_unlock(&tres_read_lock);

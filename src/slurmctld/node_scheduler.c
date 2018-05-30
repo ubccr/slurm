@@ -1003,7 +1003,8 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 		  bitstr_t **select_bitmap, struct job_record *job_ptr,
 		  struct part_record *part_ptr,
 		  uint32_t min_nodes, uint32_t max_nodes, uint32_t req_nodes,
-		  bool test_only, List *preemptee_job_list, bool can_reboot)
+		  bool test_only, List *preemptee_job_list, bool can_reboot,
+		  bool submission)
 {
 	uint32_t saved_min_nodes, saved_job_min_nodes, saved_job_num_tasks;
 	bitstr_t *saved_req_node_bitmap = NULL;
@@ -1015,6 +1016,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 	int error_code = SLURM_SUCCESS, i;
 	bitstr_t *feature_bitmap, *accumulate_bitmap = NULL;
 	bitstr_t *save_avail_node_bitmap = NULL, *resv_bitmap = NULL;
+	bitstr_t *save_share_node_bitmap = NULL;
 	bitstr_t *exc_core_bitmap = NULL;
 	List preemptee_candidates = NULL;
 	bool has_xand = false;
@@ -1066,16 +1068,21 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 		FREE_NULL_BITMAP(resv_bitmap);
 	}
 
+	if (submission)
+		resv_overlap = false;
+
 	if (!save_avail_node_bitmap)
 		save_avail_node_bitmap = bit_copy(avail_node_bitmap);
 	bit_and_not(avail_node_bitmap, booting_node_bitmap);
-	filter_by_node_owner(job_ptr, avail_node_bitmap);
+	save_share_node_bitmap = bit_copy(share_node_bitmap);
+	filter_by_node_owner(job_ptr, share_node_bitmap);
+
 	if (can_reboot && !test_only)
 		_filter_by_node_feature(job_ptr, node_set_ptr, node_set_size);
 
 	/* get mcs_select */
 	mcs_select = slurm_mcs_get_select(job_ptr);
-	filter_by_node_mcs(job_ptr, mcs_select, avail_node_bitmap);
+	filter_by_node_mcs(job_ptr, mcs_select, share_node_bitmap);
 
 	/* save job and request state */
 	saved_min_nodes = min_nodes;
@@ -1493,6 +1500,10 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 		FREE_NULL_BITMAP(avail_node_bitmap);
 		avail_node_bitmap = save_avail_node_bitmap;
 	}
+	if (save_share_node_bitmap) {
+		FREE_NULL_BITMAP(share_node_bitmap);
+		share_node_bitmap = save_share_node_bitmap;
+	}
 	FREE_NULL_BITMAP(exc_core_bitmap);
 
 	return error_code;
@@ -1521,7 +1532,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
  *	ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE if request can never
  *	be satisfied,
  *	ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE if the job can not be
- *	initiated until the parition's configuration changes or
+ *	initiated until the partition's configuration changes or
  *	ESLURM_NODE_NOT_AVAIL if required nodes are DOWN or DRAINED
  *	ESLURM_RESERVATION_BUSY if requested reservation overlaps another
  * NOTE: the caller must FREE_NULL_BITMAP memory pointed to by select_bitmap
@@ -2165,7 +2176,7 @@ static bool _first_array_task(struct job_record *job_ptr)
  * IN select_node_bitmap - bitmap of nodes to be used for the
  *	job's resource allocation (not returned if NULL), caller
  *	must free
- * IN unavail_node_str - Nodes which are currently unavailable.
+ * IN submission - if set ignore reservations
  * OUT err_msg - if not NULL set to error message for job, caller must xfree
  * RET 0 on success, ESLURM code from slurm_errno.h otherwise
  * globals: list_part - global list of partition info
@@ -2180,8 +2191,8 @@ static bool _first_array_task(struct job_record *job_ptr)
  *	3) Call allocate_nodes() to perform the actual allocation
  */
 extern int select_nodes(struct job_record *job_ptr, bool test_only,
-			bitstr_t **select_node_bitmap, char *unavail_node_str,
-			char **err_msg)
+			bitstr_t **select_node_bitmap, char **err_msg,
+			bool submission)
 {
 	int bb, error_code = SLURM_SUCCESS, i, node_set_size = 0;
 	bitstr_t *select_bitmap = NULL;
@@ -2314,7 +2325,8 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 					       &select_bitmap, job_ptr,
 					       part_ptr, min_nodes, max_nodes,
 					       req_nodes, test_only,
-					       &preemptee_job_list, can_reboot);
+					       &preemptee_job_list, can_reboot,
+					       submission);
 	}
 
 	/* Set this guess here to give the user tools an idea
@@ -2420,31 +2432,26 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		} else if (error_code == ESLURM_NODE_NOT_AVAIL) {
 			/* Required nodes are down or drained */
 			char *node_str = NULL, *unavail_node = NULL;
+			bitstr_t *unavail_bitmap;
 			debug3("JobId=%u required nodes not avail",
 			       job_ptr->job_id);
 			job_ptr->state_reason = WAIT_NODE_NOT_AVAIL;
 			xfree(job_ptr->state_desc);
-			if (unavail_node_str) {	/* Set in few cases */
-				node_str = unavail_node_str;
-			} else {
-				bitstr_t *unavail_bitmap;
-				unavail_bitmap = bit_copy(avail_node_bitmap);
-				bit_not(unavail_bitmap);
-				if (job_ptr->details  &&
-				    job_ptr->details->req_node_bitmap &&
-				    bit_overlap(unavail_bitmap,
-					   job_ptr->details->req_node_bitmap)) {
-					bit_and(unavail_bitmap,
-						job_ptr->details->
-						req_node_bitmap);
-				}
-				if (bit_ffs(unavail_bitmap) != -1) {
-					unavail_node = bitmap2node_name(
-								unavail_bitmap);
-					node_str = unavail_node;
-				}
-				FREE_NULL_BITMAP(unavail_bitmap);
+			unavail_bitmap = bit_copy(avail_node_bitmap);
+			filter_by_node_owner(job_ptr, unavail_bitmap);
+			bit_not(unavail_bitmap);
+			if (job_ptr->details  &&
+			    job_ptr->details->req_node_bitmap &&
+			    bit_overlap(unavail_bitmap,
+					job_ptr->details->req_node_bitmap)) {
+				bit_and(unavail_bitmap,
+					job_ptr->details->req_node_bitmap);
 			}
+			if (bit_ffs(unavail_bitmap) != -1) {
+				unavail_node = bitmap2node_name(unavail_bitmap);
+				node_str = unavail_node;
+			}
+			FREE_NULL_BITMAP(unavail_bitmap);
 			if (node_str) {
 				xstrfmtcat(job_ptr->state_desc,
 					   "ReqNodeNotAvail, "
@@ -3240,7 +3247,8 @@ static int _build_node_list(struct job_record *job_ptr,
 	int check_node_config;
 	struct job_details *detail_ptr = job_ptr->details;
 	bitstr_t *usable_node_mask = NULL;
-	bitstr_t *inactive_bitmap = NULL;
+	bitstr_t *avoid_node_map = NULL;
+	uint32_t avoid_weight = 0;
 	multi_core_data_t *mc_ptr = detail_ptr->mc_ptr;
 	bitstr_t *tmp_feature;
 	bool has_xor = false;
@@ -3412,36 +3420,71 @@ static int _build_node_list(struct job_record *job_ptr,
 			error("%s: node_set buffer filled", __func__);
 			break;
 		}
-		if (test_only || !can_reboot)
-			continue;
-		if (!_match_feature3(job_ptr, prev_node_set_ptr,
-				     &inactive_bitmap))
-			continue;
 
-		if (bit_equal(prev_node_set_ptr->my_bitmap, inactive_bitmap)) {
-			/* All nodes require reboot, just change weight */
-			prev_node_set_ptr->weight = INFINITE;
-			FREE_NULL_BITMAP(inactive_bitmap);
+		if (job_ptr->resv_ptr &&
+		    (job_ptr->resv_ptr->flags & RESERVE_FLAG_FLEX) &&
+		    job_ptr->resv_ptr->node_bitmap &&
+		    !bit_super_set(prev_node_set_ptr->my_bitmap,
+				   job_ptr->resv_ptr->node_bitmap)) {
+			/* Avoid nodes outside of job's FLEX reservation */
+			avoid_node_map =
+				bit_copy(job_ptr->resv_ptr->node_bitmap);
+			bit_not(avoid_node_map);
+			avoid_weight = INFINITE;
+		} else {
+			/* Avoid nodes requiring reboot for active features */
+			if (test_only || !can_reboot)
+				continue;
+			if (!_match_feature3(job_ptr, prev_node_set_ptr,
+					     &avoid_node_map))
+				continue;
+			avoid_weight = INFINITE - 1;
+		}
+
+		if (!avoid_node_map)
+			continue;
+		if (!bit_overlap(prev_node_set_ptr->my_bitmap, avoid_node_map)){
+			/* No nodes in set to avoid */
+			FREE_NULL_BITMAP(avoid_node_map);
 			continue;
 		}
-		/* Split the node set record in two:
-		 * one set to reboot, one set available now */
+		if (bit_super_set(prev_node_set_ptr->my_bitmap,
+				  avoid_node_map)) {
+			/*
+			 * All nodes in this set should be avoided. Either they
+			 * require a reboot or are outside of a FLEX
+			 * reservation so change the weigh of all these nodes
+			 */
+			prev_node_set_ptr->weight = avoid_weight;
+			FREE_NULL_BITMAP(avoid_node_map);
+			continue;
+		}
+		/*
+		 * Split the node set record in two:
+		 * one set of nodes to avoid if possible
+		 * one set of nodes available now
+		 *
+		 * FIXME: We really want 4 different weights (not 2):
+		 * Inside and outside of FLEX reservation plus
+		 * Need to reboot or not for node features
+		 */
 		node_set_ptr[node_set_inx].cpus_per_node = config_ptr->cpus;
 		node_set_ptr[node_set_inx].features =
 			xstrdup(config_ptr->feature);
 		node_set_ptr[node_set_inx].feature_bits = bit_copy(tmp_feature);
 		node_set_ptr[node_set_inx].my_bitmap =
 			bit_copy(node_set_ptr[node_set_inx-1].my_bitmap);
-		bit_and(node_set_ptr[node_set_inx].my_bitmap, inactive_bitmap);
+		bit_and(node_set_ptr[node_set_inx].my_bitmap, avoid_node_map);
 		node_set_ptr[node_set_inx].nodes = bit_set_count(
 			node_set_ptr[node_set_inx].my_bitmap);
 		node_set_ptr[node_set_inx].real_memory =
 			config_ptr->real_memory;
-		node_set_ptr[node_set_inx].weight = INFINITE;
-		bit_and_not(node_set_ptr[node_set_inx-1].my_bitmap,inactive_bitmap);
+		node_set_ptr[node_set_inx].weight = avoid_weight;
+		bit_and_not(node_set_ptr[node_set_inx-1].my_bitmap,
+			    avoid_node_map);
 		node_set_ptr[node_set_inx-1].nodes -= bit_set_count(
 			node_set_ptr[node_set_inx-1].my_bitmap);
-		FREE_NULL_BITMAP(inactive_bitmap);
+		FREE_NULL_BITMAP(avoid_node_map);
 		node_set_inx++;
 		if (node_set_inx >= node_set_len) {
 			error("%s: node_set buffer filled", __func__);

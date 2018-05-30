@@ -554,7 +554,7 @@ static void _setup_one_job_env(slurm_opt_t *opt_local, srun_job_t *job,
 	if (job->pack_nnodes != NO_VAL)
 		env->nhosts = job->pack_nnodes;
 	else if (got_alloc)	/* Don't overwrite unless we got allocation */
-		env->nhosts = job->ntasks;
+		env->nhosts = job->nhosts;
 	if (job->pack_ntasks != NO_VAL)
 		env->ntasks = job->pack_ntasks;
 	else
@@ -813,7 +813,7 @@ static void _setup_env_working_cluster(void)
 		*port_ptr++ = '\0';
 		*rpc_ptr++  = '\0';
 
-		if (strcmp(slurmctld_conf.cluster_name, working_env)) {
+		if (xstrcmp(slurmctld_conf.cluster_name, working_env)) {
 			working_cluster_rec =
 				xmalloc(sizeof(slurmdb_cluster_rec_t));
 			slurmdb_init_cluster_rec(working_cluster_rec, false);

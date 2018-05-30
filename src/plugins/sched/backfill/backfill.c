@@ -437,6 +437,7 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		if (low_start) {
 			job_ptr->start_time = low_start;
 			rc = SLURM_SUCCESS;
+			FREE_NULL_BITMAP(*avail_bitmap);
 			*avail_bitmap = low_bitmap;
 		} else {
 			rc = ESLURM_NODES_BUSY;
@@ -1400,6 +1401,10 @@ next_task:
 				continue;
 		}
 		job_ptr->part_ptr = part_ptr;
+		if (job_limits_check(&job_ptr, true) != WAIT_NO_REASON) {
+			/* should never happen */
+			continue;
+		}
 
 		if (debug_flags & DEBUG_FLAG_BACKFILL) {
 			char job_id_str[64];
@@ -1790,7 +1795,7 @@ next_task:
 		     (!bit_super_set(job_ptr->details->req_node_bitmap,
 				     avail_bitmap))) ||
 		    (job_req_node_filter(job_ptr, avail_bitmap, true))) {
-			if (later_start) {
+			if (later_start && !job_no_reserve) {
 				job_ptr->start_time = 0;
 				goto TRY_LATER;
 			}
@@ -1904,7 +1909,7 @@ next_task:
 		now = time(NULL);
 		if (j != SLURM_SUCCESS) {
 			_set_job_time_limit(job_ptr, orig_time_limit);
-			if (later_start) {
+			if (later_start && !job_no_reserve) {
 				job_ptr->start_time = 0;
 				goto TRY_LATER;
 			}
@@ -2262,8 +2267,10 @@ skip_start:
 		}
 		if (debug_flags & DEBUG_FLAG_BACKFILL)
 			_dump_job_sched(job_ptr, end_reserve, avail_bitmap);
-		if (qos_flags & QOS_FLAG_NO_RESERVE)
+		if (qos_flags & QOS_FLAG_NO_RESERVE) {
+			_set_job_time_limit(job_ptr, orig_time_limit);
 			continue;
+		}
 		if (bf_job_part_count_reserve) {
 			bool do_reserve = true;
 			for (j = 0; j < bf_parts; j++) {
@@ -2363,7 +2370,7 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *resv_bitmap)
 		job_ptr->details->exc_node_bitmap = bit_copy(resv_bitmap);
 	if (job_ptr->array_recs)
 		is_job_array_head = true;
-	rc = select_nodes(job_ptr, false, NULL, NULL, NULL);
+	rc = select_nodes(job_ptr, false, NULL, NULL, false);
 	if (is_job_array_head && job_ptr->details) {
 		struct job_record *base_job_ptr;
 		base_job_ptr = find_job_record(job_ptr->array_job_id);
@@ -3316,7 +3323,7 @@ static bool _job_pack_deadlock_test(struct job_record *job_ptr)
 	list_sort(dl_part_ptr->deadlock_job_list, _deadlock_job_list_sort);
 
 	/*
-	 * Log current table of pack job start times by parition
+	 * Log current table of pack job start times by partition
 	 */
 	if (debug_flags & DEBUG_FLAG_BACKFILL) {
 		part_iter = list_iterator_create(deadlock_global_list);

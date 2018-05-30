@@ -346,6 +346,9 @@ int main(int argc, char **argv)
 			     "but details not gathered");
 	}
 
+	if (slurmctld_conf.chos_loc)
+		error("Support for the ChosLoc configuration parameter will end in Slurm version 18.08");
+
 	if (license_init(slurmctld_conf.licenses) != SLURM_SUCCESS)
 		fatal("Invalid Licenses value: %s", slurmctld_conf.licenses);
 
@@ -1551,6 +1554,27 @@ static int _init_tres(void)
 	return SLURM_SUCCESS;
 }
 
+/*
+ * NOTE: the job_write_lock as well as the assoc_mgr TRES Read lock should be
+ * locked before coming in here.
+ */
+static void _update_job_tres(struct job_record *job_ptr)
+{
+	xassert(verify_lock(JOB_LOCK, WRITE_LOCK));
+
+	/* If this returns 1 it means the positions were
+	   altered so just rebuild it.
+	*/
+	if (assoc_mgr_set_tres_cnt_array(&job_ptr->tres_req_cnt,
+					 job_ptr->tres_req_str,
+					 0, true))
+		job_set_req_tres(job_ptr, true);
+	if (assoc_mgr_set_tres_cnt_array(&job_ptr->tres_alloc_cnt,
+					 job_ptr->tres_alloc_str,
+					 0, true))
+		job_set_alloc_tres(job_ptr, true);
+}
+
 /* any association manager locks should be unlocked before hand */
 static void _update_cluster_tres(void)
 {
@@ -1569,17 +1593,7 @@ static void _update_cluster_tres(void)
 	assoc_mgr_lock(&locks);
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = list_next(job_iterator))) {
-		/* If this returns 1 it means the positions were
-		   altered so just rebuild it.
-		*/
-		if (assoc_mgr_set_tres_cnt_array(&job_ptr->tres_req_cnt,
-						 job_ptr->tres_req_str,
-						 0, true))
-			job_set_req_tres(job_ptr, true);
-		if (assoc_mgr_set_tres_cnt_array(&job_ptr->tres_alloc_cnt,
-						 job_ptr->tres_alloc_str,
-						 0, true))
-			job_set_alloc_tres(job_ptr, true);
+		_update_job_tres(job_ptr);
 	}
 	list_iterator_destroy(job_iterator);
 
@@ -2816,6 +2830,8 @@ static void *_assoc_cache_mgr(void *no_data)
 	/* Write lock on jobs, read lock on nodes and partitions */
 	slurmctld_lock_t job_write_lock =
 		{ NO_LOCK, WRITE_LOCK, READ_LOCK, WRITE_LOCK, NO_LOCK };
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
+				   READ_LOCK, NO_LOCK, NO_LOCK };
 
 	while (running_cache == 1) {
 		slurm_mutex_lock(&assoc_cache_mutex);
@@ -2827,6 +2843,8 @@ static void *_assoc_cache_mgr(void *no_data)
 			slurm_mutex_unlock(&assoc_cache_mutex);
 			return NULL;
 		}
+
+		lock_slurmctld(job_write_lock);
 		/*
 		 * Make sure not to have the job_write_lock, assoc_mgr or the
 		 * slurmdbd_lock locked when refresh_lists is called or you may
@@ -2839,10 +2857,11 @@ static void *_assoc_cache_mgr(void *no_data)
 			     g_tres_count, slurmctld_tres_cnt);
 			_init_tres();
 		}
+		if (running_cache == 1)
+			unlock_slurmctld(job_write_lock);
+
 		slurm_mutex_unlock(&assoc_cache_mutex);
 	}
-
-	lock_slurmctld(job_write_lock);
 
 	if (!job_list) {
 		/* This could happen in rare occations, it doesn't
@@ -2857,8 +2876,11 @@ static void *_assoc_cache_mgr(void *no_data)
 	debug2("got real data from the database "
 	       "refreshing the association ptr's for %d jobs",
 	       list_count(job_list));
+	assoc_mgr_lock(&locks);
 	itr = list_iterator_create(job_list);
 	while ((job_ptr = list_next(itr))) {
+		_update_job_tres(job_ptr);
+
 		if (job_ptr->assoc_id) {
 			memset(&assoc_rec, 0,
 			       sizeof(slurmdb_assoc_rec_t));
@@ -2872,7 +2894,7 @@ static void *_assoc_cache_mgr(void *no_data)
 				    acct_db_conn, &assoc_rec,
 				    accounting_enforce,
 				    (slurmdb_assoc_rec_t **)
-				    &job_ptr->assoc_ptr, false)) {
+				    &job_ptr->assoc_ptr, true)) {
 				verbose("Invalid association id %u "
 					"for job id %u",
 					job_ptr->assoc_id, job_ptr->job_id);
@@ -2890,7 +2912,8 @@ static void *_assoc_cache_mgr(void *no_data)
 			if ((assoc_mgr_fill_in_qos(
 				    acct_db_conn, &qos_rec,
 				    accounting_enforce,
-				    (slurmdb_qos_rec_t **)&job_ptr->qos_ptr, 0))
+				    (slurmdb_qos_rec_t **)&job_ptr->qos_ptr,
+				    true))
 			   != SLURM_SUCCESS) {
 				verbose("Invalid qos (%u) for job_id %u",
 					job_ptr->qos_id, job_ptr->job_id);
@@ -2929,7 +2952,8 @@ handle_parts:
 			part_ptr->qos_ptr = NULL;
 			if (assoc_mgr_fill_in_qos(
 				    acct_db_conn, &qos_rec, accounting_enforce,
-				    (slurmdb_qos_rec_t **)&part_ptr->qos_ptr, 0)
+				    (slurmdb_qos_rec_t **)&part_ptr->qos_ptr,
+				    true)
 			    != SLURM_SUCCESS) {
 				fatal("Partition %s has an invalid qos (%s), "
 				      "please check your configuration",
@@ -2940,6 +2964,7 @@ handle_parts:
 	list_iterator_destroy(itr);
 
 end_it:
+	assoc_mgr_unlock(&locks);
 	/* issuing a reconfig will reset the pointers on the burst
 	   buffers */
 	bb_g_reconfig();

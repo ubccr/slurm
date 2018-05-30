@@ -718,7 +718,7 @@ When used to identify jobs to be modified, all jobs belonging to all users
 are modified unless the \fIUserID\fP option is used to identify a specific user.
 Either \fIJobId\fP or \fIJobName\fP is required.
 .TP
-\fB\-\-nice\fR[=\fIadjustment\fR]
+\fINice\fP[=<adjustment>]
 Update the job with an adjusted scheduling priority within Slurm. With no
 adjustment value the scheduling priority is decreased by 100. A negative nice
 value increases the priority, otherwise decreases it. The adjustment range is
@@ -1109,8 +1109,13 @@ node to be terminated.
 "POWER_DOWN" and "POWER_UP" will use the configured \fISuspendProg\fR and
 \fIResumeProg\fR programs to explicitly place a node in or out of a power
 saving mode. If a node is already in the process of being powered up or down,
-the command will have no effect until the configured ResumeTimeout or
-SuspendTimeout is reached.
+the command will only change the state of the node but won't have any
+effect until the configured ResumeTimeout or SuspendTimeout is reached.
+Use of this command can be useful in situations
+where a \fIResumeProg\fR like \fIcapmc\fR in Cray machines is stalled and one
+wants to restore the node to "IDLE" manually, in this case rebooting the node
+and setting the state to "POWER_DOWN" will cancel the previous "POWER_UP"
+state and the node will become "IDLE".
 The "NoResp" state will only set the "NoResp" flag for a node without
 changing its underlying state.
 While all of the above states are valid, some of them are not valid new
@@ -1539,7 +1544,7 @@ Repeat the reservation at the same time every day.
 Permit jobs requesting the reservation to begin prior to the reservation's
 start time, end after the reservation's end time, and use resources inside
 and/or outside of the reservation. A typical
-use case is to prevent jobs not explicitlg requesting the reservation from using
+use case is to prevent jobs not explicitly requesting the reservation from using
 those reserved resources rather than forcing jobs requesting the reservation to
 use those resources in the time frame reserved.
 .TP

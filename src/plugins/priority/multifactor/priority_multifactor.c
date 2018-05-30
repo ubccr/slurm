@@ -1386,8 +1386,17 @@ static void _filter_job(struct job_record *job_ptr,
 			return;
 	}
 
+	/*
+	 * Job is not in any partition, so there is nothing to return.
+	 * This can happen if the Partition was deleted, CALCULATE_RUNNING
+	 * is enabled, and this job is still waiting out MinJobAge before
+	 * being removed from the system.
+	 */
+	if (!job_ptr->part_ptr && !job_ptr->part_ptr_list)
+		return;
+
 	/* Filter by partition, job in one partition */
-	if (!job_ptr->part_ptr_list || !job_ptr->priority_array) {
+	if (!job_ptr->part_ptr_list) {
 		job_part_ptr =  job_ptr->part_ptr;
 		filter = 0;
 		if (part_ptr_list) {
@@ -1874,6 +1883,8 @@ extern List priority_p_get_priority_factors_list(
 	}
 
 	if (job_list && list_count(job_list)) {
+		time_t use_time;
+
 		ret_list = list_create(slurm_destroy_priority_factors_object);
 		itr = list_iterator_create(job_list);
 		while ((job_ptr = list_next(itr))) {
@@ -1888,8 +1899,12 @@ extern List priority_p_get_priority_factors_list(
 			/*
 			 * This means the job is not eligible yet
 			 */
-			if (!job_ptr->details->begin_time
-			    || (job_ptr->details->begin_time > start_time))
+			if (flags & PRIORITY_FLAGS_ACCRUE_ALWAYS)
+				use_time = job_ptr->details->submit_time;
+			else
+				use_time = job_ptr->details->begin_time;
+
+			if (!use_time || (use_time > start_time))
 				continue;
 
 			/*
