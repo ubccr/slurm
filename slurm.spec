@@ -1,6 +1,6 @@
 Name:		slurm
-Version:	17.11.3
-%global rel	2
+Version:	17.11.7
+%global rel	1
 Release:	%{rel}%{?dist}
 Summary:	Slurm Workload Manager
 
@@ -108,11 +108,7 @@ BuildRequires: pkgconfig
 BuildRequires: perl(ExtUtils::MakeMaker)
 
 %if %{with lua}
-%if %{defined suse_version}
-BuildRequires: lua51-devel
-%else
-BuildRequires: lua-devel
-%endif
+BuildRequires: pkgconfig(lua) >= 5.1.0
 %endif
 
 %if %{with hwloc}
@@ -278,6 +274,17 @@ running on the node, or any user who has allocated resources on the node
 according to the Slurm
 %endif
 
+%if %{with cray}
+%package slurmsmwd
+Summary: support daemons and software for the Cray SMW
+Group: System Environment/Base
+Requires: %{name}%{?_isa} = %{version}-%{release}
+Obsoletes: craysmw
+%description slurmsmwd
+support daeamons and software for the Cray SMW.  Includes slurmsmwd which
+notifies slurm about failed nodes.
+%endif
+
 #############################################################################
 
 %prep
@@ -291,7 +298,7 @@ according to the Slurm
 	%{?_with_cpusetdir} \
 	%{?_with_mysql_config} \
 	%{?_with_ssl} \
-	%{?_with_cray:--enable-native-cray}\
+	%{?_without_cray:--disable-native-cray}\
 	%{?_with_cray_network:--enable-cray-network}\
 	%{?_with_multiple_slurmd:--enable-multiple-slurmd} \
 	%{?_with_pmix} \
@@ -329,15 +336,20 @@ install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/slurmdbd.service
    mv %{buildroot}/%{_libdir}/libpmi* %{buildroot}/%{_libdir}/slurmpmi
    install -D -m644 contribs/cray/plugstack.conf.template %{buildroot}/%{_sysconfdir}/plugstack.conf.template
    install -D -m644 contribs/cray/slurm.conf.template %{buildroot}/%{_sysconfdir}/slurm.conf.template
-   install -D -m644 contribs/cray/opt_modulefiles_slurm %{buildroot}/opt/modulefiles/slurm/%{version}-%{rel}
+   mkdir -p %{buildroot}/opt/modulefiles/slurm
+   test -f contribs/cray/opt_modulefiles_slurm &&
+      install -D -m644 contribs/cray/opt_modulefiles_slurm %{buildroot}/opt/modulefiles/slurm/%{version}-%{rel}
+   install -D -m644 contribs/cray/slurmsmwd/slurmsmwd.service %{buildroot}/%{_unitdir}/slurmsmwd.service
    echo -e '#%Module\nset ModulesVersion "%{version}-%{rel}"' > %{buildroot}/opt/modulefiles/slurm/.version
 %else
    rm -f contribs/cray/opt_modulefiles_slurm
+   rm -f contribs/cray/slurmsmwd/slurmsmwd.service
    rm -f %{buildroot}/%{_sysconfdir}/plugstack.conf.template
    rm -f %{buildroot}/%{_sysconfdir}/slurm.conf.template
    rm -f %{buildroot}/%{_sbindir}/capmc_suspend
    rm -f %{buildroot}/%{_sbindir}/capmc_resume
    rm -f %{buildroot}/%{_sbindir}/slurmconfgen.py
+   rm -f %{buildroot}/%{_sbindir}/slurmsmwd
 %endif
 
 install -D -m644 etc/cgroup.conf.example %{buildroot}/%{_sysconfdir}/cgroup.conf.example
@@ -403,6 +415,14 @@ test -f %{buildroot}/opt/modulefiles/slurm/%{version}-%{rel} &&
 test -f %{buildroot}/opt/modulefiles/slurm/.version &&
   echo /opt/modulefiles/slurm/.version >> $LIST
 
+
+LIST=./example.configs
+touch $LIST
+%if %{with cray}
+   test -f %{buildroot}/%{_sbindir}/slurmconfgen.py	&&
+	echo %{_sbindir}/slurmconfgen.py		>>$LIST
+%endif
+
 # Make pkg-config file
 mkdir -p %{buildroot}/%{_libdir}/pkgconfig
 cat >%{buildroot}/%{_libdir}/pkgconfig/slurm.pc <<EOF
@@ -462,16 +482,17 @@ rm -rf %{buildroot}
 %exclude %{_mandir}/man1/sjobexit*
 %exclude %{_mandir}/man1/sjstat*
 %dir %{_libdir}/slurm/src
+%if %{with cray}
+%dir /opt/modulefiles/slurm
+%endif
 #############################################################################
 
-%files example-configs
+%files -f example.configs example-configs
 %defattr(-,root,root,0755)
 %dir %{_sysconfdir}
 %if %{with cray}
 %config %{_sysconfdir}/plugstack.conf.template
 %config %{_sysconfdir}/slurm.conf.template
-%dir /opt/modulefiles/slurm
-%{_sbindir}/slurmconfgen.py
 %endif
 %config %{_sysconfdir}/cgroup.conf.example
 %config %{_sysconfdir}/cgroup_allowed_devices_file.conf.example
@@ -573,6 +594,13 @@ rm -rf %{buildroot}
 %if %{with pam}
 %files -f pam.files pam_slurm
 %defattr(-,root,root)
+%endif
+#############################################################################
+
+%if %{with cray}
+%files slurmsmwd
+%{_sbindir}/slurmsmwd
+%{_unitdir}/slurmsmwd.service
 %endif
 #############################################################################
 

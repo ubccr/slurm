@@ -479,7 +479,7 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	Buf buffer = NULL;
 	slurm_msg_t msg;
 
-	int rank;
+	int rank, proto;
 	int parent_rank, children, depth, max_depth;
 	char *parent_alias = NULL;
 	slurm_addr_t parent_addr = {0};
@@ -623,8 +623,14 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	pack_msg(&msg, buffer);
 	len = get_buf_offset(buffer);
 
-	/* this is the protocol version for the client srun only */
-	safe_write(fd, &protocol_version, sizeof(int));
+	/*
+	 * This is the protocol version for the client srun only.
+	 * Must store into an int before writing, as the argument
+	 * is a uint16_t not an int, and will result in a corrupted
+	 * version being received by the slurmstepd.
+	 */
+	proto = protocol_version;
+	safe_write(fd, &proto, sizeof(int));
 
 	safe_write(fd, &len, sizeof(int));
 	safe_write(fd, get_buf_data(buffer), len);
@@ -1477,18 +1483,20 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 			errnum = ESLURMD_PROLOG_FAILED;
 			goto done;
 		}
-		/* Since the job could have been killed while the prolog was
-		 * running, test if the credential has since been revoked
-		 * and exit as needed. */
-		if (slurm_cred_revoked(conf->vctx, req->cred)) {
-			info("Job %u already killed, do not launch step %u.%u",
-			     req->job_id, req->job_id, req->job_step_id);
-			errnum = ESLURMD_CREDENTIAL_REVOKED;
-			goto done;
-		}
 	} else {
 		slurm_mutex_unlock(&prolog_mutex);
 		_wait_for_job_running_prolog(req->job_id);
+	}
+
+	/*
+	 * Since the job could have been killed while the prolog was running,
+	 * test if the credential has since been revoked and exit as needed.
+	 */
+	if (slurm_cred_revoked(conf->vctx, req->cred)) {
+		info("Job %u already killed, do not launch step %u.%u",
+		     req->job_id, req->job_id, req->job_step_id);
+		errnum = ESLURMD_CREDENTIAL_REVOKED;
+		goto done;
 	}
 #endif
 
@@ -2203,6 +2211,16 @@ static void _rpc_prolog(slurm_msg_t *msg)
 		if ((rc == SLURM_SUCCESS) &&
 		    (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN))
 			rc = _spawn_prolog_stepd(msg);
+
+		/*
+		 * Revoke cred so that the slurmd won't launch tasks if the
+		 * prolog failed. The slurmd waits for the prolog to finish but
+		 * can't check the return code.
+		 */
+		if (rc)
+			slurm_cred_revoke(conf->vctx, req->job_id, time(NULL),
+					  time(NULL));
+
 		_remove_job_running_prolog(req->job_id);
 	} else
 		slurm_mutex_unlock(&prolog_mutex);
@@ -2314,6 +2332,7 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 			 */
 			if (retry_cnt > 50) {
 				rc = ESLURMD_PROLOG_FAILED;
+				slurm_mutex_unlock(&prolog_mutex);
 				goto done;
 			}
 
@@ -4273,7 +4292,7 @@ static int _file_bcast_register_file(slurm_msg_t *msg,
 	file_info->uid = key->uid;
 	file_info->gid = key->gid;
 	file_info->job_id = key->job_id;
-	file_info->start_time = time(NULL);
+	file_info->last_update = file_info->start_time = time(NULL);
 
 	//TODO: mmap the file here
 	_fb_wrlock();

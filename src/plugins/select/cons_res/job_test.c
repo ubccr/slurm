@@ -356,22 +356,54 @@ static uint16_t _allocate_sc(struct job_record *job_ptr, bitstr_t *core_map,
 			used_cpu_count += used_cores[i] * threads_per_core;
 	}
 
-	/* Ignore resources that would push a job allocation over the
-	 * partition CPU limit (if any) */
+	/*
+	 * Ignore resources that would push a job allocation over the
+	 * partition CPU limit (if any). Remove cores from consideration by
+	 * taking them from the sockets with the lowest free_cores count.
+	 * This will tend to satisfy a job's --cores-per-socket specification.
+	 */
 	if ((job_ptr->part_ptr->max_cpus_per_node != INFINITE) &&
 	    (free_cpu_count + used_cpu_count >
 	     job_ptr->part_ptr->max_cpus_per_node)) {
 		int excess = free_cpu_count + used_cpu_count -
 			     job_ptr->part_ptr->max_cpus_per_node;
-		for (c = core_begin; c < core_end; c++) {
-			i = (uint16_t) (c - core_begin) / cores_per_socket;
-			if (free_cores[i] > 0) {
-				free_core_count--;
-				free_cores[i]--;
-				excess -= threads_per_core;
-				if (excess <= 0)
-					break;
+		int min_excess_cores = min_cores;
+		int found_cores;
+		excess = (excess + threads_per_core - 1) / threads_per_core;
+		while (excess > 0) {
+			int min_free_inx = -1;
+			for (i = 0; i < sockets; i++) {
+				if (free_cores[i] == 0)
+					continue;
+				if (((min_excess_cores > 1) ||
+				     (min_sockets > 1)) &&
+				    (free_cores[i] <= min_excess_cores))
+					continue;
+				if ((min_free_inx == -1) ||
+				    (free_cores[i] < free_cores[min_free_inx]))
+					min_free_inx = i;
 			}
+			if (min_free_inx == -1) {
+				if (min_excess_cores) {
+					min_excess_cores = 0;
+					continue;
+				}
+				break;
+			}
+			if (free_cores[min_free_inx] < excess)
+				found_cores = free_cores[min_free_inx];
+			else
+				found_cores = excess;
+			if (min_excess_cores  > 1 &&
+			    ((free_cores[min_free_inx] - found_cores) <
+			     min_excess_cores)) {
+				found_cores = free_cores[min_free_inx] -
+					      min_excess_cores;
+			}
+			free_core_count -= found_cores;
+			free_cpu_count -= (found_cores * threads_per_core);
+			free_cores[min_free_inx] -= found_cores;
+			excess -= found_cores;
 		}
 	}
 
@@ -2246,8 +2278,7 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 		}
 	}
 	if (best_fit_inx == -1) {
-		debug("job %u: best_fit topology failure: no switch currently "
-		      "has sufficient resource to satisfy the request",
+		debug2("job %u: best_fit topology failure: no switch currently has sufficient resource to satisfy the request",
 		      job_ptr->job_id);
 		rc = SLURM_ERROR;
 		goto fini;
@@ -2697,8 +2728,7 @@ static int _eval_nodes_dfly(struct job_record *job_ptr, bitstr_t *bitmap,
 		}
 	}
 	if (best_fit_inx == -1) {
-		debug("job %u: best_fit topology failure: no switch currently "
-		      "has sufficient resource to satisfy the request",
+		debug2("job %u: best_fit topology failure: no switch currently has sufficient resource to satisfy the request",
 		      job_ptr->job_id);
 		rc = SLURM_ERROR;
 		goto fini;
@@ -3828,23 +3858,7 @@ alloc_job:
 		for (i = 0; i < job_res->nhosts; i++) {
 			job_res->memory_allocated[i] = save_mem;
 		}
-	} else {	/* --mem=0, allocate job all memory on node */
-		uint64_t avail_mem, lowest_mem = 0;
-		first = bit_ffs(job_res->node_bitmap);
-		if (first != -1)
-			last  = bit_fls(job_res->node_bitmap);
-		else
-			last = first - 1;
-		for (i = first, j = 0; i <= last; i++) {
-			if (!bit_test(job_res->node_bitmap, i))
-				continue;
-			avail_mem = select_node_record[i].real_memory -
-				    select_node_record[i].mem_spec_limit;
-			if ((j == 0) || (lowest_mem > avail_mem))
-				lowest_mem = avail_mem;
-			job_res->memory_allocated[j++] = avail_mem;
-		}
-		details_ptr->pn_min_memory = lowest_mem;
 	}
+
 	return error_code;
 }

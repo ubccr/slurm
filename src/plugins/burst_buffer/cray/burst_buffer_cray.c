@@ -2596,6 +2596,16 @@ static int _parse_bb_opts(struct job_descriptor *job_desc, uint64_t *bb_size,
 				xfree(bb_pool);
 			} else if (!xstrncmp(tok, "stage_out", 9)) {
 				have_stage_out = true;
+			} else if (!xstrncmp(tok, "create_persistent", 17) ||
+				   !xstrncmp(tok, "destroy_persistent", 18)) {
+				/*
+				 * Disable support until Slurm v18.08 to prevent
+				 * user directed persistent burst buffer changes
+				 * outside of Slurm control.
+				 */
+				rc = ESLURM_BURST_BUFFER_PERMISSION;
+				break;
+
 			}
 		}
 		tok = strtok_r(NULL, "\n", &save_ptr);
@@ -3870,7 +3880,7 @@ static void *_start_pre_run(void *x)
 		NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 	/* Locks: write job */
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
+		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK, READ_LOCK };
 	pre_run_args_t *pre_run_args = (pre_run_args_t *) x;
 	char *resp_msg = NULL;
 	char jobid_buf[64];

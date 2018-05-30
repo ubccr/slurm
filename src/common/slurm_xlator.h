@@ -213,6 +213,7 @@
 #define	log_fp			slurm_log_fp
 #define	log_has_data		slurm_log_has_data
 #define	log_flush		slurm_log_flush
+#define	fatal_abort		slurm_fatal_abort
 #define	fatal			slurm_fatal
 #define	error			slurm_error
 #define	info			slurm_info
@@ -258,6 +259,8 @@
 #define	unpackmem_ptr		slurm_unpackmem_ptr
 #define	unpackmem_xmalloc	slurm_unpackmem_xmalloc
 #define	unpackmem_malloc	slurm_unpackmem_malloc
+#define	unpackstr_xmalloc_escaped slurm_unpackstr_xmalloc_escaped
+#define	unpackstr_xmalloc_chooser slurm_unpackstr_xmalloc_chooser
 #define	packstr_array		slurm_packstr_array
 #define	unpackstr_array		slurm_unpackstr_array
 #define	packmem_array		slurm_packmem_array
@@ -361,6 +364,7 @@
 #define node_use_string		slurm_node_use_string
 #define bg_block_state_string	slurm_bg_block_state_string
 #define reservation_flags_string slurm_reservation_flags_string
+#define print_multi_line_string slurm_print_multi_line_string
 
 /* slurmdbd_defs.[ch] functions */
 #define slurmdbd_defs_init      slurm_slurmdbd_defs_init

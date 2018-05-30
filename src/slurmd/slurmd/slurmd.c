@@ -829,6 +829,14 @@ _read_config(void)
 	xfree(conf->block_map);
 	xfree(conf->block_map_inv);
 
+	/*
+	 * This must be reset before _update_logging(), otherwise the
+	 * slurmstepd processes will not get the reconfigure request,
+	 * and logs may be lost if the path changed or the log was rotated.
+	 */
+	_free_and_set(conf->spooldir, xstrdup(cf->slurmd_spooldir));
+	_massage_pathname(&conf->spooldir);
+
 	_update_logging();
 	_update_nice();
 
@@ -934,8 +942,6 @@ _read_config(void)
 	_free_and_set(conf->tmpfs,    xstrdup(cf->tmp_fs));
 	_free_and_set(conf->health_check_program,
 		      xstrdup(cf->health_check_program));
-	_free_and_set(conf->spooldir, xstrdup(cf->slurmd_spooldir));
-	_massage_pathname(&conf->spooldir);
 	_free_and_set(conf->pidfile,  xstrdup(cf->slurmd_pidfile));
 	_massage_pathname(&conf->pidfile);
 	_free_and_set(conf->plugstack,   xstrdup(cf->plugstack));
@@ -1056,7 +1062,7 @@ static void
 _print_conf(void)
 {
 	slurm_ctl_conf_t *cf;
-	char *str, time_str[32];
+	char *str = NULL, time_str[32];
 	int i;
 
 	cf = slurm_conf_lock();
@@ -1090,24 +1096,17 @@ _print_conf(void)
 	secs2time_str((time_t)conf->up_time, time_str, sizeof(time_str));
 	debug3("UpTime      = %u = %s", conf->up_time, time_str);
 
-	str = xmalloc(conf->block_map_size*5);
-	str[0] = '\0';
-	for (i = 0; i < conf->block_map_size; i++) {
-		char id[10];
-		sprintf(id, "%u,", conf->block_map[i]);
-		strcat(str, id);
-	}
-	str[strlen(str)-1] = '\0';		/* trim trailing "," */
+	for (i = 0; i < conf->block_map_size; i++)
+		xstrfmtcat(str, "%s%u", (str ? "," : ""),
+			   conf->block_map[i]);
 	debug3("Block Map   = %s", str);
-	str[0] = '\0';
-	for (i = 0; i < conf->block_map_size; i++) {
-		char id[10];
-		sprintf(id, "%u,", conf->block_map_inv[i]);
-		strcat(str, id);
-	}
-	str[strlen(str)-1] = '\0';		/* trim trailing "," */
+	xfree(str);
+	for (i = 0; i < conf->block_map_size; i++)
+		xstrfmtcat(str, "%s%u", (str ? "," : ""),
+			   conf->block_map_inv[i]);
 	debug3("Inverse Map = %s", str);
 	xfree(str);
+
 	debug3("RealMemory  = %"PRIu64"",conf->real_memory_size);
 	debug3("TmpDisk     = %u",       conf->tmp_disk_space);
 	debug3("Epilog      = `%s'",     conf->epilog);
@@ -1547,11 +1546,7 @@ _slurmd_init(void)
 		}
 	}
 
-#ifdef O_CLOEXEC
 	if ((devnull = open("/dev/null", O_RDWR | O_CLOEXEC)) < 0) {
-#else
-	if ((devnull = open("/dev/null", O_RDWR)) < 0) {
-#endif
 		error("Unable to open /dev/null: %m");
 		return SLURM_FAILURE;
 	}

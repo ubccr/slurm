@@ -1539,12 +1539,10 @@ int update_node ( update_node_msg_t * update_node_msg )
 					bit_set (avail_node_bitmap, node_inx);
 				bit_set (idle_node_bitmap, node_inx);
 				bit_set (up_node_bitmap, node_inx);
-				if (IS_NODE_POWER_SAVE(node_ptr)) {
-					if (node_ptr->last_idle > 0)
-						node_ptr->last_idle = 1;
-				} else {
+				if (IS_NODE_POWER_SAVE(node_ptr))
+					node_ptr->last_idle = 0;
+				else
 					node_ptr->last_idle = now;
-				}
 			} else if (state_val == NODE_STATE_ALLOCATED) {
 				if (!IS_NODE_DRAIN(node_ptr) &&
 				    !IS_NODE_FAIL(node_ptr)  &&
@@ -1555,6 +1553,15 @@ int update_node ( update_node_msg_t * update_node_msg )
 			} else if ((state_val == NODE_STATE_DRAIN) ||
 				   (state_val == NODE_STATE_FAIL)) {
 				uint32_t new_state = state_val;
+				if ((IS_NODE_ALLOCATED(node_ptr) ||
+				     IS_NODE_MIXED(node_ptr)) &&
+				    (IS_NODE_POWER_SAVE(node_ptr) ||
+				     IS_NODE_POWER_UP(node_ptr))) {
+					info("%s: DRAIN/FAIL request for node %s which is allocated and being powered up. Requeueing jobs",
+					     __func__, this_node_name);
+					kill_running_job_by_node_name(
+								this_node_name);
+				}
 				bit_clear (avail_node_bitmap, node_inx);
 				node_ptr->node_state &= (~NODE_STATE_DRAIN);
 				node_ptr->node_state &= (~NODE_STATE_FAIL);
@@ -1597,8 +1604,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 					info("powering down node %s",
 					     this_node_name);
 				}
-				if (node_ptr->last_idle > 0)
-					node_ptr->last_idle = 1;
+				node_ptr->last_idle = 1;
 				free(this_node_name);
 				continue;
 			} else if (state_val == NODE_STATE_POWER_UP) {
@@ -1702,10 +1708,11 @@ int update_node ( update_node_msg_t * update_node_msg )
  */
 extern void restore_node_features(int recover)
 {
-	int i;
+	int i, node_features_plugin_cnt;
 	struct node_record *node_ptr;
 
-	for (i=0, node_ptr=node_record_table_ptr; i<node_record_count;
+	node_features_plugin_cnt = node_features_g_count();
+	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
 	     i++, node_ptr++) {
 		if (node_ptr->weight != node_ptr->config_ptr->weight) {
 			error("Node %s Weight(%u) differ from slurm.conf",
@@ -1720,16 +1727,13 @@ extern void restore_node_features(int recover)
 		}
 
 		if (xstrcmp(node_ptr->config_ptr->feature, node_ptr->features)){
-			error("Node %s Features(%s) differ from slurm.conf",
-			      node_ptr->name, node_ptr->features);
+			if (node_features_plugin_cnt == 0) {
+				error("Node %s Features(%s) differ from slurm.conf",
+				      node_ptr->name, node_ptr->features);
+			}
 			if (recover == 2) {
 				_update_node_avail_features(node_ptr->name,
 							    node_ptr->features);
-			} else {
-				xfree(node_ptr->features);
-				node_ptr->features = xstrdup(node_ptr->
-							     config_ptr->
-							     feature);
 			}
 		}
 
@@ -2543,13 +2547,28 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		last_node_update = now;
 	}
 
-	if (IS_NODE_NO_RESPOND(node_ptr) || IS_NODE_POWER_UP(node_ptr)) {
+	if (IS_NODE_NO_RESPOND(node_ptr) ||
+	    IS_NODE_POWER_UP(node_ptr) ||
+	    IS_NODE_POWER_SAVE(node_ptr)) {
 		info("Node %s now responding", node_ptr->name);
+
+		/*
+		 * Set last_idle in case that the node came up out of band or
+		 * came up after ResumeTimeout so that it can be suspended at a
+		 * later point.
+		 */
+		if (IS_NODE_POWER_UP(node_ptr) || IS_NODE_POWER_SAVE(node_ptr))
+			node_ptr->last_idle = now;
+
 		node_ptr->node_state &= (~NODE_STATE_NO_RESPOND);
 		node_ptr->node_state &= (~NODE_STATE_POWER_UP);
+		node_ptr->node_state &= (~NODE_STATE_POWER_SAVE);
 		node_ptr->node_state &= (~NODE_STATE_REBOOT);
 		if (!is_node_in_maint_reservation(node_inx))
 			node_ptr->node_state &= (~NODE_STATE_MAINT);
+
+		bit_clear(power_node_bitmap, node_inx);
+
 		last_node_update = now;
 	}
 
@@ -2819,6 +2838,8 @@ extern int validate_nodes_via_front_end(
 	char step_str[64];
 
 	xassert(verify_lock(CONFIG_LOCK, READ_LOCK));
+	xassert(verify_lock(JOB_LOCK, READ_LOCK));
+	xassert(verify_lock(FED_LOCK, READ_LOCK));
 
 	if (reg_msg->up_time > now) {
 		error("Node up_time on %s is invalid: %u>%u",

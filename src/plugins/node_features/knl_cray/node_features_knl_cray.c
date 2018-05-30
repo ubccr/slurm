@@ -166,7 +166,7 @@ List active_feature_list __attribute__((weak_import));
 List active_feature_list;
 #endif
 
-/* Configuration Paramters */
+/* Configuration Parameters */
 static uint16_t allow_mcdram = KNL_MCDRAM_FLAG;
 static uint16_t allow_numa = KNL_NUMA_FLAG;
 static uid_t *allowed_uid = NULL;
@@ -1687,6 +1687,7 @@ extern int init(void)
 	for (i = 0; i < KNL_MCDRAM_CNT; i++)
 		mcdram_pct[i] = -1;
 	mcdram_set = 0;
+	xfree(mc_path);
 	xfree(syscfg_path);
 
 	knl_conf_file = get_extra_conf_path("knl_cray.conf");
@@ -2846,7 +2847,7 @@ extern void node_features_p_step_config(bool mem_sort, bitstr_t *numa_bitmap)
 	if (mem_sort && (numa_available() != -1)) {
 		struct stat sb;
 		int buf_len, fd, i, len, rc;
-		char buf[8];
+		char buf[12];
 
 		if (stat(ZONE_SORT_PATH, &sb) == -1) {
 			rc = system(MODPROBE_PATH " zonesort_module");

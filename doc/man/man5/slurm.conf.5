@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "Slurm Configuration File" "November 2017" "Slurm Configuration File"
+.TH "slurm.conf" "5" "Slurm Configuration File" "April 2018" "Slurm Configuration File"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -384,21 +384,6 @@ no checkpoint support (default)
 \fBcheckpoint/ompi\fR
 OpenMPI (version 1.3 or higher)
 .RE
-
-.TP
-\fBChosLoc\fR
-If configured, then any processes invoked on the user behalf (namely the
-SPANK prolog/epilog scripts and the slurmstepd processes, which in turn spawn
-the user batch script and applications) are not directly executed by the slurmd
-daemon, but instead the \fBChosLoc\fR program is executed.
-Both are spawned with the same user ID as the configured SlurmdUser
-(typically user root).
-That program's argument are the program and arguments that would otherwise be
-invoked directly by the slurmd daemon.
-The intent of this feature is to be able to run a user application in some
-sort of container.
-This option specified the fully qualified pathname of the chos command
-(see https://github.com/scanon/chos for details).
 
 .TP
 \fBClusterName\fR
@@ -1239,10 +1224,11 @@ The value may not exceed 65533.
 
 .TP
 \fBKillOnBadExit\fR
-If set to 1, the job will be terminated immediately when one of the
-processes is crashed or aborted. With the default value of 0, if one of
-the processes is crashed or aborted the other processes will continue
-to run. The user can override this configuration parameter by using srun's
+If set to 1, a step will be terminated immediately if any task is
+crashed or aborted, as indicated by a non-zero exit code.
+With the default value of 0, if one of the processes is crashed or aborted
+the other processes will continue to run while the crashed or aborted process
+waits. The user can override this configuration parameter by using srun's
 \fB\-K\fR, \fB\-\-kill\-on\-bad\-exit\fR.
 
 .TP
@@ -2083,7 +2069,7 @@ which uses process group IDs
 \fBProlog\fR
 Fully qualified pathname of a program for the slurmd to execute
 whenever it is asked to run a job step from a new job allocation (e.g.
-"/usr/local/slurm/prolog").  A glob pattern (See \fBglob\fR(7)) may
+"/usr/local/slurm/prolog"). A glob pattern (See \fBglob\fR (7)) may
 also be used to specify more than one program to run (e.g.
 "/etc/slurm/prolog.d/*"). The slurmd executes the prolog before starting
 the first job step.  The prolog script or scripts may be used to purge files,
@@ -2902,13 +2888,15 @@ held state. By specifying this parameter the job will be requeued but not
 held so that the scheduler can dispatch it to another host.
 .TP
 \fBreduce_completing_frag\fR
-Setting this option will attempt to avoid completing jobs nodes when scheduling
-thus reducing potential fragmentation. This option is to be used in
-conjunction with \fBCompleteWait\fR. By default if a job is found
-completing then no jobs are scheduled. If this parameter is used the node in
-a completing job are taken out of consideration.
-NOTE: With this set there may be a slight performance penalty in scheduling
-depending on queue depth.
+This option is used to control how scheduling of resources is performed when
+jobs are in completing state, which influences potential fragmentation.
+If the option is not set then no jobs will be started in any partition when
+any job is in completing state.
+If the option is set then no jobs will be started in any individual partition
+that has a job in completing state.
+In addition, no jobs will be started in any partition with nodes that overlap
+with any nodes in the partition of the completing job.
+This option is to be used in conjunction with \fBCompleteWait\fR.
 NOTE: \fBCompleteWait\fR must be set for this to work.
 .TP
 \fBrequeue_setup_env_fail\fR
@@ -3864,6 +3852,8 @@ system overhead, this option can be used to impose the extra overhead only on
 jobs which can take advantage of it. If most job allocations are not optimized
 for network topology, they make fragment resources to the point that topology
 optimization for other jobs will be difficult to achieve.
+\fBNOTE\fR: Jobs may span across nodes without common parent switches with
+this enabled.
 .RE
 
 .TP
@@ -5517,7 +5507,6 @@ See the \fBlogrotate\fR man page for more details.
 	compress
 	missingok
 	nocopytruncate
-	nocreate
 	nodelaycompress
 	nomail
 	notifempty
@@ -5534,6 +5523,10 @@ See the \fBlogrotate\fR man page for more details.
 	endscript
 }
 .fi
+.LP
+NOTE: slurmdbd daemon isn't listed in the output of 'scontrol show daemons', so
+a separate logrotate config should be used to send a SIGUSR2 signal to it.
+.LP
 
 .SH "COPYING"
 Copyright (C) 2002\-2007 The Regents of the University of California.

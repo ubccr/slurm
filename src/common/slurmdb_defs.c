@@ -1343,7 +1343,7 @@ extern List slurmdb_get_info_cluster(char *cluster_names)
 	ListIterator itr, itr2;
 	bool all_clusters = 0;
 
-	if (cluster_names && !xstrcmp(cluster_names, "all"))
+	if (cluster_names && !xstrcasecmp(cluster_names, "all"))
 		all_clusters = 1;
 
 	cluster_name = slurm_get_cluster_name();
@@ -3547,6 +3547,9 @@ extern char *slurmdb_make_tres_string_from_simple(
 		}
 		count = slurm_atoull(++tmp_str);
 
+		if (count == NO_VAL64)
+			goto get_next;
+
 		if (tres_str)
 			xstrcat(tres_str, ",");
 		if (!tres_rec->type)
@@ -3888,6 +3891,17 @@ extern int slurmdb_find_qos_in_list_by_name(void *x, void *key)
 	char *name = (char *)key;
 
 	if (!xstrcmp(qos_rec->name, name))
+		return 1;
+
+	return 0;
+}
+
+extern int slurmdb_find_qos_in_list(void *x, void *key)
+{
+	slurmdb_qos_rec_t *qos_rec = (slurmdb_qos_rec_t *)x;
+	uint32_t qos_id = *(uint32_t *)key;
+
+	if (qos_rec->id == qos_id)
 		return 1;
 
 	return 0;
