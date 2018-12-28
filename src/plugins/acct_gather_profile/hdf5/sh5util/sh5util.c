@@ -12,11 +12,11 @@
  *  and Danny Auble <da@schedmd.com> @ SchedMD.
  *  Adapted by Yoann Blein <yoann.blein@bull.net> @ Bull.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -32,22 +32,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
 \*****************************************************************************/
 
 #include "config.h"
 
-#ifndef _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
+#define _GNU_SOURCE
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -63,6 +61,7 @@
 #include "src/common/proc_args.h"
 #include "src/common/xstring.h"
 #include "src/common/slurm_acct_gather_profile.h"
+#include "src/common/slurm_jobacct_gather.h"
 #include "../hdf5_api.h"
 #include "sh5util.h"
 
@@ -104,7 +103,20 @@
 
 // Data types supported by all HDF5 plugins of this type
 
-#ifndef H5free_memory
+/*
+ * H5_VERSION_LE (lifted from 1.10.1 H5public.h) was not added until 1.8.7
+ * (centos 6 has 1.8.5 by default)
+ */
+#ifndef H5_VERSION_LE
+#define H5_VERSION_LE(Maj,Min,Rel) \
+	(((H5_VERS_MAJOR==Maj) && (H5_VERS_MINOR==Min) &&		\
+	  (H5_VERS_RELEASE<=Rel)) ||					\
+	 ((H5_VERS_MAJOR==Maj) && (H5_VERS_MINOR<Min)) ||		\
+	 (H5_VERS_MAJOR<Maj))
+#endif
+
+/* H5free_memory was introduced in 1.8.13, before it just needed to be 'free' */
+#if H5_VERSION_LE(1,8,13)
 #define H5free_memory free
 #endif
 
@@ -303,10 +315,12 @@ static void _remove_empty_output(void)
 	 * the program failed somewhere along the
 	 * way and the file is just left hanging...
 	 */
-	info("Output file generated is empty, removing it: %s", params.output);
-	if ((sb.st_size == 0) &&
-	    (remove(params.output) == -1))
-		error("%s: remove(%s): %m", __func__, params.output);
+	if (!sb.st_size) {
+		info("Output file generated is empty, removing it: %s",
+		     params.output);
+		if (remove(params.output) == -1)
+			error("%s: remove(%s): %m", __func__, params.output);
+	}
 }
 
 static void _init_opts(void)
@@ -731,6 +745,10 @@ endit:
 
 	if (jgid_steps != -1)
 		H5Gclose(jgid_steps);
+	if (jgid_step != -1)
+		H5Gclose(jgid_step);
+	if (jgid_nodes != -1)
+		H5Gclose(jgid_nodes);
 	if (fid_job != -1)
 		H5Fclose(fid_job);
 

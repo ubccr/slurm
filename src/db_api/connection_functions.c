@@ -7,11 +7,11 @@
  *  Written by Danny Auble da@llnl.gov, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -49,7 +49,23 @@
 extern void *slurmdb_connection_get(void)
 {
 	char *cluster_name = slurm_get_cluster_name();
+	void *db_conn = acct_storage_g_get_connection(NULL, 0, NULL,
+						      1, cluster_name);
+	xfree(cluster_name);
+	return db_conn;
+}
+
+/*
+ * get a new connection to the slurmdb
+ * OUT: persist_conn_flags - Flags returned from connection if any see
+ *                           slurm_persist_conn.h.
+ * RET: pointer used to access db
+ */
+extern void *slurmdb_connection_get2(uint16_t *persist_conn_flags)
+{
+	char *cluster_name = slurm_get_cluster_name();
 	void *db_conn = acct_storage_g_get_connection(NULL, 0,
+						      persist_conn_flags,
 						      1, cluster_name);
 	xfree(cluster_name);
 	return db_conn;

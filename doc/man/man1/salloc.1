@@ -1,4 +1,4 @@
-.TH salloc "1" "Slurm Commands" "December 2017" "Slurm Commands"
+.TH salloc "1" "Slurm Commands" "November 2018" "Slurm Commands"
 
 .SH "NAME"
 salloc \- Obtain a Slurm job allocation (a set of nodes), execute a command,
@@ -123,8 +123,6 @@ if the \fB\-B\fR option specifies a thread count, otherwise an option of
 If SelectType is configured to select/cons_res, it must have a parameter of
 CR_Core, CR_Core_Memory, CR_Socket, or CR_Socket_Memory for this option
 to be honored.
-This option is not supported on BlueGene systems (select/bluegene plugin
-is configured).
 If not specified, the scontrol show job will display 'ReqS:C:T=*:*:*'. This
 option applies to job allocations.
 
@@ -256,6 +254,19 @@ For example: "\fB\-\-constraint=[rack1*2&rack2*4]"\fR might
 be used to specify that two nodes must be allocated from nodes with the feature
 of "rack1" and four nodes must be allocated from nodes with the feature
 "rack2".
+
+\fBNOTE:\fR This construct does not support multiple Intel KNL NUMA or MCDRAM
+modes. For example, while "\fB\-\-constraint=[(knl&quad)*2&(knl&hemi)*4]"\fR is
+not supported, "\fB\-\-constraint=[haswell*2&(knl&hemi)*4]"\fR is supported.
+Specification of multiple KNL modes requires the use of a heterogeneous job.
+
+.TP
+\fBParenthesis\fR
+Parenthesis can be used to group like node features together. For example
+"\fB\-\-constraint=[(knl&snc4&flat)*4&haswell*1]"\fR might be used to specify
+that four nodes with the features "knl", "snc4" and "flat" plus one node with
+the feature "haswell" are required. All options within parenthesis should be
+grouped with AND (e.g. "&") operands.
 .RE
 
 .TP
@@ -372,9 +383,8 @@ accounting information will be present.
 
 .TP
 \fB\-c\fR, \fB\-\-cpus\-per\-task\fR=<\fIncpus\fR>
-Advise the Slurm controller that ensuing job steps will require \fIncpus\fR
-number of processors per task.  Without this option, the controller will
-just try to allocate one processor per task.
+Advise Slurm that ensuing job steps will require \fIncpus\fR processors per
+task. By default Slurm will allocate one processor per task.
 
 For instance,
 consider an application that has 4 tasks, each requiring 3 processors.  If our
@@ -434,6 +444,10 @@ execution.
 \fBafterany:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have terminated.
 .TP
+\fBafterburstbuffer:job_id[:jobid...]\fR
+This job can begin execution after the specified jobs have terminated and
+any associated burst buffer stage out operations have completed.
+.TP
 \fBaftercorr:job_id[:jobid...]\fR
 A task of this job array can begin execution after the corresponding task ID
 in the specified job has completed successfully (ran to completion with an
@@ -455,6 +469,8 @@ Gang scheduling of resources in the partition is also not supported.
 \fBsingleton\fR
 This job can begin execution after any previously launched jobs
 sharing the same job name and user have terminated.
+In other words, only one job by that name and owned by that user can be running
+or suspended at any point in time.
 .RE
 
 .TP
@@ -518,20 +534,33 @@ The available generic consumable resources is configurable by the system
 administrator.
 A list of available generic consumable resources will be printed and the
 command will exit if the option argument is "help".
-Examples of use include "\-\-gres=gpu:2,mic=1", "\-\-gres=gpu:kepler:2", and
+Examples of use include "\-\-gres=gpu:2,mic:1", "\-\-gres=gpu:kepler:2", and
 "\-\-gres=help".
 
 .TP
-\fB\-\-gres\-flags\fR=enforce\-binding
-If set, the only CPUs available to the job will be those bound to the selected
-GRES (i.e. the CPUs identified in the gres.conf file will be strictly enforced
-rather than advisory). This option may result in delayed initiation of a job.
+\fB\-\-gres\-flags\fR=<\fItype\fR>
+Specify generic resource task binding options.
+.RS
+.TP
+.B disable\-binding
+Disable filtering of CPUs with respect to generic resource locality.
+This option is currently required to use more CPUs than are bound to a GRES
+(i.e. if a GPU is bound to the CPUs on one socket, but resources on more than
+one socket are required to run the job).
+This option may permit a job to be allocated resources sooner than otherwise
+possible, but may result in lower job performance.
+.TP
+.B enforce\-binding
+The only CPUs available to the job will be those bound to the selected
+GRES (i.e. the CPUs identified in the gres.conf file will be strictly
+enforced). This option may result in delayed initiation of a job.
 For example a job requiring two GPUs and one CPU will be delayed until both
 GPUs on a single socket are available rather than using GPUs bound to separate
 sockets, however the application performance may be improved due to improved
 communication speed.
 Requires the node to be configured with more than one socket and resource
 filtering will be performed on a per\-socket basis.
+.RE
 
 .TP
 \fB\-H, \-\-hold\fR
@@ -630,9 +659,7 @@ Multiple license names should be comma separated (e.g.
 Clusters to issue commands to.  Multiple cluster names may be comma separated.
 The job will be submitted to the one cluster providing the earliest expected
 job initiation time. The default value is the current cluster. A value of
-\(aq\fIall\fR' will query to run on all clusters.  Note the
-\fB\-\-export\fR option to control environment variables exported
-between clusters.
+\(aq\fIall\fR' will query to run on all clusters.
 Note that the SlurmDBD must be up for this option to work properly.
 
 .TP
@@ -767,7 +794,7 @@ seen using the \fBscontrol show config\fR command.
 This parameter would generally be used if whole nodes
 are allocated to jobs (\fBSelectType=select/linear\fR).
 Also see \fB\-\-mem\-per\-cpu\fR.
-\fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
+The \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR options are mutually exclusive.
 
 NOTE: A memory size specification of zero is treated as a special case and
 grants the job access to all of the memory on each node.
@@ -1191,7 +1218,7 @@ Only Slurm operators and administrators can set the priority of a job.
 \fB\-\-profile\fR=<all|none|[energy[,|task[,|lustre[,|network]]]]>
 enables detailed data collection by the acct_gather_profile plugin.
 Detailed data are typically time-series that are stored in an HDF5 file for
-the job.
+the job or an InfluxDB database depending on the configured plugin.
 
 .RS
 .TP 10
@@ -1433,70 +1460,11 @@ slurm.conf this value is ignored.
 \fB\-x\fR, \fB\-\-exclude\fR=<\fInode name list\fR>
 Explicitly exclude certain nodes from the resources granted to the job.
 
-.PP
-The following options support Blue Gene systems, but may be
-applicable to other systems as well.
-
 .TP
-\fB\-\-blrts\-image\fR=<\fIpath\fR>
-Path to blrts image for bluegene block.  BGL only.
-Default from \fIblugene.conf\fR if not set.
-
-.TP
-\fB\-\-cnload\-image\fR=<\fIpath\fR>
-Path to compute node image for bluegene block.  BGP only.
-Default from \fIblugene.conf\fR if not set.
-
-.TP
-\fB\-\-conn\-type\fR=<\fItype\fR>
-Require the block connection type to be of a certain type.
-On Blue Gene the acceptable of \fItype\fR are MESH, TORUS and NAV.
-If NAV, or if not set, then Slurm will try to fit a what the
-DefaultConnType is set to in the bluegene.conf if that isn't set the
-default is TORUS.
-You should not normally set this option.
-If running on a BGP system and wanting to run in HTC mode (only for 1
-midplane and below).  You can use HTC_S for SMP, HTC_D for Dual, HTC_V
-for virtual node mode, and HTC_L for Linux mode.
-For systems that allow a different connection type per dimension you
-can supply a comma separated list of connection types may be specified, one for
-each dimension (i.e. M,T,T,T will give you a torus connection is all
-dimensions expect the first).
-
-.TP
-\fB\-g\fR, \fB\-\-geometry\fR=<\fIXxYxZ\fR> | <\fIAxXxYxZ\fR>
-Specify the geometry requirements for the job. On BlueGene/L and BlueGene/P
-systems there are three numbers giving dimensions in the X, Y and Z directions,
-while on BlueGene/Q systems there are four numbers giving dimensions in the
-A, X, Y and Z directions and can not be used to allocate sub-blocks.
-For example "\-\-geometry=1x2x3x4", specifies a block of nodes having
-1 x 2 x 3 x 4 = 24 nodes (actually midplanes on BlueGene).
-
-.TP
-\fB\-\-ioload\-image\fR=<\fIpath\fR>
-Path to io image for bluegene block.  BGP only.
-Default from \fIblugene.conf\fR if not set.
-
-.TP
-\fB\-\-linux\-image\fR=<\fIpath\fR>
-Path to linux image for bluegene block.  BGL only.
-Default from \fIblugene.conf\fR if not set.
-
-.TP
-\fB\-\-mloader\-image\fR=<\fIpath\fR>
-Path to mloader image for bluegene block.
-Default from \fIblugene.conf\fR if not set.
-
-.TP
-\fB\-R\fR, \fB\-\-no\-rotate\fR
-Disables rotation of the job's requested geometry in order to fit an
-appropriate block.
-By default the specified geometry can rotate in three dimensions.
-
-.TP
-\fB\-\-ramdisk\-image\fR=<\fIpath\fR>
-Path to ramdisk image for bluegene block.  BGL only.
-Default from \fIblugene.conf\fR if not set.
+\fB\-\-x11\fR[=<\fIall\fR|\fIfirst\fR|\fIlast\fR>]
+Sets up X11 forwarding on all, first or last node(s) of the allocation. This
+option is only enabled if Slurm was compiled with X11 support and
+PrologFlags=x11 is defined in the slurm.conf. Default is \fIall\fR.
 
 .SH "INPUT ENVIRONMENT VARIABLES"
 .PP
@@ -1520,9 +1488,6 @@ Same as \fB\-\-bb\fR
 \fBSALLOC_CLUSTERS\fR or \fBSLURM_CLUSTERS\fR
 Same as \fB\-\-clusters\fR
 .TP
-\fBSALLOC_CONN_TYPE\fR
-Same as \fB\-\-conn\-type\fR
-.TP
 \fBSALLOC_CONSTRAINT\fR
 Same as \fB\-C\fR, \fB\-\-constraint\fR
 .TP
@@ -1537,9 +1502,6 @@ Same as \fB\-\-delay\-boot\fR
 .TP
 \fBSALLOC_EXCLUSIVE\fR
 Same as \fB\-\-exclusive\fR
-.TP
-\fBSALLOC_GEOMETRY\fR
-Same as \fB\-g, \-\-geometry\fR
 .TP
 \fBSALLOC_GRES_FLAGS\fR
 Same as \-\-gres\-flags\fR
@@ -1564,9 +1526,6 @@ Same as \fB\-\-network\fR
 .TP
 \fBSALLOC_NO_BELL\fR
 Same as \fB\-\-no\-bell\fR
-.TP
-\fBSALLOC_NO_ROTATE\fR
-Same as \fB\-R, \-\-no\-rotate\fR
 .TP
 \fBSALLOC_OVERCOMMIT\fR
 Same as \fB\-O, \-\-overcommit\fR
@@ -1640,15 +1599,6 @@ the executed program:
 \fBBASIL_RESERVATION_ID\fR
 The reservation ID on Cray systems running ALPS/BASIL only.
 .TP
-\fBMPIRUN_NOALLOCATE\fR
-Do not allocate a block on Blue Gene L/P systems only.
-.TP
-\fBMPIRUN_NOFREE\fR
-Do not free a block on Blue Gene L/P systems only.
-.TP
-\fBMPIRUN_PARTITION\fR
-The block name on Blue Gene systems only.
-.TP
 \fBSLURM_*_PACK_GROUP_#\fR
 For a heterogenous job allocation, the environment variables are set separately
 for each component.
@@ -1657,11 +1607,11 @@ for each component.
 Name of the cluster on which the job is executing.
 .TP
 \fBSLURM_CPUS_PER_TASK\fR
-Number of cpus requested per task.
+Number of CPUs requested per task.
 Only set if the \fB\-\-cpus\-per\-task\fR option is specified.
 .TP
 \fBSLURM_DISTRIBUTION\fR
-Same as \fB\-m, \-\-distribution\fR
+Only set if the \fB\-m, \-\-distribution\fR option is specified.
 .TP
 \fBSLURM_JOB_ACCOUNT\fR
 Account name associated of the job allocation.
@@ -1736,8 +1686,14 @@ SLURM_NODE_ALIASES=ec0:1.2.3.4:foo,ec1:1.2.3.5:bar
 \fBSLURM_NTASKS\fR
 Same as \fB\-n, \-\-ntasks\fR
 .TP
+\fBSLURM_NTASKS_PER_CORE\fR
+Set to value of the \-\-ntasks\-per\-core\fR option, if specified.
+.TP
 \fBSLURM_NTASKS_PER_NODE\fR
 Set to value of the \-\-ntasks\-per\-node\fR option, if specified.
+.TP
+\fBSLURM_NTASKS_PER_SOCKET\fR
+Set to value of the \-\-ntasks\-per\-socket\fR option, if specified.
 .TP
 \fBSLURM_PROFILE\fR
 Same as \fB\-\-profile\fR
@@ -1797,7 +1753,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010\-2015 SchedMD LLC.
+Copyright (C) 2010\-2018 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <https://slurm.schedmd.com/>.

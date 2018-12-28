@@ -5,11 +5,11 @@
  *  Written by Susanne M. Balle <susanne.balle@hp.com>, who borrowed heavily
  *  from select/linear
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -119,14 +119,18 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 	else
 		gres_list = node_ptr->gres_list;
 
-	gres_plugin_job_core_filter(job_ptr->gres_list, gres_list, test_only,
-				    core_map, core_start_bit, core_end_bit,
-				    node_ptr->name);
-	gres_cores = gres_plugin_job_test(job_ptr->gres_list,
-					  gres_list, test_only,
-					  core_map, core_start_bit,
-					  core_end_bit, job_ptr->job_id,
-					  node_ptr->name);
+	if (job_ptr->bit_flags & GRES_DISABLE_BIND) {
+		gres_cores = NO_VAL;
+	} else {
+		gres_plugin_job_core_filter(job_ptr->gres_list, gres_list,
+					    test_only, core_map, core_start_bit,
+					    core_end_bit, node_ptr->name);
+		gres_cores = gres_plugin_job_test(job_ptr->gres_list,
+						  gres_list, test_only,
+						  core_map, core_start_bit,
+						  core_end_bit, job_ptr->job_id,
+						  node_ptr->name);
+	}
 
 	if (job_ptr->details && (cr_type & CR_MEMORY) && cpus) {
 		req_mem   = job_ptr->details->pn_min_memory & ~MEM_PER_CPU;
@@ -263,10 +267,15 @@ static int _verify_node_state(struct part_res_record *cr_part_ptr,
 			gres_list = node_usage[i].gres_list;
 		else
 			gres_list = node_ptr->gres_list;
-		gres_cores = gres_plugin_job_test(job_ptr->gres_list,
-						  gres_list, true,
-						  NULL, 0, 0, job_ptr->job_id,
-						  node_ptr->name);
+		if (job_ptr->bit_flags & GRES_DISABLE_BIND) {
+			gres_cores = NO_VAL;
+		} else {
+			gres_cores = gres_plugin_job_test(job_ptr->gres_list,
+							  gres_list, true,
+							  NULL, 0, 0,
+							  job_ptr->job_id,
+							  node_ptr->name);
+		}
 		gres_cpus = gres_cores;
 		if (gres_cpus != NO_VAL)
 			gres_cpus *= cpus_per_core;
@@ -537,8 +546,8 @@ extern int cr_job_test(struct job_record *job_ptr, bitstr_t *bitmap, int mode,
 	}
 
 	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-		info("select/serial: evaluating job %u on %u nodes",
-		     job_ptr->job_id, bit_set_count(bitmap));
+		info("select/serial: evaluating %pJ on %u nodes",
+		     job_ptr, bit_set_count(bitmap));
 	}
 
 	orig_map = bit_copy(bitmap);
@@ -667,8 +676,8 @@ extern int cr_job_test(struct job_record *job_ptr, bitstr_t *bitmap, int mode,
 			break;
 	}
 	if (!jp_ptr) {
-		fatal("select/serial: could not find partition for job %u",
-		      job_ptr->job_id);
+		fatal("select/serial: could not find partition for %pJ",
+		      job_ptr);
 		return SLURM_ERROR;	/* Fix CLANG false positive */
 	}
 
@@ -873,8 +882,8 @@ alloc_job:
 	}
 
 	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-		info("select/serial: cr_job_test: distributing job %u",
-		     job_ptr->job_id);
+		info("select/serial: cr_job_test: distributing %pJ",
+		     job_ptr);
 	}
 
 	/** create the struct_job_res  **/
@@ -929,9 +938,8 @@ alloc_job:
 	}
 
 	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-		info("select/serial: cr_job_test: job %u ncpus %u cbits %u/%d "
-		     "nbits %u", job_ptr->job_id,
-		     job_res->ncpus, bit_set_count(free_cores), 1,
+		info("select/serial: cr_job_test: %pJ ncpus %u cbits %u/%d nbits %u",
+		     job_ptr, job_res->ncpus, bit_set_count(free_cores), 1,
 		     job_res->nhosts);
 	}
 	FREE_NULL_BITMAP(free_cores);

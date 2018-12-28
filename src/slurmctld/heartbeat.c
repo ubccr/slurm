@@ -4,11 +4,11 @@
  *  Copyright (C) 2017 SchedMD LLC.
  *  Written by Tim Wickberg <tim@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -100,8 +100,6 @@ static void *_heartbeat_thread(void *no_data)
 					  slurmctld_conf.state_save_location);
 		new_file = xstrdup_printf("%s.new", reg_file);
 
-		nl = HTON_uint64((uint64_t) now);
-
 		fd = open(new_file, O_CREAT|O_WRONLY|O_TRUNC|O_CLOEXEC, 0600);
 		if (fd < 0) {
 			error("%s: heartbeat file creation failed to %s.",
@@ -109,6 +107,16 @@ static void *_heartbeat_thread(void *no_data)
 			goto delay;
 		}
 
+		nl = HTON_uint64((uint64_t) now);
+		if (write(fd, &nl, sizeof(uint64_t)) != sizeof(uint64_t)) {
+			error("%s: heartbeat write failed to %s.",
+			      __func__, new_file);
+			close(fd);
+			(void) unlink(new_file);
+			goto delay;
+		}
+
+		nl = HTON_uint64((uint64_t) backup_inx);
 		if (write(fd, &nl, sizeof(uint64_t)) != sizeof(uint64_t)) {
 			error("%s: heartbeat write failed to %s.",
 			      __func__, new_file);
@@ -141,8 +149,8 @@ delay:
 
 void heartbeat_start(void)
 {
-	if (!slurmctld_conf.backup_addr) {
-		debug("No BackupController, not launching heartbeat.");
+	if (slurmctld_conf.control_cnt < 2) {
+		debug("No backup controllers, not launching heartbeat.");
 		return;
 	}
 
@@ -164,11 +172,12 @@ void heartbeat_stop(void)
 
 #define OPEN_RETRIES 3
 
-time_t get_last_heartbeat(void)
+time_t get_last_heartbeat(int *server_inx)
 {
 	char *file;
 	int fd = -1, i;
 	uint64_t value;
+	uint64_t inx;
 
 	file = xstrdup_printf("%s/heartbeat",
 			      slurmctld_conf.state_save_location);
@@ -198,6 +207,13 @@ time_t get_last_heartbeat(void)
 		error("%s: heartbeat read failed from %s.",
 		      __func__, file);
 		value = 0;
+	}
+	if (read(fd, &inx, sizeof(uint64_t)) != sizeof(uint64_t)) {
+		/* Information not available before Slurm version 18.08 */
+		debug("%s: heartbeat read failed from %s.",
+		      __func__, file);
+	} else if (server_inx) {
+		*server_inx = NTOH_uint64(inx);
 	}
 
 	close(fd);

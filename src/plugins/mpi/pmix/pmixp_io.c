@@ -5,11 +5,11 @@
  *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 #include <stdio.h>
@@ -145,7 +145,7 @@ _pmixp_io_drop_messages(pmixp_io_engine_t *eng)
 		void *msg = NULL;
 
 		/* complete all messages */
-		pmixp_io_send_cleanup(eng);
+		pmixp_io_send_cleanup(eng, PMIXP_P2P_REGULAR);
 
 		/* drop all outstanding messages */
 		while ((msg = list_dequeue(eng->send_queue))) {
@@ -558,6 +558,7 @@ int pmixp_io_send_enqueue(pmixp_io_engine_t *eng, void *msg)
 	slurm_mutex_lock(&eng->send_lock);
 	_send_progress(eng);
 	slurm_mutex_unlock(&eng->send_lock);
+	pmixp_io_send_cleanup(eng, PMIXP_P2P_INLINE);
 
 	return SLURM_SUCCESS;
 }
@@ -594,11 +595,11 @@ bool pmixp_io_send_pending(pmixp_io_engine_t *eng)
 	return ret;
 }
 
-void pmixp_io_send_cleanup(pmixp_io_engine_t *eng)
+void pmixp_io_send_cleanup(pmixp_io_engine_t *eng, pmixp_p2p_ctx_t ctx)
 {
 	void *msg = NULL;
 	while ((msg = list_dequeue(eng->complete_queue))) {
-		eng->h.send_complete(msg, PMIXP_P2P_REGULAR, SLURM_SUCCESS);
+		eng->h.send_complete(msg, ctx, SLURM_SUCCESS);
 	}
 }
 
@@ -608,5 +609,5 @@ void pmixp_io_send_progress(pmixp_io_engine_t *eng)
 	slurm_mutex_lock(&eng->send_lock);
 	_send_progress(eng);
 	slurm_mutex_unlock(&eng->send_lock);
-	pmixp_io_send_cleanup(eng);
+	pmixp_io_send_cleanup(eng, PMIXP_P2P_REGULAR);
 }

@@ -9,11 +9,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,13 +29,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -45,6 +45,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,8 +90,6 @@ strong_alias(get_unit_type, slurm_get_unit_type);
 
 /* STATIC VARIABLES */
 /* static pthread_mutex_t config_lock = PTHREAD_MUTEX_INITIALIZER; */
-static slurm_protocol_config_t proto_conf_default;
-static slurm_protocol_config_t *proto_conf = &proto_conf_default;
 /* static slurm_ctl_conf_t slurmctld_conf; */
 static int message_timeout = -1;
 
@@ -110,71 +109,76 @@ slurm_dbd_conf_t *slurmdbd_conf = NULL;
 /**********************************************************************\
  * protocol configuration functions
 \**********************************************************************/
-/* slurm_set_api_config
- * sets the slurm_protocol_config object
- * NOT THREAD SAFE
- * IN protocol_conf		-  slurm_protocol_config object
- *
- * XXX: Why isn't the "config_lock" mutex used here?
- */
-int slurm_set_api_config(slurm_protocol_config_t * protocol_conf)
+
+/* Free memory space returned by _slurm_api_get_comm_config() */
+static void _slurm_api_free_comm_config(slurm_protocol_config_t *proto_conf)
 {
-	proto_conf = protocol_conf;
-	return SLURM_SUCCESS;
+	if (proto_conf) {
+		xfree(proto_conf->controller_addr);
+		xfree(proto_conf);
+	}
 }
 
-/* slurm_get_api_config
- * returns a pointer to the current slurm_protocol_config object
- * RET slurm_protocol_config_t  - current slurm_protocol_config object
+/*
+ * Get communication data structure based upon configuration file
+ * RET communication information structure, call _slurm_api_free_comm_config
+ *	to release allocated memory
  */
-slurm_protocol_config_t *slurm_get_api_config(void)
+static slurm_protocol_config_t *_slurm_api_get_comm_config(void)
 {
-	return proto_conf;
-}
-
-/* slurm_api_set_default_config
- *      called by the send_controller_msg function to ensure that at least
- *	the compiled in default slurm_protocol_config object is initialized
- * RET int		 - return code
- */
-int slurm_api_set_default_config(void)
-{
-	int rc = SLURM_SUCCESS;
+	slurm_protocol_config_t *proto_conf = NULL;
+	slurm_addr_t controller_addr;
 	slurm_ctl_conf_t *conf;
+	int i;
 
-	/*slurm_conf_init(NULL);*/
 	conf = slurm_conf_lock();
 
-	if (conf->control_addr == NULL) {
+	if (!conf->control_cnt ||
+	    !conf->control_addr || !conf->control_addr[0]) {
 		error("Unable to establish controller machine");
-		rc = SLURM_ERROR;
 		goto cleanup;
 	}
 	if (conf->slurmctld_port == 0) {
 		error("Unable to establish controller port");
-		rc = SLURM_ERROR;
+		goto cleanup;
+	}
+	if (conf->control_cnt == 0) {
+		error("No slurmctld servers configured");
 		goto cleanup;
 	}
 
-	slurm_set_addr(&proto_conf_default.primary_controller,
-		       conf->slurmctld_port,
-		       conf->control_addr);
-	if (proto_conf_default.primary_controller.sin_port == 0) {
+	memset(&controller_addr, 0, sizeof(slurm_addr_t));
+	slurm_set_addr(&controller_addr, conf->slurmctld_port,
+		       conf->control_addr[0]);
+	if (controller_addr.sin_port == 0) {
 		error("Unable to establish control machine address");
-		rc = SLURM_ERROR;
 		goto cleanup;
 	}
 
-	if (conf->backup_addr) {
-		slurm_set_addr(&proto_conf_default.secondary_controller,
-			       conf->slurmctld_port,
-			       conf->backup_addr);
+	proto_conf = xmalloc(sizeof(slurm_protocol_config_t));
+	proto_conf->controller_addr = xmalloc(sizeof(slurm_addr_t) *
+					      conf->control_cnt);
+	proto_conf->control_cnt = conf->control_cnt;
+	memcpy(&proto_conf->controller_addr[0], &controller_addr,
+	       sizeof(slurm_addr_t));
+
+	for (i = 1; i < proto_conf->control_cnt; i++) {
+		if (conf->control_addr[i]) {
+			slurm_set_addr(&proto_conf->controller_addr[i],
+				       conf->slurmctld_port,
+				       conf->control_addr[i]);
+		}
 	}
-	proto_conf = &proto_conf_default;
+
+	if (conf->slurmctld_addr) {
+		proto_conf->vip_addr_set = true;
+		slurm_set_addr(&proto_conf->vip_addr, conf->slurmctld_port,
+			       conf->slurmctld_addr);
+	}
 
 cleanup:
 	slurm_conf_unlock();
-	return rc;
+	return proto_conf;
 }
 
 /* slurm_api_clear_config
@@ -250,6 +254,25 @@ uint16_t slurm_get_batch_start_timeout(void)
 		slurm_conf_unlock();
 	}
 	return batch_start_timeout;
+}
+
+/*
+ * slurm_get_control_cnt
+ * RET Count of SlurmctldHost records from slurm.conf
+ * (slurmctld server count, primary plus backups) 
+ */
+uint32_t slurm_get_control_cnt(void)
+{
+	uint32_t control_cnt = 0;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		control_cnt = conf->control_cnt;
+		slurm_conf_unlock();
+	}
+	return control_cnt;
 }
 
 /* slurm_get_suspend_timeout
@@ -912,7 +935,7 @@ static int _tres_weight_item(double *weights, char *item_str)
 	if (strchr(type, '/'))
 		type = strtok_r(type, "/", &name);
 
-	if (!value_str || !*value_str) {
+	if (!value_str || !*value_str || !isdigit(*value_str)) {
 		error("\"%s\" is an invalid TRES weight entry", item_str);
 		return SLURM_ERROR;
 	}
@@ -946,13 +969,14 @@ static int _tres_weight_item(double *weights, char *item_str)
 	return SLURM_SUCCESS;
 }
 
-/* slurm_get_priority_weight_tres_array
+/* slurm_get_tres_weight_array
  * IN weights_str - string of tres and weights to be parsed.
  * IN tres_cnt - count of how many tres' are on the system (e.g.
  * 		slurmctld_tres_cnt).
+ * IN fail - whether to fatal or not if there are parsing errors.
  * RET double* of tres weights.
  */
-double *slurm_get_tres_weight_array(char *weights_str, int tres_cnt)
+double *slurm_get_tres_weight_array(char *weights_str, int tres_cnt, bool fail)
 {
 	double *weights;
 	char *tmp_str;
@@ -969,8 +993,12 @@ double *slurm_get_tres_weight_array(char *weights_str, int tres_cnt)
 		if (_tres_weight_item(weights, token)) {
 			xfree(weights);
 			xfree(tmp_str);
-			fatal("failed to parse tres weights str '%s'",
-			      weights_str);
+			if (fail)
+				fatal("failed to parse tres weights str '%s'",
+				      weights_str);
+			else
+				error("failed to parse tres weights str '%s'",
+				      weights_str);
 			return NULL;
 		}
 		token = strtok_r(NULL, ",", &last);
@@ -995,6 +1023,24 @@ uint16_t slurm_get_private_data(void)
 		slurm_conf_unlock();
 	}
 	return private_data;
+}
+
+/* slurm_get_resume_fail_program
+ * returns the ResumeFailProgram from slurmctld_conf object
+ * RET char *    - ResumeFailProgram, MUST be xfreed by caller
+ */
+char *slurm_get_resume_fail_program(void)
+{
+	char *resume_fail_program = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		resume_fail_program = xstrdup(conf->resume_fail_program);
+		slurm_conf_unlock();
+	}
+	return resume_fail_program;
 }
 
 /* slurm_get_resume_program
@@ -1145,6 +1191,25 @@ char *slurm_get_cluster_name(void)
 	}
 	return name;
 }
+
+/* slurm_get_comm_parameters
+ * returns the value of comm_param in slurmctld_conf object
+ * RET char *    - comm parameters, MUST be xfreed by caller
+ */
+extern char *slurm_get_comm_parameters(void)
+{
+	char *comm_params = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		comm_params = xstrdup(conf->comm_params);
+		slurm_conf_unlock();
+	}
+	return comm_params;
+}
+
 
 /* slurm_get_crypto_type
  * returns the crypto_type from slurmctld_conf object
@@ -2517,6 +2582,42 @@ uint32_t slurm_get_slurmd_user_id(void)
 	return slurmd_uid;
 }
 
+/*
+ * slurm_get_slurmd_params
+ * RET slurmd_params must be xfreed by caller
+ */
+char *slurm_get_slurmd_params(void)
+{
+	char *slurmd_params = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		slurmd_params = xstrdup(conf->slurmd_params);
+		slurm_conf_unlock();
+	}
+	return slurmd_params;
+}
+
+/*
+ * slurm_get_slurmctld_params
+ * RET slurmctld_params must be xfreed by caller
+ */
+char *slurm_get_slurmctld_params(void)
+{
+	char *slurmctld_params = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		slurmctld_params = xstrdup(conf->slurmctld_params);
+		slurm_conf_unlock();
+	}
+	return slurmctld_params;
+}
+
 /* slurm_get_sched_params
  * RET char * - Value of SchedulerParameters, MUST be xfreed by caller */
 extern char *slurm_get_sched_params(void)
@@ -2930,7 +3031,7 @@ int slurm_init_msg_engine_ports(uint16_t *ports)
 		return -1;
 	}
 
-	cc = listen(s, SLURM_PROTOCOL_DEFAULT_LISTEN_BACKLOG);
+	cc = listen(s, SLURM_DEFAULT_LISTEN_BACKLOG);
 	if (cc < 0) {
 		close(s);
 		return -1;
@@ -2955,33 +3056,6 @@ int slurm_init_msg_engine_addrname_port(char *addr_name, uint16_t port)
 	return slurm_init_msg_engine(&addr);
 }
 
-/*
- *  Close an established message engine.
- *    Returns SLURM_SUCCESS or SLURM_FAILURE.
- *
- * IN  fd  - an open file descriptor to close
- * RET int - the return code
- */
-int slurm_shutdown_msg_engine(int fd)
-{
-	int rc = close(fd);
-	if (rc)
-		slurm_seterrno(SLURM_COMMUNICATIONS_SHUTDOWN_ERROR);
-	return rc;
-}
-
-/*
- *   Close an established message connection.
- *     Returns SLURM_SUCCESS or SLURM_FAILURE.
- *
- * IN  fd  - an open file descriptor to close
- * RET int - the return code
- */
-int slurm_shutdown_msg_conn(int fd)
-{
-	return close(fd);
-}
-
 /**********************************************************************\
  * msg connection establishment functions used by msg clients
 \**********************************************************************/
@@ -3002,7 +3076,8 @@ int slurm_open_msg_conn(slurm_addr_t * slurm_address)
 	return fd;
 }
 
-/* calls connect to make a connection-less datagram connection to the
+/*
+ * Calls connect to make a connection-less datagram connection 
  *	primary or secondary slurmctld message engine
  * IN/OUT addr       - address of controller contacted
  * IN/OUT use_backup - IN: whether to try the backup first or not
@@ -3014,23 +3089,27 @@ extern int slurm_open_controller_conn(slurm_addr_t *addr, bool *use_backup,
 				      slurmdb_cluster_rec_t *comm_cluster_rec)
 {
 	int fd = -1;
-	slurm_ctl_conf_t *conf;
-	slurm_protocol_config_t *myproto = NULL;
-	int retry, max_retry_period;
-	static int have_backup = 0;
+	slurm_protocol_config_t *proto_conf = NULL;
+	int i, retry, max_retry_period;
 
 	if (!comm_cluster_rec) {
 		/* This means the addr wasn't set up already */
-		if (slurm_api_set_default_config() < 0)
+		if (!(proto_conf = _slurm_api_get_comm_config()))
 			return SLURM_FAILURE;
-		myproto = xmalloc(sizeof(slurm_protocol_config_t));
-		memcpy(myproto, proto_conf, sizeof(slurm_protocol_config_t));
-		myproto->primary_controller.sin_port =
-				htons(slurmctld_conf.slurmctld_port +
-				(((time(NULL) + getpid()) %
-				slurmctld_conf.slurmctld_port_count)));
-		myproto->secondary_controller.sin_port =
-				myproto->primary_controller.sin_port;
+
+		for (i = 0; i < proto_conf->control_cnt; i++) {
+			proto_conf->controller_addr[i].sin_port =
+					htons(slurmctld_conf.slurmctld_port +
+					(((time(NULL) + getpid()) %
+					slurmctld_conf.slurmctld_port_count)));
+		}
+
+		if (proto_conf->vip_addr_set) {
+			proto_conf->vip_addr.sin_port =
+					htons(slurmctld_conf.slurmctld_port +
+					(((time(NULL) + getpid()) %
+					slurmctld_conf.slurmctld_port_count)));
+		}
 	}
 
 #ifdef HAVE_NATIVE_CRAY
@@ -3054,64 +3133,59 @@ extern int slurm_open_controller_conn(slurm_addr_t *addr, bool *use_backup,
 			if (fd >= 0)
 				goto end_it;
 			debug("Failed to contact controller: %m");
+		} else if (proto_conf->vip_addr_set) {
+			fd = slurm_open_msg_conn(&proto_conf->vip_addr);
+			if (fd >= 0)
+				goto end_it;
+			debug("Failed to contact controller: %m");
 		} else {
 			if (!*use_backup) {
 				fd = slurm_open_msg_conn(
-						&myproto->primary_controller);
+						&proto_conf->controller_addr[0]);
 				if (fd >= 0) {
 					*use_backup = false;
 					goto end_it;
 				}
-				debug("Failed to contact primary controller: "
-				      "%m");
-
-				if (retry == 0) {
-					conf = slurm_conf_lock();
-					if (conf->backup_controller)
-						have_backup = 1;
-					slurm_conf_unlock();
-				}
+				debug("Failed to contact primary controller: %m");
 			}
-
-			if (have_backup || *use_backup) {
-				fd = slurm_open_msg_conn(&myproto->
-							 secondary_controller);
-				if (fd >= 0) {
-					debug("Contacted secondary controller");
-					*use_backup = true;
-					goto end_it;
+			if ((proto_conf->control_cnt > 1) || *use_backup) {
+				for (i = 1; i < proto_conf->control_cnt; i++) {
+					fd = slurm_open_msg_conn(
+						&proto_conf->controller_addr[i]);
+					if (fd >= 0) {
+						debug("Contacted backup controller %d",
+						      (i - 1));
+						*use_backup = true;
+						goto end_it;
+					}
 				}
 				*use_backup = false;
-				debug("Failed to contact secondary "
-				      "controller: %m");
+				debug("Failed to contact backup controller: %m");
 			}
 		}
 	}
 	addr = NULL;
-	xfree(myproto);
+	_slurm_api_free_comm_config(proto_conf);
 	slurm_seterrno_ret(SLURMCTLD_COMMUNICATIONS_CONNECTION_ERROR);
 
 end_it:
-	xfree(myproto);
+	_slurm_api_free_comm_config(proto_conf);
 	return fd;
 }
 
-/* calls connect to make a connection-less datagram connection to the
- *	primary or secondary slurmctld message engine
- * IN dest      - controller to contact, primary or secondary
+/*
+ * Calls connect to make a connection-less datagram connection to a specific
+ *	primary or backup slurmctld message engine
+ * IN dest      - controller to contact (0=primary, 1=backup, 2=backup2, etc.)
  * IN comm_cluster_rec	- Communication record (host/port/version)/
  * RET int      - file descriptor of the connection created
  */
-extern int slurm_open_controller_conn_spec(enum controller_id dest,
+extern int slurm_open_controller_conn_spec(int dest,
 				      slurmdb_cluster_rec_t *comm_cluster_rec)
 {
+	slurm_protocol_config_t *proto_conf = NULL;
 	slurm_addr_t *addr;
 	int rc;
-
-	if (slurm_api_set_default_config() < 0) {
-		debug3("Error: Unable to set default config");
-		return SLURM_ERROR;
-	}
 
 	if (comm_cluster_rec) {
 		if (comm_cluster_rec->control_addr.sin_port == 0) {
@@ -3121,22 +3195,24 @@ extern int slurm_open_controller_conn_spec(enum controller_id dest,
 				comm_cluster_rec->control_host);
 		}
 		addr = &comm_cluster_rec->control_addr;
-	} else if (dest == PRIMARY_CONTROLLER)
-		addr = &proto_conf->primary_controller;
-	else {	/* (dest == SECONDARY_CONTROLLER) */
-		slurm_ctl_conf_t *conf;
-		addr = NULL;
-		conf = slurm_conf_lock();
-		if (conf->backup_addr)
-			addr = &proto_conf->secondary_controller;
-		slurm_conf_unlock();
-		if (!addr)
+	} else {	/* Some backup slurmctld */
+		if (!(proto_conf = _slurm_api_get_comm_config())) {
+			debug3("Error: Unable to set default config");
 			return SLURM_ERROR;
+		}
+		addr = NULL;
+		if ((dest >= 0) && (dest <= proto_conf->control_cnt))
+			addr = &proto_conf->controller_addr[dest];
+		if (!addr) {
+			rc = SLURM_ERROR;
+			goto fini;
+		}
 	}
 
 	rc = slurm_open_msg_conn(addr);
 	if (rc == -1)
 		_remap_slurmctld_errno();
+fini:	_slurm_api_free_comm_config(proto_conf);
 	return rc;
 }
 
@@ -3901,9 +3977,8 @@ int slurm_send_node_msg(int fd, slurm_msg_t * msg)
 	/*
 	 * Send message
 	 */
-	rc = slurm_msg_sendto( fd, get_buf_data(buffer),
-			       get_buf_offset(buffer),
-			       SLURM_PROTOCOL_NO_SEND_RECV_FLAGS );
+	rc = slurm_msg_sendto(fd, get_buf_data(buffer),
+			      get_buf_offset(buffer));
 
 	if ((rc < 0) && (errno == ENOTCONN)) {
 		debug3("slurm_msg_sendto: peer has disappeared for msg_type=%u",
@@ -4034,7 +4109,7 @@ int slurm_get_peer_addr(int fd, slurm_addr_t * slurm_address)
  * OUT slurm_address	- slurm_addr_t to pack
  * IN size_val  	- how many to pack
  * IN/OUT buffer	- buffer to pack the slurm_addr_t from
- * returns		- SLURM error code
+ * returns		- Slurm error code
  */
 void slurm_pack_slurm_addr_array(slurm_addr_t * slurm_address,
 				 uint32_t size_val, Buf buffer)
@@ -4054,7 +4129,7 @@ void slurm_pack_slurm_addr_array(slurm_addr_t * slurm_address,
  * OUT slurm_address	- slurm_addr_t to unpack to
  * IN size_val  	- how many to unpack
  * IN/OUT buffer	- buffer to upack the slurm_addr_t from
- * returns		- SLURM error code
+ * returns		- Slurm error code
  */
 int slurm_unpack_slurm_addr_array(slurm_addr_t ** slurm_address,
 				  uint32_t * size_val, Buf buffer)
@@ -4083,23 +4158,29 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
+static void _resp_msg_setup(slurm_msg_t *msg, slurm_msg_t *resp_msg,
+			    uint16_t msg_type, void *data)
+{
+	slurm_msg_t_init(resp_msg);
+	resp_msg->address = msg->address;
+	resp_msg->conn = msg->conn;
+	resp_msg->data = data;
+	resp_msg->flags = msg->flags;
+	resp_msg->forward = msg->forward;
+	resp_msg->forward_struct = msg->forward_struct;
+	resp_msg->msg_type = msg_type;
+	resp_msg->protocol_version = msg->protocol_version;
+	resp_msg->ret_list = msg->ret_list;
+	resp_msg->orig_addr = msg->orig_addr;
+}
+
 static void _rc_msg_setup(slurm_msg_t *msg, slurm_msg_t *resp_msg,
 			  return_code_msg_t *rc_msg, int rc)
 {
 	memset(rc_msg, 0, sizeof(return_code_msg_t));
 	rc_msg->return_code = rc;
 
-	slurm_msg_t_init(resp_msg);
-	resp_msg->protocol_version = msg->protocol_version;
-	resp_msg->address  = msg->address;
-	resp_msg->msg_type = RESPONSE_SLURM_RC;
-	resp_msg->data     = rc_msg;
-	resp_msg->conn = msg->conn;
-	resp_msg->flags = msg->flags;
-	resp_msg->forward = msg->forward;
-	resp_msg->forward_struct = msg->forward_struct;
-	resp_msg->ret_list = msg->ret_list;
-	resp_msg->orig_addr = msg->orig_addr;
+	_resp_msg_setup(msg, resp_msg, RESPONSE_SLURM_RC, rc_msg);
 }
 
 
@@ -4108,6 +4189,43 @@ static void _rc_msg_setup(slurm_msg_t *msg, slurm_msg_t *resp_msg,
  * They open a connection do work then close the connection all within
  * the function
 \**********************************************************************/
+
+/* slurm_send_msg
+ * given the original request message this function sends a
+ *	arbitrary message back to the client that made the request
+ * IN request_msg	- slurm_msg the request msg
+ * IN msg_type          - message type being returned
+ * IN resp_msg		- the message being returned to the client
+ */
+int slurm_send_msg(slurm_msg_t *msg, uint16_t msg_type, void *resp)
+{
+	if (msg->msg_index && msg->ret_list) {
+		slurm_msg_t *resp_msg = xmalloc_nz(sizeof(slurm_msg_t));
+
+		_resp_msg_setup(msg, resp_msg, msg_type, resp);
+
+		resp_msg->msg_index = msg->msg_index;
+		resp_msg->ret_list = NULL;
+		/*
+		 * The return list here is the list we are sending to
+		 * the node, so after we attach this message to it set
+		 * it to NULL to remove it.
+		 */
+		list_append(msg->ret_list, resp_msg);
+		return SLURM_SUCCESS;
+	} else {
+		slurm_msg_t resp_msg;
+
+		if (msg->conn_fd < 0) {
+			slurm_seterrno(ENOTCONN);
+			return SLURM_ERROR;
+		}
+		_resp_msg_setup(msg, &resp_msg, msg_type, resp);
+
+		/* send message */
+		return slurm_send_node_msg(msg->conn_fd, &resp_msg);
+	}
+}
 
 /* slurm_send_rc_msg
  * given the original request message this function sends a
@@ -4266,18 +4384,8 @@ static int
 _send_and_recv_msg(int fd, slurm_msg_t *req,
 		   slurm_msg_t *resp, int timeout)
 {
-	int retry = 0;
 	int rc = slurm_send_recv_msg(fd, req, resp, timeout);
-
-	/*
-	 *  Attempt to close an open connection
-	 */
-	while ((slurm_shutdown_msg_conn(fd) < 0) && (errno == EINTR) ) {
-		if (retry++ > MAX_SHUTDOWN_RETRY) {
-			break;
-		}
-	}
-
+	(void) close(fd);
 	return rc;
 }
 
@@ -4295,7 +4403,6 @@ _send_and_recv_msg(int fd, slurm_msg_t *req,
 static List
 _send_and_recv_msgs(int fd, slurm_msg_t *req, int timeout)
 {
-	int retry = 0;
 	List ret_list = NULL;
 	int steps = 0;
 
@@ -4328,21 +4435,13 @@ _send_and_recv_msgs(int fd, slurm_msg_t *req, int timeout)
 		ret_list = slurm_receive_msgs(fd, steps, timeout);
 	}
 
-
-	/*
-	 *  Attempt to close an open connection
-	 */
-	while ((slurm_shutdown_msg_conn(fd) < 0) && (errno == EINTR) ) {
-		if (retry++ > MAX_SHUTDOWN_RETRY) {
-			break;
-		}
-	}
+	(void) close(fd);
 
 	return ret_list;
 }
 
-
-/* slurm_send_recv_controller_msg
+/*
+ * slurm_send_recv_controller_msg
  * opens a connection to the controller, sends the controller a message,
  * listens for the response, then closes the connection
  * IN request_msg	- slurm_msg request
@@ -4365,7 +4464,8 @@ extern int slurm_send_recv_controller_msg(slurm_msg_t * request_msg,
 	static bool use_backup = false;
 	slurmdb_cluster_rec_t *save_comm_cluster_rec = comm_cluster_rec;
 
-	/* Just in case the caller didn't initialize his slurm_msg_t, and
+	/*
+	 * Just in case the caller didn't initialize his slurm_msg_t, and
 	 * since we KNOW that we are only sending to one node (the controller),
 	 * we initialize some forwarding variables to disable forwarding.
 	 */
@@ -4385,13 +4485,15 @@ tryagain:
 	}
 
 	conf = slurm_conf_lock();
-	have_backup = conf->backup_controller ? true : false;
+	have_backup = conf->control_cnt > 1;
 	slurmctld_timeout = conf->slurmctld_timeout;
 	slurm_conf_unlock();
 
 	while (retry) {
-		/* If the backup controller is in the process of assuming
-		 * control, we sleep and retry later */
+		/*
+		 * If the backup controller is in the process of assuming
+		 * control, we sleep and retry later
+		 */
 		retry = 0;
 		rc = _send_and_recv_msg(fd, request_msg, response_msg, 0);
 		if (response_msg->auth_cred)
@@ -4429,8 +4531,10 @@ tryagain:
 	if (!rc && (response_msg->msg_type == RESPONSE_SLURM_REROUTE_MSG)) {
 		reroute_msg_t *rr_msg = (reroute_msg_t *)response_msg->data;
 
-		/* Don't expect mutliple hops but in the case it does
-		 * happen, free the previous rr cluster_rec. */
+		/*
+		 * Don't expect mutliple hops but in the case it does
+		 * happen, free the previous rr cluster_rec.
+		 */
 		if (comm_cluster_rec &&
 		    (comm_cluster_rec != save_comm_cluster_rec))
 			slurmdb_destroy_cluster_rec(comm_cluster_rec);
@@ -4483,13 +4587,12 @@ extern int slurm_send_only_controller_msg(slurm_msg_t *req,
 				slurmdb_cluster_rec_t *comm_cluster_rec)
 {
 	int      rc = SLURM_SUCCESS;
-	int      retry = 0;
 	int fd = -1;
 	slurm_addr_t ctrl_addr;
 	bool     use_backup = false;
 
 	/*
-	 *  Open connection to SLURM controller:
+	 *  Open connection to Slurm controller:
 	 */
 	if ((fd = slurm_open_controller_conn(&ctrl_addr, &use_backup,
 					     comm_cluster_rec)) < 0) {
@@ -4504,15 +4607,7 @@ extern int slurm_send_only_controller_msg(slurm_msg_t *req,
 		rc = SLURM_SUCCESS;
 	}
 
-	/*
-	 *  Attempt to close an open connection
-	 */
-	while ( (slurm_shutdown_msg_conn(fd) < 0) && (errno == EINTR) ) {
-		if (retry++ > MAX_SHUTDOWN_RETRY) {
-			rc = SLURM_SOCKET_ERROR;
-			goto cleanup;
-		}
-	}
+	(void) close(fd);
 
 cleanup:
 	if (rc != SLURM_SUCCESS)
@@ -4525,12 +4620,34 @@ cleanup:
  *   Then, immediately close the connection w/out waiting for a reply.
  *
  *   Returns SLURM_SUCCESS on success SLURM_FAILURE (< 0) for failure.
+ *
+ * DO NOT USE THIS IN NEW CODE
+ * Use slurm_send_recv_rc_msg_only_one() or something similar instead.
+ *
+ * By not waiting for a response message, the message to be transmitted
+ * may never be received by the remote end. The remote TCP stack may
+ * acknowledge the data while the application itself has not had a chance
+ * to receive it. The only way to tell that the application has processed
+ * a given packet is for it to send back a message across the socket itself.
+ *
+ * The receive side looks like: poll() && read(), close(). If the poll() times
+ * out, the kernel may still ACK the data while the application has jumped to
+ * closing the connection. The send side cannot then distinguish between the
+ * close happening as a result of the timeout vs. as a normal message shutdown.
+ *
+ * This is only one example of the many races inherent in this approach.
+ *
+ * See "UNIX Network Programming" Volume 1 (Third Edition) Section 7.5 on
+ * SO_LINGER for a description of the subtle hazards inherent in abusing
+ * TCP as a unidirectional pipe.
  */
 int slurm_send_only_node_msg(slurm_msg_t *req)
 {
 	int rc = SLURM_SUCCESS;
-	int retry = 0;
 	int fd = -1;
+	struct pollfd pfd;
+	int value = -1;
+	int pollrc;
 
 	if ((fd = slurm_open_msg_conn(&req->address)) < 0) {
 		return SLURM_SOCKET_ERROR;
@@ -4539,18 +4656,92 @@ int slurm_send_only_node_msg(slurm_msg_t *req)
 	if ((rc = slurm_send_node_msg(fd, req)) < 0) {
 		rc = SLURM_ERROR;
 	} else {
-		debug3("slurm_send_only_node_msg: sent %d", rc);
+		debug3("%s: sent %d", __func__, rc);
 		rc = SLURM_SUCCESS;
 	}
+
 	/*
-	 *  Attempt to close an open connection
+	 * Make sure message was received by remote, and that there isn't
+	 * and outstanding write() or that the connection has been reset.
+	 *
+	 * The shutdown() call intentionally falls through to the next block,
+	 * the poll() should hit POLLERR which gives the TICOUTQ count as an
+	 * additional diagnostic element.
+	 *
+	 * The steps below may result in a false-positive on occassion, in
+	 * which case the code path above may opt to retransmit an already
+	 * received message. If this is a concern, you should not be using
+	 * this function.
 	 */
-	while ( (slurm_shutdown_msg_conn(fd) < 0) && (errno == EINTR) ) {
-		if (retry++ > MAX_SHUTDOWN_RETRY)
-			return SLURM_SOCKET_ERROR;
+	if (shutdown(fd, SHUT_WR))
+		debug("%s: shutdown call failed: %m", __func__);
+
+again:
+	pfd.fd = fd;
+	pfd.events = POLLIN;
+	/*
+	 * Wait for 1000 ms for shutdown to respond.  We found this is long
+	 * enough to get a response, but any longer would start to produce a
+	 * delay that could be compounded if many of these started stacking up.
+	 * We were easily able to create this kind of scenario when restarting
+	 * the slurmds over and over with message aggregation turned on.
+	 */
+	pollrc = poll(&pfd, 1, 1000);
+	if (pollrc == -1) {
+		if (errno == EINTR)
+			goto again;
+		debug("%s: poll error: %m", __func__);
+		(void) close(fd);
+		return SLURM_ERROR;
 	}
 
+	if (pollrc == 0) {
+		if (ioctl(fd, TIOCOUTQ, &value))
+			debug("%s: TIOCOUTQ ioctl failed", __func__);
+		debug("%s: poll timed out with %d outstanding: %m", __func__, value);
+		(void) close(fd);
+		return SLURM_ERROR;
+	}
+
+	if (pfd.revents & POLLERR) {
+		int err;
+		socklen_t errlen = sizeof(err);
+		int value = -1;
+
+		if (ioctl(fd, TIOCOUTQ, &value))
+			debug("%s: TIOCOUTQ ioctl failed", __func__);
+		if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen))
+			debug("%s: getsockopt error with %d outstanding: %m",
+			      __func__, value);
+		else
+			debug("%s: poll error with %d outstanding: %s",
+			      __func__, value, strerror(err));
+		(void) close(fd);
+		return SLURM_ERROR;
+	}
+
+	(void) close(fd);
+
 	return rc;
+}
+
+/*
+ * Open a connection to the "address" specified in the slurm msg `req'
+ * Then, immediately close the connection w/out waiting for a reply.
+ * Ignore any errors. This should only be used when you do not care if
+ * the message is ever received.
+ */
+void slurm_send_msg_maybe(slurm_msg_t *req)
+{
+	int fd = -1;
+
+	if ((fd = slurm_open_msg_conn(&req->address)) < 0) {
+		return;
+	}
+
+	(void) slurm_send_node_msg(fd, req);
+
+	(void) close(fd);
 }
 
 /*
@@ -4844,6 +5035,8 @@ extern void convert_num_unit2(double num, char *buf, int buf_size,
 				orig_type++;
 			}
 		}
+	} else if (flags & CONVERT_NUM_UNIT_RAW) {
+		orig_type = UNIT_NONE;
 	} else if (flags & CONVERT_NUM_UNIT_NO) {
 		/* no op */
 	} else if (flags & CONVERT_NUM_UNIT_EXACT) {
@@ -4908,7 +5101,7 @@ extern int get_convert_unit_val(int base_unit, char convert_to)
 {
 	int conv_unit = 0, conv_value = 0;
 
-	if (!(conv_unit = get_unit_type(convert_to)))
+	if ((conv_unit = get_unit_type(convert_to)) == SLURM_ERROR)
 		return SLURM_ERROR;
 
 	while (base_unit++ < conv_unit) {
@@ -5040,7 +5233,7 @@ extern void slurm_setup_sockaddr(struct sockaddr_in *sin, uint16_t port)
 		 * want to get just any address.  This is the case on
 		 * a Cray system with RSIP.
 		 */
-		char *topology_params = slurm_get_topology_param();
+		char *comm_params = slurm_get_comm_parameters();
 		char *var;
 
 		if (run_in_daemon("slurmctld"))
@@ -5048,8 +5241,7 @@ extern void slurm_setup_sockaddr(struct sockaddr_in *sin, uint16_t port)
 		else
 			var = "NoInAddrAny";
 
-		if (topology_params &&
-		    xstrcasestr(topology_params, var)) {
+		if (xstrcasestr(comm_params, var)) {
 			char host[MAXHOSTNAMELEN];
 
 			if (!gethostname(host, MAXHOSTNAMELEN)) {
@@ -5061,7 +5253,7 @@ extern void slurm_setup_sockaddr(struct sockaddr_in *sin, uint16_t port)
 		} else
 			s_addr = htonl(INADDR_ANY);
 
-		xfree(topology_params);
+		xfree(comm_params);
 	}
 
 	sin->sin_addr.s_addr = s_addr;
@@ -5150,4 +5342,27 @@ uint16_t slurm_get_prolog_timeout(void)
 	}
 
 	return timeout;
+}
+
+extern int slurm_hex_to_char(int v)
+{
+	if (v >= 0 && v < 10)
+		return '0' + v;
+	else if (v >= 10 && v < 16)
+		return ('a' - 10) + v;
+	else
+		return -1;
+}
+
+extern int slurm_char_to_hex(int c)
+{
+	int cl;
+
+	cl = tolower(c);
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	else if (cl >= 'a' && cl <= 'f')
+		return cl + (10 - 'a');
+	else
+		return -1;
 }

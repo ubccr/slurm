@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -139,6 +139,7 @@ void ping_nodes (void)
 	int i;
 	time_t now = time(NULL), still_live_time, node_dead_time;
 	static time_t last_ping_time = (time_t) 0;
+	static time_t last_ping_timeout = (time_t) 0;
 	hostlist_t down_hostlist = NULL;
 	char *host_str = NULL;
 	agent_arg_t *ping_agent_args = NULL;
@@ -172,15 +173,15 @@ void ping_nodes (void)
 	 * Because of this, we extend the SlurmdTimeout by the
 	 * time needed to complete a ping of all nodes.
 	 */
-	if ((slurmctld_conf.slurmd_timeout == 0) ||
+	if ((last_ping_timeout == 0) ||
 	    (last_ping_time == (time_t) 0)) {
 		node_dead_time = (time_t) 0;
 	} else {
-		node_dead_time = last_ping_time -
-				 slurmctld_conf.slurmd_timeout;
+		node_dead_time = last_ping_time - last_ping_timeout;
 	}
 	still_live_time = now - (slurmctld_conf.slurmd_timeout / 3);
 	last_ping_time  = now;
+	last_ping_timeout = slurmctld_conf.slurmd_timeout;
 
 	if (max_reg_threads == 0) {
 		max_reg_threads = MAX(slurm_get_tree_width(), 1);

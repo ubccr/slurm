@@ -5,11 +5,11 @@
  *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
@@ -39,6 +39,7 @@
 #include "pmixp_common.h"
 #include "pmixp_debug.h"
 #include "pmixp_info.h"
+#include "pmixp_coll.h"
 
 /* Server communication */
 static char *_srv_usock_path = NULL;
@@ -51,6 +52,8 @@ static bool _srv_use_direct_conn_ucx = true;
 #else
 static bool _srv_use_direct_conn_ucx = false;
 #endif
+static int _srv_fence_coll_type = PMIXP_COLL_CPERF_RING;
+static bool _srv_fence_coll_barrier = false;
 
 pmix_jobinfo_t _pmixp_job_info;
 
@@ -88,11 +91,31 @@ bool pmixp_info_srv_direct_conn(void){
 }
 
 bool pmixp_info_srv_direct_conn_early(void){
-	return _srv_use_direct_conn_early;
+	return _srv_use_direct_conn_early && _srv_use_direct_conn;
 }
 
 bool pmixp_info_srv_direct_conn_ucx(void){
 	return _srv_use_direct_conn_ucx && _srv_use_direct_conn;
+}
+
+int pmixp_info_srv_fence_coll_type(void)
+{
+	if (!_srv_use_direct_conn) {
+		static bool printed = false;
+		if (!printed && PMIXP_COLL_CPERF_RING == _srv_fence_coll_type) {
+			PMIXP_ERROR("Ring collective algorithm cannot be used "
+				    "with Slurm RPC's communication subsystem. "
+				    "Tree-based collective will be used instead.");
+			printed = true;
+		}
+		return PMIXP_COLL_CPERF_TREE;
+	}
+	return _srv_fence_coll_type;
+}
+
+bool pmixp_info_srv_fence_coll_barrier(void)
+{
+	return _srv_fence_coll_barrier;
 }
 
 /* Job information */
@@ -367,7 +390,7 @@ static int _env_set(char ***env)
 
 	/* save client temp directory if requested
 	 * TODO: We want to get TmpFS value as well if exists.
-	 * Need to sync with SLURM developers.
+	 * Need to sync with Slurm developers.
 	 */
 	p = getenvp(*env, PMIXP_TMPDIR_CLI);
 
@@ -386,7 +409,7 @@ static int _env_set(char ***env)
 
 
 	/* ----------- Timeout setting ------------- */
-	/* TODO: also would be nice to have a cluster-wide setting in SLURM */
+	/* TODO: also would be nice to have a cluster-wide setting in Slurm */
 	_pmixp_job_info.timeout = PMIXP_TIMEOUT_DEFAULT;
 	p = getenvp(*env, PMIXP_TIMEOUT);
 	if (p) {
@@ -442,6 +465,28 @@ static int _env_set(char ***env)
 		} else if (!xstrcmp("0", p) || !xstrcasecmp("false", p) ||
 			   !xstrcasecmp("no", p)) {
 			_srv_use_direct_conn_early = false;
+		}
+	}
+
+	/*------------- Fence coll type setting ----------*/
+	p = getenvp(*env, PMIXP_COLL_FENCE);
+	if (p) {
+		if (!xstrcmp("mixed", p)) {
+			_srv_fence_coll_type = PMIXP_COLL_CPERF_MIXED;
+		} else if (!xstrcmp("tree", p)) {
+			_srv_fence_coll_type = PMIXP_COLL_CPERF_TREE;
+		} else if (!xstrcmp("ring", p)) {
+			_srv_fence_coll_type = PMIXP_COLL_CPERF_RING;
+		}
+	}
+	p = getenvp(*env, SLURM_PMIXP_FENCE_BARRIER);
+	if (p) {
+		if (!xstrcmp("1",p) || !xstrcasecmp("true", p) ||
+		    !xstrcasecmp("yes", p)) {
+			_srv_fence_coll_barrier = true;
+		} else if (!xstrcmp("0",p) || !xstrcasecmp("false", p) ||
+			   !xstrcasecmp("no", p)) {
+			_srv_fence_coll_barrier = false;
 		}
 	}
 

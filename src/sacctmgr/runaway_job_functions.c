@@ -4,11 +4,11 @@
  *  Copyright (C) 2016 SchedMD LLC.
  *  Written by Nathan Yee <nyee32@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #include "src/sacctmgr/sacctmgr.h"
@@ -103,8 +103,8 @@ static void _print_runaway_jobs(List format_list, List jobs)
 	int field_count;
 
 	printf("NOTE: Runaway jobs are jobs that don't exist in the "
-	       "controller but are still considered pending, running or "
-	       "suspended in the database\n");
+	       "controller but have a start time and no end time "
+	       "in the database\n");
 
 	if (!format_list || !list_count(format_list)) {
 		if (!format_list)
@@ -197,12 +197,7 @@ static List _get_runaway_jobs(slurmdb_job_cond_t *job_cond)
 	List runaway_jobs = NULL;
 	List cluster_list;
 
-	job_cond->without_steps = 1;
-	job_cond->without_usage_truncation = 1;
-	job_cond->state_list = list_create(slurm_destroy_char);
-	slurm_addto_char_list(job_cond->state_list, "0");
-	slurm_addto_char_list(job_cond->state_list, "1");
-	slurm_addto_char_list(job_cond->state_list, "2");
+	job_cond->flags |= JOBCOND_FLAG_RUNAWAY | JOBCOND_FLAG_NO_TRUNC;
 
 	if (!job_cond->cluster_list || !list_count(job_cond->cluster_list)) {
 		char *cluster = slurm_get_cluster_name();
@@ -263,14 +258,11 @@ static List _get_runaway_jobs(slurmdb_job_cond_t *job_cond)
 	runaway_jobs = list_create(NULL);
 	db_jobs_itr = list_iterator_create(db_jobs_list);
 	while ((db_job = list_next(db_jobs_itr))) {
-		/* If this job has end time, it is not a runaway job */
-		if (db_job->end)
-			continue;
-
 		job_runaway = true;
 		for (i = 0, clus_job = clus_jobs->job_array;
 		     i < clus_jobs->record_count; i++, clus_job++) {
-			if (db_job->jobid == clus_job->job_id) {
+			if ((db_job->jobid == clus_job->job_id) &&
+			    (db_job->submit == clus_job->submit_time)) {
 				job_runaway = false;
 				break;
 			}
@@ -292,6 +284,7 @@ extern int sacctmgr_list_runaway_jobs(int argc, char **argv)
 	List runaway_jobs = NULL;
 	int rc = SLURM_SUCCESS;
 	int i=0;
+	char *cluster_str;
 	List format_list = list_create(slurm_destroy_char);
 	slurmdb_job_cond_t *job_cond = xmalloc(sizeof(slurmdb_job_cond_t));
 	char *ask_msg = "\nWould you like to fix these runaway jobs?\n"
@@ -312,16 +305,21 @@ extern int sacctmgr_list_runaway_jobs(int argc, char **argv)
 	}
 
 	runaway_jobs = _get_runaway_jobs(job_cond);
+	cluster_str = xstrdup(list_peek(job_cond->cluster_list));
+
 	slurmdb_destroy_job_cond(job_cond);
 
 	if (!runaway_jobs)
 		return SLURM_ERROR;
 
 	if (!list_count(runaway_jobs)) {
-		printf("Runaway Jobs: No runaway jobs found\n");
+		printf("Runaway Jobs: No runaway jobs found on cluster %s\n",
+		       cluster_str);
+		xfree(cluster_str);
 		return SLURM_SUCCESS;
 	}
 
+	xfree(cluster_str);
 	_print_runaway_jobs(format_list, runaway_jobs);
 
 	rc = slurmdb_jobs_fix_runaway(db_conn, runaway_jobs);

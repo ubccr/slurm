@@ -8,11 +8,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -62,6 +62,7 @@
 #include "src/common/fd.h"
 #include "src/common/strlcpy.h"
 #include "src/common/xsignal.h"
+#include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
 #include "src/common/util-net.h"
 
@@ -161,15 +162,14 @@ extern ssize_t slurm_msg_recvfrom_timeout(int fd, char **pbuf, size_t *lenp,
 	return (ssize_t) msglen;
 }
 
-extern ssize_t slurm_msg_sendto(int fd, char *buffer, size_t size,
-				uint32_t flags)
+extern ssize_t slurm_msg_sendto(int fd, char *buffer, size_t size)
 {
-	return slurm_msg_sendto_timeout( fd, buffer, size, flags,
-				(slurm_get_msg_timeout() * 1000));
+	return slurm_msg_sendto_timeout(fd, buffer, size,
+					(slurm_get_msg_timeout() * 1000));
 }
 
-ssize_t slurm_msg_sendto_timeout(int fd, char *buffer, size_t size,
-				 uint32_t flags, int timeout)
+ssize_t slurm_msg_sendto_timeout(int fd, char *buffer,
+				 size_t size, int timeout)
 {
 	int   len;
 	uint32_t usize;
@@ -221,7 +221,7 @@ extern int slurm_send_timeout(int fd, char *buf, size_t size,
 	while (sent < size) {
 		timeleft = timeout - _tot_wait(&tstart);
 		if (timeleft <= 0) {
-			debug("slurm_send_timeout at %d of %zd, timeout",
+			debug("slurm_send_timeout at %d of %zu, timeout",
 				sent, size);
 			slurm_seterrno(SLURM_PROTOCOL_SOCKET_IMPL_TIMEOUT);
 			sent = SLURM_ERROR;
@@ -232,7 +232,7 @@ extern int slurm_send_timeout(int fd, char *buf, size_t size,
 			if ((rc == 0) || (errno == EINTR) || (errno == EAGAIN))
  				continue;
 			else {
-				debug("slurm_send_timeout at %d of %zd, "
+				debug("slurm_send_timeout at %d of %zu, "
 					"poll error: %s",
 					sent, size, strerror(errno));
 				slurm_seterrno(SLURM_COMMUNICATIONS_SEND_ERROR);
@@ -270,7 +270,7 @@ extern int slurm_send_timeout(int fd, char *buf, size_t size,
 		if (rc < 0) {
  			if (errno == EINTR)
 				continue;
-			debug("slurm_send_timeout at %d of %zd, "
+			debug("slurm_send_timeout at %d of %zu, "
 				"send error: %s",
 				sent, size, strerror(errno));
  			if (errno == EAGAIN) {	/* poll() lied to us */
@@ -282,7 +282,7 @@ extern int slurm_send_timeout(int fd, char *buf, size_t size,
 			goto done;
 		}
 		if (rc == 0) {
-			debug("slurm_send_timeout at %d of %zd, "
+			debug("slurm_send_timeout at %d of %zu, "
 				"sent zero bytes", sent, size);
 			slurm_seterrno(SLURM_PROTOCOL_SOCKET_ZERO_BYTES_SENT);
 			sent = SLURM_ERROR;
@@ -328,7 +328,7 @@ extern int slurm_recv_timeout(int fd, char *buffer, size_t size,
 	while (recvlen < size) {
 		timeleft = timeout - _tot_wait(&tstart);
 		if (timeleft <= 0) {
-			debug("%s at %d of %zd, timeout", __func__, recvlen,
+			debug("%s at %d of %zu, timeout", __func__, recvlen,
 			      size);
 			slurm_seterrno(SLURM_PROTOCOL_SOCKET_IMPL_TIMEOUT);
 			recvlen = SLURM_ERROR;
@@ -339,7 +339,7 @@ extern int slurm_recv_timeout(int fd, char *buffer, size_t size,
 			if ((errno == EINTR) || (errno == EAGAIN) || (rc == 0))
 				continue;
 			else {
-				debug("%s at %d of %zd, poll error: %m",
+				debug("%s at %d of %zu, poll error: %m",
 				      __func__, recvlen, size);
  				slurm_seterrno(
 					SLURM_COMMUNICATIONS_RECEIVE_ERROR);
@@ -373,7 +373,7 @@ extern int slurm_recv_timeout(int fd, char *buffer, size_t size,
 			if (errno == EINTR)
 				continue;
 			else {
-				debug("%s at %d of %zd, recv error: %m",
+				debug("%s at %d of %zu, recv error: %m",
 				      __func__, recvlen, size);
 				slurm_seterrno(
 					SLURM_COMMUNICATIONS_RECEIVE_ERROR);
@@ -382,7 +382,7 @@ extern int slurm_recv_timeout(int fd, char *buffer, size_t size,
 			}
 		}
 		if (rc == 0) {
-			debug("%s at %d of %zd, recv zero bytes",
+			debug("%s at %d of %zu, recv zero bytes",
 			      __func__, recvlen, size);
 			slurm_seterrno(SLURM_PROTOCOL_SOCKET_ZERO_BYTES_SENT);
 			recvlen = SLURM_ERROR;
@@ -428,7 +428,7 @@ extern int slurm_init_msg_engine(slurm_addr_t *addr)
 		goto error;
 	}
 
-	if (listen(fd, SLURM_PROTOCOL_DEFAULT_LISTEN_BACKLOG) < 0) {
+	if (listen(fd, SLURM_DEFAULT_LISTEN_BACKLOG) < 0) {
 		error( "Error listening on slurm stream socket: %m" ) ;
 		rc = SLURM_ERROR;
 		goto error;
@@ -436,11 +436,9 @@ extern int slurm_init_msg_engine(slurm_addr_t *addr)
 
 	return fd;
 
-    error:
-	if ((close(fd) < 0) && (errno == EINTR))
-		close(fd);	/* try again */
+error:
+	(void) close(fd);
 	return rc;
-
 }
 
 /* Await a connection on socket FD.
@@ -460,6 +458,42 @@ extern int slurm_open_stream(slurm_addr_t *addr, bool retry)
 	int fd;
 	uint16_t port;
 	char ip[32];
+
+#ifdef HAVE_NATIVE_CRAY
+	static int check_quiesce = -1;
+	if (check_quiesce == -1) {
+		char *comm_params = slurm_get_comm_parameters();
+		if (xstrcasestr(comm_params, "CheckGhalQuiesce"))
+			check_quiesce = 1;
+		else
+			check_quiesce = 0;
+		xfree(comm_params);
+	}
+
+	if (check_quiesce) {
+		char buffer[20];
+		char *quiesce_status = "/sys/class/gni/ghal0/quiesce_status";
+		int max_retry = 300;
+		int quiesce_fd = open(quiesce_status, O_RDONLY);
+
+		retry_cnt = 0;
+		while (quiesce_fd >= 0 && retry_cnt < max_retry) {
+			if (read(quiesce_fd, buffer, sizeof(buffer)) > 0) {
+				if (buffer[0] == '0')
+					break;
+			}
+			usleep(500000);
+			if (retry_cnt % 10 == 0)
+				debug3("WARNING: ghal0 quiesce status: %c, retry count %d",
+				       buffer[0], retry_cnt);
+			retry_cnt++;
+			close(quiesce_fd);
+			quiesce_fd = open(quiesce_status, O_RDONLY);
+		}
+		if (quiesce_fd >= 0)
+			close(quiesce_fd);
+	}
+#endif
 
 	if ( (addr->sin_family == 0) || (addr->sin_port  == 0) ) {
 		error("Error connecting, bad data: family = %u, port = %u",
@@ -493,18 +527,16 @@ extern int slurm_open_stream(slurm_addr_t *addr, bool retry)
 			goto error;
 		}
 
-		if ((close(fd) < 0) && (errno == EINTR))
-			close(fd);	/* try again */
+		(void) close(fd);
 	}
 
 	return fd;
 
-    error:
+error:
 	slurm_get_ip_str(addr, &port, ip, sizeof(ip));
 	debug2("Error connecting slurm stream socket at %s:%d: %m",
 	       ip, ntohs(port));
-	if ((close(fd) < 0) && (errno == EINTR))
-		close(fd);	/* try again */
+	(void) close(fd);
 	return SLURM_SOCKET_ERROR;
 }
 
@@ -751,4 +783,3 @@ extern int slurm_unpack_slurm_addr_no_alloc(slurm_addr_t *addr, Buf buffer)
     unpack_error:
 	return SLURM_ERROR;
 }
-

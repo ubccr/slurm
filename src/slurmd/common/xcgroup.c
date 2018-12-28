@@ -4,11 +4,11 @@
  *  Copyright (C) 2009 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -580,6 +580,41 @@ int xcgroup_set_param(xcgroup_t* cg, char* param, char* content)
 			__func__, param, content, cpath);
 
 	return fstatus;
+}
+
+int xcgroup_wait_pid_moved(xcgroup_t* cg, const char *cg_name)
+{
+	pid_t *pids = NULL;
+	int npids = 0;
+	int cnt = 0;
+	int i = 0;
+	pid_t pid = getpid();
+
+	/*
+	 * There is a delay in the cgroup system when moving the
+	 * pid from one cgroup to another.  This is usually
+	 * short, but we need to wait to make sure the pid is
+	 * out of the step cgroup or we will occur an error
+	 * leaving the cgroup unable to be removed.
+	 */
+	do {
+		xcgroup_get_pids(cg, &pids, &npids);
+		for (i = 0 ; i<npids ; i++)
+			if (pids[i] == pid) {
+				cnt++;
+				break;
+			}
+		xfree(pids);
+	} while ((i < npids) && (cnt < MAX_MOVE_WAIT));
+
+	if (cnt < MAX_MOVE_WAIT)
+		debug3("Took %d checks before stepd pid %d was removed from the %s cgroup.",
+		       cnt, pid, cg_name);
+	else
+		error("Pid %d is still in the %s cgroup.  It might be left uncleaned after the job.",
+		      pid, cg_name);
+
+	return XCGROUP_SUCCESS;
 }
 
 int xcgroup_get_param(xcgroup_t* cg, char* param, char **content, size_t *csize)

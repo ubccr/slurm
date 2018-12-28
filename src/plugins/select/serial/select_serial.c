@@ -2,11 +2,11 @@
  *  select_serial.c - resource selection plugin supporting serial (since CPU)
  *  job allocations.
  *****************************************************************************
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -22,13 +22,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -89,14 +89,14 @@ int slurmctld_tres_cnt = 0;
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "select" for SLURM node selection) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "select" for Slurm node selection) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load select plugins if the plugin_type string has a
  * prefix of "select/".
  *
@@ -735,27 +735,24 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 	bitstr_t *core_bitmap;
 
 	if (!job || !job->core_bitmap) {
-		error("select/serial: job %u has no select data",
-		      job_ptr->job_id);
+		error("%s: %pJ has no select data", plugin_type, job_ptr);
 		return SLURM_ERROR;
 	}
 
-	debug3("select/serial: _add_job_to_res: job %u act %d ",
-	       job_ptr->job_id, action);
+	debug3("%s: %s: %pJ act %d", plugin_type, __func__, job_ptr, action);
 
 	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE)
 		_dump_job_res(job);
 
 	i_first = bit_ffs(job->node_bitmap);
 	if (i_first == -1) {
-		error("select/serial: job %u allocated no nodes",
-		      job_ptr->job_id);
+		error("%s: %pJ allocated no nodes", plugin_type, job_ptr);
 		i_last = -2;
 	} else {
 		i_last  = bit_fls(job->node_bitmap);
 		if (i_first != i_last) {
-			error("select/serial: job %u allocated more than one "
-			      "node", job_ptr->job_id);
+			error("%s: %pJ allocated more than one node",
+			      plugin_type, job_ptr);
 		}
 	}
 
@@ -772,9 +769,8 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 				gres_list = node_ptr->gres_list;
 			core_bitmap = copy_job_resources_node(job, n);
 			gres_plugin_job_alloc(job_ptr->gres_list, gres_list,
-					      job->nhosts, n, job->cpus[n],
-					      job_ptr->job_id, node_ptr->name,
-					      core_bitmap);
+					      job->nhosts, n, job_ptr->job_id,
+					      node_ptr->name, core_bitmap);
 			gres_plugin_node_state_log(gres_list, node_ptr->name);
 			FREE_NULL_BITMAP(core_bitmap);
 		}
@@ -786,11 +782,10 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 				job->memory_allocated[n];
 			if ((select_node_usage[i].alloc_memory >
 			     select_node_record[i].real_memory)) {
-				error("select/serial: node %s memory is "
-				      "overallocated (%"PRIu64") for job %u",
-				      node_ptr->name,
+				error("%s: node %s memory is overallocated (%"PRIu64") for %pJ",
+				      plugin_type, node_ptr->name,
 				      select_node_usage[i].alloc_memory,
-				      job_ptr->job_id);
+				      job_ptr);
 			}
 		}
 	}
@@ -820,8 +815,8 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 		for (i = 0; i < p_ptr->num_rows; i++) {
 			if (!_can_job_fit_in_row(job, &(p_ptr->row[i])))
 				continue;
-			debug3("select/serial: adding job %u to part %s row %u",
-			       job_ptr->job_id, p_ptr->part_ptr->name, i);
+			debug3("%s: adding %pJ to part %s row %u",
+			       plugin_type, job_ptr, p_ptr->part_ptr->name, i);
 			_add_job_to_row(job, &(p_ptr->row[i]));
 			break;
 		}
@@ -873,20 +868,17 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 		return SLURM_SUCCESS;
 	}
 	if (!job || !job->core_bitmap) {
-		error("select/serial: job %u has no select data",
-		      job_ptr->job_id);
+		error("%s: %pJ has no select data", plugin_type, job_ptr);
 		return SLURM_ERROR;
 	}
 
-	debug3("select/serial: _rm_job_from_res: job %u action %d",
-	       job_ptr->job_id, action);
+	debug3("%s: %s: %pJ act %d", plugin_type, __func__, job_ptr, action);
 	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE)
 		_dump_job_res(job);
 
 	i_first = bit_ffs(job->node_bitmap);
 	if (i_first == -1) {
-		error("select/serial: job %u allocated no nodes",
-		      job_ptr->job_id);
+		error("%s: %pJ allocated no nodes", plugin_type, job_ptr);
 		i_last = -2;
 	} else
 		i_last =  bit_fls(job->node_bitmap);
@@ -913,13 +905,10 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 
 			if (node_usage[i].alloc_memory <
 			    job->memory_allocated[n]) {
-				error("select/serial: node %s memory is "
-				      "under-allocated (%"PRIu64"<%"PRIu64") "
-				      "for job %u",
-				      node_ptr->name,
+				error("%s: node %s memory is under-allocated (%"PRIu64"<%"PRIu64") for %pJ",
+				      plugin_type, node_ptr->name,
 				      node_usage[i].alloc_memory,
-				      job->memory_allocated[n],
-				      job_ptr->job_id);
+				      job->memory_allocated[n], job_ptr);
 				node_usage[i].alloc_memory = 0;
 			} else {
 				node_usage[i].alloc_memory -=
@@ -934,9 +923,8 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 		struct part_res_record *p_ptr;
 
 		if (!job_ptr->part_ptr) {
-			error("select/serial: removed job %u does not have a "
-			      "partition assigned",
-			      job_ptr->job_id);
+			error("%s: removed %pJ does not have a partition assigned",
+			      plugin_type, job_ptr);
 			return SLURM_ERROR;
 		}
 
@@ -945,9 +933,8 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 				break;
 		}
 		if (!p_ptr) {
-			error("select/serial: removed job %u could not find "
-			      "part %s",
-			      job_ptr->job_id, job_ptr->part_ptr->name);
+			error("%s: removed %pJ could not find part %s",
+			      plugin_type, job_ptr, job_ptr->part_ptr->name);
 			return SLURM_ERROR;
 		}
 
@@ -961,9 +948,8 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 			for (j = 0; j < p_ptr->row[i].num_jobs; j++) {
 				if (p_ptr->row[i].job_list[j] != job)
 					continue;
-				debug3("select/serial: removed job %u from "
-				       "part %s row %u",
-				       job_ptr->job_id,
+				debug3("%s: removed %pJ from part %s row %u",
+				       plugin_type, job_ptr,
 				       p_ptr->part_ptr->name, i);
 				for (; j < p_ptr->row[i].num_jobs-1; j++) {
 					p_ptr->row[i].job_list[j] =
@@ -1211,9 +1197,30 @@ top:	orig_map = bit_copy(save_bitmap);
 	return rc;
 }
 
-/* _will_run_test - determine when and where a pending job can start, removes
- *	jobs from node table at termination time and run _test_job() after
- *	each one. Used by SLURM's sched/backfill plugin and Moab. */
+/*
+ * Return true if job is in the processing of cleaning up.
+ * This is used for Cray systems to indicate the Node Health Check (NHC)
+ * is still running. Until NHC completes, the job's resource use persists
+ * the select/cons_res plugin data structures.
+ */
+static bool _job_cleaning(struct job_record *job_ptr)
+{
+	uint16_t cleaning = 0;
+
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
+				    SELECT_JOBDATA_CLEANING,
+				    &cleaning);
+	if (cleaning)
+		return true;
+	return false;
+}
+
+/*
+ * Determine where and when the job at job_ptr can begin execution by updating
+ * a scratch cr_record structure to reflect each job terminating at the
+ * end of its time limit and use this to show where and when the job at job_ptr
+ * will begin execution. Used by Slurm's sched/backfill plugin.
+ */
 static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			  uint16_t job_node_share,
 			  List preemptee_candidates, List *preemptee_job_list)
@@ -1258,14 +1265,36 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	cr_job_list = list_create(NULL);
 	job_iterator = list_iterator_create(job_list);
 	while ((tmp_job_ptr = (struct job_record *) list_next(job_iterator))) {
+		bool cleaning = _job_cleaning(tmp_job_ptr);
+		if (!cleaning && IS_JOB_COMPLETING(tmp_job_ptr))
+			cleaning = true;
 		if (!IS_JOB_RUNNING(tmp_job_ptr) &&
-		    !IS_JOB_SUSPENDED(tmp_job_ptr))
+		    !IS_JOB_SUSPENDED(tmp_job_ptr) &&
+		    !cleaning)
 			continue;
 		if (tmp_job_ptr->end_time == 0) {
-			error("Job %u has zero end_time", tmp_job_ptr->job_id);
+			if (!cleaning) {
+				error("%s: Active %pJ has zero end_time",
+				      __func__, tmp_job_ptr);
+			}
 			continue;
 		}
-		if (_is_preemptable(tmp_job_ptr, preemptee_candidates)) {
+		if (tmp_job_ptr->node_bitmap == NULL) {
+			/*
+			 * This should indicate a requeued job was cancelled
+			 * while NHC was running
+			 */
+			if (!cleaning) {
+				error("%s: %pJ has NULL node_bitmap",
+				      __func__, tmp_job_ptr);
+			}
+			continue;
+		}
+		if (cleaning ||
+		    !_is_preemptable(tmp_job_ptr, preemptee_candidates)) {
+			/* Queue job for later removal from data structures */
+			list_append(cr_job_list, tmp_job_ptr);
+		} else {
 			uint16_t mode = slurm_job_preempt_mode(tmp_job_ptr);
 			if (mode == PREEMPT_MODE_OFF)
 				continue;
@@ -1276,8 +1305,7 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			/* Remove preemptable job now */
 			_rm_job_from_res(future_part, future_usage,
 					 tmp_job_ptr, action);
-		} else
-			list_append(cr_job_list, tmp_job_ptr);
+		}
 	}
 	list_iterator_destroy(job_iterator);
 
@@ -1308,8 +1336,8 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			ovrlap = bit_overlap(bitmap, tmp_job_ptr->node_bitmap);
 			if (ovrlap == 0)	/* job has no usable nodes */
 				continue;	/* skip it */
-			debug2("cons_res: _will_run_test, job %u: overlap=%d",
-			       tmp_job_ptr->job_id, ovrlap);
+			debug2("%s: %s: %pJ: overlap=%d",
+			       plugin_type, __func__, tmp_job_ptr, ovrlap);
 			_rm_job_from_res(future_part, future_usage,
 					 tmp_job_ptr, 0);
 			rc = cr_job_test(job_ptr, bitmap,
@@ -1512,8 +1540,7 @@ static bool _is_job_spec_serial(struct job_record *job_ptr)
 
 	if (details_ptr) {
 		if (job_ptr->details->share_res == 0) {
-			debug("Clearing exclusive flag for job %u",
-			      job_ptr->job_id);
+			debug("Clearing exclusive flag for %pJ", job_ptr);
 			job_ptr->details->share_res  = 1;
 			job_ptr->details->whole_node = 0;
 		}
@@ -1616,22 +1643,21 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t * bitmap,
 		return EINVAL;
 
 	if ((min_nodes > 1) || !_is_job_spec_serial(job_ptr)) {
-		info("select/serial: job %u not serial", job_ptr->job_id);
+		info("%s: %pJ not serial", plugin_type, job_ptr);
 		return SLURM_ERROR;
 	}
 
 	if (job_ptr->details->core_spec != NO_VAL16) {
-		verbose("select/serial: job %u core_spec(%u) not supported",
-			job_ptr->job_id, job_ptr->details->core_spec);
+		verbose("%s: %pJ core_spec(%u) not supported",
+			plugin_type, job_ptr, job_ptr->details->core_spec);
 		job_ptr->details->core_spec = NO_VAL16;
 	}
 
 	job_node_share = _get_job_node_share(job_ptr);
 
 	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-		info("select/serial: select_p_job_test: job %u node_share %u "
-		     "mode %d avail_n %u",
-		     job_ptr->job_id, job_node_share, mode,
+		info("%s: %s: %pJ node_share %u mode %d avail_n %u",
+		     plugin_type, __func__, job_ptr, job_node_share, mode,
 		     bit_set_count(bitmap));
 		_dump_state(select_part_record);
 	}
@@ -1648,13 +1674,12 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t * bitmap,
 
 	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
 		if (job_ptr->job_resrcs)
-			log_job_resources(job_ptr->job_id, job_ptr->job_resrcs);
+			log_job_resources(job_ptr);
 		else {
-			info("no job_resources info for job %u",
-			     job_ptr->job_id);
+			info("no job_resources info for %pJ", job_ptr);
 		}
 	} else if (debug_cpu_bind && job_ptr->job_resrcs) {
-		log_job_resources(job_ptr->job_id, job_ptr->job_resrcs);
+		log_job_resources(job_ptr);
 	}
 
 	return rc;
@@ -1776,24 +1801,14 @@ extern int select_p_step_finish(struct step_record *step_ptr, bool killing_step)
 	return SLURM_SUCCESS;
 }
 
-extern int select_p_pack_select_info(time_t last_query_time,
-				     uint16_t show_flags, Buf *buffer_ptr,
-				     uint16_t protocol_version)
-{
-	/* This function is always invalid on normal Linux clusters */
-	return SLURM_ERROR;
-}
-
 extern int select_p_select_nodeinfo_pack(select_nodeinfo_t *nodeinfo,
 					 Buf buffer,
 					 uint16_t protocol_version)
 {
-	if (protocol_version >= SLURM_17_02_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		pack16(nodeinfo->alloc_cpus, buffer);
 		packstr(nodeinfo->tres_alloc_fmt_str, buffer);
 		packdouble(nodeinfo->tres_alloc_weighted, buffer);
-	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		pack16(nodeinfo->alloc_cpus, buffer);
 	}
 
 	return SLURM_SUCCESS;
@@ -1809,13 +1824,11 @@ extern int select_p_select_nodeinfo_unpack(select_nodeinfo_t **nodeinfo,
 	nodeinfo_ptr = select_p_select_nodeinfo_alloc();
 	*nodeinfo = nodeinfo_ptr;
 
-	if (protocol_version >= SLURM_17_02_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		safe_unpack16(&nodeinfo_ptr->alloc_cpus, buffer);
 		safe_unpackstr_xmalloc(&nodeinfo_ptr->tres_alloc_fmt_str,
 				       &uint32_tmp, buffer);
 		safe_unpackdouble(&nodeinfo_ptr->tres_alloc_weighted, buffer);
-	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		safe_unpack16(&nodeinfo_ptr->alloc_cpus, buffer);
 	}
 
 	return SLURM_SUCCESS;
@@ -2091,17 +2104,7 @@ extern char *select_p_select_jobinfo_xstrdup(select_jobinfo_t *jobinfo,
 	return NULL;
 }
 
-extern int select_p_update_block(update_part_msg_t *part_desc_ptr)
-{
-	return SLURM_SUCCESS;
-}
-
-extern int select_p_update_sub_node(update_part_msg_t *part_desc_ptr)
-{
-	return SLURM_SUCCESS;
-}
-
-extern int select_p_fail_cnode(struct step_record *step_ptr)
+extern int select_p_update_basil(void)
 {
 	return SLURM_SUCCESS;
 }
@@ -2123,8 +2126,11 @@ extern int select_p_get_info_from_plugin(enum select_plugindata_info info,
 	case SELECT_CONFIG_INFO:
 		*tmp_list = NULL;
 		break;
+	case SELECT_SINGLE_JOB_TEST:
+		*tmp_32 = 0;
+		break;
 	default:
-		error("select_p_get_info_from_plugin info %d invalid", info);
+		error("%s: info type %d invalid", __func__, info);
 		rc = SLURM_ERROR;
 		break;
 	}
@@ -2170,11 +2176,6 @@ extern int select_p_update_node_config(int index)
 }
 
 extern int select_p_update_node_state(struct node_record *node_ptr)
-{
-	return SLURM_SUCCESS;
-}
-
-extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 {
 	return SLURM_SUCCESS;
 }
@@ -2293,17 +2294,8 @@ extern void select_p_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)
 {
 	return;
 }
-extern void select_p_ba_fini(void)
-{
-	return;
-}
 
 extern int *select_p_ba_get_dims(void)
-{
-	return NULL;
-}
-
-extern bitstr_t *select_p_ba_cnodelist2bitmap(char *cnodelist)
 {
 	return NULL;
 }

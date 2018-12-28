@@ -3,11 +3,11 @@
 *  Copyright (C) 2012 SchedMD LLC
 *  Written by Danny Auble <da@schedmd.com>
 *
-*  This file is part of SLURM, a resource management program.
+*  This file is part of Slurm, a resource management program.
 *  For details, see <https://slurm.schedmd.com/>.
 *  Please also read the included file: DISCLAIMER.
 *
-*  SLURM is free software; you can redistribute it and/or modify it under
+*  Slurm is free software; you can redistribute it and/or modify it under
 *  the terms of the GNU General Public License as published by the Free
 *  Software Foundation; either version 2 of the License, or (at your option)
 *  any later version.
@@ -23,13 +23,13 @@
 *  version.  If you delete this exception statement from all source files in
 *  the program, then also delete it here.
 *
-*  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+*  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 *  details.
 *
 *  You should have received a copy of the GNU General Public License along
-*  with SLURM; if not, write to the Free Software Foundation, Inc.,
+*  with Slurm; if not, write to the Free Software Foundation, Inc.,
 *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -45,6 +45,9 @@
 #include "src/common/xstring.h"
 #include "src/common/plugin.h"
 #include "src/common/plugrack.h"
+#include "src/common/proc_args.h"
+#include "src/common/tres_bind.h"
+#include "src/common/tres_frequency.h"
 #include "src/common/xsignal.h"
 
 typedef struct {
@@ -168,6 +171,7 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	int i, j, rc;
 	unsigned long step_wait = 0;
 	uint16_t base_dist, slurmctld_timeout;
+	char *add_tres;
 	xassert(srun_opt);
 
 	if (!job) {
@@ -187,8 +191,7 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 		       opt_local->min_nodes, opt_local->max_nodes);
 		return SLURM_ERROR;
 	}
-#if !defined HAVE_FRONT_END || (defined HAVE_BGQ)
-//#if !defined HAVE_FRONT_END || (defined HAVE_BGQ && defined HAVE_BG_FILES)
+#if !defined HAVE_FRONT_END
 	if (opt_local->min_nodes && (opt_local->min_nodes > job->nhosts)) {
 		error ("Minimum node count > allocated node count (%d > %d)",
 		       opt_local->min_nodes, job->nhosts);
@@ -214,10 +217,6 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 						MEM_PER_CPU;
 	else if (opt_local->pn_min_memory != NO_VAL64)
 		job->ctx_params.pn_min_memory = opt_local->pn_min_memory;
-	if (opt_local->gres)
-		job->ctx_params.gres = opt_local->gres;
-	else
-		job->ctx_params.gres = getenv("SLURM_STEP_GRES");
 
 	if (opt_local->overcommit) {
 		if (use_all_cpus)	/* job allocation created by srun */
@@ -297,9 +296,7 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 
 	}
 	job->ctx_params.overcommit = opt_local->overcommit ? 1 : 0;
-
 	job->ctx_params.node_list = opt_local->nodelist;
-
 	job->ctx_params.network = opt_local->network;
 	job->ctx_params.no_kill = opt_local->no_kill;
 	if (srun_opt->job_name_set_cmd && opt_local->job_name)
@@ -307,6 +304,56 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	else
 		job->ctx_params.name = srun_opt->cmd_name;
 	job->ctx_params.features = opt_local->constraints;
+
+	if (opt_local->cpus_per_gpu) {
+		xstrfmtcat(job->ctx_params.cpus_per_tres, "gpu:%d",
+			   opt_local->cpus_per_gpu);
+	}
+	xfree(opt_local->tres_bind);	/* Vestigial value from job allocate */
+	if (opt_local->gpu_bind)
+		xstrfmtcat(opt_local->tres_bind, "gpu:%s", opt_local->gpu_bind);
+	if (tres_bind_verify_cmdline(opt_local->tres_bind)) {
+		if (tres_bind_err_log) {	/* Log once */
+			error("Invalid --tres-bind argument: %s. Ignored",
+			      opt_local->tres_bind);
+			tres_bind_err_log = false;
+		}
+		xfree(opt_local->tres_bind);
+	}
+	job->ctx_params.tres_bind = xstrdup(opt_local->tres_bind);
+	xfree(opt_local->tres_freq);	/* Vestigial value from job allocate */
+	xfmt_tres(&opt_local->tres_freq, "gpu", opt_local->gpu_freq);
+	if (tres_freq_verify_cmdline(opt_local->tres_freq)) {
+		if (tres_freq_err_log) {	/* Log once */
+			error("Invalid --tres-freq argument: %s. Ignored",
+			      opt_local->tres_freq);
+			tres_freq_err_log = false;
+		}
+		xfree(opt_local->tres_freq);
+	}
+	job->ctx_params.tres_freq = xstrdup(opt_local->tres_freq);
+	xfmt_tres(&job->ctx_params.tres_per_step, "gpu", opt_local->gpus);
+	xfmt_tres(&job->ctx_params.tres_per_node, "gpu",
+		  opt_local->gpus_per_node);
+	if (opt_local->gres)
+		add_tres = opt_local->gres;
+	else
+		add_tres = getenv("SLURM_STEP_GRES");
+	if (add_tres) {
+		if (job->ctx_params.tres_per_node) {
+			xstrfmtcat(job->ctx_params.tres_per_node, ",%s",
+				   add_tres);
+		} else
+			job->ctx_params.tres_per_node = xstrdup(add_tres);
+	}
+	xfmt_tres(&job->ctx_params.tres_per_socket, "gpu",
+		  opt_local->gpus_per_socket);
+	xfmt_tres(&job->ctx_params.tres_per_task, "gpu",
+		  opt_local->gpus_per_task);
+	if (opt_local->mem_per_gpu) {
+		xstrfmtcat(job->ctx_params.mem_per_tres, "gpu:%"PRIi64,
+			   opt.mem_per_gpu);
+	}
 
 	debug("requesting job %u, user %u, nodes %u including (%s)",
 	      job->ctx_params.job_id, job->ctx_params.uid,

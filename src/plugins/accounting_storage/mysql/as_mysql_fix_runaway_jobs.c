@@ -4,11 +4,11 @@
  *  Copyright (C) 2016 SchedMD LLC.
  *  Written by Nathan Yee <nyee32@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -68,13 +68,37 @@ static int _first_job_roll_up(mysql_conn_t *mysql_conn, time_t first_start)
 	start_tm.tm_min = 0;
 	start_tm.tm_hour = 0;
 	start_tm.tm_mday = 0;
-	start_tm.tm_isdst = -1;
 	month_start = slurm_mktime(&start_tm);
 
 	query = xstrdup_printf("UPDATE \"%s_%s\" SET hourly_rollup = %ld, "
-			       "daily_rollup = %ld, monthly_rollup = %ld",
+			       "daily_rollup = %ld, monthly_rollup = %ld;",
 			       mysql_conn->cluster_name, last_ran_table,
 			       month_start, month_start, month_start);
+
+	/*
+	 * Delete allocated time from the assoc and wckey usage tables.
+	 * If the only usage during those times was runaway jobs, then rollup
+	 * won't clear that usage, so we have to clear it here. Rollup will
+	 * re-create the correct rows in these tables.
+	 */
+	xstrfmtcat(query, "DELETE FROM \"%s_%s\" where time_start >= %ld;",
+		   mysql_conn->cluster_name, assoc_hour_table,
+		   month_start);
+	xstrfmtcat(query, "DELETE FROM \"%s_%s\" where time_start >= %ld;",
+		   mysql_conn->cluster_name, assoc_day_table,
+		   month_start);
+	xstrfmtcat(query, "DELETE FROM \"%s_%s\" where time_start >= %ld;",
+		   mysql_conn->cluster_name, assoc_month_table,
+		   month_start);
+	xstrfmtcat(query, "DELETE FROM \"%s_%s\" where time_start >= %ld;",
+		   mysql_conn->cluster_name, wckey_hour_table,
+		   month_start);
+	xstrfmtcat(query, "DELETE FROM \"%s_%s\" where time_start >= %ld;",
+		   mysql_conn->cluster_name, wckey_day_table,
+		   month_start);
+	xstrfmtcat(query, "DELETE FROM \"%s_%s\" where time_start >= %ld;",
+		   mysql_conn->cluster_name, wckey_month_table,
+		   month_start);
 
 	if (debug_flags & DEBUG_FLAG_DB_QUERY)
 		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
@@ -122,7 +146,7 @@ extern int as_mysql_fix_runaway_jobs(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	query = xstrdup_printf("UPDATE \"%s_%s\" SET time_end="
 			       "GREATEST(time_start, time_eligible, time_submit), "
-			       "state=%d WHERE id_job IN (%s);",
+			       "state=%d WHERE time_end=0 && id_job IN (%s);",
 			       mysql_conn->cluster_name, job_table,
 			       JOB_COMPLETE, job_ids);
 

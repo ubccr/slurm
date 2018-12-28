@@ -4,11 +4,11 @@
  *  Copyright (C) 2017 SchedMD LLC.
  *  Written by Tim Wickberg <tim@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -74,7 +74,7 @@ static char *hostkey_pub = "/etc/ssh/ssh_host_rsa_key.pub";
 static char *priv_format = "%s/.ssh/id_rsa";
 static char *pub_format = "%s/.ssh/id_rsa.pub";
 
-static const char *xauthority_format = "%s/.Xauthority";
+static bool local_xauthority = false;
 static char *xauthority = NULL;
 
 static int x11_display = 0;
@@ -160,7 +160,12 @@ static void _shutdown_x11(int signal)
 	libssh2_exit();
 
 	if (xauthority) {
-		x11_delete_xauth(xauthority, conf->hostname, x11_display);
+		if (local_xauthority && unlink(xauthority))
+			error("%s: problem unlinking xauthority file %s: %m",
+			      __func__, xauthority);
+		else
+			x11_delete_xauth(xauthority, conf->hostname, x11_display);
+
 		xfree(xauthority);
 	}
 
@@ -178,7 +183,8 @@ static void _shutdown_x11(int signal)
  * IN/OUT: display - local X11 display number
  * OUT: SLURM_SUCCESS or SLURM_ERROR
  */
-extern int setup_x11_forward(stepd_step_rec_t *job, int *display)
+extern int setup_x11_forward(stepd_step_rec_t *job, int *display,
+			     char **tmp_xauthority)
 {
 	int rc, hostauth_failed = 1;
 	struct sockaddr_in sin;
@@ -192,10 +198,13 @@ extern int setup_x11_forward(stepd_step_rec_t *job, int *display)
 	 */
 	uint16_t ports[2] = {6020, 6099};
 	int sig_array[2] = {SIGTERM, 0};
+	*tmp_xauthority = NULL;
 	x11_target_port = job->x11_target_port;
 
 	xsignal(SIGTERM, _shutdown_x11);
 	xsignal_unblock(sig_array);
+
+	debug("X11Parameters: %s", conf->x11_params);
 
 	if (!(home = _get_home(job->uid))) {
 		error("could not find HOME in environment");
@@ -204,8 +213,6 @@ extern int setup_x11_forward(stepd_step_rec_t *job, int *display)
 
 	keypub = xstrdup_printf(pub_format, home);
 	keypriv = xstrdup_printf(priv_format, home);
-	xauthority = xstrdup_printf(xauthority_format, home);
-	xfree(home);
 
 	if (libssh2_init(0)) {
 		error("libssh2 initialization failed");
@@ -271,6 +278,27 @@ extern int setup_x11_forward(stepd_step_rec_t *job, int *display)
 		goto shutdown;
 	}
 
+	/* use a node-local XAUTHORITY file instead of ~/.Xauthority */
+	if (xstrcasestr(conf->x11_params, "local_xauthority")) {
+		int fd;
+		local_xauthority = true;
+		xauthority = xstrdup_printf("%s/.Xauthority-XXXXXX",
+					    conf->tmpfs);
+
+		/* protect against weak file permissions in old glibc */
+		umask(0077);
+		if ((fd = mkstemp(xauthority)) == -1) {
+			error("%s: failed to create temporary XAUTHORITY file: %m",
+			      __func__);
+			goto shutdown;
+		}
+		close(fd);
+	} else {
+		xauthority = xstrdup_printf("%s/.Xauthority", home);
+	}
+
+	xfree(home);
+
 	/*
 	 * If hostbased failed or was unavailable, try publickey instead.
 	 */
@@ -320,11 +348,14 @@ extern int setup_x11_forward(stepd_step_rec_t *job, int *display)
 	 * steps needing X11 forwarding service launch.
 	 */
 	*display = x11_display;
+	*tmp_xauthority = xstrdup(xauthority);
+
 	return SLURM_SUCCESS;
 
 shutdown:
 	xfree(keypub);
 	xfree(keypriv);
+	xfree(xauthority);
 	close(listen_socket);
 	libssh2_session_disconnect(session, "Disconnecting due to error.");
 	libssh2_session_free(session);

@@ -121,10 +121,10 @@ AC_DEFUN([X_AC_LIBSLURM], [
     # variables.  Some need to be resolved now ($libdir) and others
     # ($(top_builddir)) need to be resolved when dealing with the Makefile.am's
     LIB_SLURM="-Wl,-rpath=$libdir/slurm"
-    LIB_SLURM+=' -L$(top_builddir)/src/api/.libs -lslurmfull'
+    LIB_SLURM=$LIB_SLURM' -L$(top_builddir)/src/api/.libs -lslurmfull'
 
     LIB_SLURMDB="-Wl,-rpath=$libdir/slurm"
-    LIB_SLURMDB+=' -L$(top_builddir)/src/api/.libs -L$(top_builddir)/src/db_api/.libs -lslurmdb -lslurmfull'
+    LIB_SLURMDB=$LIB_SLURMDB' -L$(top_builddir)/src/api/.libs -L$(top_builddir)/src/db_api/.libs -lslurmdb -lslurmfull'
     AC_MSG_RESULT([shared]);
   fi
 
@@ -167,7 +167,7 @@ AC_DEFUN([X_AC_SLURM_BIGENDIAN],
 ])dnl AC_SLURM_BIGENDIAN
 
 dnl
-dnl Perform SLURM Project version setup
+dnl Perform Slurm Project version setup
 dnl
 AC_DEFUN([X_AC_SLURM_VERSION],
 [
@@ -220,7 +220,7 @@ RELEASE="`perl -ne 'print,exit if s/^\s*RELEASE:\s*(\S*).*/\1/i' $srcdir/META`"
 # (e.g. "pre1" in the MICRO), but may be suitable for the user determining 
 # how to use the APIs or other differences. 
 SLURM_VERSION_NUMBER="`printf "0x%02x%02x%02x" ${SLURM_MAJOR#0} ${SLURM_MINOR#0} ${SLURM_MICRO#0}`"
-AC_DEFINE_UNQUOTED(SLURM_VERSION_NUMBER, $SLURM_VERSION_NUMBER, [SLURM Version Number])
+AC_DEFINE_UNQUOTED(SLURM_VERSION_NUMBER, $SLURM_VERSION_NUMBER, [Slurm Version Number])
 AC_SUBST(SLURM_VERSION_NUMBER)
 
 if test "$SLURM_MAJOR.$SLURM_MINOR.$SLURM_MICRO" != "$VERSION"; then

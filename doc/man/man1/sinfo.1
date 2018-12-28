@@ -18,10 +18,6 @@ displayed about partitions that are configured as hidden and partitions that
 are unavailable to user's group.
 
 .TP
-\fB\-b\fR, \fB\-\-bgl\fR
-Display information about bglblocks (on Blue Gene systems only).
-
-.TP
 \fB\-d\fR, \fB\-\-dead\fR
 If set only report state information for non\-responding (dead) nodes.
 
@@ -505,7 +501,7 @@ List nodes only having the given state(s).  Multiple states
 may be comma separated and the comparison is case insensitive.
 Possible values include (case insensitive): ALLOC, ALLOCATED,
 COMP, COMPLETING, DOWN, DRAIN (for node in DRAINING or DRAINED
-states), DRAINED, DRAINING, ERR, ERROR, FAIL, FUTURE, FUTR,
+states), DRAINED, DRAINING, FAIL, FUTURE, FUTR,
 IDLE, MAINT, MIX, MIXED, NO_RESPOND, NPC, PERFCTRS,
 POWER_DOWN, POWER_UP, RESV, RESERVED, UNK, and UNKNOWN.
 By default nodes in the specified state are reported whether
@@ -568,7 +564,7 @@ partitions without a job time limit.
 \fBMEMORY\fR
 Size of real memory in megabytes on these nodes.
 .TP
-\fBNODELIST\fR or \fBBP_LIST\fR (BlueGene systems only)
+\fBNODELIST\fR
 Names of nodes associated with this configuration/partition.
 .TP
 \fBNODES\fR
@@ -681,15 +677,6 @@ to additional jobs. The node state will be changed to state
 \fBDRAINED\fR when the last job on it completes. Nodes enter
 this state per system administrator request. See the \fBupdate
 node\fR command in the \fBscontrol\fR(1) man page or the
-\fBslurm.conf\fR(5) man page for more information.
-.TP
-\fBERROR\fR
-The node is currently in an error state and not capable of running any jobs.
-Slurm can automatically place nodes in this state if some failure occurs.
-System administrators may also explicitly place nodes in this state. If
-a node resumes normal operation, Slurm can automatically
-return it to service. See the \fBReturnToService\fR
-and \fBSlurmdTimeout\fR parameter descriptions in the
 \fBslurm.conf\fR(5) man page for more information.
 .TP
 \fBFAIL\fR

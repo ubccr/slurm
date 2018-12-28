@@ -7,11 +7,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -315,17 +315,13 @@ extern int as_mysql_modify_resv(mysql_conn_t *mysql_conn,
 		xstrfmtcat(cols, ", %s", resv_req_inx[i]);
 	}
 
-	/* check for both the last start and the start because most
-	   likely the start time hasn't changed, but something else
-	   may have since the last time we did an update to the
-	   reservation. */
+	/* Get the last record of this reservation */
 	query = xstrdup_printf("select %s from \"%s_%s\" where id_resv=%u "
-			       "and (time_start=%ld || time_start=%ld) "
+			       "and time_start >= %ld "
 			       "and deleted=0 order by time_start desc "
 			       "limit 1 FOR UPDATE;",
 			       cols, resv->cluster, resv_table, resv->id,
-			       resv->time_start, resv->time_start_prev);
-try_again:
+			       resv->time_start_prev);
 	debug4("%d(%s:%d) query\n%s",
 	       mysql_conn->conn, THIS_FILE, __LINE__, query);
 	if (!(result = mysql_db_query_ret(
@@ -339,23 +335,6 @@ try_again:
 		error("There is no reservation by id %u, "
 		      "time_start %ld, and cluster '%s'", resv->id,
 		      resv->time_start_prev, resv->cluster);
-		if (!set && resv->time_end) {
-			/* This should never really happen,
-			   but just in case the controller and the
-			   database get out of sync we check
-			   to see if there is a reservation
-			   not deleted that hasn't ended yet. */
-			xfree(query);
-			query = xstrdup_printf(
-				"select %s from \"%s_%s\" where id_resv=%u "
-				"and time_start <= %ld and deleted=0 "
-				"order by time_start desc "
-				"limit 1;",
-				cols, resv->cluster, resv_table, resv->id,
-				resv->time_end);
-			set = 1;
-			goto try_again;
-		}
 		goto end_it;
 	}
 
@@ -364,7 +343,24 @@ try_again:
 	xfree(query);
 	xfree(cols);
 
-	set = 0;
+	/*
+	 * Check to see if the start is after the time we are looking for to
+	 * make sure no we are the latest update.  If we aren't throw this one
+	 * away.
+	 */
+	if (start > resv->time_start) {
+		error("There is newer record for reservation with id %u, drop modification request:",
+		      resv->id);
+		error("assocs:'%s', cluster:'%s', flags:%u, id:%u, name:'%s', nodes:'%s', nodes_inx:'%s', time_end:%ld, time_start:%ld, time_start_prev:%ld, tres_str:'%s', unused_wall:%f",
+		      resv->assocs, resv->cluster, resv->flags, resv->id,
+		      resv->name, resv->nodes, resv->node_inx, resv->time_end,
+		      resv->time_start, resv->time_start_prev, resv->tres_str,
+		      resv->unused_wall);
+		mysql_free_result(result);
+		rc = SLURM_SUCCESS;
+		goto end_it;
+	}
+
 
 	/* check differences here */
 

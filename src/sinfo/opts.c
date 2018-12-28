@@ -8,11 +8,11 @@
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -92,7 +92,6 @@ extern void parse_command_line(int argc, char **argv)
 	bool env_a_set = false, env_p_set = false;
 	static struct option long_options[] = {
 		{"all",       no_argument,       0, 'a'},
-		{"bg",        no_argument,       0, 'b'},
 		{"dead",      no_argument,       0, 'd'},
 		{"exact",     no_argument,       0, 'e'},
 		{"federation",no_argument,       0, OPT_LONG_FEDR},
@@ -159,7 +158,7 @@ extern void parse_command_line(int argc, char **argv)
 	}
 
 	while ((opt_char = getopt_long(argc, argv,
-				       "abdehi:lM:n:No:O:p:rRsS:t:TvV",
+				       "adehi:lM:n:No:O:p:rRsS:t:TvV",
 				       long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -172,18 +171,6 @@ extern void parse_command_line(int argc, char **argv)
 			xfree(params.partition);
 			FREE_NULL_LIST(params.part_list);
 			params.all_flag = true;
-			break;
-		case (int)'b':
-			params.cluster_flags = slurmdb_setup_cluster_flags();
-			if (params.cluster_flags & CLUSTER_FLAG_BG)
-				params.bg_flag = true;
-			else {
-				error("Must be on a BG system to use --bg "
-				      "option, if using --cluster option "
-				      "put the --bg option "
-				      "after the --cluster option.");
-				exit(1);
-			}
 			break;
 		case (int)'d':
 			params.dead_nodes = true;
@@ -332,10 +319,7 @@ extern void parse_command_line(int argc, char **argv)
 	if ( params.format == NULL ) {
 		if ( params.summarize ) {
 			params.part_field_flag = true;	/* compute size later */
-			if (params.cluster_flags & CLUSTER_FLAG_BG)
-				params.format = "%9P %.5a %.10l %.32F  %N";
-			else
-				params.format = "%9P %.5a %.10l %.16F  %N";
+			params.format = "%9P %.5a %.10l %.16F  %N";
 		} else if ( params.node_flag ) {
 			params.node_field_flag = true;	/* compute size later */
 			params.part_field_flag = true;	/* compute size later */
@@ -371,7 +355,7 @@ extern void parse_command_line(int argc, char **argv)
 		_parse_format(params.format);
 
 	if (params.list_reasons && (params.state_list == NULL)) {
-		params.states = xstrdup("down,fail,drain,error");
+		params.states = xstrdup("down,fail,drain");
 		if (!(params.state_list = _build_state_list (params.states)))
 			fatal ("Unable to build state list for -R!");
 	}
@@ -563,8 +547,6 @@ _node_state_id (char *str)
 		return NODE_STATE_DRAIN;
 	if (xstrncasecmp("DRAINED", str, len) == 0)
 		return NODE_STATE_DRAIN | NODE_STATE_IDLE;
-	if (xstrncasecmp("ERROR", str, len) == 0)
-		return NODE_STATE_ERROR;
 	if ((xstrncasecmp("RESV", str, len) == 0) ||
 	    (xstrncasecmp("RESERVED", str, len) == 0))
 		return NODE_STATE_RES;
@@ -1304,7 +1286,6 @@ void _print_options( void )
 			"true" : "false");
 	printf("avail_flag      = %s\n", params.match_flags.avail_flag ?
 			"true" : "false");
-	printf("bg_flag         = %s\n", params.bg_flag ? "true" : "false");
 	printf("cpus_flag       = %s\n", params.match_flags.cpus_flag ?
 			"true" : "false");
 	printf("default_time_flag =%s\n", params.match_flags.default_time_flag ?
@@ -1369,7 +1350,6 @@ static void _help( void )
 Usage: sinfo [OPTIONS]\n\
   -a, --all                  show all partitions (including hidden and those\n\
 			     not accessible)\n\
-  -b, --bg                   show bgblocks (on Blue Gene systems)\n\
   -d, --dead                 show only non-responding nodes\n\
   -e, --exact                group nodes only on exact match of configuration\n\
       --federation           Report federated information if a member of one\n\

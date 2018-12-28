@@ -1,6 +1,6 @@
 Name:		slurm
-Version:	17.11.7
-%global rel	1
+Version:	18.08.4
+%define rel	1
 Release:	%{rel}%{?dist}
 Summary:	Slurm Workload Manager
 
@@ -31,6 +31,7 @@ Source:		%{slurm_source_dir}.tar.bz2
 # --with openssl	%_with_openssl 1	require openssl RPM to be installed
 #						ensures auth/openssl and crypto/openssl are built
 # --without pam		%_without_pam 1		don't require pam-devel RPM to be installed
+# --without x11		%_without_x11 1		disable internal X11 support
 
 #  Options that are off by default (enable with --with <opt>)
 %bcond_with cray
@@ -44,6 +45,7 @@ Source:		%{slurm_source_dir}.tar.bz2
 %bcond_with hdf5
 %bcond_with lua
 %bcond_with numa
+%bcond_with x11
 
 # Build with OpenSSL by default on all platforms (disable using --without openssl)
 %bcond_without openssl
@@ -305,11 +307,16 @@ notifies slurm about failed nodes.
 	%{?_with_freeipmi} \
 	%{?_with_hdf5} \
 	%{?_with_shared_libslurm} \
+	%{?_without_x11:--disable-x11} \
 	%{?_with_cflags}
 
 make %{?_smp_mflags}
 
 %install
+
+# Ignore redundant standard rpaths and insecure relative rpaths,
+# for RHEL based distros which use "check-rpaths" tool.
+export QA_RPATHS=0x5
 
 # Strip out some dependencies
 
@@ -353,12 +360,10 @@ install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/slurmdbd.service
 %endif
 
 install -D -m644 etc/cgroup.conf.example %{buildroot}/%{_sysconfdir}/cgroup.conf.example
-install -D -m644 etc/cgroup_allowed_devices_file.conf.example %{buildroot}/%{_sysconfdir}/cgroup_allowed_devices_file.conf.example
 install -D -m644 etc/layouts.d.power.conf.example %{buildroot}/%{_sysconfdir}/layouts.d/power.conf.example
 install -D -m644 etc/layouts.d.power_cpufreq.conf.example %{buildroot}/%{_sysconfdir}/layouts.d/power_cpufreq.conf.example
 install -D -m644 etc/layouts.d.unit.conf.example %{buildroot}/%{_sysconfdir}/layouts.d/unit.conf.example
 install -D -m644 etc/slurm.conf.example %{buildroot}/%{_sysconfdir}/slurm.conf.example
-install -D -m755 etc/slurm.epilog.clean %{buildroot}/%{_sysconfdir}/slurm.epilog.clean
 install -D -m644 etc/slurmdbd.conf.example %{buildroot}/%{_sysconfdir}/slurmdbd.conf.example
 install -D -m755 contribs/sjstat %{buildroot}/%{_bindir}/sjstat
 
@@ -495,12 +500,10 @@ rm -rf %{buildroot}
 %config %{_sysconfdir}/slurm.conf.template
 %endif
 %config %{_sysconfdir}/cgroup.conf.example
-%config %{_sysconfdir}/cgroup_allowed_devices_file.conf.example
 %config %{_sysconfdir}/layouts.d/power.conf.example
 %config %{_sysconfdir}/layouts.d/power_cpufreq.conf.example
 %config %{_sysconfdir}/layouts.d/unit.conf.example
 %config %{_sysconfdir}/slurm.conf.example
-%config %{_sysconfdir}/slurm.epilog.clean
 %config %{_sysconfdir}/slurmdbd.conf.example
 #############################################################################
 

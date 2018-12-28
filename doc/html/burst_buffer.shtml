@@ -10,6 +10,7 @@
 <li><a href="#interactive">Interactive Job Options</a></li>
 <li><a href="#status">Status Commands</a></li>
 <li><a href="#reservation">Advanced Reservations</a></li>
+<li><a href="#dependencies">Job Dependencies</a></li>
 </ul>
 
 <h2><a name="overview">Overview</a></h2>
@@ -200,6 +201,14 @@ A sample batch script follows:</p>
 /home/alan/a.out
 </pre>
 
+<p>Persistent burst buffers can be created and deleted by a job requiring no
+compute resources. Submit a job with the desired burst buffer directives and
+specify a node count of zero (e.g. "sbatch -N0 setup_buffers.bash").
+Attempts to submit a zero size job without burst buffer directives or with
+job-specific burst buffer directives will generate an error.
+Note that zero size jobs are not supported for job arrays or heterogeneous
+job allocations.</p>
+
 <p><b>NOTE:</b> The ability to create and destroy persistent burst buffers may be
 limited by the "Flags" option in the burst_buffer.conf file.
 See the burst_buffer.conf man page for more information.
@@ -276,6 +285,34 @@ Name=generic DefaultPool=ssd Granularity=100G TotalSpace=50T UsedSpace=42T
     UserID=brenda(1001) Used=22T
 </pre>
 
+<p>Access to the Cray burst buffer status tool, <i>dwstat</i>, is available from
+the scontrol command using the "scontrol show bbstat ..." or
+"scontrol show dwstat ..." command. Options following "bbstat" or "dwstat" on
+the scontrol execute line are passed directly to the dwstat command as shown
+below. See
+<a href="http://docs.cray.com/books/S-2558-5204/S-2558-5204.pdf">Cray DataWarp documentation</a>
+for details about dwstat options and output.</p>
+
+<pre>
+/opt/cray/dws/default/bin/dwstat
+$ scontrol show dwstat
+    pool units quantity    free gran'
+wlm_pool bytes  7.28TiB 7.28TiB 1GiB'
+
+$ scontrol show dwstat sessions
+ sess state      token creator owner             created expiration nodes
+  832 CA---  783000000  tester 12345 2015-09-08T16:20:36      never    20
+  833 CA---  784100000  tester 12345 2015-09-08T16:21:36      never     1
+  903 D---- 1875700000  tester 12345 2015-09-08T17:26:05      never     0
+
+$ scontrol show dwstat configurations
+ conf state inst    type access_type activs
+  715 CA---  753 scratch      stripe      1
+  716 CA---  754 scratch      stripe      1
+  759 D--T-  807 scratch      stripe      0
+  760 CA---  808 scratch      stripe      1
+</pre>
+
 <h2><a name="reservation">Advanced Reservations</a></h2>
 
 <p>Burst buffer resources can be placed in an advanced reservation using the
@@ -312,6 +349,18 @@ $ scontrol create reservation StartTime=16:00 duration=60 \
   BurstBuffer=cray:pool_test:4G
 </pre>
 
-<p style="text-align:center;">Last modified 7 November 2017</p>
+<h2><a name="dependencies">Job Dependencies</a></h2>
+
+<p>If two jobs use burst buffers and one is depend on the other (e.g.
+"sbatch --dependency=afterok:123 ...") then the second job will not begin until
+the first job completes and it's burst buffer stage out completes.
+If the second job does not use a burst buffer, but is dependent upon the first
+job's completion, then it will not wait for the stage out operation of the first
+job to complete.
+The second job can be made to wait for the first job's stage out operation to
+complete using the "afterburstbuffer" dependency option (e.g.
+"sbatch --dependency=afterburstbuffer:123 ...").</p>
+
+<p style="text-align:center;">Last modified 24 April 2018</p>
 
 <!--#include virtual="footer.txt"-->

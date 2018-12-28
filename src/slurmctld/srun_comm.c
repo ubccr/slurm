@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -47,6 +47,7 @@
 #include "src/common/xstring.h"
 #include "src/slurmctld/agent.h"
 #include "src/slurmctld/fed_mgr.h"
+#include "src/slurmctld/proc_req.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/srun_comm.h"
 
@@ -82,20 +83,20 @@ static bool _pending_pack_jobs(struct job_record *job_ptr)
 
 	pack_leader = find_job_record(job_ptr->pack_job_id);
 	if (!pack_leader) {
-		error("Job pack leader %u not found", job_ptr->pack_job_id);
+		error("Job pack leader %pJ not found", job_ptr);
 		return false;
 	}
 	if (!pack_leader->pack_job_list) {
-		error("Job pack leader %u lacks pack_job_list",
-		      job_ptr->pack_job_id);
+		error("Job pack leader %pJ lacks pack_job_list",
+		      job_ptr);
 		return false;
 	}
 
 	iter = list_iterator_create(pack_leader->pack_job_list);
 	while ((pack_job = (struct job_record *) list_next(iter))) {
 		if (pack_leader->pack_job_id != pack_job->pack_job_id) {
-			error("%s: Bad pack_job_list for job %u",
-			      __func__, pack_leader->pack_job_id);
+			error("%s: Bad pack_job_list for %pJ",
+			      __func__, pack_leader);
 			continue;
 		}
 		if (IS_JOB_PENDING(pack_job)) {
@@ -106,49 +107,6 @@ static bool _pending_pack_jobs(struct job_record *job_ptr)
 	list_iterator_destroy(iter);
 
 	return pending_job;
-}
-
-resource_allocation_response_msg_t *_build_alloc_msg(struct job_record *job_ptr)
-{
-	job_resources_t *job_resrcs_ptr = job_ptr->job_resrcs;
-	resource_allocation_response_msg_t *msg_arg;
-	int i;
-
-	msg_arg = xmalloc(sizeof(resource_allocation_response_msg_t));
-	msg_arg->job_id 	= job_ptr->job_id;
-	msg_arg->node_list	= xstrdup(job_ptr->nodes);
-	msg_arg->partition	= xstrdup(job_ptr->partition);
-	msg_arg->alias_list	= xstrdup(job_ptr->alias_list);
-	msg_arg->num_cpu_groups	= job_resrcs_ptr->cpu_array_cnt;
-	msg_arg->cpus_per_node  = xmalloc(sizeof(uint16_t) *
-				  job_resrcs_ptr->cpu_array_cnt);
-	if (job_ptr->details) {
-		msg_arg->pn_min_memory = job_ptr->details->pn_min_memory;
-		msg_arg->cpu_freq_min = job_ptr->details->cpu_freq_min;
-		msg_arg->cpu_freq_max = job_ptr->details->cpu_freq_max;
-		msg_arg->cpu_freq_gov = job_ptr->details->cpu_freq_gov;
-		if (job_ptr->details->env_cnt) {
-			msg_arg->env_size = job_ptr->details->env_cnt;
-			msg_arg->environment = xmalloc(
-					sizeof(char *) * msg_arg->env_size);
-			for (i = 0; i < msg_arg->env_size; i++) {
-				msg_arg->environment[i] =
-					xstrdup(job_ptr->details->env_sup[i]);
-			}
-		}
-	}
-	memcpy(msg_arg->cpus_per_node, job_resrcs_ptr->cpu_array_value,
-	       (sizeof(uint16_t) * job_resrcs_ptr->cpu_array_cnt));
-	msg_arg->cpu_count_reps  = xmalloc(sizeof(uint32_t) *
-				   job_resrcs_ptr->cpu_array_cnt);
-	memcpy(msg_arg->cpu_count_reps, job_resrcs_ptr->cpu_array_reps,
-	       (sizeof(uint32_t) * job_resrcs_ptr->cpu_array_cnt));
-	msg_arg->node_cnt	= job_ptr->node_cnt;
-	msg_arg->select_jobinfo = select_g_select_jobinfo_copy(
-				job_ptr->select_jobinfo);
-	msg_arg->error_code	= SLURM_SUCCESS;
-
-	return msg_arg;
 }
 
 static void _free_srun_alloc(void *x)
@@ -163,13 +121,12 @@ static void _free_srun_alloc(void *x)
 
 /*
  * srun_allocate - notify srun of a resource allocation
- * IN job_id - id of the job allocated resource
+ * IN job_ptr - job allocated resources
  */
-extern void srun_allocate (uint32_t job_id)
+extern void srun_allocate(struct job_record *job_ptr)
 {
-	struct job_record *job_ptr = find_job_record(job_id);
 	struct job_record *pack_job, *pack_leader;
-	resource_allocation_response_msg_t *msg_arg;
+	resource_allocation_response_msg_t *msg_arg = NULL;
 	slurm_addr_t *addr;
 	ListIterator iter;
 	List job_resp_list = NULL;
@@ -184,9 +141,8 @@ extern void srun_allocate (uint32_t job_id)
 		addr = xmalloc(sizeof(struct sockaddr_in));
 		slurm_set_addr(addr, job_ptr->alloc_resp_port,
 			job_ptr->resp_host);
-		msg_arg = _build_alloc_msg(job_ptr);
-		set_remote_working_response(msg_arg, job_ptr,
-					    job_ptr->origin_cluster);
+
+		msg_arg = build_alloc_msg(job_ptr, SLURM_SUCCESS, NULL);
 		_srun_agent_launch(addr, job_ptr->alloc_node,
 				   RESPONSE_RESOURCE_ALLOCATION, msg_arg,
 				   job_ptr->start_protocol_ver);
@@ -200,28 +156,28 @@ extern void srun_allocate (uint32_t job_id)
 		iter = list_iterator_create(pack_leader->pack_job_list);
 		while ((pack_job = (struct job_record *) list_next(iter))) {
 			if (pack_leader->pack_job_id != pack_job->pack_job_id) {
-				error("%s: Bad pack_job_list for job %u",
-				      __func__, pack_leader->pack_job_id);
+				error("%s: Bad pack_job_list for %pJ",
+				      __func__, pack_leader);
 				continue;
 			}
-			msg_arg = _build_alloc_msg(pack_job);
-			set_remote_working_response(msg_arg, pack_job,
-						    pack_job->origin_cluster);
+			msg_arg = build_alloc_msg(pack_job, SLURM_SUCCESS,
+						  NULL);
 			list_append(job_resp_list, msg_arg);
+			msg_arg = NULL;
 		}
 		list_iterator_destroy(iter);
 		_srun_agent_launch(addr, job_ptr->alloc_node,
 				   RESPONSE_JOB_PACK_ALLOCATION, job_resp_list,
 				   job_ptr->start_protocol_ver);
 	} else {
-		error("%s: Can not find pack job leader %u",
-		      __func__, job_ptr->pack_job_id);
+		error("%s: Can not find pack job leader %pJ",
+		      __func__, job_ptr);
 	}
 }
 
 /*
  * srun_allocate_abort - notify srun of a resource allocation failure
- * IN job_id - id of the job allocated resource
+ * IN job_ptr - job allocated resources
  */
 extern void srun_allocate_abort(struct job_record *job_ptr)
 {
@@ -244,15 +200,14 @@ extern void srun_allocate_abort(struct job_record *job_ptr)
 
 /*
  * srun_node_fail - notify srun of a node's failure
- * IN job_id    - id of job to notify
+ * IN job_ptr - job to notify
  * IN node_name - name of failed node
  */
-extern void srun_node_fail (uint32_t job_id, char *node_name)
+extern void srun_node_fail(struct job_record *job_ptr, char *node_name)
 {
 #ifndef HAVE_FRONT_END
 	struct node_record *node_ptr;
 #endif
-	struct job_record *job_ptr = find_job_record (job_id);
 	int bit_position = -1;
 	slurm_addr_t * addr;
 	srun_node_fail_msg_t *msg_arg;
@@ -299,7 +254,7 @@ extern void srun_node_fail (uint32_t job_id, char *node_name)
 		addr = xmalloc(sizeof(struct sockaddr_in));
 		slurm_set_addr(addr, job_ptr->other_port, job_ptr->resp_host);
 		msg_arg = xmalloc(sizeof(srun_node_fail_msg_t));
-		msg_arg->job_id   = job_id;
+		msg_arg->job_id   = job_ptr->job_id;
 		msg_arg->step_id  = NO_VAL;
 		msg_arg->nodelist = xstrdup(node_name);
 		_srun_agent_launch(addr, job_ptr->alloc_node, SRUN_NODE_FAIL,
@@ -629,8 +584,8 @@ extern void srun_exec(struct step_record *step_ptr, char **argv)
 		_srun_agent_launch(addr, step_ptr->host, SRUN_EXEC,
 				   msg_arg, step_ptr->start_protocol_ver);
 	} else {
-		error("srun_exec %u.%u lacks communication channel",
-			step_ptr->job_ptr->job_id, step_ptr->step_id);
+		error("srun_exec %pS lacks communication channel",
+		      step_ptr);
 	}
 }
 

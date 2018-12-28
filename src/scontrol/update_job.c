@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -434,7 +434,6 @@ scontrol_hold(char *op, char *job_str)
 				slurm_free_job_array_resp(resp);
 				resp = NULL;
 			}
-			job_msg.job_id_str = _next_job_id();
 		}
 		return rc;
 	} else if (job_str) {
@@ -753,10 +752,15 @@ extern int scontrol_update_job(int argc, char **argv)
 			}
 			val++;
 			vallen = strlen(val);
-		} else if (xstrncasecmp(tag, "Nice", MAX(strlen(tag), 2)) == 0){
-			/* "Nice" is the only tag that might not have an
-			   equal sign, so it is handled specially. */
+		}
+		/* Handle any tags that might not have an equal sign here */
+		else if (xstrncasecmp(tag, "Nice", MAX(strlen(tag), 2)) == 0) {
 			job_msg.nice = NICE_OFFSET + 100;
+			update_cnt++;
+			continue;
+		} else if (!xstrncasecmp(tag, "ResetAccrueTime",
+					 MAX(strlen(tag), 3))) {
+			job_msg.bitflags |= RESET_ACCRUE_TIME;
 			update_cnt++;
 			continue;
 		} else if (!val && argv[i + 1]) {
@@ -913,12 +917,16 @@ extern int scontrol_update_job(int argc, char **argv)
 			job_msg.nice = NICE_OFFSET + tmp_nice;
 			update_cnt++;
 		}
-		else if (xstrncasecmp(tag, "CPUsPerTask", MAX(taglen, 6)) == 0) {
+		else if (!xstrncasecmp(tag, "CPUsPerTask", MAX(taglen, 9))) {
 			if (parse_uint16(val, &job_msg.cpus_per_task)) {
 				error("Invalid CPUsPerTask value: %s", val);
 				exit_code = 1;
 				return 0;
 			}
+			update_cnt++;
+		}
+		else if (!xstrncasecmp(tag, "CpusPerTres", MAX(taglen, 9))) {
+			job_msg.cpus_per_tres = val;
 			update_cnt++;
 		}
 		else if (xstrncasecmp(tag, "NumCPUs", MAX(taglen, 6)) == 0) {
@@ -936,7 +944,7 @@ extern int scontrol_update_job(int argc, char **argv)
 				job_msg.max_cpus = max_cpus;
 			update_cnt++;
 		}
-		/* ReqProcs was removed in SLURM version 2.1 */
+		/* ReqProcs was removed in Slurm version 2.1 */
 		else if ((xstrncasecmp(tag, "NumTasks", MAX(taglen, 8)) == 0) ||
 			 (xstrncasecmp(tag, "ReqProcs", MAX(taglen, 8)) == 0)) {
 			if (parse_uint32(val, &job_msg.num_tasks)) {
@@ -954,7 +962,7 @@ extern int scontrol_update_job(int argc, char **argv)
 			}
 			update_cnt++;
 		}
-		/* ReqNodes was replaced by NumNodes in SLURM version 2.1 */
+		/* ReqNodes was replaced by NumNodes in Slurm version 2.1 */
 		else if ((xstrncasecmp(tag, "ReqNodes", MAX(taglen, 8)) == 0) ||
 		         (xstrncasecmp(tag, "NumNodes", MAX(taglen, 8)) == 0)) {
 			int min_nodes, max_nodes, rc;
@@ -1124,6 +1132,10 @@ extern int scontrol_update_job(int argc, char **argv)
 			}
 			update_cnt++;
 		}
+		else if (!xstrncasecmp(tag, "MemPerTres", MAX(taglen, 5))) {
+			job_msg.mem_per_tres = val;
+			update_cnt++;
+		}
 		else if (xstrncasecmp(tag, "ThreadSpec", MAX(taglen, 4)) == 0) {
 			if (!xstrcmp(val, "-1") || !xstrcmp(val, "*"))
 				job_msg.core_spec = INFINITE16;
@@ -1133,6 +1145,34 @@ extern int scontrol_update_job(int argc, char **argv)
 				return 0;
 			} else
 				job_msg.core_spec |= CORE_SPEC_THREAD;
+			update_cnt++;
+		}
+		else if (!xstrncasecmp(tag, "TresBind", MAX(taglen, 5))) {
+			job_msg.tres_bind = val;
+			update_cnt++;
+		}
+		else if (!xstrncasecmp(tag, "TresFreq", MAX(taglen, 5))) {
+			job_msg.tres_freq = val;
+			update_cnt++;
+		}
+		else if (!xstrncasecmp(tag, "TresPerJob", MAX(taglen, 8))) {
+			job_msg.tres_per_job = val;
+			update_cnt++;
+		}
+		else if (!xstrncasecmp(tag, "TresPerNode", MAX(taglen, 8))) {
+			/* "gres" replaced by "tres_per_node" in v18.08 */
+			if (job_msg.tres_per_node)
+				xstrfmtcat(job_msg.tres_per_node, ",%s", val);
+			else
+				job_msg.tres_per_node = xstrdup(val);
+			update_cnt++;
+		}
+		else if (!xstrncasecmp(tag, "TresPerSocket", MAX(taglen, 8))) {
+			job_msg.tres_per_socket = val;
+			update_cnt++;
+		}
+		else if (!xstrncasecmp(tag, "TresPerTask", MAX(taglen, 8))) {
+			job_msg.tres_per_task = val;
 			update_cnt++;
 		}
 		else if (xstrncasecmp(tag, "ExcNodeList", MAX(taglen, 3)) == 0){
@@ -1150,11 +1190,14 @@ extern int scontrol_update_job(int argc, char **argv)
 			update_cnt++;
 		}
 		else if (xstrncasecmp(tag, "Gres", MAX(taglen, 2)) == 0) {
+			/* "gres" replaced by "tres_per_node" in v18.08 */
 			if (!xstrcasecmp(val, "help") ||
 			    !xstrcasecmp(val, "list")) {
 				print_gres_help();
+			} else if (job_msg.tres_per_node) {
+				xstrfmtcat(job_msg.tres_per_node, ",%s", val);
 			} else {
-				job_msg.gres = val;
+				job_msg.tres_per_node = xstrdup(val);
 				update_cnt++;
 			}
 		}
@@ -1169,64 +1212,6 @@ extern int scontrol_update_job(int argc, char **argv)
 		else if (xstrncasecmp(tag, "Dependency", MAX(taglen, 1)) == 0) {
 			job_msg.dependency = val;
 			update_cnt++;
-		}
-		else if (xstrncasecmp(tag, "Geometry", MAX(taglen, 2)) == 0) {
-			char* token, *delimiter = ",x", *next_ptr;
-			int j, rc = 0;
-			int dims = slurmdb_setup_cluster_dims();
-			uint16_t geo[dims];
-			char* geometry_tmp = xstrdup(val);
-			char* original_ptr = geometry_tmp;
-			token = strtok_r(geometry_tmp, delimiter, &next_ptr);
-			for (j=0; j<dims; j++) {
-				if (token == NULL) {
-					error("insufficient dimensions in "
-						"Geometry");
-					rc = -1;
-					break;
-				}
-				geo[j] = (uint16_t) atoi(token);
-				if (geo[j] <= 0) {
-					error("invalid --geometry argument");
-					rc = -1;
-					break;
-				}
-				geometry_tmp = next_ptr;
-				token = strtok_r(geometry_tmp, delimiter,
-					&next_ptr);
-			}
-			if (token != NULL) {
-				error("too many dimensions in Geometry");
-				rc = -1;
-			}
-
-			if (original_ptr)
-				xfree(original_ptr);
-			if (rc != 0)
-				exit_code = 1;
-			else {
-				for (j=0; j<dims; j++)
-					job_msg.geometry[j] = geo[j];
-				update_cnt++;
-			}
-		}
-
-		else if (xstrncasecmp(tag, "Rotate", MAX(taglen, 2)) == 0) {
-			if (xstrncasecmp(val, "YES", MAX(vallen, 1)) == 0)
-				job_msg.rotate = 1;
-			else if (xstrncasecmp(val, "NO", MAX(vallen, 1)) == 0)
-				job_msg.rotate = 0;
-			else if (parse_uint16(val, &job_msg.rotate)) {
-				error ("Invalid rotate value: %s", val);
-				exit_code = 1;
-				return 0;
-			}
-			update_cnt++;
-		}
-		else if (xstrncasecmp(tag, "Conn-Type", MAX(taglen, 2)) == 0) {
-			verify_conn_type(val, job_msg.conn_type);
-			if (job_msg.conn_type[0] != NO_VAL16)
-				update_cnt++;
 		}
 		else if (xstrncasecmp(tag, "Licenses", MAX(taglen, 1)) == 0) {
 			job_msg.licenses = val;
@@ -1484,7 +1469,7 @@ static void _update_job_size(uint32_t job_id)
 		fprintf(resize_csh, "unsetenv SLURM_TASKS_PER_NODE\n");
 	}
 
-	printf("To reset SLURM environment variables, execute\n");
+	printf("To reset Slurm environment variables, execute\n");
 	printf("  For bash or sh shells:  . ./%s\n", fname_sh);
 	printf("  For csh shells:         source ./%s\n", fname_csh);
 

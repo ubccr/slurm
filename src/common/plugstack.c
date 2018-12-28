@@ -6,11 +6,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,15 +26,17 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
+
+#define _GNU_SOURCE
 
 #include "config.h"
 
@@ -49,7 +51,6 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/xassert.h"
-#include "src/common/safeopen.h"
 #include "src/common/strlcpy.h"
 #include "src/common/read_config.h"
 #include "src/common/plugstack.h"
@@ -58,7 +59,6 @@
 #include "src/common/env.h"
 
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
-/*#include "src/srun/srun_job.h"*/
 
 #include "slurm/spank.h"
 
@@ -536,12 +536,12 @@ _spank_stack_process_line(struct spank_stack *stack,
 	return (0);
 }
 
-
 static int _spank_stack_load(struct spank_stack *stack, const char *path)
 {
 	int rc = 0;
 	int line;
 	char buf[4096];
+	int fd;
 	FILE *fp;
 
 	debug ("spank: opening plugin stack %s", path);
@@ -550,7 +550,8 @@ static int _spank_stack_load(struct spank_stack *stack, const char *path)
 	 *  Try to open plugstack.conf. A missing config file is not an
 	 *   error, but is equivalent to an empty file.
 	 */
-	if (!(fp = safeopen(path, "r", SAFEOPEN_NOCREATE|SAFEOPEN_LINK_OK))) {
+	if ((fd = open(path, O_RDONLY | O_CLOEXEC)) < 0 ||
+	    (fp = fdopen(fd, "r")) == NULL) {
 		if (errno == ENOENT)
 			return (0);
 		error("spank: Failed to open %s: %m", path);
@@ -1616,7 +1617,7 @@ spank_option_getopt (spank_t sp, struct spank_option *opt, char **argp)
 	 *  We need to check for variables that start with either
 	 *   the default spank option env prefix, or the default
 	 *   prefix + an *extra* prefix of SPANK_, in case we're
-	 *   running in prolog/epilog, where SLURM prepends SPANK_
+	 *   running in prolog/epilog, where Slurm prepends SPANK_
 	 *   to all spank job environment variables.
 	 */
 	spopt = _spank_plugin_opt_create (sp->plugin, opt, 0);

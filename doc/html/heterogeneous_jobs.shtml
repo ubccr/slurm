@@ -122,7 +122,7 @@ fashion on nodes "nid00003" and "nid00004" as shown below.</p>
 <br>
 
 <p>Some options should be specified only in the first job component.
-For example, specifyihg a batch job output file in the second job component's
+For example, specifying a batch job output file in the second job component's
 options will result in the first job component (where the batch script executes)
 using the default output file name.</p>
 
@@ -350,13 +350,13 @@ respect to heterogeneous jobs.
 By default a request to cancel, hold or release a job ID that is not the
 pack_job_id, but that of a job component will only operate that one component
 of the heterogeneous job.
-If SchedulerParameters configuration parameter includes the option "whole_pack"
-then the operation would apply to all components of the job if any job component
-is specified to be operated upon. In the below example, the scancel command will
-either cancel all components of job 93 if SchedulingParameters=whole_pack is
-configured, otherwise only job 93+1 will be cancelled.
-If a specific heterogeneous job component is specified (e.g. "scancel 93+1"),
-then only that one component will be effected.</p>
+If SchedulerParameters configuration parameter includes the option
+"whole_hetjob" then the operation would apply to all components of the job if
+any job component is specified to be operated upon. In the below example, the
+scancel command will either cancel all components of job 93 if
+SchedulingParameters=whole_hetjob is configured, otherwise only job 93+1 will be
+cancelled. If a specific heterogeneous job component is specified (e.g. "scancel
+93+1"), then only that one component will be effected.</p>
 <pre>
 $ squeue --job=93
 JOBID PARTITION  NAME  USER ST  TIME  NODES NODELIST
@@ -364,8 +364,8 @@ JOBID PARTITION  NAME  USER ST  TIME  NODES NODELIST
  93+1     debug  bash  adam  R 19:18      1 nid00011
  93+2     debug  bash  adam  R 19:18      1 nid00021
 $ scancel 94 (where job ID 94 is equivalent to 93+1)
-# Cancel 93+0, 93+1 and 93+2 if SchedulerParameters includes "whole_pack"
-# Cancel only 93+1 if SchedulerParameters does not include "whole_pack"
+# Cancel 93+0, 93+1 and 93+2 if SchedulerParameters includes "whole_hetjob"
+# Cancel only 93+1 if SchedulerParameters does not include "whole_hetjob"
 </pre>
 
 <h3>Accounting</h3>
@@ -376,7 +376,12 @@ The sacct command reports job's using the format
 "&lt;pack_job_id&gt;+&lt;pack_job_offset&gt;" and can accept a job ID
 specification for filtering using the same format.
 If a pack_job_id value is specified as a job filter, then information about
-all components of that job will be reported as shown below.</p>
+all components of that job will be reported as shown below by default.
+The <i>--whole-hetjob=[yes|no]</i> option can be used to force to report
+the information about all the components of that job or just about the specific
+component requested, no matter if the job filter includes the pack_job_id
+(leader) or not.
+</p>
 
 <pre>
 $ sacct -j 67767
@@ -389,6 +394,17 @@ $  sacct -j 67767+1
   JobID JobName Partition Account AllocCPUS     State ExitCode 
 ------- ------- --------- ------- --------- --------- -------- 
 67767+1     foo     debug    test         4 COMPLETED      0:0 
+
+$  sacct -j 67767 --whole-hetjob=no
+  JobID JobName Partition Account AllocCPUS     State ExitCode
+------- ------- --------- ------- --------- --------- --------
+67767+0     foo     debug    test         4 COMPLETED      0:0
+
+$ sacct -j 67767+1 --whole-hetjob=yes
+  JobID JobName Partition Account AllocCPUS     State ExitCode
+------- ------- --------- ------- --------- --------- --------
+67767+0     foo     debug    test         2 COMPLETED      0:0
+67767+1     foo     debug    test         4 COMPLETED      0:0
 </pre>
 
 <h2><a name="job_steps">Launching Applications (Job Steps)</a></h2>
@@ -411,12 +427,15 @@ component number zero. Some examples follow:</p>
 </ul>
 
 <p><b>IMPORTANT:</b> The ability to execute a single application across more
-than one job allocation does not work in Slurm version 17.11 except in the
-case of OpenMPI with Slurm's mpi/pmi2 plugin or a non-MPI job with Slurm's
-mpi/none. We expect support for other MPI implementations in a future release
-of Slurm. Until that time, an appropriate error message will be reported unless
-Slurm's SchedulerParameters configuration parameter includes the option
-"enable_hetero_steps".</p>
+than one job allocation does not work with all MPI implementations or Slurm MPI
+plugins. Slurm's ability to execute such an application can be disabled on the
+entire cluster by adding "disable_hetero_steps" to Slurm's SchedulerParameters
+configuration parameter.</p>
+
+<p><b>IMPORTANT:</b> While the srun command can be used to launch heterogeneous
+job steps, mpirun would require substantial modification to support
+heterogeneous applications. We are aware of no such mpirun development efforts
+at this time.</p>
 
 <p>By default, the applications launched by a single execution of the srun
 command (even for different components of the heterogeneous job) are combined
@@ -457,7 +476,7 @@ $ salloc -n1 : -n2 beta bash
 salloc: Pending job allocation 1721
 salloc: Granted job allocation 1721
 $ srun --pack-group=0,1 true   # Launches steps 1721.0 and 1722.0
-$ srun --pack-group=0 t  rue   # Launches step  1721.1, no 1722.1
+$ srun --pack-group=0   true   # Launches step  1721.1, no 1722.1
 $ srun --pack-group=0,1 true   # Launches steps 1721.2 and 1722.2
 </pre>
 
@@ -565,7 +584,7 @@ determined by examining Slurm environment variables.</p>
 memory in the future.
 This typically requires the backfill scheduler be able to allocate each
 component of a heterogeneous job on a different node in order to begin its
-resource allocation, even if multiple compoents of the job do actually get
+resource allocation, even if multiple components of the job do actually get
 allocated resources on the same node.</p>
 
 <p>In a federation of clusters, a heterogeneous job will execute entirely on
@@ -687,8 +706,7 @@ a heterogeneous job with 3 components.
 Such a situation will have an adverse effect upon scheduling other jobs,
 especially other heterogeneous jobs.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 20 December 2017</p>
+<p style="text-align:center;">Last modified 16 October 2018</p>
 
 <!--#include virtual="footer.txt"-->

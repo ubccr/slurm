@@ -3,11 +3,11 @@
  *****************************************************************************
  *  Copyright (C) 2005-2006 Hewlett-Packard Development Company, L.P.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -23,13 +23,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -192,7 +192,7 @@ int get_cpuset(cpu_set_t *mask, stepd_step_rec_t *job)
 		if (len > 1 && !memcmp(mstr, "0x", 2L))
 			curstr += 2;
 		while (ptr >= curstr) {
-			char val = char_to_val(*ptr);
+			char val = slurm_char_to_hex(*ptr);
 			if (val == (char) -1)
 				return false;
 			if (val & 1)
@@ -339,7 +339,7 @@ int slurm_setaffinity(pid_t pid, size_t size, const cpu_set_t *mask)
 	rval = sched_setaffinity(pid, mask);
 #endif
 	if (rval) {
-		verbose("sched_setaffinity(%d,%zd,0x%s) failed: %m",
+		verbose("sched_setaffinity(%d,%zu,0x%s) failed: %m",
 			pid, size, task_cpuset_to_str(mask, mstr));
 	}
 	return (rval);
@@ -369,7 +369,7 @@ int slurm_getaffinity(pid_t pid, size_t size, cpu_set_t *mask)
 	rval = sched_getaffinity(pid, mask);
 #endif
 	if (rval) {
-		verbose("sched_getaffinity(%d,%zd,0x%s) failed with status %d",
+		verbose("sched_getaffinity(%d,%zu,0x%s) failed with status %d",
 			pid, size, task_cpuset_to_str(mask, mstr), rval);
 	} else {
 		debug3("sched_getaffinity(%d) = 0x%s",

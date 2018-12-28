@@ -4,11 +4,11 @@
  *  Produced at Barcelona Supercomputing Center, December 2011
  *  Written by Alejandro Lucero <alucero@bsc.es>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -118,6 +118,7 @@ static int _print_stats(void)
 
 	printf("Server thread count:  %d\n", buf->server_thread_count);
 	printf("Agent queue size:     %d\n", buf->agent_queue_size);
+	printf("Agent count:          %d\n", buf->agent_count);
 	printf("DBD Agent queue size: %d\n\n", buf->dbd_agent_queue_size);
 
 	printf("Jobs submitted: %d\n", buf->jobs_submitted);
@@ -126,9 +127,10 @@ static int _print_stats(void)
 	printf("Jobs canceled:  %d\n", buf->jobs_canceled);
 	printf("Jobs failed:    %d\n\n", buf->jobs_failed);
 
-	printf("Jobs running:    %d\n", buf->jobs_running);
-	printf("Jobs running ts: %s (%ld)\n",
-	       slurm_ctime2(&buf->jobs_running_ts), buf->jobs_running_ts);
+	printf("Job states ts:  %s (%ld)\n",
+	       slurm_ctime2(&buf->job_states_ts), buf->job_states_ts);
+	printf("Jobs pending:   %d\n", buf->jobs_pending);
+	printf("Jobs running:   %d\n", buf->jobs_running);
 
 	printf("\nMain schedule statistics (microseconds):\n");
 	printf("\tLast cycle:   %u\n", buf->schedule_cycle_last);
@@ -182,6 +184,9 @@ static int _print_stats(void)
 		       buf->bf_queue_len_sum / buf->bf_cycle_counter);
 	}
 
+	printf("\nLatency for gettimeofday() (x1000): %d microseconds\n",
+	       buf->gettimeofday_latency);
+
 	printf("\nRemote Procedure Call statistics by message type\n");
 	for (i = 0; i < buf->rpc_type_size; i++) {
 		printf("\t%-40s(%5u) count:%-6u "
@@ -198,6 +203,27 @@ static int _print_stats(void)
 		       uid_to_string_cached((uid_t)buf->rpc_user_id[i]),
 		       buf->rpc_user_id[i], buf->rpc_user_cnt[i],
 		       rpc_user_ave_time[i], buf->rpc_user_time[i]);
+	}
+
+	printf("\nPending RPC statistics\n");
+	if (buf->rpc_queue_type_count == 0)
+		printf("\tNo pending RPCs\n");
+	for (i = 0; i < buf->rpc_queue_type_count; i++){
+		printf("\t%-40s(%5u) count:%-6u\n",
+		       rpc_num2string(buf->rpc_queue_type_id[i]),
+		       buf->rpc_queue_type_id[i],
+		       buf->rpc_queue_count[i]);
+	}
+
+	if (buf->rpc_dump_count > 0) {
+		printf("\nPending RPCs\n");
+	}
+
+	for (i = 0; i < buf->rpc_dump_count; i++) {
+		printf("\t%2u: %-36s %s\n",
+		       i+1,
+		       rpc_num2string(buf->rpc_dump_types[i]),
+		       buf->rpc_dump_hostlist[i]);
 	}
 
 	return 0;

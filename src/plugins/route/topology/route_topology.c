@@ -6,11 +6,11 @@
  *
  *  Written by Rod Schultz <rod.schultz@bull.com>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -46,6 +46,7 @@
 #include "src/common/node_conf.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_topology.h"
+#include "src/slurmctld/locks.h"
 
 /* These are defined here so when we link with something other than
  * the slurmctld we will have these symbols defined.  They will get
@@ -73,14 +74,14 @@ int switch_levels = 0;
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *      <application>/<method>
  *
  * where <application> is a description of the intended application of
  * the plugin (e.g., "task" for task control) and <method> is a description
- * of how this plugin satisfies that application.  SLURM will only load
+ * of how this plugin satisfies that application.  Slurm will only load
  * a task plugin if the plugin_type string has a prefix of "task/".
  *
  * plugin_version - an unsigned 32-bit integer containing the Slurm version
@@ -122,6 +123,20 @@ extern int fini(void)
 	return SLURM_SUCCESS;
 }
 
+/* Only run when in the slurmctld */
+static bool _run_in_daemon(void)
+{
+	static bool set = false;
+	static bool run = false;
+
+	if (!set) {
+		set = 1;
+		run = run_in_daemon("slurmctld");
+	}
+
+	return run;
+}
+
 /*****************************************************************************\
  *  API Implementations
 \*****************************************************************************/
@@ -147,10 +162,13 @@ extern int route_p_split_hostlist(hostlist_t hl,
 	char  *buf;
 	bitstr_t *nodes_bitmap = NULL;		/* nodes in message list */
 	bitstr_t *fwd_bitmap = NULL;		/* nodes in forward list */
+	slurmctld_lock_t node_read_lock = { .node = READ_LOCK };
 
 	msg_count = hostlist_count(hl);
 	slurm_mutex_lock(&route_lock);
 	if (switch_record_cnt == 0) {
+		if (_run_in_daemon())
+			fatal_abort("%s: Somehow we have 0 for switch_record_cnt and we are here in the slurmctld.  This should never happen.", __func__);
 		/* configs have not already been processed */
 		slurm_conf_init(NULL);
 		if (init_node_conf()) {
@@ -167,11 +185,16 @@ extern int route_p_split_hostlist(hostlist_t hl,
 	}
 	slurm_mutex_unlock(&route_lock);
 	*sp_hl = (hostlist_t*) xmalloc(switch_record_cnt * sizeof(hostlist_t));
+	/* Only acquire the slurmctld lock if running as the slurmctld. */
+	if (_run_in_daemon())
+		lock_slurmctld(node_read_lock);
 	/* create bitmap of nodes to send message too */
 	if (hostlist2bitmap (hl, false, &nodes_bitmap) != SLURM_SUCCESS) {
 		buf = hostlist_ranged_string_xmalloc(hl);
 		fatal("ROUTE: Failed to make bitmap from hostlist=%s.", buf);
 	}
+	if (_run_in_daemon())
+		unlock_slurmctld(node_read_lock);
 
 	/* Find lowest level switch containing all the nodes in the list */
 	j = 0;

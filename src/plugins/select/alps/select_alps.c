@@ -8,11 +8,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -132,14 +132,14 @@ static int select_cray_dim_size[3] = {-1};
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "select" for SLURM node selection) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "select" for Slurm node selection) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load select plugins if the plugin_type string has a
  * prefix of "select/".
  *
@@ -498,14 +498,6 @@ extern int select_p_step_finish(struct step_record *step_ptr, bool killing_step)
 	return other_step_finish(step_ptr, killing_step);
 }
 
-extern int select_p_pack_select_info(time_t last_query_time,
-				     uint16_t show_flags, Buf *buffer_ptr,
-				     uint16_t protocol_version)
-{
-	return other_pack_select_info(last_query_time, show_flags, buffer_ptr,
-				      protocol_version);
-}
-
 extern select_nodeinfo_t *select_p_select_nodeinfo_alloc(void)
 {
 	select_nodeinfo_t *nodeinfo = xmalloc(sizeof(struct select_nodeinfo));
@@ -794,7 +786,7 @@ extern char *select_p_select_jobinfo_sprint(select_jobinfo_t *jobinfo,
 
 	switch (mode) {
 	/*
-	 * SLURM only knows the ALPS reservation ID. The application IDs (APIDs)
+	 * Slurm only knows the ALPS reservation ID. The application IDs (APIDs)
 	 * of the reservation need to be queried from the Inventory response.
 	 * The maximum known reservation ID is 4096, it wraps around after that.
 	 */
@@ -873,22 +865,12 @@ extern char *select_p_select_jobinfo_xstrdup(select_jobinfo_t *jobinfo,
 	return buf;
 }
 
-extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
+extern int select_p_update_basil(void)
 {
 	if (slurmctld_primary && basil_inventory())
 		return SLURM_ERROR;
 
-	return other_update_block(block_desc_ptr);
-}
-
-extern int select_p_update_sub_node(update_block_msg_t *block_desc_ptr)
-{
-	return other_update_sub_node(block_desc_ptr);
-}
-
-extern int select_p_fail_cnode(struct step_record *step_ptr)
-{
-	return other_fail_cnode(step_ptr);
+	return SLURM_SUCCESS;
 }
 
 extern int select_p_get_info_from_plugin(enum select_plugindata_info dinfo,
@@ -906,11 +888,6 @@ extern int select_p_update_node_config(int index)
 extern int select_p_update_node_state(struct node_record *node_ptr)
 {
 	return other_update_node_state(node_ptr);
-}
-
-extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
-{
-	return other_alter_node_cnt(type, data);
 }
 
 extern int select_p_reconfigure(void)
@@ -983,14 +960,4 @@ extern int *select_p_ba_get_dims(void)
 	if (select_cray_dim_size[0] != -1)
 		return select_cray_dim_size;
 	return NULL;
-}
-
-extern void select_p_ba_fini(void)
-{
-	other_ba_fini();
-}
-
-extern bitstr_t *select_p_ba_cnodelist2bitmap(char *cnodelist)
-{
-	return other_ba_cnodelist2bitmap(cnodelist);
 }

@@ -8,11 +8,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
  *  This file is patterned after jobcomp_linux.c, written by Morris Jette and
@@ -142,25 +142,7 @@ static jobcomp_job_rec_t *_parse_line(List job_info_list)
 			job->timelimit = xstrdup(jobcomp_info->val);
 		} else if (!xstrcasecmp("Workdir", jobcomp_info->name)) {
 			job->work_dir = xstrdup(jobcomp_info->val);
-		}
-#ifdef HAVE_BG
-		else if (!xstrcasecmp("MaxProcs", jobcomp_info->name)) {
-			job->max_procs = atoi(jobcomp_info->val);
-		} else if (!xstrcasecmp("Block_Id", jobcomp_info->name)) {
-			job->blockid = xstrdup(jobcomp_info->val);
-		} else if (!xstrcasecmp("Connection", jobcomp_info->name)) {
-			job->connection = xstrdup(jobcomp_info->val);
-		} else if (!xstrcasecmp("reboot", jobcomp_info->name)) {
-			job->reboot = xstrdup(jobcomp_info->val);
-		} else if (!xstrcasecmp("rotate", jobcomp_info->name)) {
-			job->rotate = xstrdup(jobcomp_info->val);
-		} else if (!xstrcasecmp("geometry", jobcomp_info->name)) {
-			job->geo = xstrdup(jobcomp_info->val);
-		} else if (!xstrcasecmp("start", jobcomp_info->name)) {
-			job->bg_start_point = xstrdup(jobcomp_info->val);
-		}
-#endif
-		else {
+		} else {
 			error("Unknown type %s: %s", jobcomp_info->name,
 			      jobcomp_info->val);
 		}

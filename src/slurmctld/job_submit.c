@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -53,6 +53,7 @@
 #include "src/common/xstring.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/job_submit.h"
+#include "src/slurmctld/locks.h"
 
 typedef struct slurm_submit_ops {
 	int		(*submit)	( struct job_descriptor *job_desc,
@@ -81,7 +82,7 @@ static bool init_run = false;
 /*
  * Initialize the job submit plugin.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int job_submit_plugin_init(void)
 {
@@ -140,7 +141,7 @@ fini:
 /*
  * Terminate the job submit plugin. Free memory.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int job_submit_plugin_fini(void)
 {
@@ -218,6 +219,11 @@ extern int job_submit_plugin_submit(struct job_descriptor *job_desc,
 	DEF_TIMERS;
 	int i, rc;
 
+	xassert(verify_lock(CONF_LOCK, READ_LOCK));
+	xassert(verify_lock(JOB_LOCK, READ_LOCK));
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+	xassert(verify_lock(PART_LOCK, READ_LOCK));
+
 	START_TIMER;
 	rc = job_submit_plugin_init();
 	slurm_mutex_lock(&g_context_lock);
@@ -244,6 +250,11 @@ extern int job_submit_plugin_modify(struct job_descriptor *job_desc,
 {
 	DEF_TIMERS;
 	int i, rc;
+
+	xassert(verify_lock(CONF_LOCK, READ_LOCK));
+	xassert(verify_lock(JOB_LOCK, READ_LOCK));
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+	xassert(verify_lock(PART_LOCK, READ_LOCK));
 
 	START_TIMER;
 	rc = job_submit_plugin_init();

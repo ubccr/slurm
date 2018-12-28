@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -81,11 +81,12 @@ static void _preempt_signal(struct job_record *job_ptr, uint32_t grace_time)
 				(job_ptr->preempt_time + (time_t)grace_time));
 
 	/* Signal the job at the beginning of preemption GraceTime */
-	job_signal(job_ptr->job_id, SIGCONT, 0, 0, 0);
-	job_signal(job_ptr->job_id, SIGTERM, 0, 0, 0);
+	job_signal(job_ptr, SIGCONT, 0, 0, 0);
+	job_signal(job_ptr, SIGTERM, 0, 0, 0);
 }
 
-extern int slurm_job_check_grace(struct job_record *job_ptr, uint32_t preemptor)
+extern int slurm_job_check_grace(struct job_record *job_ptr,
+				 struct job_record *preemptor_ptr)
 {
 	/* Preempt modes: -1 (unset), 0 (none), 1 (partition), 2 (QOS) */
 	static int preempt_mode = 0;
@@ -103,8 +104,7 @@ extern int slurm_job_check_grace(struct job_record *job_ptr, uint32_t preemptor)
 		char *preempt_type = slurm_get_preempt_type();
 		if (!xstrcmp(preempt_type, "preempt/partition_prio"))
 			preempt_mode = 1;
-		else if (!xstrcmp(preempt_type, "preempt/qos") ||
-			 !xstrcmp(preempt_type, "preempt/job_prio"))
+		else if (!xstrcmp(preempt_type, "preempt/qos"))
 			preempt_mode = 2;
 		else
 			preempt_mode = 0;
@@ -116,16 +116,15 @@ extern int slurm_job_check_grace(struct job_record *job_ptr, uint32_t preemptor)
 		grace_time = job_ptr->part_ptr->grace_time;
 	else if (preempt_mode == 2) {
 		if (!job_ptr->qos_ptr)
-			error("%s: Job %u has no QOS ptr!  This should never happen",
-			      __func__, job_ptr->job_id);
+			error("%s: %pJ has no QOS ptr!  This should never happen",
+			      __func__, job_ptr);
 		else
 			grace_time = job_ptr->qos_ptr->grace_time;
 	}
 
 	if (grace_time) {
-		debug("setting %u sec preemption grace time for job %u to "
-		      "reclaim resources for job %u",
-		      grace_time, job_ptr->job_id, preemptor);
+		debug("setting %u sec preemption grace time for %pJ to reclaim resources for %pJ",
+		      grace_time, job_ptr, preemptor_ptr);
 		_preempt_signal(job_ptr, grace_time);
 	} else
 		rc = SLURM_ERROR;

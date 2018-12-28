@@ -6,11 +6,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -54,7 +54,7 @@
  */
 #define MAX_WIDTH 10
 
-static char *_is_path_escaped(char *);
+static char *_remove_path_slashes(char *);
 
 /*
  * Fill in as much of filename as possible from srun, update
@@ -114,7 +114,7 @@ extern fname_t *fname_create(srun_job_t *job, char *format, int task_count)
 	/* Check if path has escaped characters
 	 * in it and prevent them to be expanded.
 	 */
-	esc = _is_path_escaped(format);
+	esc = _remove_path_slashes(format);
 	if (esc) {
 		fname->name = esc;
 		return fname;
@@ -289,14 +289,14 @@ fname_remote_string (fname_t *f)
 	return (NULL);
 }
 
-/* is_path_escaped()
+/* remove_path_slashes()
  *
  * If there are \ chars in the path strip them.
  * The new path will tell the caller not to
  * translate escaped characters.
  */
 static char *
-_is_path_escaped(char *p)
+_remove_path_slashes(char *p)
 {
 	char *buf;
 	bool t;

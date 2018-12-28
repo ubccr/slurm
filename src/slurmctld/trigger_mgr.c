@@ -8,11 +8,11 @@
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -78,7 +78,6 @@ bitstr_t *trigger_drained_nodes_bitmap = NULL;
 bitstr_t *trigger_fail_nodes_bitmap = NULL;
 bitstr_t *trigger_up_nodes_bitmap   = NULL;
 static bool trigger_bb_error = false;
-static bool trigger_block_err = false;
 static bool trigger_node_reconfig = false;
 static bool trigger_pri_ctld_fail = false;
 static bool trigger_pri_ctld_res_op = false;
@@ -237,10 +236,10 @@ extern int trigger_pull(trigger_info_msg_t *msg)
 				trigger_primary_ctld_acct_full();
 				break;
 			case TRIGGER_TYPE_BU_CTLD_FAIL:
-				trigger_backup_ctld_fail();
+				trigger_backup_ctld_fail(trig_in->control_inx);
 				break;
 			case TRIGGER_TYPE_BU_CTLD_RES_OP:
-				trigger_backup_ctld_res_op();
+				trigger_backup_ctld_res_op(trig_in->control_inx);
 				break;
 			case TRIGGER_TYPE_BU_CTLD_AS_CTRL:
 				trigger_backup_ctld_as_ctrl();
@@ -506,6 +505,8 @@ extern void trigger_front_end_down(front_end_record_t *front_end_ptr)
 {
 	int inx = front_end_ptr - front_end_nodes;
 
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+
 	slurm_mutex_lock(&trigger_mutex);
 	if (trigger_down_front_end_bitmap == NULL)
 		trigger_down_front_end_bitmap = bit_alloc(front_end_node_cnt);
@@ -516,6 +517,8 @@ extern void trigger_front_end_down(front_end_record_t *front_end_ptr)
 extern void trigger_front_end_up(front_end_record_t *front_end_ptr)
 {
 	int inx = front_end_ptr - front_end_nodes;
+
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
 
 	slurm_mutex_lock(&trigger_mutex);
 	if (trigger_up_front_end_bitmap == NULL)
@@ -528,6 +531,8 @@ extern void trigger_node_down(struct node_record *node_ptr)
 {
 	int inx = node_ptr - node_record_table_ptr;
 
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+
 	slurm_mutex_lock(&trigger_mutex);
 	if (trigger_down_nodes_bitmap == NULL)
 		trigger_down_nodes_bitmap = bit_alloc(node_record_count);
@@ -539,6 +544,8 @@ extern void trigger_node_drained(struct node_record *node_ptr)
 {
 	int inx = node_ptr - node_record_table_ptr;
 
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+
 	slurm_mutex_lock(&trigger_mutex);
 	if (trigger_drained_nodes_bitmap == NULL)
 		trigger_drained_nodes_bitmap = bit_alloc(node_record_count);
@@ -549,6 +556,8 @@ extern void trigger_node_drained(struct node_record *node_ptr)
 extern void trigger_node_failing(struct node_record *node_ptr)
 {
 	int inx = node_ptr - node_record_table_ptr;
+
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
 
 	slurm_mutex_lock(&trigger_mutex);
 	if (trigger_fail_nodes_bitmap == NULL)
@@ -562,6 +571,8 @@ extern void trigger_node_up(struct node_record *node_ptr)
 {
 	int inx = node_ptr - node_record_table_ptr;
 
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+
 	slurm_mutex_lock(&trigger_mutex);
 	if (trigger_up_nodes_bitmap == NULL)
 		trigger_up_nodes_bitmap = bit_alloc(node_record_count);
@@ -571,6 +582,9 @@ extern void trigger_node_up(struct node_record *node_ptr)
 
 extern void trigger_reconfig(void)
 {
+	slurmctld_lock_t node_read_lock = { .node = READ_LOCK };
+
+	lock_slurmctld(node_read_lock);
 	slurm_mutex_lock(&trigger_mutex);
 	trigger_node_reconfig = true;
 	if (trigger_down_front_end_bitmap)
@@ -592,7 +606,9 @@ extern void trigger_reconfig(void)
 		trigger_up_nodes_bitmap = bit_realloc(
 			trigger_up_nodes_bitmap, node_record_count);
 	slurm_mutex_unlock(&trigger_mutex);
+	unlock_slurmctld(node_read_lock);
 }
+
 extern void trigger_primary_ctld_fail(void)
 {
 	slurm_mutex_lock(&trigger_mutex);
@@ -625,7 +641,7 @@ extern void trigger_primary_ctld_acct_full(void)
 	slurm_mutex_unlock(&trigger_mutex);
 }
 
-extern void trigger_backup_ctld_fail(void)
+extern void trigger_backup_ctld_fail(int index)
 {
 	slurm_mutex_lock(&trigger_mutex);
 	if (bu_ctld_failure != 1) {
@@ -635,7 +651,7 @@ extern void trigger_backup_ctld_fail(void)
 	slurm_mutex_unlock(&trigger_mutex);
 }
 
-extern void trigger_backup_ctld_res_op(void)
+extern void trigger_backup_ctld_res_op(int index)
 {
 	slurm_mutex_lock(&trigger_mutex);
 	trigger_bu_ctld_res_op = true;
@@ -686,13 +702,6 @@ extern void trigger_primary_db_res_op(void)
 	slurm_mutex_unlock(&trigger_mutex);
 }
 
-extern void trigger_block_error(void)
-{
-	slurm_mutex_lock(&trigger_mutex);
-	trigger_block_err = true;
-	slurm_mutex_unlock(&trigger_mutex);
-}
-
 extern void trigger_burst_buffer(void)
 {
 	slurm_mutex_lock(&trigger_mutex);
@@ -727,6 +736,8 @@ static int _load_trigger_state(Buf buffer, uint16_t protocol_version)
 {
 	trig_mgr_info_t *trig_ptr;
 	uint32_t str_len;
+
+	xassert(verify_lock(JOB_LOCK, READ_LOCK));
 
 	trig_ptr = xmalloc(sizeof(trig_mgr_info_t));
 
@@ -800,6 +811,7 @@ unpack_error:
 	xfree(trig_ptr);
 	return SLURM_FAILURE;
 }
+
 extern int trigger_state_save(void)
 {
 	/* Save high-water mark to avoid buffer growth with copies */
@@ -891,79 +903,46 @@ extern int trigger_state_save(void)
  * state_file IN - the name of the state save file used
  * RET the file description to read from or error code
  */
-static int _open_resv_state_file(char **state_file)
+static Buf _open_trigger_state_file(char **state_file)
 {
-	int state_fd;
-	struct stat stat_buf;
+	Buf buf;
 
 	*state_file = xstrdup(slurmctld_conf.state_save_location);
 	xstrcat(*state_file, "/trigger_state");
-	state_fd = open(*state_file, O_RDONLY);
-	if (state_fd < 0) {
+	if (!(buf = create_mmap_buf(*state_file)))
 		error("Could not open trigger state file %s: %m",
 		      *state_file);
-	} else if (fstat(state_fd, &stat_buf) < 0) {
-		error("Could not stat trigger state file %s: %m",
-		      *state_file);
-		(void) close(state_fd);
-	} else if (stat_buf.st_size < 10) {
-		error("Trigger state file %s too small", *state_file);
-		(void) close(state_fd);
-	} else 	/* Success */
-		return state_fd;
+	else
+		return buf;
 
 	error("NOTE: Trying backup state save file. Triggers may be lost!");
 	xstrcat(*state_file, ".old");
-	state_fd = open(*state_file, O_RDONLY);
-	return state_fd;
+	return create_mmap_buf(*state_file);;
 }
 
 extern void trigger_state_restore(void)
 {
-	int data_allocated, data_read = 0;
-	uint32_t data_size = 0;
 	uint16_t protocol_version = NO_VAL16;
-	int state_fd, trigger_cnt = 0;
-	char *data = NULL, *state_file;
+	int trigger_cnt = 0;
+	char *state_file;
 	Buf buffer;
 	time_t buf_time;
 	char *ver_str = NULL;
 	uint32_t ver_str_len;
 
 	/* read the file */
+	xassert(verify_lock(CONF_LOCK, READ_LOCK));
+
 	lock_state_files();
-	state_fd = _open_resv_state_file(&state_file);
-	if (state_fd < 0) {
+	if (!(buffer = _open_trigger_state_file(&state_file))) {
 		info("No trigger state file (%s) to recover", state_file);
 		xfree(state_file);
 		unlock_state_files();
 		return;
-	} else {
-		data_allocated = BUF_SIZE;
-		data = xmalloc(data_allocated);
-		while (1) {
-			data_read = read(state_fd, &data[data_size],
-					 BUF_SIZE);
-			if (data_read < 0) {
-				if (errno == EINTR)
-					continue;
-				else {
-					error("Read error on %s: %m",
-					      state_file);
-					break;
-				}
-			} else if (data_read == 0)	/* eof */
-				break;
-			data_size      += data_read;
-			data_allocated += data_read;
-			xrealloc(data, data_allocated);
-		}
-		close(state_fd);
 	}
 	xfree(state_file);
 	unlock_state_files();
 
-	buffer = create_buf(data, data_size);
 	safe_unpackstr_xmalloc(&ver_str, &ver_str_len, buffer);
 	if (ver_str && !xstrcmp(ver_str, TRIGGER_STATE_VERSION))
 		safe_unpack16(&protocol_version, buffer);
@@ -1004,6 +983,9 @@ static bool _front_end_job_test(bitstr_t *front_end_bitmap,
 #ifdef HAVE_FRONT_END
 	int i;
 
+	/* Need node read lock for reading front_end_node_cnt. */
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+
 	if ((front_end_bitmap == NULL) || (job_ptr->batch_host == NULL))
 		return false;
 
@@ -1020,6 +1002,8 @@ static bool _front_end_job_test(bitstr_t *front_end_bitmap,
 /* Test if the event has been triggered, change trigger state as needed */
 static void _trigger_job_event(trig_mgr_info_t *trig_in, time_t now)
 {
+	xassert(verify_lock(JOB_LOCK, READ_LOCK));
+
 	trig_in->job_ptr = find_job_record(trig_in->job_id);
 
 	if ((trig_in->trig_type & TRIGGER_TYPE_FINI) &&
@@ -1123,6 +1107,8 @@ static void _trigger_front_end_event(trig_mgr_info_t *trig_in, time_t now)
 {
 	int i;
 
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+
 	if ((trig_in->trig_type & TRIGGER_TYPE_DOWN) &&
 	    (trigger_down_front_end_bitmap != NULL) &&
 	    ((i = bit_ffs(trigger_down_front_end_bitmap)) != -1)) {
@@ -1178,14 +1164,7 @@ static void _trigger_other_event(trig_mgr_info_t *trig_in, time_t now)
 
 static void _trigger_node_event(trig_mgr_info_t *trig_in, time_t now)
 {
-	if ((trig_in->trig_type & TRIGGER_TYPE_BLOCK_ERR) &&
-	    trigger_block_err) {
-		trig_in->state = 1;
-		trig_in->trig_time = now + (trig_in->trig_time - 0x8000);
-		if (slurmctld_conf.debug_flags & DEBUG_FLAG_TRIGGERS)
-			info("trigger[%u] for block_err", trig_in->trig_id);
-		return;
-	}
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
 
 	if ((trig_in->trig_type & TRIGGER_TYPE_DOWN) &&
 	    trigger_down_nodes_bitmap                &&
@@ -1494,6 +1473,7 @@ static void _trigger_database_event(trig_mgr_info_t *trig_in, time_t now)
 		return;
 	}
 }
+
 /* Ideally we would use the existing proctrack plugin to prevent any
  * processes from escaping our control, but that plugin is tied
  * to various slurmd data structures. We just the process group ID
@@ -1597,7 +1577,6 @@ static void _clear_event_triggers(void)
 	}
 	trigger_node_reconfig = false;
 	trigger_bb_error = false;
-	trigger_block_err = false;
 	trigger_pri_ctld_fail = false;
 	trigger_pri_ctld_res_op = false;
 	trigger_pri_ctld_res_ctrl = false;

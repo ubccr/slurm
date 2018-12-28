@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>, Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -49,6 +49,7 @@
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/slurmdbd_defs.h"
+#include "src/common/slurmdbd_pack.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_protocol_api.h"
@@ -717,7 +718,7 @@ static int _handle_init_msg(slurmdbd_conn_t *slurmdbd_conn,
 	   avoid such a slow down.
 	*/
 	slurmdbd_conn->db_conn = acct_storage_g_get_connection(
-		false, slurmdbd_conn->conn->fd, true,
+		NULL, slurmdbd_conn->conn->fd, NULL, true,
 		slurmdbd_conn->conn->cluster_name);
 	slurmdbd_conn->conn->version = init_msg->version;
 	if (errno)
@@ -754,8 +755,10 @@ static int _unpack_persist_init(slurmdbd_conn_t *slurmdbd_conn,
 	if (rc != SLURM_SUCCESS)
 		comment = slurm_strerror(rc);
 
-	*out_buffer = slurm_persist_make_rc_msg(slurmdbd_conn->conn,
-						rc, comment, req_msg->version);
+	*out_buffer = slurm_persist_make_rc_msg_flags(
+		slurmdbd_conn->conn, rc, comment,
+		slurmdbd_conf->persist_conn_rc_flags,
+		req_msg->version);
 
 	return rc;
 }
@@ -861,7 +864,7 @@ static int _add_assocs(slurmdbd_conn_t *slurmdbd_conn,
 		memset(&user, 0, sizeof(slurmdb_user_rec_t));
 		user.uid = *uid;
 		if (assoc_mgr_fill_in_user(
-			    slurmdbd_conn->db_conn, &user, 1, NULL)
+			    slurmdbd_conn->db_conn, &user, 1, NULL, false)
 		    != SLURM_SUCCESS) {
 			comment = "Your user has not been added to the accounting system yet.";
 			error("CONN:%u %s", slurmdbd_conn->conn->fd, comment);
@@ -1170,7 +1173,7 @@ end_it:
 		cluster_tres_msg->tres_str = NULL;
 	}
 	if (!slurmdbd_conn->conn->rem_port) {
-		info("DBD_CLUSTER_TRES: cluster not registered");
+		debug3("DBD_CLUSTER_TRES: cluster not registered");
 		slurmdbd_conn->conn->rem_port =
 			clusteracct_storage_g_register_disconn_ctld(
 				slurmdbd_conn->db_conn,
@@ -1422,7 +1425,7 @@ static int _get_jobs_cond(slurmdbd_conn_t *slurmdbd_conn,
 	debug2("DBD_GET_JOBS_COND: called");
 
 	/* fail early if too wide a query */
-	if (!_validate_slurm_user(*uid)
+	if (!job_cond->step_list && !_validate_slurm_user(*uid)
 	    && (slurmdbd_conf->max_time_range != INFINITE)) {
 		time_t start, end;
 
@@ -1904,6 +1907,7 @@ static int  _job_complete(slurmdbd_conn_t *slurmdbd_conn,
 	job.start_time = job_comp_msg->start_time;
 	details.submit_time = job_comp_msg->submit_time;
 	job.start_protocol_ver = slurmdbd_conn->conn->version;
+	job.system_comment = job_comp_msg->system_comment;
 	job.tres_alloc_str = job_comp_msg->tres_alloc_str;
 
 	job.details = &details;
@@ -1923,7 +1927,7 @@ static int  _job_complete(slurmdbd_conn_t *slurmdbd_conn,
 	xfree(job.wckey);
 
 	if (!slurmdbd_conn->conn->rem_port) {
-		info("DBD_JOB_COMPLETE: cluster not registered");
+		debug3("DBD_JOB_COMPLETE: cluster not registered");
 		slurmdbd_conn->conn->rem_port =
 			clusteracct_storage_g_register_disconn_ctld(
 				slurmdbd_conn->db_conn,
@@ -2242,10 +2246,19 @@ static int   _modify_job(slurmdbd_conn_t *slurmdbd_conn,
 		return rc;
 	}
 
-	*out_buffer = init_buf(1024);
-	pack16((uint16_t) DBD_GOT_LIST, *out_buffer);
-	slurmdbd_pack_list_msg(&list_msg, slurmdbd_conn->conn->version,
-			       DBD_GOT_LIST, *out_buffer);
+	if (get_msg->cond &&
+	    (((slurmdb_job_modify_cond_t *)get_msg->cond)->flags &&
+	     SLURMDB_MODIFY_NO_WAIT)) {
+		*out_buffer = slurm_persist_make_rc_msg(slurmdbd_conn->conn,
+							rc, comment,
+							DBD_MODIFY_JOB);
+	} else {
+		*out_buffer = init_buf(1024);
+		pack16((uint16_t) DBD_GOT_LIST, *out_buffer);
+		slurmdbd_pack_list_msg(&list_msg, slurmdbd_conn->conn->version,
+				       DBD_GOT_LIST, *out_buffer);
+	}
+
 	FREE_NULL_LIST(list_msg.my_list);
 
 	return rc;
@@ -2681,7 +2694,7 @@ static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 		xfree(job.wckey);
 
 	if (!slurmdbd_conn->conn->rem_port) {
-		info("DBD_JOB_START: cluster not registered");
+		debug3("DBD_JOB_START: cluster not registered");
 		slurmdbd_conn->conn->rem_port =
 			clusteracct_storage_g_register_disconn_ctld(
 				slurmdbd_conn->db_conn,
@@ -3439,7 +3452,7 @@ static int  _step_complete(slurmdbd_conn_t *slurmdbd_conn,
 	xfree(job.wckey);
 
 	if (!slurmdbd_conn->conn->rem_port) {
-		info("DBD_STEP_COMPLETE: cluster not registered");
+		debug3("DBD_STEP_COMPLETE: cluster not registered");
 		slurmdbd_conn->conn->rem_port =
 			clusteracct_storage_g_register_disconn_ctld(
 				slurmdbd_conn->db_conn,
@@ -3515,7 +3528,7 @@ static int  _step_start(slurmdbd_conn_t *slurmdbd_conn,
 	xfree(job.wckey);
 
 	if (!slurmdbd_conn->conn->rem_port) {
-		info("DBD_STEP_START: cluster not registered");
+		debug3("DBD_STEP_START: cluster not registered");
 		slurmdbd_conn->conn->rem_port =
 			clusteracct_storage_g_register_disconn_ctld(
 				slurmdbd_conn->db_conn,

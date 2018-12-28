@@ -8,11 +8,11 @@
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -137,6 +137,7 @@ static void _free_node_info(void)
  * %a - Job array ID (index) number.
  * %j - Job ID
  * %u - User name
+ * %x - Job name
  */
 static void _fname_format(char *buf, int buf_size, job_info_t * job_ptr,
 			  char *fname)
@@ -180,6 +181,8 @@ static void _fname_format(char *buf, int buf_size, job_info_t * job_ptr,
 		tmp = tmp2;
 		tmp2 = NULL;
 	}
+	xstrsubstituteall(tmp, "%x", job_ptr->name);	/* Job name */
+
 	if (tmp[0] == '/')
 		snprintf(buf, buf_size, "%s", tmp);
 	else
@@ -304,28 +307,10 @@ slurm_print_job_info_msg ( FILE* out, job_info_msg_t *jinfo, int one_liner )
 static void _sprint_range(char *str, uint32_t str_size,
 			  uint32_t lower, uint32_t upper)
 {
-	char tmp[128];
-	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
-
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		convert_num_unit((float)lower, tmp, sizeof(tmp), UNIT_NONE,
-				 NO_VAL, CONVERT_NUM_UNIT_EXACT);
-	} else {
-		snprintf(tmp, sizeof(tmp), "%u", lower);
-	}
-	if (upper > 0) {
-    		char tmp2[128];
-		if (cluster_flags & CLUSTER_FLAG_BG) {
-			convert_num_unit((float)upper, tmp2, sizeof(tmp2),
-					 UNIT_NONE, NO_VAL,
-					 CONVERT_NUM_UNIT_EXACT);
-		} else {
-			snprintf(tmp2, sizeof(tmp2), "%u", upper);
-		}
-		snprintf(str, str_size, "%s-%s", tmp, tmp2);
-	} else
-		snprintf(str, str_size, "%s", tmp);
-
+	if (upper > 0)
+		snprintf(str, str_size, "%u-%u", lower, upper);
+	else
+		snprintf(str, str_size, "%u", lower);
 }
 
 /*
@@ -382,20 +367,11 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	uint64_t last_mem_alloc = NO_VAL64;
 	char *last_hosts;
 	hostlist_t hl, hl_last;
-	char select_buf[122];
-	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 	uint32_t threads;
 	char *line_end = (one_liner) ? " " : "\n   ";
 
 	if (job_ptr->job_id == 0)	/* Duplicated sibling job record */
 		return NULL;
-
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		nodelist = "MidplaneList";
-		select_g_select_jobinfo_get(job_ptr->select_jobinfo,
-					    SELECT_JOBDATA_IONODES,
-					    &ionodes);
-	}
 
 	/****** Line 1 ******/
 	xstrfmtcat(out, "JobId=%u ", job_ptr->job_id);
@@ -526,6 +502,12 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	xstrcat(out, line_end);
 
+	/****** Line 7.5 ******/
+	slurm_make_time_str(&job_ptr->accrue_time, time_str, sizeof(time_str));
+	xstrfmtcat(out, "AccrueTime=%s", time_str);
+
+	xstrcat(out, line_end);
+
 	/****** Line 8 (optional) ******/
 	if (job_ptr->resize_time) {
 		slurm_make_time_str(&job_ptr->resize_time, time_str, sizeof(time_str));
@@ -599,10 +581,16 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	xstrcat(out, line_end);
 
 	/****** Line 14 (optional) ******/
+	if (job_ptr->batch_features)
+		xstrfmtcat(out, "BatchFeatures=%s", job_ptr->batch_features);
 	if (job_ptr->batch_host) {
-		xstrfmtcat(out, "BatchHost=%s", job_ptr->batch_host);
-		xstrcat(out, line_end);
+		char *sep = "";
+		if (job_ptr->batch_features)
+			sep = " ";
+		xstrfmtcat(out, "%sBatchHost=%s", sep, job_ptr->batch_host);
 	}
+	if (job_ptr->batch_features || job_ptr->batch_host)
+		xstrcat(out, line_end);
 
 	/****** Line 14a (optional) ******/
 	if (job_ptr->fed_siblings_active || job_ptr->fed_siblings_viable) {
@@ -614,16 +602,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	}
 
 	/****** Line 15 ******/
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		select_g_select_jobinfo_get(job_ptr->select_jobinfo,
-					    SELECT_JOBDATA_NODE_CNT,
-					    &min_nodes);
-		if ((min_nodes == 0) || (min_nodes == NO_VAL)) {
-			min_nodes = job_ptr->num_nodes;
-			max_nodes = job_ptr->max_nodes;
-		} else if (job_ptr->max_nodes)
-			max_nodes = min_nodes;
-	} else if (IS_JOB_PENDING(job_ptr)) {
+	if (IS_JOB_PENDING(job_ptr)) {
 		min_nodes = job_ptr->num_nodes;
 		max_nodes = job_ptr->max_nodes;
 		if (max_nodes && (max_nodes < min_nodes))
@@ -708,36 +687,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	xstrcat(out, line_end);
 
-	if (job_resrcs && cluster_flags & CLUSTER_FLAG_BG) {
-		if ((job_resrcs->cpu_array_cnt > 0) &&
-		    (job_resrcs->cpu_array_value) &&
-		    (job_resrcs->cpu_array_reps)) {
-			int length = 0;
-			xstrcat(out, "CPUs=");
-			for (i = 0; i < job_resrcs->cpu_array_cnt; i++) {
-				/* only print 60 characters worth of this record */
-				if (length > 60) {
-					/* skip to last CPU group entry */
-					if (i < job_resrcs->cpu_array_cnt - 1) {
-						continue;
-					}
-					/* add ellipsis before last entry */
-					xstrcat(out, "...,");
-				}
-
-				length += xstrfmtcat(out, "%d", job_resrcs->cpus[i]);
-				if (job_resrcs->cpu_array_reps[i] > 1) {
-					length += xstrfmtcat(out, "*%d",
-							     job_resrcs->cpu_array_reps[i]);
-				}
-				if (i < job_resrcs->cpu_array_cnt - 1) {
-					xstrcat(out, ",");
-					length++;
-				}
-			}
-			xstrcat(out, line_end);
-		}
-	} else if (job_resrcs && job_resrcs->core_bitmap &&
+	if (job_resrcs && job_resrcs->core_bitmap &&
 		   ((last = bit_fls(job_resrcs->core_bitmap)) != -1)) {
 		hl = hostlist_create(job_resrcs->nodes);
 		if (!hl) {
@@ -807,7 +757,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 						   last_hosts, tmp2,
 						   last_mem_alloc_ptr ?
 						   last_mem_alloc : 0,
-						    gres_last);
+						   gres_last);
 					xfree(last_hosts);
 					xstrcat(out, line_end);
 
@@ -861,14 +811,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	} else
 		tmp6_ptr = "Node";
 
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		convert_num_unit((float)job_ptr->pn_min_cpus, tmp1,
-				 sizeof(tmp1), UNIT_NONE, NO_VAL,
-				 CONVERT_NUM_UNIT_EXACT);
-		xstrfmtcat(out, "MinCPUsNode=%s ", tmp1);
-	} else {
-		xstrfmtcat(out, "MinCPUsNode=%u ", job_ptr->pn_min_cpus);
-	}
+	xstrfmtcat(out, "MinCPUsNode=%u ", job_ptr->pn_min_cpus);
 
 	convert_num_unit((float)job_ptr->pn_min_memory, tmp1, sizeof(tmp1),
 			 UNIT_MEGA, NO_VAL, CONVERT_NUM_UNIT_EXACT);
@@ -889,10 +832,11 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		xstrcat(out, line_end);
 	}
 
-	/****** Line ******/
-	xstrfmtcat(out, "Gres=%s Reservation=%s",
-		   job_ptr->gres, job_ptr->resv_name);
-	xstrcat(out, line_end);
+	/****** Line (optional) ******/
+	if (job_ptr->resv_name) {
+		xstrfmtcat(out, "Reservation=%s", job_ptr->resv_name);
+		xstrcat(out, line_end);
+	}
 
 	/****** Line 20 ******/
 	xstrfmtcat(out, "OverSubscribe=%s Contiguous=%d Licenses=%s Network=%s",
@@ -907,55 +851,16 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	/****** Line 22 ******/
 	xstrfmtcat(out, "WorkDir=%s", job_ptr->work_dir);
 
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		/****** Line 23 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_BG_ID);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			xstrfmtcat(out, "Block_ID=%s", select_buf);
-		}
-
-		/****** Line 24 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_MIXED_SHORT);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			xstrcat(out, select_buf);
-		}
-
-		/****** Line 26 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_LINUX_IMAGE);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			xstrfmtcat(out, "CnloadImage=%s", select_buf);
-		}
-		/****** Line 27 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_MLOADER_IMAGE);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			xstrfmtcat(out, "MloaderImage=%s", select_buf);
-		}
-		/****** Line 28 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_RAMDISK_IMAGE);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			xstrfmtcat(out, "IoloadImage=%s", select_buf);
-		}
-	}
-
 	/****** Line (optional) ******/
 	if (job_ptr->admin_comment) {
 		xstrcat(out, line_end);
 		xstrfmtcat(out, "AdminComment=%s ", job_ptr->admin_comment);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->system_comment) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "SystemComment=%s ", job_ptr->system_comment);
 	}
 
 	/****** Line (optional) ******/
@@ -1020,8 +925,12 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	xstrfmtcat(out, "Power=%s", power_flags_str(job_ptr->power_flags));
 
 	/****** Line 38 (optional) ******/
-	if (job_ptr->bitflags) {
+	if (job_ptr->bitflags &
+	    (GRES_DISABLE_BIND | GRES_ENFORCE_BIND | KILL_INV_DEP |
+	     NO_KILL_INV_DEP | SPREAD_JOB)) {
 		xstrcat(out, line_end);
+		if (job_ptr->bitflags & GRES_DISABLE_BIND)
+			xstrcat(out, "GresEnforceBind=No");
 		if (job_ptr->bitflags & GRES_ENFORCE_BIND)
 			xstrcat(out, "GresEnforceBind=Yes");
 		if (job_ptr->bitflags & KILL_INV_DEP)
@@ -1030,6 +939,54 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 			xstrcat(out, "KillOInInvalidDependent=No");
 		if (job_ptr->bitflags & SPREAD_JOB)
 			xstrcat(out, "SpreadJob=Yes");
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->cpus_per_tres) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "CpusPerTres=%s", job_ptr->cpus_per_tres);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->mem_per_tres) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "MemPerTres=%s", job_ptr->mem_per_tres);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_bind) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresBind=%s", job_ptr->tres_bind);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_freq) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresFreq=%s", job_ptr->tres_freq);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_per_job) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresPerJob=%s", job_ptr->tres_per_job);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_per_node) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresPerNode=%s", job_ptr->tres_per_node);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_per_socket) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresPerSocket=%s", job_ptr->tres_per_socket);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_per_task) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresPerTask=%s", job_ptr->tres_per_task);
 	}
 
 	/****** END OF JOB RECORD ******/

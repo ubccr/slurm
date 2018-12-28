@@ -1,4 +1,4 @@
-.TH squeue "1" "Slurm Commands" "February 2018" "Slurm Commands"
+.TH squeue "1" "Slurm Commands" "June 2018" "Slurm Commands"
 
 .SH "NAME"
 squeue \- view information about jobs located in the Slurm scheduling queue.
@@ -168,16 +168,12 @@ Job id.
 This will have a unique value for each element of job arrays.
 (Valid for jobs only)
 .TP
-\fB%b\fR
-Generic resources (gres) required by the job or step.
-(Valid for jobs and job steps)
-.TP
 \fB%B\fR
 Executing (batch) host. For an allocated session, this is the host on which
 the session is executing (i.e. the node from which the \fBsrun\fR or the
 \fBsalloc\fR command was executed). For a batch job, this is the node executing
 the batch script. In the case of a typical Linux cluster, this would be the
-compute node zero of the allocation. In the case of a BlueGene or a Cray
+compute node zero of the allocation. In the case of a Cray ALPS
 system, this would be the front\-end host whose slurmd daemon executes the job
 script.
 .TP
@@ -318,8 +314,7 @@ If the time is obviously wrong (e.g. negative), it displays as "INVALID".
 (Valid for jobs and job steps)
 .TP
 \fB%n\fR
-List of node names (or base partitions on BlueGene systems) explicitly
-requested by the job.
+List of node names explicitly requested by the job.
 (Valid for jobs only)
 .TP
 \fB%N\fR
@@ -503,7 +498,7 @@ Executing (batch) host. For an allocated session, this is the host on which
 the session is executing (i.e. the node from which the the \fBsrun\fR or the
 \fBsalloc\fR command was executed). For a batch job, this is the node executing
 the batch script. In the case of a typical Linux cluster, this would be the
-compute node zero of the allocation. In the case of a BlueGene or a Cray/ALPS
+compute node zero of the allocation. In the case of a Cray ALPS
 system, this would be the front\-end host whose slurmd daemon executes the job
 script.
 (Valid for jobs only)
@@ -561,9 +556,12 @@ Count of cores reserved on each node for system use (core specialization).
 Prints the frequency of the allocated CPUs.
 (Valid for job steps only)
 .TP
-\fBcpuspertask\fR
+\fBcpus\-per\-task\fR
 Prints the number of CPUs per tasks allocated to the job.
 (Valid for jobs only)
+.TP
+\fBcpus\-per\-tres\fR
+Print the memory required per trackable resources allocated to the job or job step.
 .TP
 \fBdeadline\fR
 Prints the deadline affected to the job
@@ -600,10 +598,6 @@ The exit code for the job.
 \fBfeature\fR
 Features required by the job.
 (Valid for jobs only)
-.TP
-\fBgres\fR
-Generic resources (gres) required by the job or step.
-(Valid for jobs and job steps)
 .TP
 \fBgroupid\fR
 Group ID of the job.
@@ -643,6 +637,10 @@ Prints the max number of nodes allocated to the job.
 \fBmcslabel\fR
 Prints the MCS_label of the job.
 (Valid for jobs only)
+.TP
+\fBmem\-per-tres\fR
+Print the memory (in MB) required per trackable resources allocated to the job
+or job step.
 .TP
 \fBminmemory\fR
 Minimum size of memory (in MB) requested by the job.
@@ -799,8 +797,7 @@ Indicates if the allocated nodes should be rebooted before starting the job.
 (Valid on jobs only)
 .TP
 \fBreqnodes\fR
-List of node names (or base partitions on BlueGene systems) explicitly
-requested by the job.
+List of node names explicitly requested by the job.
 (Valid for jobs only)
 .TP
 \fBreqswitch\fR
@@ -915,6 +912,10 @@ The state of the job step.
 The time that the job was submitted at.
 (Valid for jobs only)
 .TP
+\fBsystem_comment\fR
+System comment associated with the job.
+(Valid for jobs only)
+.TP
 \fBthreads\fR
 Number of threads per core requested by the job.
 This reports the value of the \fBsrun \-\-threads\-per\-core\fR option.
@@ -941,8 +942,30 @@ Clock skew between nodes in the cluster will cause the time to be inaccurate.
 If the time is obviously wrong (e.g. negative), it displays as "INVALID".
 (Valid for jobs and job steps)
 .TP
-\fBtres\fR
-Print the trackable resources allocated to the job.
+\fBtres\-alloc\fR
+Print the trackable resources allocated to the job if running.
+If not running, then print the trackable resources requested by the job.
+.TP
+\fBtres\-bind\fR
+Print the trackable resources task binding requested by the job or job step.
+.TP
+\fBtres\-freq\fR
+Print the trackable resources frequencies requested by the job or job step.
+.TP
+\fBtres\-per\-job\fR
+Print the trackable resources requested by the job.
+.TP
+\fBtres\-per\-node\fR
+Print the trackable resources per node requested by the job or job step.
+.TP
+\fBtres\-per\-socket\fR
+Print the trackable resources per socket requested by the job or job step.
+.TP
+\fBtres\-per\-step\fR
+Print the trackable resources requested by the job step.
+.TP
+\fBtres\-per\-task\fR
+Print the trackable resources per task requested by the job or job step.
 .TP
 \fBuserid\fR
 User ID for a job or job step.
@@ -1087,12 +1110,6 @@ The job's constraints can not be satisfied.
 .TP
 \fBBeginTime\fR
 The job's earliest start time has not yet been reached.
-.TP
-\fBBlockFreeAction\fR
-An IBM BlueGene block is being freed and can not allow more jobs to start.
-.TP
-\fBBlockMaxError\fR
-An IBM BlueGene block has too many cnodes in error state to allow more jobs to start.
 .TP
 \fBCleaning\fR
 The job is being requeued and still cleaning up from its previous execution.
@@ -1251,10 +1268,16 @@ Job is about to change size.
 \fBRV  REVOKED\fR
 Sibling was removed from cluster due to other cluster starting the job.
 .TP
+\fBSI  SIGNALING\fR
+Job is being signaled.
+.TP
 \fBSE  SPECIAL_EXIT\fR
 The job was requeued in a special state. This state can be set by
 users, typically in EpilogSlurmctld, if the job has terminated with
 a particular exit value.
+.TP
+\fBSO  STAGE_OUT\fR
+Job is staging out files.
 .TP
 \fBST  STOPPED\fR
 Job has an allocation, but execution has been stopped with SIGSTOP signal.

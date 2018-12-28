@@ -2,15 +2,15 @@
  **  pmix_client_v2.c - PMIx v2 client communication code
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2018 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>,
  *             Boris Karasev <karasev.b@gmail.com, boriska@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
@@ -102,30 +102,28 @@ static pmix_status_t _fencenb_fn(const pmix_proc_t procs_v2[], size_t nprocs,
 				 pmix_modex_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
-	pmixp_coll_t *coll;
-	pmixp_coll_type_t type = PMIXP_COLL_TYPE_FENCE;
-	pmix_status_t status = PMIX_SUCCESS;
 	int ret;
 	size_t i;
 	pmixp_proc_t *procs = xmalloc(sizeof(*procs) * nprocs);
+	bool collect = false;
 
 	for (i = 0; i < nprocs; i++) {
 		procs[i].rank = procs_v2[i].rank;
 		strncpy(procs[i].nspace, procs_v2[i].nspace, PMIXP_MAX_NSLEN);
 	}
-	coll = pmixp_state_coll_get(type, procs, nprocs);
-	ret = pmixp_coll_contrib_local(coll, data, ndata, cbfunc, cbdata);
+	/* check the info keys */
+	if (info) {
+		for (i = 0; i < ninfo; i++) {
+			if (0 == strncmp(info[i].key, PMIX_COLLECT_DATA, PMIX_MAX_KEYLEN)) {
+				collect = true;
+				break;
+			}
+		}
+	}
+	ret = pmixp_lib_fence(procs, nprocs, collect, data, ndata, cbfunc, cbdata);
 	xfree(procs);
 
-	if (SLURM_SUCCESS != ret) {
-		status = PMIX_ERROR;
-		goto error;
-	}
-	return PMIX_SUCCESS;
-error:
-	cbfunc(status, NULL, 0, cbdata, NULL, NULL);
-
-	return status;
+	return ret;
 }
 
 static pmix_status_t _dmodex_fn(const pmix_proc_t *proc,
@@ -138,6 +136,15 @@ static pmix_status_t _dmodex_fn(const pmix_proc_t *proc,
 	rc = pmixp_dmdx_get(proc->nspace, proc->rank, cbfunc, cbdata);
 
 	return (SLURM_SUCCESS == rc) ? PMIX_SUCCESS : PMIX_ERROR;
+}
+
+static pmix_status_t _job_control(const pmix_proc_t *proct,
+                                  const pmix_proc_t targets[], size_t ntargets,
+                                  const pmix_info_t directives[], size_t ndirs,
+                                  pmix_info_cbfunc_t cbfunc, void *cbdata)
+{
+	PMIXP_DEBUG("called");
+	return PMIX_ERR_NOT_SUPPORTED;
 }
 
 static pmix_status_t _publish_fn(const pmix_proc_t *proc,
@@ -205,19 +212,18 @@ static void _errhandler(size_t evhdlr_registration_id,
 }
 
 static pmix_server_module_t slurm_pmix_cb = {
-	_client_connected,
-	_client_finalized,
-	_abort_fn,
-	_fencenb_fn,
-	_dmodex_fn,
-	_publish_fn,
-	_lookup_fn,
-	_unpublish_fn,
-	_spawn_fn,
-	_connect_fn,
-	_disconnect_fn,
-	NULL,
-	NULL
+	.client_connected = _client_connected,
+	.client_finalized = _client_finalized,
+	.abort = _abort_fn,
+	.fence_nb = _fencenb_fn,
+	.direct_modex = _dmodex_fn,
+	.publish = _publish_fn,
+	.lookup = _lookup_fn,
+	.unpublish = _unpublish_fn,
+	.spawn = _spawn_fn,
+	.connect = _connect_fn,
+	.disconnect = _disconnect_fn,
+	.job_control = _job_control
 };
 
 int pmixp_lib_init(void)

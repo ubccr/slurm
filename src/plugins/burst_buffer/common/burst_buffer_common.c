@@ -10,11 +10,11 @@
  *  Copyright (C) 2014-2015 SchedMD LLC.
  *  Written by Morris Jette <jette@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -30,13 +30,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -214,6 +214,7 @@ extern void bb_clear_config(bb_config_t *config_ptr, bool fini)
 	xfree(config_ptr->deny_users_str);
 	xfree(config_ptr->destroy_buffer);
 	xfree(config_ptr->get_sys_state);
+	xfree(config_ptr->get_sys_status);
 	config_ptr->granularity = 1;
 	if (fini) {
 		for (i = 0; i < config_ptr->pool_cnt; i++)
@@ -240,7 +241,6 @@ extern bb_alloc_t *bb_find_alloc_rec(bb_state_t *state_ptr,
 				     struct job_record *job_ptr)
 {
 	bb_alloc_t *bb_alloc = NULL;
-	char jobid_buf[32];
 
 	xassert(job_ptr);
 	xassert(state_ptr);
@@ -251,10 +251,8 @@ extern bb_alloc_t *bb_find_alloc_rec(bb_state_t *state_ptr,
 				xassert(bb_alloc->magic == BB_ALLOC_MAGIC);
 				return bb_alloc;
 			}
-			error("%s: Slurm state inconsistent with burst "
-			      "buffer. %s has UserID mismatch (%u != %u)",
-			      __func__,
-			      jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)),
+			error("%s: Slurm state inconsistent with burst buffer. %pJ has UserID mismatch (%u != %u)",
+			      __func__, job_ptr,
 			      bb_alloc->user_id, job_ptr->user_id);
 			/* This has been observed when slurmctld crashed and
 			 * the job state recovered was missing some jobs
@@ -363,7 +361,7 @@ extern void bb_set_tres_pos(bb_state_t *state_ptr)
 	inx = assoc_mgr_find_tres_pos(&tres_rec, false);
 	state_ptr->tres_pos = inx;
 	if (inx == -1) {
-		debug("%s: Tres %s not found by assoc_mgr",
+		debug3("%s: Tres %s not found by assoc_mgr",
 		       __func__, state_ptr->name);
 	} else {
 		state_ptr->tres_id  = assoc_mgr_tres_array[inx]->id;
@@ -391,6 +389,7 @@ extern void bb_load_config(bb_state_t *state_ptr, char *plugin_type)
 		{"DestroyBuffer", S_P_STRING},
 		{"Flags", S_P_STRING},
 		{"GetSysState", S_P_STRING},
+		{"GetSysStatus", S_P_STRING},
 		{"Granularity", S_P_STRING},
 		{"OtherTimeout", S_P_UINT32},
 		{"StageInTimeout", S_P_UINT32},
@@ -478,6 +477,8 @@ extern void bb_load_config(bb_state_t *state_ptr, char *plugin_type)
 
 	s_p_get_string(&state_ptr->bb_config.get_sys_state, "GetSysState",
 		       bb_hashtbl);
+	s_p_get_string(&state_ptr->bb_config.get_sys_status, "GetSysStatus",
+		       bb_hashtbl);
 	if (s_p_get_string(&tmp, "Granularity", bb_hashtbl)) {
 		state_ptr->bb_config.granularity = bb_get_size_num(tmp, 1);
 		xfree(tmp);
@@ -548,6 +549,8 @@ extern void bb_load_config(bb_state_t *state_ptr, char *plugin_type)
 		     state_ptr->bb_config.destroy_buffer);
 		info("%s: GetSysState:%s",  __func__,
 		     state_ptr->bb_config.get_sys_state);
+		info("%s: GetSysStatus:%s",  __func__,
+		     state_ptr->bb_config.get_sys_status);
 		info("%s: Granularity:%"PRIu64"",  __func__,
 		     state_ptr->bb_config.granularity);
 		for (i = 0; i < state_ptr->bb_config.pool_cnt; i++) {
@@ -634,7 +637,8 @@ extern void bb_pack_state(bb_state_t *state_ptr, Buf buffer,
 	bb_config_t *config_ptr = &state_ptr->bb_config;
 	int i;
 
-	if (protocol_version >= SLURM_17_02_PROTOCOL_VERSION) {
+
+	if (protocol_version >= SLURM_18_08_PROTOCOL_VERSION) {
 		packstr(config_ptr->allow_users_str, buffer);
 		packstr(config_ptr->create_buffer,   buffer);
 		packstr(config_ptr->default_pool,    buffer);
@@ -642,6 +646,7 @@ extern void bb_pack_state(bb_state_t *state_ptr, Buf buffer,
 		packstr(config_ptr->destroy_buffer,  buffer);
 		pack32(config_ptr->flags,            buffer);
 		packstr(config_ptr->get_sys_state,   buffer);
+		packstr(config_ptr->get_sys_status,   buffer);
 		pack64(config_ptr->granularity,      buffer);
 		pack32(config_ptr->pool_cnt,         buffer);
 		for (i = 0; i < config_ptr->pool_cnt; i++) {
@@ -676,6 +681,7 @@ extern void bb_pack_state(bb_state_t *state_ptr, Buf buffer,
 			packstr(config_ptr->pool_ptr[i].name, buffer);
 			pack64(config_ptr->pool_ptr[i].total_space, buffer);
 			pack64(config_ptr->pool_ptr[i].granularity, buffer);
+			pack64(config_ptr->pool_ptr[i].unfree_space, buffer);
 			pack64(config_ptr->pool_ptr[i].used_space, buffer);
 		}
 		pack32(config_ptr->other_timeout,    buffer);
@@ -686,6 +692,7 @@ extern void bb_pack_state(bb_state_t *state_ptr, Buf buffer,
 		pack32(config_ptr->stage_in_timeout, buffer);
 		pack32(config_ptr->stage_out_timeout,buffer);
 		pack64(state_ptr->total_space,       buffer);
+		pack64(state_ptr->unfree_space,      buffer);
 		pack64(state_ptr->used_space,        buffer);
 		pack32(config_ptr->validate_timeout, buffer);
 	}
@@ -910,8 +917,7 @@ extern void bb_set_use_time(bb_state_t *state_ptr)
 				job_ptr = find_job_record(bb_alloc->job_id);
 				if (!job_ptr && !bb_alloc->orphaned) {
 					bb_alloc->orphaned = true;
-					error("%s: Job %u not found for "
-					      "allocated burst buffer",
+					error("%s: JobId=%u not found for allocated burst buffer",
 					      __func__, bb_alloc->job_id);
 					bb_alloc->use_time = now + 24 * 60 * 60;
 				} else if (!job_ptr) {
@@ -1177,7 +1183,7 @@ extern void bb_job_log(bb_state_t *state_ptr, bb_job_t *bb_job)
 	int i;
 
 	if (bb_job) {
-		xstrfmtcat(out_buf, "%s: Job:%u UserID:%u ",
+		xstrfmtcat(out_buf, "%s: JobId=%u UserID:%u ",
 			   state_ptr->name, bb_job->job_id, bb_job->user_id);
 		xstrfmtcat(out_buf, "Swap:%ux%u ", bb_job->swap_size,
 			   bb_job->swap_nodes);

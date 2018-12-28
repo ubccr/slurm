@@ -6,22 +6,22 @@
  *  from other parts of SLURM.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
  *  This file is patterned after hostlist.c, written by Mark Grondona and
@@ -101,12 +101,10 @@ slurm_step_layout_t *slurm_step_layout_create(
 	step_layout->task_cnt  = step_layout_req->num_tasks;
 	if (cluster_flags & CLUSTER_FLAG_FE) {
 		/* Limited job step support on front-end systems.
-		 * All jobs execute through front-end on Blue Gene.
 		 * Normally we would not permit execution of job steps,
 		 * but can fake it by just allocating all tasks to
 		 * one of the allocated nodes. */
-		if ((cluster_flags & CLUSTER_FLAG_BG)
-		    || (cluster_flags & CLUSTER_FLAG_CRAY_A))
+		if (cluster_flags & CLUSTER_FLAG_CRAY_A)
 			step_layout->node_cnt  = step_layout_req->num_hosts;
 		else
 			step_layout->node_cnt  = 1;
@@ -361,6 +359,7 @@ static int _init_task_layout(slurm_step_layout_req_t *step_layout_req,
 {
 	int cpu_cnt = 0, cpu_inx = 0, cpu_task_cnt = 0, cpu_task_inx = 0, i;
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
+	hostlist_t hl;
 
 	uint16_t cpus[step_layout->node_cnt];
 	uint16_t cpus_per_task[1];
@@ -390,15 +389,14 @@ static int _init_task_layout(slurm_step_layout_req_t *step_layout_req,
 				     * step_layout->node_cnt);
 	step_layout->tids  = xmalloc(sizeof(uint32_t *)
 				     * step_layout->node_cnt);
-	if (!(cluster_flags & CLUSTER_FLAG_BG)) {
-		hostlist_t hl = hostlist_create(step_layout->node_list);
-		/* make sure the number of nodes we think we have
-		 * is the correct number */
-		i = hostlist_count(hl);
-		if (step_layout->node_cnt > i)
-			step_layout->node_cnt = i;
-		hostlist_destroy(hl);
-	}
+	hl = hostlist_create(step_layout->node_list);
+	/* make sure the number of nodes we think we have
+	 * is the correct number */
+	i = hostlist_count(hl);
+	if (step_layout->node_cnt > i)
+		step_layout->node_cnt = i;
+	hostlist_destroy(hl);
+
 	debug("laying out the %u tasks on %u hosts %s dist %u",
 	      step_layout->task_cnt, step_layout->node_cnt,
 	      step_layout->node_list, step_layout->task_dist);

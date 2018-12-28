@@ -250,18 +250,6 @@ slurm_accounting_enforce_string(slurm_t self, uint16_t enforce)
 		RETVAL
 
 char *
-slurm_conn_type_string(slurm_t self, uint16_t conn_type)
-	CODE:
-		if (self); /* this is needed to avoid a warning about
-			      unused variables.  But if we take slurm_t self
-			      out of the mix Slurm-> doesn't work,
-			      only Slurm::
-			    */
-		RETVAL = slurm_conn_type_string((enum connection_type)conn_type);
-	OUTPUT:
-		RETVAL
-
-char *
 slurm_node_use_string(slurm_t self, uint16_t node_use)
 	CODE:
 		if (self); /* this is needed to avoid a warning about
@@ -272,124 +260,6 @@ slurm_node_use_string(slurm_t self, uint16_t node_use)
 		RETVAL = slurm_node_use_string((enum node_use_type)node_use);
 	OUTPUT:
 		RETVAL
-
-char *
-slurm_bg_block_state_string(slurm_t self, uint16_t state)
-	CODE:
-		if (self); /* this is needed to avoid a warning about
-			      unused variables.  But if we take slurm_t self
-			      out of the mix Slurm-> doesn't work,
-			      only Slurm::
-			    */
-		RETVAL = slurm_bg_block_state_string(state);
-	OUTPUT:
-		RETVAL
-
-
-######################################################################
-# 	BLUEGENE BLOCK INFO FUNCTIONS
-######################################################################
-
-void
-slurm_print_block_info_msg(slurm_t self, FILE *out, HV *block_info_msg, int one_liner=0)
-	PREINIT:
-		block_info_msg_t bi_msg;
-	INIT:
-		if (out == NULL) {
-			Perl_croak (aTHX_ "Invalid output stream specified: FILE not found");
-		}
-		if(hv_to_block_info_msg(block_info_msg, &bi_msg) < 0) {
-			XSRETURN_UNDEF;
-		}
-		if (self); /* this is needed to avoid a warning about
-			      unused variables.  But if we take slurm_t self
-			      out of the mix Slurm-> doesn't work,
-			      only Slurm::
-			    */
-	C_ARGS:
-		out, &bi_msg, one_liner
-	CLEANUP:
-		xfree(bi_msg.block_array);
-
-void
-slurm_print_block_info(slurm_t self, FILE *out, HV *block_info, int one_liner=0)
-	PREINIT:
-		block_info_t bi;
-	INIT:
-		if (out == NULL) {
-			Perl_croak (aTHX_ "Invalid output stream specified: FILE not found");
-		}
-		if(hv_to_block_info(block_info, &bi) < 0) {
-			XSRETURN_UNDEF;
-		}
-		if (self); /* this is needed to avoid a warning about
-			      unused variables.  But if we take slurm_t self
-			      out of the mix Slurm-> doesn't work,
-			      only Slurm::
-			    */
-	C_ARGS:
-		out, &bi, one_liner
-
-char_xfree *
-slurm_sprint_block_info(slurm_t self, HV *block_info, int one_liner=0)
-	PREINIT:
-		block_info_t bi;
-	CODE:
-		if (self); /* this is needed to avoid a warning about
-			      unused variables.  But if we take slurm_t self
-			      out of the mix Slurm-> doesn't work,
-			      only Slurm::
-			    */
-		if(hv_to_block_info(block_info, &bi) < 0) {
-			XSRETURN_UNDEF;
-		}
-		RETVAL = slurm_sprint_block_info(&bi, one_liner);
-	OUTPUT:
-		RETVAL
-
-HV *
-slurm_load_block_info(slurm_t self, time_t update_time=0, uint16_t show_flags=0)
-	PREINIT:
-		block_info_msg_t *bi_msg = NULL;
-		int rc;
-	CODE:
-		if (self); /* this is needed to avoid a warning about
-			      unused variables.  But if we take slurm_t self
-			      out of the mix Slurm-> doesn't work,
-			      only Slurm::
-			    */
-		rc = slurm_load_block_info(update_time, &bi_msg, show_flags);
-		if(rc == SLURM_SUCCESS) {
-			RETVAL = newHV();
-			sv_2mortal((SV*)RETVAL);
-			rc = block_info_msg_to_hv(bi_msg, RETVAL);
-			if (rc < 0) {
-				XSRETURN_UNDEF;
-			}
-			slurm_free_block_info_msg(bi_msg);
-		} else {
-			XSRETURN_UNDEF;
-		}
-	OUTPUT:
-		RETVAL
-
-
-int
-slurm_update_block(slurm_t self, HV *update_req)
-	PREINIT:
-		update_block_msg_t block_msg;
-	INIT:
-		if (self); /* this is needed to avoid a warning about
-			      unused variables.  But if we take slurm_t self
-			      out of the mix Slurm-> doesn't work,
-			      only Slurm::
-			    */
-		if(hv_to_update_block_msg(update_req, &block_msg) < 0) {
-			XSRETURN_UNDEF;
-		}
-	C_ARGS:
-		&block_msg
-
 
 ######################################################################
 # 	RESOURCE ALLOCATION FUNCTIONS
@@ -1665,7 +1535,7 @@ slurm_print_node_info_msg(slurm_t self, FILE *out, HV *node_info_msg, int one_li
 		xfree(ni_msg.node_array);
 
 void
-slurm_print_node_table(slurm_t self, FILE *out, HV *node_info, int node_scaling=1, int one_liner=0)
+slurm_print_node_table(slurm_t self, FILE *out, HV *node_info, int one_liner=0)
 	PREINIT:
 		node_info_t ni;
 	INIT:
@@ -1681,10 +1551,10 @@ slurm_print_node_table(slurm_t self, FILE *out, HV *node_info, int node_scaling=
 			XSRETURN_UNDEF;
 		}
 	C_ARGS:
-		out, &ni, node_scaling, one_liner
+		out, &ni, one_liner
 
 char_xfree *
-slurm_sprint_node_table(slurm_t self, HV *node_info, int node_scaling=1, int one_liner=0)
+slurm_sprint_node_table(slurm_t self, HV *node_info, int one_liner=0)
 	PREINIT:
 		node_info_t ni;
 	CODE:
@@ -1696,7 +1566,7 @@ slurm_sprint_node_table(slurm_t self, HV *node_info, int node_scaling=1, int one
 		if(hv_to_node_info(node_info, &ni) < 0) {
 			XSRETURN_UNDEF;
 		}
-		RETVAL = slurm_sprint_node_table(&ni, node_scaling, one_liner);
+		RETVAL = slurm_sprint_node_table(&ni, one_liner);
 	OUTPUT:
 		RETVAL
 
@@ -1791,76 +1661,6 @@ slurm_print_topo_record(slurm_t self, FILE *out, HV *topo_info, int one_liner=0)
 ######################################################################
 #	SLURM SELECT READ/PRINT/UPDATE FUNCTIONS
 ######################################################################
-int
-slurm_get_select_jobinfo(slurm_t self, dynamic_plugin_data_t *jobinfo, uint32_t data_type, SV *data)
-	PREINIT:
-		uint16_t tmp_16, tmp_array[SYSTEM_DIMENSIONS];
-		uint32_t tmp_32;
-		char *tmp_str;
-		select_jobinfo_t *tmp_ptr;
-		int i;
-	CODE:
-		if (self); /* this is needed to avoid a warning about
-			      unused variables.  But if we take slurm_t self
-			      out of the mix Slurm-> doesn't work,
-			      only Slurm::
-			    */
-		switch(data_type) {
-		case SELECT_JOBDATA_GEOMETRY: /* data-> uint16_t geometry[SYSTEM_DIMENSIONS] */
-			RETVAL = slurm_get_select_jobinfo(jobinfo, data_type, tmp_array);
-			if (RETVAL == 0) {
-				AV *avp = newAV();
-				for (i = 0; i < SYSTEM_DIMENSIONS; i ++) {
-					av_store_uint16_t(avp, i, tmp_array[i]);
-				}
-				sv_setsv(data, (SV*)newRV_noinc((SV*)avp));
-			}
-			break;
-		case SELECT_JOBDATA_ROTATE: /* data-> uint16_t rotate */
-		case SELECT_JOBDATA_CONN_TYPE: /* data-> uint16_t connection_type */
-		case SELECT_JOBDATA_ALTERED: /* data-> uint16_t altered */
-		case SELECT_JOBDATA_REBOOT:  /* data-> uint16_t reboot */
-			RETVAL = slurm_get_select_jobinfo(jobinfo, data_type, &tmp_16);
-			if (RETVAL == 0) {
-				sv_setuv(data, (UV)tmp_16);
-			}
-			break;
-		case SELECT_JOBDATA_NODE_CNT: /* data-> uint32_t node_cnt */
-		case SELECT_JOBDATA_RESV_ID: /* data-> uint32_t reservation_id */
-			RETVAL = slurm_get_select_jobinfo(jobinfo, data_type, &tmp_32);
-			if (RETVAL == 0) {
-				sv_setuv(data, (UV)tmp_32);
-			}
-			break;
-		case SELECT_JOBDATA_BLOCK_ID: /* data-> char *bg_block_id */
-		case SELECT_JOBDATA_NODES:   /* data-> char *nodes */
-		case SELECT_JOBDATA_IONODES: /* data-> char *ionodes */
-		case SELECT_JOBDATA_BLRTS_IMAGE: /* data-> char *blrtsimage */
-		case SELECT_JOBDATA_LINUX_IMAGE: /* data-> char *linuximage */
-		case SELECT_JOBDATA_MLOADER_IMAGE: /* data-> char *mloaderimage */
-		case SELECT_JOBDATA_RAMDISK_IMAGE: /* data-> char *ramdiskimage */
-			RETVAL = slurm_get_select_jobinfo(jobinfo, data_type, &tmp_str);
-			if (RETVAL == 0) {
-				char *str;
-				int len = strlen(tmp_str) + 1;
-				New(0, str, len, char);
-				Copy(tmp_str, str, len, char);
-				xfree(tmp_str);
-				sv_setpvn(data, str, len);
-			}
-			break;
-		case SELECT_JOBDATA_PTR: /* data-> select_jobinfo_t *jobinfo */
-			RETVAL = slurm_get_select_jobinfo(jobinfo, data_type, &tmp_ptr);
-			if (RETVAL == 0) {
-				sv_setref_pv(data, "Slurm::select_jobinfo_t", (void*)tmp_ptr);
-			}
-			break;
-		default:
-			RETVAL = slurm_get_select_jobinfo(jobinfo, data_type, NULL);
-		}
-	OUTPUT:
-		RETVAL
-
 #
 # $rc = $slurm->get_select_nodeinfo($nodeinfo, $data_type, $state, $data);
 #
@@ -2239,7 +2039,7 @@ slurm_shutdown(slurm_t self, uint16_t options=0)
 		options
 
 int
-slurm_takeover(slurm_t self)
+slurm_takeover(slurm_t self, int backup_inx=1)
 	INIT:
 		if (self); /* this is needed to avoid a warning about
 			      unused variables.  But if we take slurm_t self
@@ -2247,6 +2047,7 @@ slurm_takeover(slurm_t self)
 			      only Slurm::
 			    */
 	C_ARGS:
+		backup_inx
 
 int
 slurm_set_debug_level(slurm_t self, uint32_t debug_level)

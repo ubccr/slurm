@@ -7,11 +7,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -51,8 +51,8 @@
 #define SLURM_PROTOCOL_NO_SEND_RECV_FLAGS 0
 
 /* for listen API */
-#ifndef SLURM_PROTOCOL_DEFAULT_LISTEN_BACKLOG
-#define SLURM_PROTOCOL_DEFAULT_LISTEN_BACKLOG 4096
+#ifndef SLURM_DEFAULT_LISTEN_BACKLOG
+#define SLURM_DEFAULT_LISTEN_BACKLOG 4096
 #endif
 
 /* used in interface methods */
@@ -75,17 +75,18 @@
  * done here with them since we have to support old version of archive
  * files since they don't update once they are created.
  */
+#define SLURM_18_08_PROTOCOL_VERSION ((33 << 8) | 0)
 #define SLURM_17_11_PROTOCOL_VERSION ((32 << 8) | 0)
 #define SLURM_17_02_PROTOCOL_VERSION ((31 << 8) | 0)
-#define SLURM_16_05_PROTOCOL_VERSION ((30 << 8) | 0)
 
-#define SLURM_PROTOCOL_VERSION SLURM_17_11_PROTOCOL_VERSION
-#define SLURM_ONE_BACK_PROTOCOL_VERSION SLURM_17_02_PROTOCOL_VERSION
-#define SLURM_MIN_PROTOCOL_VERSION SLURM_16_05_PROTOCOL_VERSION
+#define SLURM_PROTOCOL_VERSION SLURM_18_08_PROTOCOL_VERSION
+#define SLURM_ONE_BACK_PROTOCOL_VERSION SLURM_17_11_PROTOCOL_VERSION
+#define SLURM_MIN_PROTOCOL_VERSION SLURM_17_02_PROTOCOL_VERSION
 
 #if 0
 /* Old Slurm versions kept for reference only.  Slurm only actively keeps track
  * of 2 previous versions. */
+#define SLURM_16_05_PROTOCOL_VERSION ((30 << 8) | 0)
 #define SLURM_15_08_PROTOCOL_VERSION ((29 << 8) | 0)
 #define SLURM_14_11_PROTOCOL_VERSION ((28 << 8) | 0)
 #define SLURM_14_03_PROTOCOL_VERSION ((27 << 8) | 0)

@@ -7,11 +7,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>, Danny Auble <da@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -60,6 +60,7 @@
 #include "src/common/macros.h"
 #include "src/common/proc_args.h"
 #include "src/common/read_config.h"
+#include "src/common/slurm_opt.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_step_layout.h"
@@ -96,41 +97,7 @@ static int _setup_particulars(uint32_t cluster_flags,
 			       dynamic_plugin_data_t *select_jobinfo)
 {
 	int rc = SLURM_SUCCESS;
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		char *bg_part_id = NULL;
-		uint32_t node_cnt = 0;
-		select_g_select_jobinfo_get(select_jobinfo,
-					    SELECT_JOBDATA_BLOCK_ID,
-					    &bg_part_id);
-		if (bg_part_id) {
-			select_g_select_jobinfo_get(
-				select_jobinfo,
-				SELECT_JOBDATA_BLOCK_NODE_CNT,
-				&node_cnt);
-			if (node_cnt)
-				setenvf(dest, "SLURM_BLOCK_NUM_NODES",
-					"%u", node_cnt);
-
-			setenvf(dest, "MPIRUN_PARTITION", "%s", bg_part_id);
-			setenvf(dest, "MPIRUN_NOFREE", "%d", 1);
-			setenvf(dest, "MPIRUN_NOALLOCATE", "%d", 1);
-			xfree(bg_part_id);
-			select_g_select_jobinfo_get(select_jobinfo,
-						    SELECT_JOBDATA_IONODES,
-						    &bg_part_id);
-			if (bg_part_id) {
-				setenvf(dest, "SLURM_JOB_SUB_MP", "%s",
-					bg_part_id);
-				xfree(bg_part_id);
-			}
-		} else
-			rc = SLURM_FAILURE;
-
-		if (rc == SLURM_FAILURE) {
-			error("Can't set MPIRUN_PARTITION "
-			      "environment variable");
-		}
-	} else if (cluster_flags & CLUSTER_FLAG_CRAY_A) {
+	if (cluster_flags & CLUSTER_FLAG_CRAY_A) {
 		uint32_t resv_id = 0;
 
 		select_g_select_jobinfo_get(select_jobinfo,
@@ -139,7 +106,7 @@ static int _setup_particulars(uint32_t cluster_flags,
 		if (resv_id) {
 			setenvf(dest, "BASIL_RESERVATION_ID", "%u", resv_id);
 		} else {
-			/* This is not an error for a SLURM job allocation with
+			/* This is not an error for a Slurm job allocation with
 			 * no compute nodes and no BASIL reservation */
 			verbose("Can't set BASIL_RESERVATION_ID "
 			        "environment variable");
@@ -343,7 +310,7 @@ char *getenvp(char **env, const char *name)
 int setup_env(env_t *env, bool preserve_env)
 {
 	int rc = SLURM_SUCCESS;
-	char *dist = NULL, *lllp_dist = NULL;
+	char *addr, *dist = NULL, *lllp_dist = NULL;
 	char addrbuf[INET_ADDRSTRLEN];
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
@@ -681,10 +648,9 @@ int setup_env(env_t *env, bool preserve_env)
 		}
 	}
 
-	if (!(cluster_flags & CLUSTER_FLAG_BG) &&
-	    !(cluster_flags & CLUSTER_FLAG_CRAYXT)) {
+	if (!(cluster_flags & CLUSTER_FLAG_CRAYXT)) {
 		/*
-		 * These aren't relavant to a system not using Slurm as the
+		 * These aren't relevant to a system not using Slurm as the
 		 * launcher. Since there isn't a flag for that we check for
 		 * the flags we do have.
 		 */
@@ -855,10 +821,13 @@ int setup_env(env_t *env, bool preserve_env)
 		}
 	}
 
+	if (slurmctld_conf.slurmctld_addr)
+		addr = slurmctld_conf.slurmctld_addr;
+	else
+		addr = slurmctld_conf.control_addr[0];
 	setenvf(&env->env, "SLURM_WORKING_CLUSTER", "%s:%s:%d:%d",
-		slurmctld_conf.cluster_name, slurmctld_conf.control_addr,
-		slurmctld_conf.slurmctld_port,
-		SLURM_PROTOCOL_VERSION);
+		slurmctld_conf.cluster_name, addr,
+		slurmctld_conf.slurmctld_port, SLURM_PROTOCOL_VERSION);
 
 	return rc;
 }
@@ -912,7 +881,7 @@ extern char *uint16_array_to_str(int array_len, const uint16_t *array)
 
 
 /*
- * The cpus-per-node representation in SLURM (and perhaps tasks-per-node
+ * The cpus-per-node representation in Slurm (and perhaps tasks-per-node
  * in the future) is stored in a compressed format comprised of two
  * equal-length arrays, and an integer holding the array length.  In one
  * array an element represents a count (number of cpus, number of tasks,
@@ -949,7 +918,7 @@ extern char *uint32_compressed_to_str(uint32_t array_len,
 }
 
 /*
- * Set in "dest" the environment variables relevant to a SLURM job
+ * Set in "dest" the environment variables relevant to a Slurm job
  * allocation, overwriting any environment variables of the same name.
  * If the address pointed to by "dest" is NULL, memory will automatically be
  * xmalloc'ed.  The array is terminated by a NULL pointer, and thus is
@@ -962,8 +931,7 @@ extern char *uint32_compressed_to_str(uint32_t array_len,
  *	SLURM_JOB_NODELIST
  *	SLURM_JOB_CPUS_PER_NODE
  *	SLURM_NODE_ALIASES
- *	SLURM_BG_NUM_NODES, MPIRUN_PARTITION, MPIRUN_NOFREE, and
- *	MPIRUN_NOALLOCATE (BG only)
+ *	SLURM_NTASKS_PER_NODE
  *
  * dest OUT - array in which to the set environment variables
  * alloc IN - resource allocation response
@@ -1000,18 +968,6 @@ extern int env_array_for_job(char ***dest,
 	cpus_task_reps[0] = alloc->node_cnt;
 
 	_setup_particulars(cluster_flags, dest, alloc->select_jobinfo);
-
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		select_g_select_jobinfo_get(alloc->select_jobinfo,
-					    SELECT_JOBDATA_NODE_CNT,
-					    &step_layout_req.num_hosts);
-		if (!step_layout_req.num_hosts)
-			step_layout_req.num_hosts = alloc->node_cnt;
-
-		env_array_overwrite_pack_fmt(dest, "SLURM_BG_NUM_NODES",
-					     pack_offset, "%u",
-					     step_layout_req.num_hosts);
-	}
 
 	if (pack_offset < 1) {
 		env_array_overwrite_fmt(dest, "SLURM_JOB_ID", "%u",
@@ -1172,12 +1128,17 @@ extern int env_array_for_job(char ***dest,
 					     pack_offset, "%d",
 					     desc->cpus_per_task);
 	}
+	if (desc->ntasks_per_node && (desc->ntasks_per_node != NO_VAL16)) {
+		env_array_overwrite_pack_fmt(dest, "SLURM_NTASKS_PER_NODE",
+					     pack_offset, "%d",
+					     desc->ntasks_per_node);
+	}
 
 	return rc;
 }
 
 /*
- * Set in "dest" the environment variables strings relevant to a SLURM batch
+ * Set in "dest" the environment variables strings relevant to a Slurm batch
  * job allocation, overwriting any environment variables of the same name.
  * If the address pointed to by "dest" is NULL, memory will automatically be
  * xmalloc'ed.  The array is terminated by a NULL pointer, and thus is
@@ -1242,10 +1203,6 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	env_array_overwrite_fmt(dest, "SLURM_JOB_ID", "%u", batch->job_id);
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NUM_NODES", "%u",
 				step_layout_req.num_hosts);
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		env_array_overwrite_fmt(dest, "SLURM_BG_NUM_NODES",
-					"%u", step_layout_req.num_hosts);
-	}
 	if (batch->array_task_id != NO_VAL) {
 		env_array_overwrite_fmt(dest, "SLURM_ARRAY_JOB_ID", "%u",
 					batch->array_job_id);
@@ -1360,7 +1317,7 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 }
 
 /*
- * Set in "dest" the environment variables relevant to a SLURM job step,
+ * Set in "dest" the environment variables relevant to a Slurm job step,
  * overwriting any environment variables of the same name.  If the address
  * pointed to by "dest" is NULL, memory will automatically be xmalloc'ed.
  * The array is terminated by a NULL pointer, and thus is suitable for
@@ -1397,7 +1354,6 @@ env_array_for_step(char ***dest,
 {
 	char *tmp, *tpn;
 	uint32_t node_cnt, task_cnt;
-	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
 	if (!step || !launch)
 		return;
@@ -1414,28 +1370,6 @@ env_array_for_step(char ***dest,
 		env_array_append_fmt(dest, "SLURM_JOB_NODELIST", "%s", tmp);
 	}
 	env_array_overwrite_fmt(dest, "SLURM_STEP_NODELIST", "%s", tmp);
-
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		char geo_char[HIGHEST_DIMENSIONS+1];
-
-		select_g_select_jobinfo_get(step->select_jobinfo,
-					    SELECT_JOBDATA_NODE_CNT,
-					    &node_cnt);
-		if (!node_cnt)
-			node_cnt = step->step_layout->node_cnt;
-
-		select_g_select_jobinfo_sprint(step->select_jobinfo,
-					       geo_char, sizeof(geo_char),
-					       SELECT_PRINT_GEOMETRY);
-		if (geo_char[0] != '0')
-			env_array_overwrite_fmt(dest, "SLURM_STEP_GEO",
-						"%s", geo_char);
-		select_g_select_jobinfo_sprint(step->select_jobinfo,
-					       geo_char, sizeof(geo_char),
-					       SELECT_PRINT_START_LOC);
-		env_array_overwrite_fmt(dest, "SLURM_STEP_START_LOC",
-					"%s", geo_char);
-	}
 
 	if (launch->pack_nnodes && (launch->pack_nnodes != NO_VAL))
 		node_cnt = launch->pack_nnodes;
@@ -1469,15 +1403,6 @@ env_array_for_step(char ***dest,
 	if (step->resv_ports) {
 		env_array_overwrite_fmt(dest, "SLURM_STEP_RESV_PORTS",
 					"%s", step->resv_ports);
-	}
-
-	tmp = NULL;
-	select_g_select_jobinfo_get(step->select_jobinfo,
-				    SELECT_JOBDATA_IONODES,
-				    &tmp);
-	if (tmp) {
-		setenvf(dest, "SLURM_STEP_SUB_MP", "%s", tmp);
-		xfree(tmp);
 	}
 
 	/* OBSOLETE, but needed by some MPI implementations, do not remove */
@@ -2057,7 +1982,7 @@ char **env_array_user_default(const char *username, int timeout, int mode,
 	char *starttoken = "XXXXSLURMSTARTPARSINGHEREXXXX";
 	char *stoptoken  = "XXXXSLURMSTOPPARSINGHEREXXXXX";
 	char cmdstr[256], *env_loc = NULL;
-	char stepd_path[MAXPATHLEN];
+	char *stepd_path = NULL;
 	int fildes[2], found, fval, len, rc, timeleft;
 	int buf_read, buf_rem, config_timeout;
 	pid_t child;
@@ -2070,8 +1995,6 @@ char **env_array_user_default(const char *username, int timeout, int mode,
 		return NULL;
 	}
 
-	snprintf(stepd_path, sizeof(stepd_path), "%s/sbin/slurmstepd",
-		 SLURM_PREFIX);
 	config_timeout = slurm_get_env_timeout();
 
 	if (config_timeout == 0)	/* just read directly from cache */
@@ -2081,9 +2004,10 @@ char **env_array_user_default(const char *username, int timeout, int mode,
 		fatal("Could not locate command: "SUCMD);
 	if (stat("/bin/echo", &buf))
 		fatal("Could not locate command: /bin/echo");
+	xstrfmtcat(stepd_path, "%s/sbin/slurmstepd", SLURM_PREFIX);
 	if (stat(stepd_path, &buf) == 0) {
-		snprintf(name, sizeof(name), "%s getenv", stepd_path);
-		env_loc = name;
+		xstrcat(stepd_path, " getenv");
+		env_loc = stepd_path;
 	} else if (stat("/bin/env", &buf) == 0)
 		env_loc = "/bin/env";
 	else if (stat("/usr/bin/env", &buf) == 0)
@@ -2094,6 +2018,7 @@ char **env_array_user_default(const char *username, int timeout, int mode,
 		 "/bin/echo; /bin/echo; /bin/echo; "
 		 "/bin/echo %s; %s; /bin/echo %s",
 		 starttoken, env_loc, stoptoken);
+	xfree(stepd_path);
 
 	if (pipe(fildes) < 0) {
 		fatal("pipe: %m");
@@ -2271,4 +2196,57 @@ char **env_array_user_default(const char *username, int timeout, int mode,
 	}
 
 	return env;
+}
+
+/*
+ * Set TRES related env vars. Set here rather than env_array_for_job() since
+ * we don't have array of opt values and the raw values are not stored in the
+ * job_desc_msg_t structure (only the strings with possibly combined TRES)
+ *
+ * opt IN - options set by command parsing
+ * dest IN/OUT - location to write environment variables
+ * pack_offset IN - component offset into pack job, -1 if not pack job
+ */
+extern void set_env_from_opts(slurm_opt_t *opt, char ***dest, int pack_offset)
+{
+	if (opt->cpus_per_gpu) {
+		env_array_overwrite_pack_fmt(dest, "SLURM_CPUS_PER_GPU",
+					     pack_offset, "%d",
+					     opt->cpus_per_gpu);
+	}
+	if (opt->gpus) {
+		env_array_overwrite_pack_fmt(dest, "SLURM_GPUS",
+					     pack_offset, "%s",
+					     opt->gpus);
+	}
+	if (opt->gpu_bind) {
+		env_array_overwrite_pack_fmt(dest, "SLURM_GPU_BIND",
+					     pack_offset, "%s",
+					     opt->gpu_bind);
+	}
+	if (opt->gpu_freq) {
+		env_array_overwrite_pack_fmt(dest, "SLURM_GPU_FREQ",
+					     pack_offset, "%s",
+					     opt->gpu_freq);
+	}
+	if (opt->gpus_per_node) {
+		env_array_overwrite_pack_fmt(dest, "SLURM_GPUS_PER_NODE",
+					     pack_offset, "%s",
+					     opt->gpus_per_node);
+	}
+	if (opt->gpus_per_socket) {
+		env_array_overwrite_pack_fmt(dest, "SLURM_GPUS_PER_SOCKET",
+					     pack_offset, "%s",
+					     opt->gpus_per_socket);
+	}
+	if (opt->gpus_per_task) {
+		env_array_overwrite_pack_fmt(dest, "SLURM_GPUS_PER_TASK",
+					     pack_offset, "%s",
+					     opt->gpus_per_task);
+	}
+	if (opt->mem_per_gpu) {
+		env_array_overwrite_pack_fmt(dest, "SLURM_MEM_PER_GPU",
+					     pack_offset, "%"PRIi64,
+					     opt->mem_per_gpu);
+	}
 }

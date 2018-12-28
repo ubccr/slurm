@@ -7,11 +7,11 @@
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -151,7 +151,7 @@ extern void slurm_step_launch_params_t_init(slurm_step_launch_params_t *ptr)
 
 /*
  * Specify the plugin name to be used. This may be needed to specify the
- * non-default MPI plugin when using SLURM API to launch tasks.
+ * non-default MPI plugin when using Slurm API to launch tasks.
  * IN plugin name - "none", "pmi2", etc.
  * RET SLURM_SUCCESS or SLURM_ERROR (with errno set)
  */
@@ -232,14 +232,6 @@ extern int slurm_step_launch(slurm_step_ctx_t *ctx,
 		return SLURM_ERROR;
 	}
 
-#if defined HAVE_BGQ
-	{
-		int i;
-		/* Now, hack the step_layout struct for BGQ systems. */
-		for (i = 0; i < ctx->step_resp->step_layout->node_cnt; i++)
-			ctx->step_resp->step_layout->tasks[i] = 1;
-	}
-#endif
 	if (params->pack_jobid && (params->pack_jobid != NO_VAL))
 		_rebuild_mpi_layout(ctx, params);
 
@@ -310,6 +302,8 @@ extern int slurm_step_launch(slurm_step_ctx_t *ctx,
 	launch.cpu_freq_min	= params->cpu_freq_min;
 	launch.cpu_freq_max	= params->cpu_freq_max;
 	launch.cpu_freq_gov	= params->cpu_freq_gov;
+	launch.tres_bind	= params->tres_bind;
+	launch.tres_freq	= params->tres_freq;
 	launch.mem_bind_type	= params->mem_bind_type;
 	launch.mem_bind		= params->mem_bind;
 	launch.accel_bind_type	= params->accel_bind_type;
@@ -452,15 +446,6 @@ extern int slurm_step_launch_add(slurm_step_ctx_t *ctx,
 
 	memset(&launch, 0, sizeof(launch));
 
-#if defined HAVE_BGQ
-	{
-		int i;
-		/* Now, hack the step_layout struct for BGQ systems. */
-		for (i = 0; i < ctx->step_resp->step_layout->node_cnt; i++)
-			ctx->step_resp->step_layout->tasks[i] = 1;
-	}
-#endif
-
 	/* Start tasks on compute nodes */
 	launch.job_id = ctx->step_req->job_id;
 	launch.uid = ctx->step_req->user_id;
@@ -515,6 +500,8 @@ extern int slurm_step_launch_add(slurm_step_ctx_t *ctx,
 	launch.cpu_freq_min	= params->cpu_freq_min;
 	launch.cpu_freq_max	= params->cpu_freq_max;
 	launch.cpu_freq_gov	= params->cpu_freq_gov;
+	launch.tres_bind	= params->tres_bind;
+	launch.tres_freq	= params->tres_freq;
 	launch.mem_bind_type	= params->mem_bind_type;
 	launch.mem_bind		= params->mem_bind;
 	launch.accel_bind_type	= params->accel_bind_type;
@@ -970,13 +957,7 @@ struct step_launch_state *step_launch_state_create(slurm_step_ctx_t *ctx)
 
 	sls = xmalloc(sizeof(struct step_launch_state));
 	sls->slurmctld_socket_fd = -1;
-#if defined HAVE_BGQ
-	/* This means we are on an emulated system, so only launch 1
-	   task to avoid overflows with large jobs. */
-	layout->node_cnt = layout->task_cnt = sls->tasks_requested = 1;
-#else
 	sls->tasks_requested = layout->task_cnt;
-#endif
 	sls->tasks_started = bit_alloc(layout->task_cnt);
 	sls->tasks_exited = bit_alloc(layout->task_cnt);
 	sls->node_io_error = bit_alloc(layout->node_cnt);
@@ -1014,11 +995,7 @@ void step_launch_state_alter(slurm_step_ctx_t *ctx)
 	int ii;
 
 	xassert(sls);
-#if defined HAVE_BGQ
-	sls->tasks_requested = 1;
-#else
 	sls->tasks_requested = layout->task_cnt;
-#endif
 	sls->tasks_started = bit_realloc(sls->tasks_started, layout->task_cnt);
 	sls->tasks_exited = bit_realloc(sls->tasks_exited, layout->task_cnt);
 	sls->node_io_error = bit_realloc(sls->node_io_error, layout->node_cnt);
@@ -1215,8 +1192,8 @@ _launch_handler(struct step_launch_state *sls, slurm_msg_t *resp)
 	slurm_mutex_lock(&sls->lock);
 	if ((msg->count_of_pids > 0) &&
 	    bit_test(sls->tasks_started, msg->task_ids[0])) {
-		error("duplicate launch response received from node %s. "
-		       "this is not an error", msg->node_name);
+		debug("%s: duplicate launch response received from node %s",
+		      __func__, msg->node_name);
 		slurm_mutex_unlock(&sls->lock);
 		return;
 	}
@@ -1600,10 +1577,12 @@ _handle_msg(void *arg, slurm_msg_t *msg)
 	case RESPONSE_LAUNCH_TASKS:
 		debug2("received task launch");
 		_launch_handler(sls, msg);
+		slurm_send_rc_msg(msg, SLURM_SUCCESS);
 		break;
 	case MESSAGE_TASK_EXIT:
 		debug2("received task exit");
 		_exit_handler(sls, msg);
+		slurm_send_rc_msg(msg, SLURM_SUCCESS);
 		break;
 	case SRUN_PING:
 		debug3("slurmctld ping received");

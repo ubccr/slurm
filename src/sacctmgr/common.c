@@ -8,11 +8,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -358,6 +358,12 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("GrpJobs");
 		field->len = 7;
 		field->print_routine = print_fields_uint;
+	} else if (!xstrncasecmp("GrpJobsAccrue",
+				 object, MAX(command_len, 8))) {
+		field->type = PRINT_GRPJA;
+		field->name = xstrdup("GrpJobsAccrue");
+		field->len = 13;
+		field->print_routine = print_fields_uint;
 	} else if (!xstrncasecmp("GrpMemory", object, MAX(command_len, 4))) {
 		field->type = PRINT_GRPMEM;
 		field->name = xstrdup("GrpMem");
@@ -487,13 +493,37 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("MaxJobs");
 		field->len = 7;
 		field->print_routine = print_fields_uint;
+	} else if (!xstrncasecmp("MaxJobsAccrue",
+				 object, MAX(command_len, 4))) {
+		field->type = PRINT_MAXJA;
+		field->name = xstrdup("MaxJobsAccrue");
+		field->len = 13;
+		field->print_routine = print_fields_uint;
+	} else if (!xstrncasecmp("MaxJobsAccruePerAccount", object,
+				 MAX(command_len, 17)) ||
+		   !xstrncasecmp("MaxJobsAccruePerAcct", object,
+				 MAX(command_len, 17)) ||
+		   !xstrncasecmp("MaxJobsAccruePA", object,
+				 MAX(command_len, 15))) {
+		field->type = PRINT_MAXJAA;
+		field->name = xstrdup("MaxJobsAccruePA");
+		field->len = 15;
+		field->print_routine = print_fields_uint;
+	} else if (!xstrncasecmp("MaxJobsAccruePerUser", object,
+				 MAX(command_len, 17)) ||
+		   !xstrncasecmp("MaxJobsAccruePU", object,
+				 MAX(command_len, 15))) {
+		field->type = PRINT_MAXJAU;
+		field->name = xstrdup("MaxJobsAccruePU");
+		field->len = 15;
+		field->print_routine = print_fields_uint;
 	} else if (!xstrncasecmp("MaxJobsPerAccount", object,
 				 MAX(command_len, 11)) ||
 		   !xstrncasecmp("MaxJobsPerAcct", object,
 				 MAX(command_len, 11)) ||
 		   !xstrncasecmp("MaxJobsPA", object,
 				 MAX(command_len, 9))) {
-		field->type = PRINT_MAXJA;
+		field->type = PRINT_MAXJPA;
 		field->name = xstrdup("MaxJobsPA");
 		field->len = 9;
 		field->print_routine = print_fields_uint;
@@ -511,13 +541,19 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("MaxNodes");
 		field->len = 8;
 		field->print_routine = print_fields_uint;
-	} else if (!xstrncasecmp("MaxNodesPerUser", object, 
+	} else if (!xstrncasecmp("MaxNodesPerUser", object,
 				 MAX(command_len, 12)) ||
 		   !xstrncasecmp("MaxNodesPU", object,
 				 MAX(command_len, 10))) {
 		field->type = PRINT_MAXNU;
 		field->name = xstrdup("MaxNodesPU");
 		field->len = 10;
+		field->print_routine = print_fields_uint;
+	} else if (!xstrncasecmp("MinPrioThreshold", object,
+				 MAX(command_len, 4))) {
+		field->type = PRINT_MINPT;
+		field->name = xstrdup("MinPrioThres");
+		field->len = 12;
 		field->print_routine = print_fields_uint;
 	} else if (!xstrncasecmp("MaxSubmitJobs", object,
 				 MAX(command_len, 4))) {
@@ -753,7 +789,8 @@ static print_field_t *_get_print_field(char *object)
 
 extern void notice_thread_init()
 {
-	slurm_thread_create(&lock_warning_thread, _print_lock_warn, NULL);
+	slurm_thread_create_detached(&lock_warning_thread,
+				     _print_lock_warn, NULL);
 }
 
 extern void notice_thread_fini()
@@ -1659,7 +1696,8 @@ extern void sacctmgr_print_tres(print_field_t *field, char *tres_simple_str,
 	sacctmgr_initialize_g_tres_list();
 
 	print_this = slurmdb_make_tres_string_from_simple(
-		tres_simple_str, g_tres_list, NO_VAL, CONVERT_NUM_UNIT_EXACT);
+		tres_simple_str, g_tres_list, NO_VAL, CONVERT_NUM_UNIT_EXACT, 0,
+		NULL);
 
 
 	if (!print_this)
@@ -1701,6 +1739,12 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 	else if (assoc->grp_jobs != NO_VAL)
 		printf("  GrpJobs       = %u\n", assoc->grp_jobs);
 
+	if (assoc->grp_jobs_accrue == INFINITE)
+		printf("  GrpJobsAccrue            = None\n");
+	else if (assoc->grp_jobs_accrue != NO_VAL)
+		printf("  GrpJobsAccrue            = %u\n",
+		       assoc->grp_jobs_accrue);
+
 	if (assoc->grp_submit_jobs == INFINITE)
 		printf("  GrpSubmitJobs = NONE\n");
 	else if (assoc->grp_submit_jobs != NO_VAL)
@@ -1711,7 +1755,7 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->grp_tres, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  GrpTRES       = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1719,7 +1763,7 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->grp_tres_mins, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);;
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);;
 		printf("  GrpTRESMins   = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1727,7 +1771,7 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->grp_tres_run_mins, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  GrpTRESRunMins= %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1746,6 +1790,11 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 	else if (assoc->max_jobs != NO_VAL)
 		printf("  MaxJobs       = %u\n", assoc->max_jobs);
 
+	if (assoc->max_jobs_accrue == INFINITE)
+		printf("  MaxJobsPrioAcc= NONE\n");
+	else if (assoc->max_jobs_accrue != NO_VAL)
+		printf("  MaxJobsPrioAcc= %u\n", assoc->max_jobs_accrue);
+
 	if (assoc->max_submit_jobs == INFINITE)
 		printf("  MaxSubmitJobs = NONE\n");
 	else if (assoc->max_submit_jobs != NO_VAL)
@@ -1756,7 +1805,7 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->max_tres_pj, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRES       = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1764,7 +1813,7 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->max_tres_pn, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESPerNode= %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1772,7 +1821,7 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->max_tres_mins_pj, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESMins   = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1780,7 +1829,7 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->max_tres_run_mins, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESRUNMins= %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1793,6 +1842,11 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 			      time_buf, sizeof(time_buf));
 		printf("  MaxWall       = %s\n", time_buf);
 	}
+
+	if (assoc->min_prio_thresh == INFINITE)
+		printf("  MinPrioThresh = NONE\n");
+	else if (assoc->min_prio_thresh != NO_VAL)
+		printf("  MinPrioThresh = %u\n", assoc->min_prio_thresh);
 
 	if (assoc->parent_acct)
 		printf("  Parent        = %s\n", assoc->parent_acct);
@@ -1921,6 +1975,12 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 	else if (qos->grp_jobs != NO_VAL)
 		printf("  GrpJobs                  = %u\n", qos->grp_jobs);
 
+	if (qos->grp_jobs_accrue == INFINITE)
+		printf("  GrpJobsAccrue            = None\n");
+	else if (qos->grp_jobs_accrue != NO_VAL)
+		printf("  GrpJobsAccrue            = %u\n",
+		       qos->grp_jobs_accrue);
+
 	if (qos->grp_submit_jobs == INFINITE)
 		printf("  GrpSubmitJobs            = NONE\n");
 	else if (qos->grp_submit_jobs != NO_VAL)
@@ -1931,7 +1991,7 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->grp_tres, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  GrpTRES                  = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1939,7 +1999,7 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->grp_tres_mins, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  GrpTRESMins              = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1947,7 +2007,7 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->grp_tres_run_mins, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  GrpTRESRunMins           = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1960,6 +2020,18 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 			      time_buf, sizeof(time_buf));
 		printf("  GrpWall                  = %s\n", time_buf);
 	}
+
+	if (qos->max_jobs_accrue_pa == INFINITE)
+		printf("  MaxJobsAccruePerAccount  = NONE\n");
+	else if(qos->max_jobs_accrue_pa != NO_VAL)
+		printf("  MaxJobsAccruePerAccount  = %u\n",
+		       qos->max_jobs_accrue_pa);
+
+	if (qos->max_jobs_accrue_pu == INFINITE)
+		printf("  MaxJobsAccruePerUser     = NONE\n");
+	else if(qos->max_jobs_accrue_pu != NO_VAL)
+		printf("  MaxJobsAccruePerUser     = %u\n",
+		       qos->max_jobs_accrue_pu);
 
 	if (qos->max_jobs_pa == INFINITE)
 		printf("  MaxJobsPerAccount        = NONE\n");
@@ -1988,7 +2060,7 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->max_tres_pa, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESPerAccount        = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1996,7 +2068,7 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->max_tres_pj, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESPerJob            = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -2004,7 +2076,7 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->max_tres_pn, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESPerNode           = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -2012,15 +2084,30 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->max_tres_pu, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESPerUser           = %s\n", tmp_char);
+		xfree(tmp_char);
+	}
+
+	if (qos->min_prio_thresh == INFINITE)
+		printf("  MinPrioThresh            = NONE\n");
+	else if (qos->min_prio_thresh != NO_VAL)
+		printf("  MinPrioThresh            = %u\n",
+		       qos->min_prio_thresh);
+
+	if (qos->min_tres_pj) {
+		sacctmgr_initialize_g_tres_list();
+		tmp_char = slurmdb_make_tres_string_from_simple(
+			qos->min_tres_pj, g_tres_list, NO_VAL,
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
+		printf("  MinTRESPerJob            = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
 	if (qos->max_tres_mins_pj) {
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->max_tres_mins_pj, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESMins              = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -2028,7 +2115,7 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->max_tres_run_mins_pa, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESRUNMinsPerAccount = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -2036,7 +2123,7 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			qos->max_tres_run_mins_pu, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		printf("  MaxTRESRUNMinsPerUser    = %s\n", tmp_char);
 		xfree(tmp_char);
 	}
@@ -2068,6 +2155,16 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		printf("  Priority                 = NONE\n");
 	else if (qos->priority != NO_VAL)
 		printf("  Priority                 = %d\n", qos->priority);
+
+	if (qos->usage_factor == INFINITE)
+		printf("  UsageFactor              = NONE\n");
+	else if(qos->usage_factor != NO_VAL)
+		printf("  UsageFactor              = %.4lf\n", qos->usage_factor);
+
+	if (qos->usage_thres == INFINITE)
+		printf("  UsageThreshold           = NONE\n");
+	else if (qos->usage_thres != NO_VAL)
+		printf("  UsageThreshold           = %.4lf\n", qos->usage_thres);
 
 }
 

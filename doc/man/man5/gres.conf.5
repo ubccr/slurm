@@ -1,4 +1,4 @@
-.TH "gres.conf" "5" "Slurm Configuration File" "March 2018" "Slurm Configuration File"
+.TH "gres.conf" "5" "Slurm Configuration File" "July 2018" "Slurm Configuration File"
 
 .SH "NAME"
 gres.conf \- Slurm configuration file for generic resource management.
@@ -42,17 +42,31 @@ If the \fBCores\fR configuration option is specified and a job is submitted
 with the \fB\-\-gres-flags=enforce\-binding\fR option then only the identified cores
 can be allocated with each generic resource; which will tend to improve
 performance of jobs, but slow the allocation of resources to them.
-If specified and a job is \fInot\fR submitted with the with the
+If specified and a job is \fInot\fR submitted with the
 \fB\-\-gres-flags=enforce\-binding\fR option the identified cores will be
 preferred for scheduled with each generic resource.
-If not specified, then any core can be used with the resources, which also
-increases the speed of Slurm's scheduling algorithm.
+If \fB\-\-gres-flags=disable\-binding\fR is specified, then any core can be
+used with the resources, which also increases the speed of Slurm's
+scheduling algorithm but can degrade the application performance.
+The \fB\-\-gres-flags=disable\-binding\fR option is currently required to use
+more CPUs than are bound to a GRES (i.e. if a GPU is bound to the CPUs on one
+socket, but resources on more than one socket are required to run the job).
 If any core can be effectively used with the resources, then do not specify the
 \fBcores\fR option for improved speed in the Slurm scheduling logic.
+A restart of the slurmctld is needed for changes to the Cores option to take
+affect.
 
 \fBNOTE:\fR If your cores contain multiple threads only list the first thread
-of each core.  The logic is such that it uses core instead of thread scheduling
-per GRES.
+of each core. The logic is such that it uses core instead of thread scheduling
+per GRES. Also note that since Slurm must be able to perform resource
+management on heterogeneous clusters having various core ID numbering schemes,
+an abstract index will be used instead of the physical core index. That
+abstract id may not correspond to your physical core number.
+Basically Slurm starts numbering from 0 to n, being 0 the id of the first
+processing unit (core or thread if HT is enabled) on the first socket,
+first core and maybe first thread, and then continuing sequentially to the
+next thread, core, and socket. The numbering generally coincides with the
+processing unit logical number (PU L#) seen in lstopo output.
 
 .TP
 \fBFile\fR

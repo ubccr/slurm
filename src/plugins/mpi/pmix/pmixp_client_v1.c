@@ -2,15 +2,15 @@
  **  pmix_client_v1.c - PMIx v1 client communication code
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2018 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>,
  *             Boris Karasev <karasev.b@gmail.com, boriska@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
@@ -101,30 +101,28 @@ static pmix_status_t _fencenb_fn(const pmix_proc_t procs_v1[], size_t nprocs,
 				 pmix_modex_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
-	pmixp_coll_t *coll;
-	pmixp_coll_type_t type = PMIXP_COLL_TYPE_FENCE;
-	pmix_status_t status = PMIX_SUCCESS;
 	int ret;
 	size_t i;
 	pmixp_proc_t *procs = xmalloc(sizeof(*procs) * nprocs);
+	bool collect = false;
 
 	for (i = 0; i < nprocs; i++) {
 		procs[i].rank = procs_v1[i].rank;
 		strncpy(procs[i].nspace, procs_v1[i].nspace, PMIXP_MAX_NSLEN);
 	}
-	coll = pmixp_state_coll_get(type, procs, nprocs);
-	ret = pmixp_coll_contrib_local(coll, data, ndata, cbfunc, cbdata);
+	/* check the info keys */
+	if (info) {
+		for (i = 0; i < ninfo; i++) {
+			if (0 == strncmp(info[i].key, PMIX_COLLECT_DATA, PMIX_MAX_KEYLEN)) {
+				collect = true;
+				break;
+			}
+		}
+	}
+	ret = pmixp_lib_fence(procs, nprocs, collect, data, ndata, cbfunc, cbdata);
 	xfree(procs);
 
-	if (SLURM_SUCCESS != ret) {
-		status = PMIX_ERROR;
-		goto error;
-	}
-	return PMIX_SUCCESS;
-error:
-	cbfunc(status, NULL, 0, cbdata, NULL, NULL);
-
-	return status;
+	return ret;
 }
 
 static pmix_status_t _dmodex_fn(const pmix_proc_t *proc,

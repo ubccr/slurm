@@ -48,7 +48,6 @@ adding a new database you may want to add common functions in a common
 file in the src/database dir.  Refer to src/database/mysql_common.c|.h for an
 example so other plugins can also use that database type to write out
 information.
-<p class="footer"><a href="#top">top</a>
 
 
 <h2>API Functions</h2>
@@ -82,7 +81,8 @@ The system <span class="commandline">_init()</span> is called before the Slurm
 <h3>Functions called by the accounting_storage plugin</h3>
 
 <p class="commandline">void *acct_storage_p_get_connection(bool
-  make_agent, int conn_num, bool rollback, char *location)
+  make_agent, int conn_num, uint16_t *persist_conn_flags,
+  bool rollback, char *location)
 <p style="margin-left:.2in"><b>Description</b>:<br>
 acct_storage_p_get_connection() is called to get a connection to the
   storage medium. acct_storage_p_close_connection() should be used to
@@ -95,6 +95,8 @@ the plugin.  In many cases you should plan on multiple simultaneous
 connections to the plugin.  This number is useful since the debug
 messages can print this out to determine which connection the message
 is from.<br>
+<span class="commandline">persist_conn_flags</span> (output) Flags passed back
+from the server if talking to the dbd (optional).<br>
 <span class="commandline">rollback</span> (input) Allow rollback to
 happen or not (in use with databases that support rollback).<br>
 <p style="margin-left:.2in"><b>Returns</b>: <br>
@@ -998,7 +1000,6 @@ the storage type.<br>
 <span class="commandline">SLURM_SUCCESS</span> on success, or<br>
 <span class="commandline">SLURM_ERROR</span> on failure.
 
-<p class="footer"><a href="#top">top</a>
 
 
 <h2>Parameters</h2>
@@ -1026,7 +1027,6 @@ database with.
   of those listed.
 </dl>
 
-<p class="footer"><a href="#top">top</a>
 
 <p style="text-align:center;">Last modified 22 July 2016</p>
 

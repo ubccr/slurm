@@ -8,11 +8,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -312,7 +312,8 @@ extern int sacctmgr_set_assoc_cond(slurmdb_assoc_cond_t *assoc_cond,
 	} else if (!xstrncasecmp(type, "Users", MAX(command_len, 1))) {
 		if (!assoc_cond->user_list)
 			assoc_cond->user_list = list_create(slurm_destroy_char);
-		if (slurm_addto_char_list(assoc_cond->user_list, value))
+		if (slurm_addto_char_list_with_case(assoc_cond->user_list,
+						    value, user_case_norm))
 			set = 1;
 	}
 
@@ -398,6 +399,10 @@ extern int sacctmgr_set_assoc_rec(slurmdb_assoc_rec_t *assoc,
 	} else if (!xstrncasecmp(type, "GrpJobs", MAX(command_len, 4))) {
 		if (get_uint(value, &assoc->grp_jobs,
 			     "GrpJobs") == SLURM_SUCCESS)
+			set = 1;
+	} else if (!xstrncasecmp(type, "GrpJobsAccrue", MAX(command_len, 8))) {
+		if (get_uint(value, &assoc->grp_jobs_accrue,
+			     "GrpJobsAccrue") == SLURM_SUCCESS)
 			set = 1;
 	} else if (!xstrncasecmp(type, "GrpMemory", MAX(command_len, 4))) {
 		if (get_uint64(value, &tmp64,
@@ -506,6 +511,11 @@ extern int sacctmgr_set_assoc_rec(slurmdb_assoc_rec_t *assoc,
 		if (get_uint(value, &assoc->max_jobs,
 			     "MaxJobs") == SLURM_SUCCESS)
 			set = 1;
+	} else if (!xstrncasecmp(type, "MaxJobsAccrue",
+				 MAX(command_len, 8))) {
+		if (get_uint(value, &assoc->max_jobs_accrue,
+			     "MaxJobsAccrue") == SLURM_SUCCESS)
+			set = 1;
 	} else if (!xstrncasecmp(type, "MaxNodesPerJob", MAX(command_len, 4))) {
 		if (get_uint64(value, &tmp64,
 			       "MaxNodes") == SLURM_SUCCESS) {
@@ -517,6 +527,11 @@ extern int sacctmgr_set_assoc_rec(slurmdb_assoc_rec_t *assoc,
 				tres_flags);
 			xfree(tmp_char);
 		}
+	} else if (!xstrncasecmp(type, "MinPrioThresh",
+				 MAX(command_len, 4))) {
+		if (get_uint(value, &assoc->min_prio_thresh,
+			     "MinPrioThresh") == SLURM_SUCCESS)
+			set = 1;
 	} else if (!xstrncasecmp(type, "MaxSubmitJobs", MAX(command_len, 4))) {
 		if (get_uint(value, &assoc->max_submit_jobs,
 			     "MaxSubmitJobs") == SLURM_SUCCESS)
@@ -682,6 +697,9 @@ extern void sacctmgr_print_assoc_rec(slurmdb_assoc_rec_t *assoc,
 	case PRINT_GRPJ:
 		field->print_routine(field, assoc->grp_jobs, last);
 		break;
+	case PRINT_GRPJA:
+		field->print_routine(field, assoc->grp_jobs_accrue, last);
+		break;
 	case PRINT_GRPMEM:
 		field->print_routine(field,
 				     slurmdb_find_tres_count_in_string(
@@ -739,6 +757,12 @@ extern void sacctmgr_print_assoc_rec(slurmdb_assoc_rec_t *assoc,
 		break;
 	case PRINT_MAXJ:
 		field->print_routine(field, assoc->max_jobs, last);
+		break;
+	case PRINT_MAXJA:
+		field->print_routine(field, assoc->max_jobs_accrue, last);
+		break;
+	case PRINT_MINPT:
+		field->print_routine(field, assoc->min_prio_thresh, last);
 		break;
 	case PRINT_MAXN:
 		field->print_routine(field,

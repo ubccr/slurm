@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -71,14 +71,14 @@
  * plugin_type - A string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "auth" for SLURM authentication) and <method> is a
- * description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "auth" for Slurm authentication) and <method> is a
+ * description of how this plugin satisfies that application.  Slurm will
  * only load authentication plugins if the plugin_type string has a prefix
  * of "auth/".
  *
@@ -157,6 +157,34 @@ extern int node_config_load(List gres_conf_list)
 
 	if (gres_devices)
 		return rc;
+
+#if 0
+//FIXME: gres_conf_list contains records of type gres_slurmd_conf_t*
+//FIXME: Use "nvidia-smi" tool to populate/update the records here, especially cpus & links
+	ListIterator itr;
+	char cpu_bit_str[64];
+	gres_slurmd_conf_t *gres_slurmd_conf;
+	itr = list_iterator_create(gres_conf_list);
+	while ((gres_slurmd_conf = list_next(itr))) {
+		info("GRES:%s(%u) Type:%s Count:%"PRIu64,
+		     gres_slurmd_conf->name, gres_slurmd_conf->plugin_id,
+		     gres_slurmd_conf->type_name, gres_slurmd_conf->count);
+		if (gres_slurmd_conf->cpus) {
+			info("  CPUs(%u):%s", gres_slurmd_conf->cpu_cnt,
+			     gres_slurmd_conf->cpus);
+		}
+		if (gres_slurmd_conf->cpus_bitmap) {
+			bit_fmt(cpu_bit_str, sizeof(cpu_bit_str),
+				gres_slurmd_conf->cpus_bitmap);
+			info("  CPU_bitmap:%s", cpu_bit_str);
+		}
+		if (gres_slurmd_conf->file)
+			info("  File:%s", gres_slurmd_conf->file);
+		if (gres_slurmd_conf->links)
+			info("  Links:%s", gres_slurmd_conf->links);
+	}
+	list_iterator_destroy(itr);
+#endif
 
 	rc = common_node_config_load(gres_conf_list, gres_name,
 				     &gres_devices);

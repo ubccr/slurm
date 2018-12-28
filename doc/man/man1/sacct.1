@@ -1,4 +1,4 @@
-.TH sacct "1" "Slurm Commands" "April 2017" "Slurm Commands"
+.TH sacct "1" "Slurm Commands" "June 2018" "Slurm Commands"
 
 .SH "NAME"
 sacct \- displays accounting data for all jobs and job steps in the
@@ -131,28 +131,40 @@ Print a list of fields that can be specified with the \f3\-\-format\fP option.
 .ft 3
 Fields available:
 
-Account           AdminComment      AllocCPUS         AllocGRES
-AllocNodes        AllocTRES         AssocID           AveCPU
-AveCPUFreq        AveDiskRead       AveDiskWrite      AvePages
-AveRSS            AveVMSize         BlockID           Cluster
-Comment           ConsumedEnergy    ConsumedEnergyRaw CPUTime
-CPUTimeRAW        DerivedExitCode   Elapsed           ElapsedRaw
-Eligible          End               ExitCode          GID
-Group             JobID             JobIDRaw          JobName
-Layout            MaxDiskRead       MaxDiskReadNode   MaxDiskReadTask
-MaxDiskWrite      MaxDiskWriteNode  MaxDiskWriteTask  MaxPages
-MaxPagesNode      MaxPagesTask      MaxRSS            MaxRSSNode
-MaxRSSTask        MaxVMSize         MaxVMSizeNode     MaxVMSizeTask
-McsLabel          MinCPU            MinCPUNode        MinCPUTask
-NCPUS             NNodes            NodeList          NTasks
-Priority          Partition         QOS               QOSRAW
-ReqCPUFreq        ReqCPUFreqMin     ReqCPUFreqMax     ReqCPUFreqGov
-ReqCPUS           ReqGRES           ReqMem            ReqNodes
-ReqTRES           Reservation       ReservationId     Reserved
-ResvCPU           ResvCPURAW        Start             State
-Submit            Suspended         SystemCPU         Timelimit
-TotalCPU          UID               User              UserCPU
-WCKey             WCKeyID           WorkDir
+Account             AdminComment        AllocCPUS           AllocGRES
+AllocNodes          AllocTRES           AssocID             AveCPU
+AveCPUFreq          AveDiskRead         AveDiskWrite        AvePages
+AveRSS              AveVMSize           BlockID             Cluster
+Comment             ConsumedEnergy      ConsumedEnergyRaw   CPUTime
+CPUTimeRAW          DerivedExitCode     Elapsed             ElapsedRaw
+Eligible            End                 ExitCode            GID
+Group               JobID               JobIDRaw            JobName
+Layout              MaxDiskRead         MaxDiskReadNode     MaxDiskReadTask
+MaxDiskWrite        MaxDiskWriteNode    MaxDiskWriteTask    MaxPages
+MaxPagesNode        MaxPagesTask        MaxRSS              MaxRSSNode
+MaxRSSTask          MaxVMSize           MaxVMSizeNode       MaxVMSizeTask
+McsLabel            MinCPU              MinCPUNode          MinCPUTask
+NCPUS               NNodes              NodeList            NTasks
+Priority            Partition           QOS                 QOSRAW
+ReqCPUFreq          ReqCPUFreqMin       ReqCPUFreqMax       ReqCPUFreqGov
+ReqCPUS             ReqGRES             ReqMem              ReqNodes
+ReqTRES             Reservation         ReservationId       Reserved
+ResvCPU             ResvCPURAW          Start               State
+Submit              Suspended           SystemCPU           SystemComment
+Timelimit           TimelimitRaw        TotalCPU            TRESUsageInAve
+TRESUsageInMax      TRESUsageInMaxNode  TRESUsageInMaxTask  TRESUsageInMin
+TRESUsageInMinNode  TRESUsageInMinTask  TRESUsageInTot      TRESUsageOutAve
+TRESUsageOutMax     TRESUsageOutMaxNode TRESUsageOutMaxTask TRESUsageOutMin
+TRESUsageOutMinNode TRESUsageOutMinTask TRESUsageOutTot     UID
+User                UserCPU             WCKey               WCKeyID
+WorkDir
+
+NOTE: When using with Ave[RSS|VM]Size or their values in
+TRESUsageIn[Ave|Tot].  They represent the average/total of the highest
+watermarks over all ranks in the step.  When using sstat they represent the
+average/total at the moment the command was ran.
+
+NOTE: TRESUsage*Min* values represent the lowest highwater mark in the step.
 
 .ft 1
 .fi
@@ -163,8 +175,8 @@ The section titled "Job Accounting Fields" describes these fields.
 .TP
 \f3\-E \fP\f2end_time\fP\fP\f3,\fP \f3\-\-endtime\fP\f3=\fP\f2end_time\fP
 .IP
-Select jobs in any state before the specified time.  If states are given with the \-s
-option return jobs in this state before this period.
+Select eligible jobs in any state before the specified time.  If states are
+given with the \-s option return jobs in this state before this period.
 
 Valid time formats are...
 .sp
@@ -243,7 +255,9 @@ avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,
 maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks,
 alloccpus,elapsed,state,exitcode,maxdiskread,maxdiskreadnode,maxdiskreadtask,
 avediskread,maxdiskwrite,maxdiskwritenode,maxdiskwritetask,avediskwrite,
-allocgres,reqgres,avecpufreq,reqcpufreqmin,reqcpufreqmax,reqcpufreqgov
+allocgres,reqgres,avecpufreq,reqcpufreqmin,reqcpufreqmax,reqcpufreqgov,
+tresusageinmax,tresusageinmaxn,tresusageinmaxt,tresusageoutmax,tresusageoutmaxn,
+tresusageoutmaxt,tresusageoutave,tresusageinave
 .ad
 
 .TP
@@ -343,10 +357,12 @@ starttime is 'now'.
 
 .TP
 \f3\-S\fP\f3,\fP \f3\-\-starttime\fP
-Select jobs in any state after the specified time. Default is 00:00:00 of the
-current day, unless '\-s' is set then the default is 'now'.  If states
-are given with the '\-s' option then only jobs in this state at this
-time will be returned.
+Select eligible jobs in any state after the specified time. Default is 00:00:00
+of the
+current day, unless the '\-s' or '\-j' options are used. If the '\-s' option is
+used, then the default is 'now'. If states are given with the '\-s' option then
+only jobs in this state at this time will be returned. If the '\-j' option is
+used, then the default time is Unix Epoch 0.
 
 Valid time formats are...
 .sp
@@ -385,6 +401,17 @@ variables during processing.
 .TP
 \f3\-V\fP\f3,\fP \f3\-\-version\fP
 Print version.
+
+.TP
+\f3\-\-whole\-hetjob=[yes|no]\fP
+When querying heterogeneous jobs, Slurm by default retrieves the information
+about all the components of the job if the pack_job_id (leader) is selected. If
+a non-leader hetjob component is selected only that component is retrieved by
+default. This behavior can be changed by using this option. If set to 'yes' or
+no value is set, then information about all the components will be retrieved no
+matter which component is selected in the job filter. Otherwise, if set to 'no'
+then only the selected hetjob components will be retrieved, even when selecting
+the leader.
 
 .TP
 \f3\-W \fP\f2wckey_list\fP\f3, \-\-wckeys=\fP\f2wckey_list\fP
@@ -465,10 +492,6 @@ Average resident set size of all tasks in job.
 .TP
 \f3AveVMSize\fP
 Average Virtual Memory size of all tasks in job.
-
-.TP
-\f3BlockID\fP
-Block ID, applicable to BlueGene computers only.
 
 .TP
 \f3Cluster\fP
@@ -718,7 +741,6 @@ Trackable resources. These are the minimum resource counts requested by the
 job/step at submission time.
 For more details see AccountingStorageTRES in slurm.conf.
 
-
 .TP
 \f3Reservation\fP
 Reservation Name.
@@ -766,8 +788,8 @@ state(s) without the RUNNING state.
 
 .TP
 \f3Submit\fP
-The  time and date stamp (in Universal Time Coordinated, UTC) the job
-was submitted.  The format of the output is identical to that of the \f3End\fP
+The  time and date stamp (in localtime) the job was submitted.
+The format of the output is identical to that of the \f3End\fP
 field.
 
 NOTE: If a job is requeued, the submit time is reset.  To obtain the
@@ -791,6 +813,10 @@ does not include CPU time of child processes.
 What the timelimit was/is for the job.
 
 .TP
+\f3TimelimitRaw\fP
+What the timelimit was/is for the job, not formatted.
+
+.TP
 \f3TotalCPU\fP
 The sum of the SystemCPU and UserCPU time used by the job or job step.
 The total CPU time of the job may exceed the job's elapsed time for
@@ -799,6 +825,46 @@ identical to that of the \f3Elapsed\fP field.
 
 NOTE: TotalCPU provides a measure of the task's parent process and
 does not include CPU time of child processes.
+
+.TP
+\f3TresUsageInAve\fP
+Tres average usage in by all tasks in job.
+NOTE: If corresponding TresUsageInMaxTask is -1 the metric is node centric
+instead of task.
+
+.TP
+\f3TresUsageInMax\fP
+Tres maximum usage in by all tasks in job.
+NOTE: If corresponding TresUsageInMaxTask is -1 the metric is node centric
+instead of task.
+
+.TP
+\f3TresUsageInMaxNode\fP
+Node for which each maximum TRES usage out occurred.
+
+.TP
+\f3TresUsageInMaxTask\fP
+Task for which each maximum TRES usage out occurred.
+
+.TP
+\f3TresUsageOutAve\fP
+Tres average usage out by all tasks in job.
+NOTE: If corresponding TresUsageOutMaxTask is -1 the metric is node centric
+instead of task.
+
+.TP
+\f3TresUsageOutMax\fP
+Tres maximum usage out by all tasks in job.
+NOTE: If corresponding TresUsageOutMaxTask is -1 the metric is node centric
+instead of task.
+
+.TP
+\f3TresUsageOutMaxNode\fP
+Node for which each maximum TRES usage out occurred.
+
+.TP
+\f3TresUsageOutMaxTask\fP
+Task for which each maximum TRES usage out occurred.
 
 .TP
 \f3UID\fP

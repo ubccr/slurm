@@ -2,16 +2,16 @@
  *  job_submit_lua.c - Set defaults in job submit request specifications.
  *****************************************************************************
  *  Copyright (C) 2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2015 SchedMD LLC <https://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2017 SchedMD LLC <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -76,14 +76,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "auth" for SLURM authentication) and <method> is a
- * description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "auth" for Slurm authentication) and <method> is a
+ * description of how this plugin satisfies that application.  Slurm will
  * only load authentication plugins if the plugin_type string has a prefix
  * of "auth/".
  *
@@ -157,7 +157,7 @@ static void _stack_dump (char *header, lua_State *L)
 }
 
 /*
- *  Lua interface to SLURM log facility:
+ *  Lua interface to Slurm log facility:
  */
 static int _log_lua_msg (lua_State *L)
 {
@@ -239,7 +239,7 @@ static char *_get_default_account(uint32_t user_id)
 	memset(&user, 0, sizeof(slurmdb_user_rec_t));
 	user.uid = user_id;
 	if (assoc_mgr_fill_in_user(acct_db_conn, &user, accounting_enforce,
-				   NULL) != SLURM_ERROR) {
+				   NULL, false) != SLURM_ERROR) {
 		return user.default_acct;
 	} else {
 		return NULL;
@@ -301,10 +301,14 @@ static int _job_rec_field(const struct job_record *job_ptr,
 			lua_pushnumber (L, job_ptr->array_recs->task_cnt);
 		else
 			lua_pushnil (L);
+	} else if (!xstrcmp(name, "batch_features")) {
+		lua_pushstring (L, job_ptr->batch_features);
 	} else if (!xstrcmp(name, "burst_buffer")) {
 		lua_pushstring (L, job_ptr->burst_buffer);
 	} else if (!xstrcmp(name, "comment")) {
 		lua_pushstring (L, job_ptr->comment);
+	} else if (!xstrcmp(name, "cpus_per_tres")) {
+		lua_pushstring (L, job_ptr->cpus_per_tres);
 	} else if (!xstrcmp(name, "delay_boot")) {
 		lua_pushnumber (L, job_ptr->delay_boot);
 	} else if (!xstrcmp(name, "direct_set_prio")) {
@@ -315,7 +319,10 @@ static int _job_rec_field(const struct job_record *job_ptr,
 		else
 			lua_pushnil (L);
 	} else if (!xstrcmp(name, "gres")) {
-		lua_pushstring (L, job_ptr->gres);
+		/* "gres" replaced by "tres_per_node" in v18.08 */
+		lua_pushstring (L, job_ptr->tres_per_node);
+	} else if (!xstrcmp(name, "group_id")) {
+		lua_pushnumber (L, job_ptr->group_id);
 	} else if (!xstrcmp(name, "job_id")) {
 		lua_pushnumber (L, job_ptr->job_id);
 	} else if (!xstrcmp(name, "job_state")) {
@@ -332,6 +339,8 @@ static int _job_rec_field(const struct job_record *job_ptr,
 			lua_pushnumber (L, job_ptr->details->max_nodes);
 		else
 			lua_pushnumber (L, 0);
+	} else if (!xstrcmp(name, "mem_per_tres")) {
+		lua_pushstring (L, job_ptr->mem_per_tres);
 	} else if (!xstrcmp(name, "min_cpus")) {
 		if (job_ptr->details)
 			lua_pushnumber (L, job_ptr->details->min_cpus);
@@ -415,6 +424,22 @@ static int _job_rec_field(const struct job_record *job_ptr,
 		lua_pushnumber (L, job_ptr->time_limit);
 	} else if (!xstrcmp(name, "time_min")) {
 		lua_pushnumber (L, job_ptr->time_min);
+	} else if (!xstrcmp(name, "tres_bind")) {
+		lua_pushstring (L, job_ptr->tres_bind);
+	} else if (!xstrcmp(name, "tres_freq")) {
+		lua_pushstring (L, job_ptr->tres_freq);
+	} else if (!xstrcmp(name, "tres_per_job")) {
+		lua_pushstring (L, job_ptr->tres_per_job);
+	} else if (!xstrcmp(name, "tres_per_node")) {
+		lua_pushstring (L, job_ptr->tres_per_node);
+	} else if (!xstrcmp(name, "tres_per_socket")) {
+		lua_pushstring (L, job_ptr->tres_per_socket);
+	} else if (!xstrcmp(name, "tres_per_task")) {
+		lua_pushstring (L, job_ptr->tres_per_task);
+	} else if (!xstrcmp(name, "user_id")) {
+		lua_pushnumber (L, job_ptr->user_id);
+	} else if (!xstrcmp(name, "user_name")) {
+		lua_pushstring (L, job_ptr->user_name);
 	} else if (!xstrcmp(name, "wait4switch")) {
 		lua_pushnumber (L, job_ptr->wait4switch);
 	} else if (!xstrcmp(name, "wckey")) {
@@ -562,7 +587,7 @@ static void _update_resvs_global(void)
 		/* Store the slurmctld_resv_t in the metatable, so the index
 		 * function knows which reservation it's getting data for.
 		 */
-		lua_pushlightuserdata(L, resv_ptr->name);
+		lua_pushlightuserdata(L, resv_ptr);
 		lua_setfield(L, -2, "_resv_ptr");
 		lua_setmetatable(L, -2);
 
@@ -708,8 +733,26 @@ static int _get_job_req_field(const struct job_descriptor *job_desc,
 		lua_pushstring (L, job_desc->admin_comment);
 	} else if (!xstrcmp(name, "alloc_node")) {
 		lua_pushstring (L, job_desc->alloc_node);
+	} else if (!xstrcmp(name, "argc")) {
+		lua_pushnumber (L, job_desc->argc);
+	} else if (!xstrcmp(name, "argv")) {
+		if ((job_desc->argc == 0) ||
+		    (job_desc->argv == NULL)) {
+			lua_pushnil (L);
+		} else {
+			lua_newtable(L);
+			for (i = 0; i < job_desc->argc; i++) {
+				if (job_desc->argv[i] != NULL) {
+					lua_pushnumber (L, i);
+					lua_pushstring (L, job_desc->argv[i]);
+					lua_settable (L, -3);
+				}
+			}
+		}
 	} else if (!xstrcmp(name, "array_inx")) {
 		lua_pushstring (L, job_desc->array_inx);
+	} else if (!xstrcmp(name, "batch_features")) {
+		lua_pushstring (L, job_desc->batch_features);
 	} else if (!xstrcmp(name, "begin_time")) {
 		lua_pushnumber (L, job_desc->begin_time);
 	} else if (!xstrcmp(name, "bitflags")) {
@@ -734,6 +777,8 @@ static int _get_job_req_field(const struct job_descriptor *job_desc,
 		lua_pushnumber (L, job_desc->cpu_freq_gov);
 	} else if (!xstrcmp(name, "cpus_per_task")) {
 		lua_pushnumber (L, job_desc->cpus_per_task);
+	} else if (!xstrcmp(name, "cpus_per_tres")) {
+		lua_pushstring (L, job_desc->cpus_per_tres);
 	} else if (!xstrcmp(name, "default_account")) {
 		lua_pushstring (L, _get_default_account(job_desc->user_id));
 	} else if (!xstrcmp(name, "default_qos")) {
@@ -755,7 +800,8 @@ static int _get_job_req_field(const struct job_descriptor *job_desc,
 	} else if (!xstrcmp(name, "features")) {
 		lua_pushstring (L, job_desc->features);
 	} else if (!xstrcmp(name, "gres")) {
-		lua_pushstring (L, job_desc->gres);
+		/* "gres" replaced by "tres_per_node" in v18.08 */
+		lua_pushstring (L, job_desc->tres_per_node);
 	} else if (!xstrcmp(name, "group_id")) {
 		lua_pushnumber (L, job_desc->group_id);
 	} else if (!xstrcmp(name, "immediate")) {
@@ -770,6 +816,8 @@ static int _get_job_req_field(const struct job_descriptor *job_desc,
 		lua_pushnumber (L, job_desc->max_cpus);
 	} else if (!xstrcmp(name, "max_nodes")) {
 		lua_pushnumber (L, job_desc->max_nodes);
+	} else if (!xstrcmp(name, "mem_per_tres")) {
+		lua_pushstring (L, job_desc->mem_per_tres);
 	} else if (!xstrcmp(name, "min_cpus")) {
 		lua_pushnumber (L, job_desc->min_cpus);
 	} else if (!xstrcmp(name, "min_mem_per_node") &&
@@ -861,6 +909,18 @@ static int _get_job_req_field(const struct job_descriptor *job_desc,
 		lua_pushnumber (L, job_desc->time_limit);
 	} else if (!xstrcmp(name, "time_min")) {
 		lua_pushnumber (L, job_desc->time_min);
+	} else if (!xstrcmp(name, "tres_bind")) {
+		lua_pushstring (L, job_desc->tres_bind);
+	} else if (!xstrcmp(name, "tres_freq")) {
+		lua_pushstring (L, job_desc->tres_freq);
+	} else if (!xstrcmp(name, "tres_per_job")) {
+		lua_pushstring (L, job_desc->tres_per_job);
+	} else if (!xstrcmp(name, "tres_per_node")) {
+		lua_pushstring (L, job_desc->tres_per_node);
+	} else if (!xstrcmp(name, "tres_per_socket")) {
+		lua_pushstring (L, job_desc->tres_per_socket);
+	} else if (!xstrcmp(name, "tres_per_task")) {
+		lua_pushstring (L, job_desc->tres_per_task);
 	} else if (!xstrcmp(name, "user_id")) {
 		lua_pushnumber (L, job_desc->user_id);
 	} else if (!xstrcmp(name, "user_name")) {
@@ -935,6 +995,11 @@ static int _set_job_req_field(lua_State *L)
 		xfree(job_desc->array_inx);
 		if (strlen(value_str))
 			job_desc->array_inx = xstrdup(value_str);
+	} else if (!xstrcmp(name, "batch_features")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->batch_features);
+		if (strlen(value_str))
+			job_desc->batch_features = xstrdup(value_str);
 	} else if (!xstrcmp(name, "begin_time")) {
 		job_desc->begin_time = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "bitflags")) {
@@ -958,14 +1023,19 @@ static int _set_job_req_field(lua_State *L)
 		job_desc->contiguous = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "cores_per_socket")) {
 		job_desc->cores_per_socket = luaL_checknumber(L, 3);
-	} else if (!xstrcmp(name, "cpus_per_task")) {
-		job_desc->cpus_per_task = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "cpu_freq_min")) {
 		job_desc->cpu_freq_min = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "cpu_freq_max")) {
 		job_desc->cpu_freq_max = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "cpu_freq_gov")) {
 		job_desc->cpu_freq_gov = luaL_checknumber(L, 3);
+	} else if (!xstrcmp(name, "cpus_per_task")) {
+		job_desc->cpus_per_task = luaL_checknumber(L, 3);
+	} else if (!xstrcmp(name, "cpus_per_tres")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->cpus_per_tres);
+		if (strlen(value_str))
+			job_desc->cpus_per_tres = xstrdup(value_str);
 	} else if (!xstrcmp(name, "dependency")) {
 		value_str = luaL_checkstring(L, 3);
 		xfree(job_desc->dependency);
@@ -991,10 +1061,11 @@ static int _set_job_req_field(lua_State *L)
 		if (strlen(value_str))
 			job_desc->features = xstrdup(value_str);
 	} else if (!xstrcmp(name, "gres")) {
+		/* "gres" replaced by "tres_per_node" in v18.08 */
 		value_str = luaL_checkstring(L, 3);
-		xfree(job_desc->gres);
+		xfree(job_desc->tres_per_node);
 		if (strlen(value_str))
-			job_desc->gres = xstrdup(value_str);
+			job_desc->tres_per_node = xstrdup(value_str);
 	} else if (!xstrcmp(name, "immediate")) {
 		job_desc->immediate = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "licenses")) {
@@ -1006,6 +1077,11 @@ static int _set_job_req_field(lua_State *L)
 		job_desc->max_cpus = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "max_nodes")) {
 		job_desc->max_nodes = luaL_checknumber(L, 3);
+	} else if (!xstrcmp(name, "mem_per_tres")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->mem_per_tres);
+		if (strlen(value_str))
+			job_desc->mem_per_tres = xstrdup(value_str);
 	} else if (!xstrcmp(name, "min_cpus")) {
 		job_desc->min_cpus = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "min_mem_per_cpu")) {
@@ -1098,6 +1174,36 @@ static int _set_job_req_field(lua_State *L)
 		job_desc->time_limit = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "time_min")) {
 		job_desc->time_min = luaL_checknumber(L, 3);
+	} else if (!xstrcmp(name, "tres_bind")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->tres_bind);
+		if (strlen(value_str))
+			job_desc->tres_bind = xstrdup(value_str);
+	} else if (!xstrcmp(name, "tres_freq")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->tres_freq);
+		if (strlen(value_str))
+			job_desc->tres_freq = xstrdup(value_str);
+	} else if (!xstrcmp(name, "tres_per_job")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->tres_per_job);
+		if (strlen(value_str))
+			job_desc->tres_per_job = xstrdup(value_str);
+	} else if (!xstrcmp(name, "tres_per_node")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->tres_per_node);
+		if (strlen(value_str))
+			job_desc->tres_per_node = xstrdup(value_str);
+	} else if (!xstrcmp(name, "tres_per_socket")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->tres_per_socket);
+		if (strlen(value_str))
+			job_desc->tres_per_socket = xstrdup(value_str);
+	} else if (!xstrcmp(name, "tres_per_task")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->tres_per_task);
+		if (strlen(value_str))
+			job_desc->tres_per_task = xstrdup(value_str);
 	} else if (!xstrcmp(name, "wait4switch")) {
 		job_desc->wait4switch = luaL_checknumber(L, 3);
 	} else if (!xstrcmp(name, "wckey")) {
@@ -1319,7 +1425,7 @@ static void _register_lua_slurm_output_functions (void)
 	lua_newtable (L);
 	_lua_table_register(L, NULL, slurm_functions);
 	/*
-	 *  Create more user-friendly lua versions of SLURM log functions.
+	 *  Create more user-friendly lua versions of Slurm log functions.
 	 */
 	snprintf(tmp_string, sizeof(tmp_string),
 		 "slurm.error (string.format(%s({...})))",
@@ -1371,10 +1477,22 @@ static void _register_lua_slurm_output_functions (void)
 	lua_setfield (L, -2, "ERROR");
 	lua_pushnumber (L, SLURM_SUCCESS);
 	lua_setfield (L, -2, "SUCCESS");
+	lua_pushnumber (L, ESLURM_ACCESS_DENIED);
+	lua_setfield (L, -2, "ESLURM_ACCESS_DENIED");
+	lua_pushnumber (L, ESLURM_ACCOUNTING_POLICY);
+	lua_setfield (L, -2, "ESLURM_ACCOUNTING_POLICY");
+	lua_pushnumber (L, ESLURM_INVALID_ACCOUNT);
+	lua_setfield (L, -2, "ESLURM_INVALID_ACCOUNT");
 	lua_pushnumber (L, ESLURM_INVALID_LICENSES);
 	lua_setfield (L, -2, "ESLURM_INVALID_LICENSES");
+	lua_pushnumber (L, ESLURM_INVALID_NODE_COUNT);
+	lua_setfield (L, -2, "ESLURM_INVALID_NODE_COUNT");
 	lua_pushnumber (L, ESLURM_INVALID_TIME_LIMIT);
 	lua_setfield (L, -2, "ESLURM_INVALID_TIME_LIMIT");
+	lua_pushnumber (L, ESLURM_JOB_MISSING_SIZE_SPECIFICATION);
+	lua_setfield (L, -2, "ESLURM_JOB_MISSING_SIZE_SPECIFICATION");
+	lua_pushnumber (L, ESLURM_MISSING_TIME_LIMIT);
+	lua_setfield (L, -2, "ESLURM_MISSING_TIME_LIMIT");
 
 	/*
 	 * Other definitions needed to interpret data
@@ -1432,6 +1550,8 @@ static void _register_lua_slurm_output_functions (void)
 	/*
 	 * job_desc bitflags
 	 */
+	lua_pushnumber (L, GRES_DISABLE_BIND);
+	lua_setfield (L, -2, "GRES_DISABLE_BIND");
 	lua_pushnumber (L, GRES_ENFORCE_BIND);
 	lua_setfield (L, -2, "GRES_ENFORCE_BIND");
 	lua_pushnumber (L, KILL_INV_DEP);
@@ -1545,7 +1665,7 @@ static int _load_script(void)
 	}
 
 	/*
-	 *  Register SLURM functions in lua state:
+	 *  Register Slurm functions in lua state:
 	 *  logging and slurm structure read/write functions
 	 */
 	_register_lua_slurm_output_functions();

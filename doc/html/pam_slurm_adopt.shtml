@@ -55,7 +55,8 @@ account    sufficient    pam_slurm_adopt.so
 <p>pam_slurm_adopt must be used with the task/cgroup plugin.
 The pam_systemd module will conflict with pam_slurm_adopt, so you need to
 disable it in all files that are included in sshd or system-auth (e.g.
-password-auth, common-session, etc.). You must also make sure a different PAM
+password-auth, common-session, etc.). You should also stop and mask
+systemd-logind. You must also make sure a different PAM
 module isn't short-circuiting the account stack before it gets to
 pam_slurm_adopt.so. From the example above, the following two lines have been
 commented out in the included password-auth file:</p>
@@ -166,7 +167,9 @@ one job will result in this action being taken. Configurable values are:
 <dd>
 <dl compact>
 <dt><b>allow</b> (default)</dt>
-<dd>Let the connection through without adoption.</dd>
+<dd>Let the connection through without adoption. <b>WARNING: This value is
+insecure and is recommended for testing purposes only. We recommend using
+"deny."</b></dd>
 <dt><b>deny</b></dt>
 <dd>Deny the connection.</dd>
 </dl>
@@ -185,7 +188,9 @@ the correct facilities. Configurable values are:
 <dd>
 <dl compact>
 <dt><b>ignore</b> (default)</dt>
-<dd>Do nothing. Fall through to the next pam module.</dd>
+<dd>Do nothing. Fall through to the next pam module. <b>WARNING: This value is
+insecure and is recommended for testing purposes only. We recommend using
+"deny."</b></dd>
 <dt><b>allow</b></dt>
 <dd>Let the connection through without adoption.</dd>
 <dt><b>deny</b></dt>
@@ -196,11 +201,41 @@ the correct facilities. Configurable values are:
 
 </dd>
 
+<dt><b>disable_x11</b></dt>
+<dd>Turn off Slurm built-in X11 forwarding support. Configurable values are:
+
+<dl compact>
+<dt></dt>
+<dd>
+<dl compact>
+<dt><b>0</b> (default)</dt>
+<dd>If the job the connection is adopted into has Slurm's X11 forwarding
+enabled, the DISPLAY variable will be overwritten with the X11 tunnel
+endpoint details.</dd>
+<dt><b>1</b></dt>
+<dd>Do not check for Slurm's X11 forwarding support, and do not alter the
+DISPLAY variable.</dd>
+</dl>
+</dd>
+</dl>
+
+</dd>
+
+<dl compact>
 <dt><b>log_level</b></dt>
 <dd>See <a href="https://slurm.schedmd.com/slurm.conf.html#OPT_SlurmdDebug">
 SlurmdDebug</a> in slurm.conf for available options.
 The default log_level is <b>info</b>.
 </dd>
+</dl>
+
+<dl compact>
+<dt><b>nodename</b></dt>
+<dd>If the NodeName defined in <b>slurm.conf</b> is different than this node's
+hostname (as reported by <b>hostname -s</b>), then this must be set to the
+NodeName in <b>slurm.conf</b> that this host operates as.
+</dd>
+</dl>
 
 </dl>
 
@@ -220,13 +255,13 @@ assume that the user has no jobs allocated to the node. Depending on your
 configuration of the PAM module, you might accidentally deny all user ssh
 attempts without <b>PrologFlags=contain.</b></p>
 
+<p>The <b>UsePAM</b> option in slurm.conf is not related to pam_slurm_adopt.</p>
+
+
 <h2><a name="OTHER_CONFIG">Other Configuration</a></h2>
 
 <p>Verify that <b>UsePAM</b> is set to <b>On</b> in /etc/ssh/sshd_config (it
 should be on by default).</p>
-
-<p>The <b>UsePAM</b> option in slurm.conf is not related to this module, and
-usually should not be set on your cluster.</p>
 
 <h3>Firewalls, IP Addresses, etc.</h3>
 
@@ -237,6 +272,11 @@ on the source node, such as on a login node, it is better to have the RPC be
 rejected rather than silently dropped. This will allow better responsiveness to
 the RPC initiator.</p>
 
-<p style="text-align:center;">Last modified 12 December 2017</p>
+<h2><a name="LIMITATIONS">Limitations</a></h2>
+
+<p>Alternate authentication methods such as multi-factor authentication may
+break process adoption with pam_slurm_adopt.</p>
+
+<p style="text-align:center;">Last modified 11 December 2018</p>
 
 <!--#include virtual="footer.txt"-->

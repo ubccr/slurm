@@ -20,8 +20,6 @@
   job?</a></li>
 <li><a href="#steps">How can I run multiple jobs from within a single
   script?</a></li>
-<li><a href="#orphan">Why do I have job steps when my job has already
-  COMPLETED?</a></li>
 <li><a href="#multi_batch">How can I run a job within an existing job
   allocation?</a></li>
 <li><a href="#user_env">How does Slurm establish the environment for my
@@ -271,15 +269,18 @@ the same user's soft hard resource limits on the node from which the
 job was submitted. It is recommended that the system administrator
 establish uniform hard resource limits for users on all nodes
 within a cluster to prevent this from occurring.</li>
-</ul></p>
+<li>PropagateResourceLimits or PropagateResourceLimitsExcept parameters are
+configured in slurm.conf and avoid propagation of specified limits.</li>
+</ul>
+</p>
 <p>NOTE: This may produce the error message &quot;Can't propagate RLIMIT_...&quot;.
 The error message is printed only if the user explicitly specifies that
 the resource limit should be propagated or the srun command is running
 with verbose logging of actions from the slurmd daemon (e.g. "srun -d6 ...").</p>
 
 <p><a name="pending"><b>3. Why is my job not running?</b></a><br>
-The answer to this question depends upon the scheduler used by Slurm. Executing
-the command</p>
+The answer to this question depends on a lot of factors. Main one relies upon
+the scheduler used by Slurm. Executing the command</p>
 <blockquote>
 <p> <span class="commandline">scontrol show config | grep SchedulerType</span></p>
 </blockquote>
@@ -297,7 +298,10 @@ jobs will be limited. The backfill scheduler does not alter job specifications
 of required or excluded nodes, so jobs which specify nodes will substantially
 reduce the effectiveness of backfill scheduling. See the <a href="#backfill">
 backfill</a> section for more details. For any scheduler, you can check priorities
-of jobs using the command <span class="commandline">scontrol show job</span>.</p>
+of jobs using the command <span class="commandline">scontrol show job</span>.
+Other reasons can include waiting for resources, memory, qos, reservations, etc.
+As a guide line, issue an <span class="commandline">scontrol show job &lt;jobid&gt;</span>
+and look at the field <i>State</i> and <i>Reason</i> to investigate the cause.</p></p>
 
 <p><a name="sharing"><b>4. Why does the srun --overcommit option not permit multiple jobs
 to run on nodes?</b></a><br>
@@ -378,23 +382,6 @@ steps will be allocated nodes that are not already allocated to
 other job steps. This essential provides a second level of resource
 management within the job for the job steps.</p>
 
-<p><a name="orphan"><b>9. Why do I have job steps when my job has
-already COMPLETED?</b></a><br>
-NOTE: This only applies to systems configured with
-<i>SwitchType=switch/nrt</i>.
-All other systems will purge all job steps on job completion.</p>
-<p>Slurm maintains switch (network interconnect) information within
-the job step for IBM NRT switches.
-This information must be maintained until we are absolutely certain
-that the processes associated with the switch have been terminated
-to avoid the possibility of re-using switch resources for other
-jobs (even on different nodes).
-Slurm considers jobs COMPLETED when all nodes allocated to the
-job are either DOWN or confirm termination of all its processes.
-This enables Slurm to purge job information in a timely fashion
-even when there are many failing nodes.
-Unfortunately the job step information may persist longer.</p>
-
 <p><a name="multi_batch"><b>10. How can I run a job within an existing
 job allocation?</b></a><br>
 There is a srun option <i>--jobid</i> that can be used to specify
@@ -419,14 +406,21 @@ the processes).
 The environment variables in effect at the time the <i>srun</i> command
 is executed are propagated to the spawned processes.
 The <i>~/.profile</i> and <i>~/.bashrc</i> scripts are not executed
-as part of the process launch.</p>
+as part of the process launch. You can also look at <i>--export</i> option of
+srun and sbatch. See man pages for details.</p>
 
 <p><a name="prompt"><b>12. How can I get shell prompts in interactive
 mode?</b></a><br>
-<i>srun --pty bash -i</i><br>
+<i>srun --pty bash -i</i><br/>
 Srun's <i>--pty</i> option runs task zero in pseudo terminal mode.
 Bash's <i>-i</i> option tells it to run in interactive mode (with prompts).
-
+<br/>You can also configure <i>SallocDefaultCommand</i> in <i>slurm.conf</i>
+to automatically launch a shell, e.g.:
+<pre>
+SallocDefaultCommand="srun -n1 -N1 --mem-per-cpu=0 --pty --preserve-env --cpu-bind=no --mpi=none $SHELL"
+</pre>
+And then run <i>salloc</i> directly which will provide you an allocation with
+an interactive shell console.
 <p><a name="batch_out"><b>13. How can I get the task ID in the output
 or error file name for a batch job?</b></a><br>
 <p>If you want separate output by task, you will need to build a script
@@ -473,8 +467,17 @@ will be unchanged.</p>
 
 <p><a name="terminal"><b>15. Can tasks be launched with a remote (pseudo)
 terminal?</b></a><br>
-Use srun's <i>--pty</i> option.
-
+You have several ways to do so, the recommended ones are the following:<br>
+The simplest method is to make use of srun's <i>--pty</i> option,
+(e.g. <i>srun --pty bash -i</i>).
+Srun's <i>--pty</i> option runs task zero in pseudo terminal mode. Bash's
+<i>-i</i> option instructs it to run in interactive mode (with prompts).<br>
+In addition to that method you have the option to define the
+<i>SallocDefaultCommand</i> to run a task in pseudo terminal mode directly,
+so you get the prompt just invoking salloc:
+<pre>SallocDefaultCommand="srun -n1 -N1 --mem-per-cpu=0 --pty --preserve-env --cpu-bind=no --mpi=none $SHELL"</pre>
+Finally you can make use of X11 feature and run a graphical terminal.
+(e.g. <i>srun xterm</i>).<br>
 <p><a name="force"><b>16. What does &quot;srun: Force Terminated job&quot;
 indicate?</b></a><br>
 The srun command normally terminates when the standard output and
@@ -519,22 +522,15 @@ sufficiently large resource limit and ensuring that <i>slurmd</i> takes
 full advantage of this limit. For example, you can set user root's
 locked memory limit ulimit to be unlimited on the compute nodes (see
 <i>"man limits.conf"</i>) and ensuring that <i>slurmd</i> takes
-full advantage of this limit (e.g. by adding something like
-<i>"ulimit -l unlimited"</i> to the <i>/etc/init.d/slurm</i>
-script used to initiate <i>slurmd</i>). It may also be desirable to lock
+full advantage of this limit (e.g. by adding <i>"LimitMEMLOCK=infinity"</i>
+to your systemd's <i>slurmd.service</i> file). It may also be desirable to lock
 the slurmd daemon's memory to help ensure that it keeps responding if memory
-swapping begins. A sample <i>/etc/sysconfig/slurm</i> file is shown below.
+swapping begins. A sample <i>/etc/sysconfig/slurm</i> which can be read from
+systemd is shown below.
 Related information about <a href="#pam">PAM</a> is also available.</p>
 <pre>
 #
 # Example /etc/sysconfig/slurm
-#
-# Increase the memlock limit so that user tasks can get
-# unlimited memlock
-ulimit -l unlimited
-#
-# Increase the open file limit
-ulimit -n 8192
 #
 # Memlocks the slurmd process's memory so that if a node
 # starts swapping, the slurmd will continue to respond
@@ -629,7 +625,7 @@ While the size of a pending job may be changed with few restrictions, several
 significant restrictions apply to changing the size of a running job as noted
 below:
 <ol>
-<li>Support is not available on BlueGene or Cray ALPS system due to limitations
+<li>Support is not available on Cray ALPS system due to limitations
 in the software underlying Slurm.</li>
 <li>Job(s) changing size must not be in a suspended state, including jobs
 suspended for gang scheduling. The jobs must be in a state of pending or
@@ -968,10 +964,29 @@ regex white:default ^JOBID.*
 </pre>
 <img src="squeue_color.png" width=600>
 
-<p><a name="x11"><b>33. Can Slurm export an X11 display on an allocated compute node?</b></a><br>
-You will need to build and install an optional SPANK plugin for that functionality
-today. The functionality should be provided natively in Slurm soon. Instructions
-to build and install the plugin follow. Update the Slurm installation path as needed.</p>
+<p><a name="x11"><b>33. Can Slurm export an X11 display on an allocated compute node?</b></a><br/>
+You can use the X11 builtin feature starting at version 17.11. This plugin is
+based on libssh2 and it supports <i>hostbased</i> and <i>pubkey</i>
+authentication.<br/>You just need to have <i>libssh2</i> installed on compute
+nodes, <i>libssh2</i> development package installed in the build host at build
+time and <i>PrologFlags=x11</i> set in <i>slurm.conf</i>. You will need also
+user public/private keys available on compute nodes or otherwise a
+<i>hostbased</i> authentication setup in your ssh servers.
+Other X11 plugins must be deactivated.
+<br/>
+Run it as shown:
+</p>
+<pre>
+$ ssh -X user@login1
+$ srun -n1 --pty --x11 xclock
+</pre>
+<p>
+An alternative for older versions is to build and install an optional SPANK
+plugin for that functionality. Instructions to build and install the plugin
+follow. This SPANK plugin will not work if used in combination with native X11
+support so you must disable it compiling Slurm with <i>--disable-x11</i>. This
+plugin relies on openssh library and it provides features such as GSSAPI
+support.<br/> Update the Slurm installation path as needed:</p>
 <pre>
 # Maybe obvious, but don't forget the -X on ssh
 $ ssh -X alex@testserver.com
@@ -1001,7 +1016,7 @@ $ install -m 755 slurm-spank-x11 /opt/slurm/17.02/libexec
 $ install -m 755 x11.so /opt/slurm/17.02/lib/slurm
 
 # Configure
-$ echo -e "optional\tx11.so" >> /opt/slurm/17.02/etc/plugstack.conf
+$ echo -e "optional x11.so" >> /opt/slurm/17.02/etc/plugstack.conf
 $ cd ~/tests
 
 # Run
@@ -1028,7 +1043,6 @@ sview color-coding is affected by the GTK theme. The node status grid
 is made up of button widgets and certain GTK themes don't show the color
 setting as desired. Changing GTK themes can restore proper color-coding.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
 
 <h2>For Administrators</h2>
@@ -1233,8 +1247,7 @@ will be out of service for an extended period of time, it may be desirable
 to relocate them. In order to do so, follow this procedure:</p>
 <ol>
 <li>Stop all Slurm daemons</li>
-<li>Modify the <i>ControlMachine</i>, <i>ControlAddr</i>,
-<i>BackupController</i>, and/or <i>BackupAddr</i> in the <i>slurm.conf</i> file</li>
+<li>Modify the <i>SlurmctldHost</i> values in the <i>slurm.conf</i> file</li>
 <li>Distribute the updated <i>slurm.conf</i> file to all nodes</li>
 <li>Copy the <i>StateSaveLocation</i> directory to the new host and
 make sure the permissions allow the <i>SlurmUser</i> to read and write it.
@@ -1244,11 +1257,10 @@ make sure the permissions allow the <i>SlurmUser</i> to read and write it.
 any nodes added to the cluster have a current <i>slurm.conf</i> file
 installed.
 <b>CAUTION:</b> If two nodes are simultaneously configured as the primary
-controller (two nodes on which <i>ControlMachine</i> specify the local host
+controller (two nodes on which <i>SlurmctldHost</i> specify the local host
 and the <i>slurmctld</i> daemon is executing on each), system behavior will be
-destructive. If a compute node has an incorrect <i>ControlMachine</i> or
-<i>BackupController</i> parameter, that node may be rendered unusable, but no
-other harm will result.
+destructive. If a compute node has an incorrect <i>SlurmctldHost</i> parameter,
+that node may be rendered unusable, but no other harm will result.
 
 <p><a name="multi_slurm"><b>13. Can multiple Slurm systems be run in
 parallel for testing purposes?</b></a><br>
@@ -1258,14 +1270,11 @@ Just install the test version in a different location with a different
 The test system's <i>slurm.conf</i> should specify different
 pathnames and port numbers to avoid conflicts.
 The only problem is if more than one version of Slurm is configured
-with <i>switch/nrt</i> or <i>burst_buffer/*</i> plugins.
+with <i>burst_buffer/*</i> plugins or others that may interact with external
+system APIs.
 In that case, there can be conflicting API requests from
 the different Slurm systems.
-This can be avoided by configuring the test system with <i>switch/none</i>
-and <i>burst_buffer/none</i>.
-MPI jobs started on an NRT switch system without the
-switch windows configured will not execute properly, but other jobs
-will run fine.
+This can be avoided by configuring the test system with <i>burst_buffer/none</i>.
 
 <p><a name="multi_slurmd"><b>14. Can Slurm emulate a larger cluster?</b></a><br>
 Yes, this can be useful for testing purposes.
@@ -1483,8 +1492,14 @@ an option of <i>--debug=#</i> will result in the desired level of
 detail being logged in the <i>SlurmdLogFile</i> plus the output
 of the program.
 
-<p><a name="rpm"><b>25. Why isn't the auth_none.so (or other file) in a
+<p><a name="rpm"><b>26. Why isn't the pam_slurm.so (or other component) in a
 Slurm RPM?</b></a><br>
+It is possible that at build time the required dependencies for building the
+library are missing. If you want to build the library then install pam-devel
+and compile again. See the file slurm.spec in the Slurm distribution for a list
+of other options that you can specify at compile time with rpmbuild flags
+and your <i>rpmmacros</i> file.
+
 The auth_none plugin is in a separate RPM and not built by default.
 Using the auth_none plugin means that Slurm communications are not
 authenticated, so you probably do not want to run in this mode of operation
@@ -1506,17 +1521,21 @@ slow down to the controller due to a slow or overloaded database.</li>
 <li>Keeping enterprise wide accounting from all Slurm clusters in one database.
 The slurmdbd is multi-threaded and designed to handle all the
 accounting for the entire enterprise.</li>
-<li>With the new database plugins 1.3+ you can query with sacct
-accounting stats from any node Slurm is installed on.  With the
-slurmdbd you can also query any cluster using the slurmdbd from any
-other cluster's nodes.</li>
+<li>With the database plugins you can query with sacct accounting stats from
+any node Slurm is installed on. With the slurmdbd you can also query any
+cluster using the slurmdbd from any other cluster's nodes. Other tools like
+sreport are also available.</li>
 </ol>
 
 <p><a name="debug"><b>27. How can I build Slurm with debugging symbols?</b></a></br>
-Set your CFLAGS environment variable before building.
-You want the "-g" option to produce debugging information and
-"-O0" to set the optimization level to zero (off). For example:<br>
-CFLAGS="-g -O0" ./configure ...
+When configuring, run the configure script with <i>--enable-developer</i> option.
+That will provide asserts, debug messages and the <i>-Werror</i> flag, that
+will in turn activate <i>--enable-debug</i>.
+<br/>With the <i>--enable-debug</i> flag, the code will be compiled with
+<i>-ggdb3</i> and <i>-g -O1 -fno-strict-aliasing</i> flags that will produce
+extra debugging information. Another possible option to use is
+<i>--disable-optimizations</i> that will set <i>-O0</i>.
+See also <i>auxdir/x_ac_debug.m4</i> for more detail.
 
 <p><a name="state_preserve"><b>28. How can I easily preserve drained node
 information between major Slurm updates?</b></a><br>
@@ -1611,7 +1630,7 @@ when all of the processes associated with a job or job step have completed.
 Those plugins relying upon a kernel patch can reliably identify every process.
 Those plugins dependent upon process group IDs or parent process IDs are not
 reliable. See the <i>ProctrackType</i> description in the <i>slurm.conf</i>
-man page for details. We rely upon the sgi_job for most systems.</p>
+man page for details. We rely upon the cgroup plugin for most systems.</p>
 
 <p><a name="slurmd_oom"><b>34. How can I prevent the <i>slurmd</i> and
 <i>slurmstepd</i> daemons from being killed when a node's memory
@@ -1634,8 +1653,8 @@ instead of the correct address and prevent communications between nodes.
 The solution is to either remove this line or configure a different NodeAddr
 that is known by your other nodes.</p>
 
-<p>The TopologyParam=NoInAddrAny configuration parameter is subject to this
-same problem, which can also be addressed by removing actual node
+<p>The CommunicationParameters=NoInAddrAny configuration parameter is subject to
+this same problem, which can also be addressed by removing actual node
 name from the "127.0.1.1" as well as the "127.0.0.1"
 addresses in the /etc/hosts file.  It is ok if they point to
 localhost, but not the actual name of the node.</p>
@@ -1683,41 +1702,101 @@ simple first-login script that configures the virtual cluster for me.</p>
 
 <p><a name="core_dump"><b>39. If a Slurm daemon core dumps, where can I find the
 core file?</b></a></br>
-<p>For <i>slurmctld</i>, the core file will be in the same directory as its
-log files (<i>SlurmctldLogFile</i>) if configured using an fully qualified
-pathname (starting with "/").
-Otherwise it will be found in directory used for saving state
-(<i>StateSaveLocation</i>).</p>
-<p>For <i>slurmd</i>, the core file will be in the same directory as its
-log files (<i>SlurmdLogFile</i>) if configured using an fully qualified
-pathname (starting with "/").
-Otherwise it will be found in directory used for saving state
-(<i>SlurmdSpoolDir</i>).</p>
+<p>For <i>slurmctld</i>, if started with -D option then the core file will be 
+written to the current working directory. If <i>SlurmctldLogFile</i> is an 
+absolute path, the core file will be written to this directory. Otherwise the 
+core file will be written to the <i>StateSaveLocation</i>, or "/var/tmp/" as a 
+last resort.<br>
+SlurmUser must have write permission on the directories. If none of the above 
+directories have write permission for SlurmUser, no core file will be produced.
+For testing purposes the command "scontrol abort" can be used to abort the 
+slurmctld daemon and generate a core file.
+
+<p>For <i>slurmd</i>, if started with -D option then the core file will be 
+written to the current working directory. If <i>SlurmdLogFile</i> is an 
+absolute path, the core file will be written to the this directory. 
+Otherwise the core file will be written to the <i>SlurmdSpoolDir</i>, or
+"/var/tmp/" as a last resort.<br>
+If none of the above directories can be written, no core file will be produced. 
+</p>
+
 <p>For <i>slurmstepd</i>, the core file will depend upon when the failure
-occurs. It will either be in spawned job's working directory on the same
-location as that described above for the <i>slurmd</i> daemon.</p>
-<p><b>NOTE:</b> On some systems, the slurmstepd's will not generate core files
-without some system configuration changes due to its use of the setuid
-(set user ID) function.<br>
-Set /proc/sys/fs/suid_dumpable to 2.<br>
-This could be set in permently in sysctl.conf with:<br>
-fs.suid_dumpable = 2<br>
-or temporarily with:<br>
-sysctl fs.suid_dumpable=2<br>
-On Centos 6, also set "ProcessUnpackaged = yes" in the file
+occurs. If it is running in a privileged phase it will be on the same location 
+as that described above for the slurmd daemon. If it is running on an 
+unprivileged phase, it will be in spawned job's working directory.</p>
+
+
+<p>Nevertheless, in some operating systems this can vary:
+<br>I.e. in RHEL the event 
+may be captured by abrt daemon and generated in the defined abrt configured 
+dump location (i.e. /var/spool/abrt).<br>In Cray XC ATP
+(Abnormal Termination Processing) daemon acts the same way, if it is enabled.
+</p>
+
+<p>Normally, distributions need some more tweaking in order to allow the core
+files to be generated correctly.</p>
+
+<p>slurmstepd uses the setuid() (set user ID) function to escalate 
+privileges. It is possible that in certain systems and for security policies, 
+this causes the core files not to be generated.
+<br>To allow the generation in such systems you usually must enable the 
+suid_dumpable kernel parameter:</p>
+
+Set:<br>
+ /proc/sys/fs/suid_dumpable to 2<br>
+or<br>
+ sysctl fs.suid_dumpable=2<br><br>
+or set it permanently in sysctl.conf<br>
+ fs.suid_dumpable = 2<br><br>
+
+<p>The value of 2, "suidsafe", makes any binary which normally not be dumped is 
+dumped readable by root only.<br>This allows the end user to remove such a dump
+but not access it directly. For security reasons core dumps in this mode will
+not overwrite one another or other files.<br> This mode is appropriate when
+administrators are attempting to debug problems in a normal environment.</p>
+
+<p>Then you must also set the core pattern to an asbolute pathname:</p>
+
+<pre>sysctl kernel.core_pattern=/tmp/core.%e.%p</pre>
+
+<p>We recommend reading your distribution's documentation on about the 
+configuration of this parameters.</p>
+
+
+<p>It is also usually needed to configure the system core limits, since it can be 
+set to 0.</p>
+<pre>
+]$ grep core /etc/security/limits.conf
+#        - core - limits the core file size (KB)
+*               hard    core            unlimited
+*               soft    core            unlimited
+</pre>
+<p>In some systems it is not enough to set a hard limit, you must set also a 
+soft limit.</p>
+
+<p>Also, for generating the limits in userspace, the
+<i>PropagateResourceLimits=CORE</i> parameter in slurm.conf could be needed.</p>
+
+<p>Be also sure to give SlurmUser the appropriate permissions to write in the 
+core location directories.</p>
+
+
+<b>Other exceptions:</b>
+
+<p>On Centos 6, also set "ProcessUnpackaged = yes" in the file 
 /etc/abrt/abrt-action-save-package-data.conf.
-On Red Hat EL6, also set "DAEMON_COREFILE_LIMIT=unlimited" in the file
+
+<p>On RHEL6, also set "DAEMON_COREFILE_LIMIT=unlimited" in the file
 rc.d/init.d/functions.</p>
-<p>Once these configuration changes have been made and the slurmstepd aborts,
-you should see message of this type in the file /var/log/messages:</p>
-<pre>Oct 15 11:31:20 knc abrt[21489]: Saved core dump of pid 21477 (/localhome/adam/slurm/16.05/knc/sbin/slurmstepd) to /var/spool/abrt/ccpp-2015-10-15-11:31:20-21477 (6639616 bytes)
-Oct 15 11:31:20 knc abrtd: Directory 'ccpp-2015-10-15-11:31:20-21477' creation detected</pre>
 
-<p>There should be a core file inside the specified directory.</p>
+<p>On a SELinux enabled system, or on a distribution with similar security
+system, get sure it is allowing to dump cores:</p>
 
-<p>On a 3.6 kernel (Ubuntu), fs.suid_dumpable requires a fully qualified path
-in the core_pattern. For example:<br>
-sysctl kernel.core_pattern=/tmp/core.%e.%p</p>
+<pre>]$ getsebool allow_daemons_dump_core</pre>
+
+<p>coredumpctl can also give valuable information:</p>
+
+<pre>]$ coredumpctl info</pre>
 
 <p><a name="totalview"><b>40. How can TotalView be configured to operate with
   Slurm?</b></a></br>
@@ -1795,10 +1874,10 @@ nodes to the slurmctld daemon include a configuration file checksum, so you
 probably also want to maintain a common slurm.conf file on all nodes. The
 following procedure is recommended:
 <ol>
-<li>Stop the slurmctld daemon (e.g. "/etc/init.d/slurm stop" on the head node)</li>
+<li>Stop the slurmctld daemon (e.g. "systemctl stop slurmctld" on the head node)</li>
 <li>Update the slurm.conf file on all nodes in the cluster</li>
-<li>Restart the slurmctld daemon (e.g. "/etc/init.d/slurm start" on the head node)</li>
-<li>Start the slurmd daemons on the new nodes (e.g. "/etc/init.d/slurm start" on those node)</li>
+<li>Restart the slurmctld daemon (e.g. "systemctl start slurmctld" on the head node)</li>
+<li>Start the slurmd daemons on the new nodes (e.g. "systemctl start slurmd" on those nodes)</li>
 <li>Have all slurmd daemons read the new configuration file (e.g.
 "scontrol reconfig", no need to restart the daemons)</li>
 </ol>
@@ -1823,7 +1902,7 @@ launch a shell on a node in the job's allocation?</b></a></br>
 Yes, just use the SallocDefaultCommand configuration parameter in your
 slurm.conf file as shown below.</p>
 <pre>
-SallocDefaultCommand="srun -n1 -N1 --mem-per-cpu=0 --pty --preserve-env --mpi=none $SHELL"
+SallocDefaultCommand="srun -n1 -N1 --mem-per-cpu=0 --pty --preserve-env --cpu-bind=no --mpi=none $SHELL"
 </pre>
 
 <p>
@@ -2254,8 +2333,7 @@ cray_netroot_preload.settings.load.data.compute.size_limit: 0
 <p>This is a generally useful technique for preventing remote lookups of commonly
 accessed files within jobs.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 24 April 2018</p>
+<p style="text-align:center;">Last modified 04 July 2018</p>
 
 <!--#include virtual="footer.txt"-->

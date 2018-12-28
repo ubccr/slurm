@@ -4,11 +4,11 @@
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -1131,6 +1131,13 @@ static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 	}
 
 	size = bit_set_count(avail_map);
+	if ((req->cpu_bind_type & CPU_BIND_ONE_THREAD_PER_CORE) &&
+	    (size < (req->cpus_per_task * hw_threads))) {
+		error("task/affinity: only %d bits in avail_map, CPU_BIND_ONE_THREAD_PER_CORE requires %d!",
+		      size, (req->cpus_per_task * hw_threads));
+		FREE_NULL_BITMAP(avail_map);
+		return SLURM_ERROR;
+	}
 	if (size < max_tasks) {
 		error("task/affinity: only %d bits in avail_map for %d tasks!",
 		      size, max_tasks);

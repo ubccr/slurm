@@ -8,11 +8,11 @@
  *  Written by Mark Grondona <grondona@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -156,15 +156,20 @@ void cfmakeraw(struct termios *attr)
 
 static bool _enable_pack_steps(void)
 {
-	bool enabled = false;
+	bool enabled = true;
 	char *sched_params = slurm_get_sched_params();
 
 	if (sched_params && strstr(sched_params, "disable_hetero_steps"))
 		enabled = false;
 	else if (sched_params && strstr(sched_params, "enable_hetero_steps"))
 		enabled = true;
-	else if (mpi_type && strstr(mpi_type, "none"))
-		enabled = true;
+	else {
+		char *select_type = slurm_get_select_type();
+		if (select_type && strstr(select_type, "cray"))
+			enabled = false;
+		xfree(select_type);
+	}
+
 	xfree(sched_params);
 	return enabled;
 }
@@ -182,7 +187,7 @@ int srun(int ac, char **av)
 	log_init(xbasename(av[0]), logopt, 0, NULL);
 	_set_exit_code();
 
-	if (slurm_select_init(1) != SLURM_SUCCESS )
+	if (slurm_select_init(0) != SLURM_SUCCESS)
 		fatal( "failed to initialize node selection plugin" );
 
 	if (switch_init(0) != SLURM_SUCCESS )
@@ -564,7 +569,6 @@ static void _setup_one_job_env(slurm_opt_t *opt_local, srun_job_t *job,
 		env->jobid = job->pack_jobid;
 	else
 		env->jobid = job->jobid;
-	env->ntasks = job->ntasks;
 	env->stepid = job->stepid;
 	env->account = job->account;
 	env->qos = job->qos;
@@ -597,7 +601,7 @@ static void _setup_one_job_env(slurm_opt_t *opt_local, srun_job_t *job,
 	}
 
 	setup_env(env, srun_opt->preserve_env);
-	job->env = environ;
+	env_array_merge(&job->env, (const char **)environ);
 	xfree(env->task_count);
 	xfree(env);
 }

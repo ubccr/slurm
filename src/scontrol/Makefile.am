@@ -2,13 +2,12 @@
 
 AUTOMAKE_OPTIONS = foreign
 
-AM_CPPFLAGS = -I$(top_srcdir) $(BG_INCLUDES)
+AM_CPPFLAGS = -I$(top_srcdir)
 
 bin_PROGRAMS = scontrol
 
 scontrol_SOURCES =	\
 	create_res.c	\
-	info_block.c	\
 	info_burst_buffer.c \
 	info_assoc_mgr.c \
 	info_fed.c 	\
@@ -18,6 +17,7 @@ scontrol_SOURCES =	\
 	info_node.c	\
 	info_part.c	\
 	info_res.c	\
+	reboot_node.c	\
 	scontrol.c	\
 	scontrol.h	\
 	update_job.c	\

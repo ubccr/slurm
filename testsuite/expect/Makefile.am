@@ -191,6 +191,7 @@ EXTRA_DIST = \
 	test3.14			\
 	test3.15			\
 	test3.16			\
+	test3.17			\
 	test4.1				\
 	test4.2				\
 	test4.3				\
@@ -278,24 +279,8 @@ EXTRA_DIST = \
 	test7.17_configs/test7.17.6/slurm.conf	\
 	test7.17_configs/test7.17.7/gres.conf	\
 	test7.17_configs/test7.17.7/slurm.conf	\
-	test8.1				\
-	test8.2				\
-	test8.3				\
-	test8.4				\
-	test8.4.prog.c			\
-	test8.5				\
-	test8.6				\
-	test8.8				\
-	test8.9				\
-	test8.10			\
-	test8.11			\
-	test8.20			\
-	test8.21			\
-	test8.21.bash			\
-	test8.22			\
-	test8.23			\
-	test8.24			\
-	test8.25			\
+	test7.18			\
+	test7.18.prog.c			\
 	test9.1				\
 	test9.2				\
 	test9.3				\
@@ -312,15 +297,11 @@ EXTRA_DIST = \
 	test10.2			\
 	test10.3			\
 	test10.4			\
-	test10.5			\
-	test10.6			\
 	test10.7			\
 	test10.8			\
 	test10.9			\
 	test10.10			\
 	test10.11			\
-	test10.12			\
-	test10.13			\
 	test11.1			\
 	test11.2			\
 	test11.3			\
@@ -604,6 +585,8 @@ EXTRA_DIST = \
 	test35.1			\
 	test35.2			\
 	test35.3			\
+	test35.4			\
+	test35.5			\
 	test36.1			\
 	test36.2			\
 	test36.3			\

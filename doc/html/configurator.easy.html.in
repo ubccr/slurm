@@ -103,8 +103,7 @@ function displayfile()
    "# Put this file on all nodes of your cluster.<br>" +
    "# See the slurm.conf man page for more information.<br>" +
    "#<br>" +
-   "ControlMachine=" + document.config.control_machine.value + "<br>" +
-   get_field("ControlAddr",document.config.control_addr) + "<br>" +
+   "SlurmctldHost=" + document.config.control_machine.value + "<br>" +
    "# <br>" +
    "#MailProg=/bin/mail <br>" +
    "MpiDefault=" + get_radio_value(document.config.mpi_default) + "<br>" +
@@ -222,17 +221,12 @@ as <I>slurm.conf</I> for use by Slurm.
 
 <H2>Control Machines</H2>
 Define the hostname of the computer on which the Slurm controller and
-optional backup controller will execute. You can also specify addresses
-of these computers if desired (defaults to their hostnames).
-The IP addresses can be either numeric IP addresses or names.
+optional backup controller will execute.
 Hostname values should should not be the fully qualified domain
 name (e.g. use <I>tux</I> rather than <I>tux.abc.com</I>).
 <P>
-<input type="text" name="control_machine" value="linux0"> <B>ControlMachine</B>:
+<input type="text" name="control_machine" value="linux0"> <B>SlurmctldHost</B>:
 Master Controller Hostname
-<P>
-<input type="text" name="control_addr"> <B>ControlAddr</B>: Master Controller
-Address (optional)
 <P>
 
 <H2>Compute Machines</H2>
@@ -355,7 +349,6 @@ Select one value for <B>SwitchType</B>:<BR>
 <input type="radio" name="switch_type" value="cray"> <B>Cray</B>: Cray proprietary interconnect<BR>
 <input type="radio" name="switch_type" value="none" checked> <B>None</B>: No special
 handling required (InfiniBand, Myrinet, Ethernet, etc.)<BR>
-<input type="radio" name="switch_type" value="nrt"> <B>NRT</B>: IBM Network Resource Table<BR>
 <P>
 
 <H2>Default MPI Type</H2>
@@ -396,8 +389,6 @@ Select one value for <B>SelectType</B>:<BR>
 <input type="radio" name="select_type" value="linear">
 <B>Linear</B>: Node-base
 resource allocation, does not manage individual processor allocation<BR>
-<input type="radio" name="select_type" value="serial">
-<B>Serial</B>: Execute single CPU jobs only<BR>
 <DL>
 <DT><B>SelectTypeParameters</B> (As used by <I>SelectType=cons_res or cray</I> only):
     <DD> Note: The -E extension for sockets, cores, and threads

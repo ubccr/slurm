@@ -9,12 +9,6 @@
 
 #include "config.h"
 
-#if defined HAVE_BG_FILES
-/* Use symbols from the runjob.so library provided by IBM.
- * Do NOT use debugger symbols local to the srun command */
-
-#else
-
 /* This file contains support for bringing processes up stopped, so that
  * a debugger can attach to them     (done for TotalView)
  */
@@ -41,19 +35,11 @@
  * them, and will be confused if you change them.
  */
 
-#if defined HAVE_BG_FILES
-/* On bluegene systems the below structure is defined here.  So as to
- * not confict with allocate.c including this file we will just use the
- * definition there instead of defining it here.
- */
-# include "src/plugins/select/bluegene/bg_enums.h"
-#else
 typedef struct {
   char * host_name;           /* Something we can pass to inet_addr */
   char * executable_name;     /* The name of the image */
   int    pid;		      /* The pid of the process */
 } MPIR_PROCDESC;
-#endif
 
 /* Array of procdescs for debugging purposes */
 extern MPIR_PROCDESC *MPIR_proctable;
@@ -79,7 +65,7 @@ extern int          MPIR_partial_attach_ok;
 #define MPIR_DEBUG_SPAWNED   1
 #define MPIR_DEBUG_ABORTING  2
 
-/* SLURM specific declarations */
+/* Slurm specific declarations */
 extern int MPIR_i_am_starter;
 extern int MPIR_acquired_pre_main;
 
@@ -90,5 +76,4 @@ extern void MPIR_Breakpoint(srun_job_t *job);
 extern char *totalview_jobid;
 extern char *totalview_stepid;
 
-#endif
 #endif

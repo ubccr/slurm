@@ -7,11 +7,11 @@
  *  Written by Danny Auble <da@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -127,44 +127,6 @@ static gboolean _open_node(GtkWidget *widget, GdkEventButton *event,
 	}
 
 	return false;
-}
-
-static void _open_block(GtkWidget *widget, GdkEventButton *event,
-			grid_button_t *grid_button)
-{
-	GError *error = NULL;
-	char title[100] = {0};
-	ListIterator itr = NULL;
-	popup_info_t *popup_win = NULL;
-
-	snprintf(title, 100,
-		 "Info about block containing %s", grid_button->node_name);
-
-	itr = list_iterator_create(popup_list);
-	while ((popup_win = list_next(itr))) {
-		if (popup_win->spec_info)
-			if (!xstrcmp(popup_win->spec_info->title, title)) {
-				break;
-			}
-	}
-	list_iterator_destroy(itr);
-
-	if (!popup_win) {
-		popup_win = create_popup_info(INFO_PAGE, BLOCK_PAGE, title);
-		popup_win->spec_info->search_info->search_type =
-			SEARCH_BLOCK_NODENAME;
-		popup_win->spec_info->search_info->gchar_data =
-			g_strdup(grid_button->node_name);
-		if (!sview_thread_new((gpointer)popup_thr, popup_win,
-				      false, &error)) {
-			g_printerr ("Failed to create block "
-				    "grid popup thread: %s\n",
-				    error->message);
-			return;
-		}
-	} else
-		gtk_window_present(GTK_WINDOW(popup_win->popup));
-	return;
 }
 
 /* static void _state_changed(GtkWidget *button, GtkStateType state, */
@@ -363,8 +325,7 @@ static bool _change_button_color(grid_button_t *grid_button,
 
 	if (node_base_state == NODE_STATE_DOWN) {
 		_put_button_as_down(grid_button, NODE_STATE_DOWN);
-	} else if ((state & NODE_STATE_DRAIN) ||
-		   (node_base_state == NODE_STATE_ERROR)) {
+	} else if (state & NODE_STATE_DRAIN) {
 		_put_button_as_down(grid_button, NODE_STATE_DRAIN);
 	} else if (grid_button->node_name &&
 		   !xstrcmp(grid_button->node_name, "EMPTY")) {
@@ -488,17 +449,6 @@ static void _each_highlight_selected(GtkTreeModel *model,
 
 }
 
-
-static int _block_in_node(int *mp_inx, int inx)
-{
-	int j=0;
-	if (mp_inx[j] >= 0) {
-		if ((mp_inx[j] == inx) && (mp_inx[j+1] == inx))
-			return 1;
-	}
-	return 0;
-}
-
 /*
  * This is used to add an entry to the grid for a node which is not configured
  * in the system (e.g. there is a gap in the 3-D torus for a service or login
@@ -539,17 +489,6 @@ static void _calc_coord_3d(int x, int y, int z, int default_y_offset,
 
 	*coord_x = (x + (dim_size[2] - 1)) - z;
 	y_offset = default_y_offset - (dim_size[2] * y);
-	*coord_y = (y_offset - y) + z;
-}
-
-static void _calc_coord_4d(int a, int x, int y, int z, int default_y_offset,
-			   int *coord_x, int *coord_y, int* dim_size)
-{
-	int x_offset, y_offset;
-
-	x_offset = (dim_size[1] + dim_size[3]) * a;
-	*coord_x = x_offset + (x + (dim_size[3] - 1)) - z;
-	y_offset = default_y_offset - (dim_size[3] * y);
 	*coord_y = (y_offset - y) + z;
 }
 
@@ -619,47 +558,7 @@ static int _add_button_to_list(node_info_t *node_ptr,
 		}
 	}
 
-	if (cluster_dims == 4) {
-		int a, x, y, z;
-		if (node_ptr) {
-			a = select_char2coord(node_ptr->name[len-4]);
-			x = select_char2coord(node_ptr->name[len-3]);
-			y = select_char2coord(node_ptr->name[len-2]);
-			z = select_char2coord(node_ptr->name[len-1]);
-			/* Ignore "b" dimension for BlueGene/Q */
-			i = ((a * dim_size[1] + x) * dim_size[2] + y) *
-			    dim_size[3] + z;
-			node_exists[i] = true;
-			_calc_coord_4d(a, x, y, z,
-				       button_processor->default_y_offset,
-				       &coord_x, &coord_y, dim_size);
-		} else {
-			for (i = -1, a = 0; a < dim_size[0]; a++) {
-				for (x = 0; x < dim_size[1]; x++) {
-					for (y = 0; y < dim_size[2]; y++) {
-						for (z = 0; z < dim_size[3];
-						     z++) {
-							i++;
-							if (node_exists[i])
-								continue;
-							_calc_coord_4d(a,x,y,z,
-				      				button_processor->
-								default_y_offset,
-								&coord_x,
-								&coord_y,
-								dim_size);
-							_build_empty_node(
-								coord_x,
-								coord_y,
-								button_processor);
-						}
-					}
-				}
-			}
-			xfree(node_exists);
-			return SLURM_SUCCESS;
-		}
-	} else if (cluster_dims == 3) {
+	if (cluster_dims == 3) {
 		int x, y, z;
 		if (node_ptr) {
 			if (cluster_flags & CLUSTER_FLAG_CRAY_A) {
@@ -916,14 +815,8 @@ static int _init_button_processor(button_processor_t *button_processor,
 			return SLURM_ERROR;
 		}
 	}
-	if (cluster_dims == 4) {
-		button_processor->default_y_offset = (dim_size[3] * dim_size[2])
-					+ (dim_size[2] - dim_size[3]);
-		working_sview_config.grid_x_width = (dim_size[1] + dim_size[3])
-						    * dim_size[0];
-		button_processor->table_y = (dim_size[3] * dim_size[2])
-					    + dim_size[2];
-	} else if (cluster_dims == 3) {
+
+	if (cluster_dims == 3) {
 		button_processor->default_y_offset = (dim_size[2] * dim_size[1])
 			+ (dim_size[1] - dim_size[2]);
 		working_sview_config.grid_x_width = dim_size[0] + dim_size[2];
@@ -974,6 +867,7 @@ extern void destroy_grid_button(void *arg)
  * the button, an example of this would be in
  * add_extra_bluegene_buttons were the small block buttons do
  * something different than they do regularly
+ * TODO - this may be simplified now that bluegene is gone.
  */
 
 extern grid_button_t *create_grid_button_from_another(
@@ -1029,8 +923,7 @@ extern grid_button_t *create_grid_button_from_another(
 			GTK_CONTAINER(send_grid_button->button),
 			image);
 	} else if ((color_inx >= 0)
-		   && ((send_grid_button->state & NODE_STATE_DRAIN)
-		       || (node_base_state == NODE_STATE_ERROR))) {
+		   && (send_grid_button->state & NODE_STATE_DRAIN)) {
 		GtkWidget *image = gtk_image_new_from_stock(
 			GTK_STOCK_DIALOG_ERROR,
 			GTK_ICON_SIZE_SMALL_TOOLBAR);
@@ -1309,119 +1202,6 @@ extern List copy_main_button_list(int initial_color)
 	return button_list;
 }
 
-extern void add_extra_bluegene_buttons(List *button_list, int inx,
-				       int *color_inx)
-{
-	block_info_msg_t *block_ptr = NULL;
-	block_info_t *bg_info_ptr = NULL;
-	int rc = SLURM_SUCCESS;
-	ListIterator itr = NULL;
-	grid_button_t *grid_button = NULL;
-	grid_button_t *send_grid_button = NULL;
-	int i=0;
-	char *mp_str = NULL;
-	char tmp_nodes[256];
-	int found = 0;
-	int coord_y=0;
-	uint16_t orig_state;
-
-	rc = get_new_info_block(&block_ptr, 0);
-
-	if ((rc != SLURM_SUCCESS) && (rc != SLURM_NO_CHANGE_IN_DATA)) {
-		return;
-	}
-
-	if (!*button_list)
-		*button_list = list_create(NULL);
-
-	*color_inx %= sview_colors_cnt;
-
-	itr = list_iterator_create(grid_button_list);
-	while ((grid_button = list_next(itr))) {
-		if (grid_button->inx == inx)
-			break;
-	}
-	list_iterator_destroy(itr);
-
-	if (!grid_button)
-		return;
-	orig_state = grid_button->state;
-	/* remove all (if any) buttons pointing to this node since we
-	   will be creating all of them */
-
-	itr = list_iterator_create(*button_list);
-	while ((send_grid_button = list_next(itr))) {
-		if (send_grid_button->inx == grid_button->inx)
-			list_remove(itr);
-	}
-	list_iterator_destroy(itr);
-
-	for (i=0; i < block_ptr->record_count; i++) {
-		bg_info_ptr = &block_ptr->block_array[i];
-		if (!_block_in_node(bg_info_ptr->mp_inx, inx))
-			continue;
-		found = 1;
-		mp_str = bg_info_ptr->mp_str;
-		if (bg_info_ptr->ionode_str) {
-			sprintf(tmp_nodes, "%s[%s]", mp_str,
-				bg_info_ptr->ionode_str);
-			mp_str = tmp_nodes;
-		}
-		if (bg_info_ptr->state & BG_BLOCK_ERROR_FLAG)
-			grid_button->state = NODE_STATE_ERROR;
-		else if (list_count(bg_info_ptr->job_list))
-			grid_button->state = NODE_STATE_ALLOCATED;
-		else
-			grid_button->state = NODE_STATE_IDLE;
-		send_grid_button = create_grid_button_from_another(
-			grid_button, mp_str, *color_inx);
-		grid_button->state = orig_state;
-		if (send_grid_button) {
-			send_grid_button->button_list = *button_list;
-			send_grid_button->table_x = 0;
-			send_grid_button->table_y = coord_y++;
-			//_add_button_signals(send_grid_button);
-			/* this is a different signal than usual */
-			g_signal_connect(
-				G_OBJECT(send_grid_button->button),
-				"button-press-event",
-				G_CALLBACK(_open_block),
-				send_grid_button);
-			g_signal_connect(G_OBJECT(grid_button->button),
-					 "enter-notify-event",
-					 G_CALLBACK(_mouseover_node),
-					 grid_button);
-			g_signal_connect(G_OBJECT(grid_button->button),
-					 "leave-notify-event",
-					 G_CALLBACK(_mouseoff_node),
-					 grid_button);
-			list_append(*button_list, send_grid_button);
-			(*color_inx)++;
-		}
-	}
-	if (!found) {
-		send_grid_button = create_grid_button_from_another(
-			grid_button, grid_button->node_name, *color_inx);
-		if (send_grid_button) {
-			send_grid_button->button_list = *button_list;
-			send_grid_button->table_x = 0;
-			send_grid_button->table_y = coord_y++;
-			_add_button_signals(send_grid_button);
-			list_append(*button_list, send_grid_button);
-			(*color_inx)++;
-		}
-	}
-
-}
-
-extern void add_extra_cr_buttons(List *button_list, node_info_t *node_ptr)
-{
-	/* FIXME: this is here for consumable resources "multi-core"
-	   and what not to add buttons for each.  This needs to be added
-	   when HP is done with the multi-core code. */
-	return;
-}
-
 extern void put_buttons_in_table(GtkTable *table, List button_list)
 {
 	int coord_x=0, coord_y=0;
@@ -1449,21 +1229,7 @@ extern void put_buttons_in_table(GtkTable *table, List button_list)
 
 	itr = list_iterator_create(button_list);
 	while ((grid_button = list_next(itr))) {
-		if (cluster_dims == 4) {
-			grid_button->table = table;
-			gtk_table_attach(table, grid_button->button,
-					 grid_button->table_x,
-					 (grid_button->table_x+1),
-					 grid_button->table_y,
-					 (grid_button->table_y+1),
-					 GTK_SHRINK, GTK_SHRINK,
-					 1, 1);
-			if (!grid_button->table_x) {
-				gtk_table_set_row_spacing(table,
-						grid_button->table_y,
-						working_sview_config.gap_size);
-			}
-		} else if (cluster_dims == 3) {
+		if (cluster_dims == 3) {
 			grid_button->table = table;
 			gtk_table_attach(table, grid_button->button,
 					 grid_button->table_x,

@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -120,34 +120,41 @@ static job_step_create_request_msg_t *_create_step_request(
 {
 	job_step_create_request_msg_t *step_req =
 		xmalloc(sizeof(job_step_create_request_msg_t));
-	step_req->job_id = step_params->job_id;
-	step_req->step_id = step_params->step_id;
-	step_req->user_id = (uint32_t)step_params->uid;
-	step_req->min_nodes = step_params->min_nodes;
-	step_req->max_nodes = step_params->max_nodes;
+	step_req->ckpt_dir = xstrdup(step_params->ckpt_dir);
+	step_req->ckpt_interval = step_params->ckpt_interval;
 	step_req->cpu_count = step_params->cpu_count;
 	step_req->cpu_freq_min = step_params->cpu_freq_min;
 	step_req->cpu_freq_max = step_params->cpu_freq_max;
 	step_req->cpu_freq_gov = step_params->cpu_freq_gov;
+	step_req->cpus_per_tres = xstrdup(step_params->cpus_per_tres);
+	step_req->exclusive  = step_params->exclusive;
+	step_req->features = xstrdup(step_params->features);
+	step_req->immediate  = step_params->immediate;
+	step_req->job_id = step_params->job_id;
+	step_req->max_nodes = step_params->max_nodes;
+	step_req->mem_per_tres = xstrdup(step_params->mem_per_tres);
+	step_req->min_nodes = step_params->min_nodes;
+	step_req->name = xstrdup(step_params->name);
+	step_req->network = xstrdup(step_params->network);
+	step_req->no_kill = step_params->no_kill;
+	step_req->node_list = xstrdup(step_params->node_list);
 	step_req->num_tasks = step_params->task_count;
+	step_req->overcommit = step_params->overcommit ? 1 : 0;
+	step_req->plane_size = step_params->plane_size;
+	step_req->pn_min_memory = step_params->pn_min_memory;
 	step_req->relative = step_params->relative;
 	step_req->resv_port_cnt = step_params->resv_port_cnt;
-	step_req->exclusive  = step_params->exclusive;
-	step_req->immediate  = step_params->immediate;
-	step_req->ckpt_interval = step_params->ckpt_interval;
-	step_req->ckpt_dir = xstrdup(step_params->ckpt_dir);
-	step_req->features = xstrdup(step_params->features);
-	step_req->gres = xstrdup(step_params->gres);
-	step_req->task_dist = step_params->task_dist;
-	step_req->plane_size = step_params->plane_size;
-	step_req->node_list = xstrdup(step_params->node_list);
-	step_req->network = xstrdup(step_params->network);
-	step_req->name = xstrdup(step_params->name);
-	step_req->no_kill = step_params->no_kill;
-	step_req->overcommit = step_params->overcommit ? 1 : 0;
-	step_req->pn_min_memory = step_params->pn_min_memory;
 	step_req->srun_pid = (uint32_t) getpid();
+	step_req->step_id = step_params->step_id;
+	step_req->task_dist = step_params->task_dist;
+	step_req->tres_bind = xstrdup(step_params->tres_bind);
+	step_req->tres_freq = xstrdup(step_params->tres_freq);
+	step_req->tres_per_step = xstrdup(step_params->tres_per_step);
+	step_req->tres_per_node = xstrdup(step_params->tres_per_node);
+	step_req->tres_per_socket = xstrdup(step_params->tres_per_socket);
+	step_req->tres_per_task = xstrdup(step_params->tres_per_task);
 	step_req->time_limit = step_params->time_limit;
+	step_req->user_id = (uint32_t)step_params->uid;
 
 	return step_req;
 }
@@ -502,6 +509,10 @@ slurm_step_ctx_get (slurm_step_ctx_t *ctx, int ctx_key, ...)
 		*int_ptr = ctx->launch_state->tasks_requested;
 		*int_array_pptr = ctx->launch_state->io.user->sockets;
 		break;
+	case SLURM_STEP_CTX_DEF_CPU_BIND_TYPE:
+		uint32_ptr = (uint32_t *) va_arg(ap, void *);
+		*uint32_ptr = ctx->step_resp->def_cpu_bind_type;
+		break;
 	default:
 		slurm_seterrno(EINVAL);
 		rc = SLURM_ERROR;
@@ -648,4 +659,3 @@ extern void slurm_step_ctx_params_t_init (slurm_step_ctx_params_t *ptr)
 		ptr->job_id = NO_VAL;
 	}
 }
-

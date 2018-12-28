@@ -7,11 +7,11 @@
  *  Written by Christopher Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -50,8 +50,8 @@
 typedef enum {
 	REQUEST_CONNECT = 0,
 	REQUEST_SIGNAL_PROCESS_GROUP, /* Defunct, See REQUEST_SIGNAL_CONTAINER */
-	REQUEST_SIGNAL_TASK_LOCAL,
-	REQUEST_SIGNAL_TASK_GLOBAL,
+	REQUEST_SIGNAL_TASK_LOCAL, /* Defunct see REQUEST_SIGNAL_CONTAINER */
+	REQUEST_SIGNAL_TASK_GLOBAL, /* Defunct see REQUEST_SIGNAL_CONTAINER */
 	REQUEST_SIGNAL_CONTAINER,
 	REQUEST_STATE,
 	REQUEST_INFO,  /* Defunct, See REQUEST_STEP_MEM_LIMITS|UID|NODEID */
@@ -160,22 +160,10 @@ int stepd_checkpoint(int fd, uint16_t protocol_version,
 		     time_t timestamp, char *image_dir);
 
 /*
- * Send a signal to a single task in a job step.
- */
-int stepd_signal_task_local(int fd, uint16_t protocol_version,
-			    int signal, int ltaskid);
-
-/*
- * Send a signal to a single task in a job step.
- */
-int stepd_signal_task_global(int fd, uint16_t protocol_version,
-			     int signal, int gtaskid);
-
-/*
  * Send a signal to the proctrack container of a job step.
  */
 int stepd_signal_container(int fd, uint16_t protocol_version, int signal,
-			   int flags);
+			   int flags, uid_t uid);
 
 /*
  * Attach a client to a running job step.
@@ -218,10 +206,12 @@ extern int stepd_add_extern_pid(int fd, uint16_t protocol_version, pid_t pid);
 
 /*
  * Fetch the display number if this extern step is providing x11 tunneling.
+ * If temporary XAUTHORITY files are in use, xauthority is set to that path,
+ * otherwise NULL.
  * Returns 0 to indicate no display forwarded.
- * (The implementation will never use local X11 display number zero.)
  */
-extern int stepd_get_x11_display(int fd, uint16_t protocol_version);
+extern int stepd_get_x11_display(int fd, uint16_t protocol_version,
+				 char **xauthority);
 
 /*
  * Return the process ID of the slurmstepd.

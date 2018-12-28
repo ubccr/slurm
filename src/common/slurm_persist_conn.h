@@ -5,11 +5,11 @@
  *  Copyright (C) 2016 SchedMD LLC
  *  Written by Danny Auble da@schedmd.com, et. al.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #ifndef _SLURM_PERSIST_CONN_H
@@ -43,6 +43,7 @@
 #define PERSIST_FLAG_DBD            0x0001
 #define PERSIST_FLAG_RECONNECT      0x0002
 #define PERSIST_FLAG_ALREADY_INITED 0x0004
+#define PERSIST_FLAG_P_USER_CASE    0x0008
 
 typedef enum {
 	PERSIST_TYPE_NONE = 0,
@@ -93,6 +94,7 @@ typedef struct {
 
 typedef struct {
 	char *comment;
+	uint16_t flags;
 	uint32_t rc;
 	uint16_t ret_info; /* protocol version we are connecting to since we
 			    * sent the lowest one to begin with, or the return
@@ -186,5 +188,10 @@ extern void slurm_persist_free_rc_msg(persist_rc_msg_t *msg);
 extern Buf slurm_persist_make_rc_msg(slurm_persist_conn_t *persist_conn,
 				     uint32_t rc, char *comment,
 				     uint16_t ret_info);
+
+extern Buf slurm_persist_make_rc_msg_flags(slurm_persist_conn_t *persist_conn,
+					   uint32_t rc, char *comment,
+					   uint16_t flags,
+					   uint16_t ret_info);
 
 #endif

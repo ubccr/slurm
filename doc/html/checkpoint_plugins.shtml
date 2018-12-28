@@ -4,10 +4,10 @@
 
 <h2> Overview</h2>
 <p> This document describes Slurm job checkpoint plugins and the API that defines
-them. It is intended as a resource to programmers wishing to write their own SLURM
+them. It is intended as a resource to programmers wishing to write their own Slurm
 job checkpoint plugins.</p>
 
-<p>Slurm job checkpoint plugins are Slurm plugins that implement the SLURM
+<p>Slurm job checkpoint plugins are Slurm plugins that implement the Slurm
 API for checkpointing and restarting jobs.
 The plugins must conform to the Slurm Plugin API with the following specifications:</p>
 
@@ -39,7 +39,6 @@ in other Slurm functions used by the plugin.</p>
 <p>The programmer is urged to study
 <span class="commandline">src/plugins/checkpoint/blcr/checkpoint_blcr.c</span>
 for a sample implementation of a Slurm job checkpoint plugin.</p>
-<p class="footer"><a href="#top">top</a></p>
 
 <h2>Data Objects</h2>
 <p>The implementation must maintain (though not necessarily directly export) an
@@ -57,7 +56,6 @@ SLURM_SUCCESS. </p>
 
 <p>There is also a checkpoint-specific error code and message that may be associated
 with each job step.</p>
-<p class="footer"><a href="#top">top</a></p>
 
 <h2>API Functions</h2>
 <p>The following functions must appear. Functions which are not implemented should
@@ -79,8 +77,8 @@ be stubbed.</p>
 <p><b>Note</b>: These init and fini functions are not the same as those
 described in the <span class="commandline">dlopen (3)</span> system library.
 The C run-time system co-opts those symbols for its own initialization.
-The system <span class="commandline">_init()</span> is called before the SLURM
-<span class="commandline">init()</span>, and the SLURM
+The system <span class="commandline">_init()</span> is called before the Slurm
+<span class="commandline">init()</span>, and the Slurm
 <span class="commandline">fini()</span> is called before the system's
 <span class="commandline">_fini()</span>.</p>
 
@@ -214,7 +212,6 @@ of a tasks from a checkpoint image, called by <b>slurmstepd</b>.</p>
 On failure, the plugin should return SLURM_ERROR and set the error_code
 and error_msg to an appropriate value to indicate the reason for failure.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
 <p style="text-align:center;">Last modified 27 March 2015</p>
 

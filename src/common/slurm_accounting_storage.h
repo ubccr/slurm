@@ -7,11 +7,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -50,6 +50,11 @@
 #include <sys/types.h>
 #include <pwd.h>
 
+typedef enum {
+	ACCT_STORAGE_INFO_CONN_ACTIVE,
+	ACCT_STORAGE_INFO_AGENT_COUNT
+} acct_storage_info_t;
+
 extern int with_slurmdbd;
 extern uid_t db_api_uid;
 
@@ -62,12 +67,15 @@ extern int slurm_acct_storage_fini(void); /* unload the plugin */
  *                 trigger callbacks
  * IN: conn_num - If running more than one connection to the database
  *     this can be used to tell which connection is doing what
+ * OUT: persist_conn_flags - If using a persistant connection to talk to the
+ *      slurmdbd get back the flags from the server.
  * IN: rollback - maintain journal of changes to permit rollback
  * RET: pointer used to access db
  */
 extern void *acct_storage_g_get_connection(
 	const slurm_trigger_callbacks_t *callbacks,
-	int conn_num, bool rollback,char *cluster_name);
+	int conn_num, uint16_t *persist_conn_flags,
+	bool rollback, char *cluster_name);
 
 /*
  * release connection to the storage unit
@@ -554,6 +562,13 @@ extern int acct_storage_g_reset_lft_rgt(void *db_conn, uid_t uid,
 extern int acct_storage_g_get_stats(void *db_conn, slurmdb_stats_rec_t **stats);
 
 /*
+ * Get generic data.
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int acct_storage_g_get_data(void *db_conn,  acct_storage_info_t dinfo,
+				    void *data);
+
+/*
  * Clear performance statistics.
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
@@ -619,7 +634,7 @@ extern int jobacct_storage_g_step_complete(void *db_conn,
 					   struct step_record *step_ptr);
 
 /*
- * load into the storage a suspention of a job
+ * load into the storage a suspension of a job
  */
 extern int jobacct_storage_g_job_suspend(void *db_conn,
 					 struct job_record *job_ptr);

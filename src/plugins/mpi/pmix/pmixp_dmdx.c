@@ -5,11 +5,11 @@
  *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
@@ -353,7 +353,7 @@ static void _dmdx_req(Buf buf, int nodeid, uint32_t seq_num)
 	}
 exit:
 	/* we don't need this buffer anymore */
-	free_buf(buf);
+	FREE_NULL_BUFFER(buf);
 
 	/* no sense to return errors, engine can't do anything
 	 * anyway. We've notified libpmix, that's enough */
@@ -408,7 +408,7 @@ static void _dmdx_resp(Buf buf, int nodeid, uint32_t seq_num)
 
 	/* call back to libpmix-server */
 	pmixp_lib_modex_invoke(req->cbfunc, status, data, size,
-			       req->cbdata, pmixp_free_Buf, (void *)buf);
+			       req->cbdata, pmixp_free_buf, (void *)buf);
 
 	/* release tracker & list iterator */
 	req = NULL;
@@ -418,7 +418,7 @@ exit:
 	if (SLURM_SUCCESS != rc) {
 		/* we are not expect libpmix to call the callback
 		 * to cleanup this buffer */
-		free_buf(buf);
+		FREE_NULL_BUFFER(buf);
 	}
 	/* no sense to return errors, engine can't do anything
 	 * anyway. We've notified libpmix, that's enough */

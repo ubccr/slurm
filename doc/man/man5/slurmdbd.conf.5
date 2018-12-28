@@ -1,4 +1,4 @@
-.TH "slurmdbd.conf" "5" "Slurm Configuration File" "July 2015" "Slurm Configuration File"
+.TH "slurmdbd.conf" "5" "Slurm Configuration File" "August 2018" "Slurm Configuration File"
 
 .SH "NAME"
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file
@@ -128,13 +128,10 @@ mechanism being used.
 \fBAuthType\fR
 Define the authentication method for communications between Slurm
 components.
-Acceptable values at present include "auth/none"
-and "auth/munge".
-The default value is "auth/none", which means the UID included in
-communication messages is not verified.
-This may be fine for testing purposes, but
-\fBdo not use "auth/none" if you desire any security\fR.
-"auth/munge" indicates that LLNL's Munge system is to be used
+Acceptable values at present include "auth/none" and "auth/munge".
+The default value is "auth/munge".
+\fBDo not use "auth/none" if you desire any security\fR.
+"auth/munge" indicates that LLNL's MUNGE system is to be used
 (this is the supported authentication mechanism for Slurm;
 see "https://dun.github.io/munge/" for more information).
 SlurmDBD must be terminated prior to changing the value of \fBAuthType\fR
@@ -270,14 +267,12 @@ Log errors and verbose informational messages and even more debugging messages
 .TP
 \fBDebugLevelSyslog\fR
 The slurmdbd daemon will log events to the syslog file at the specified
-level of detail (the \fBLogFile\fR file will include log messages
-at level of details specified be \fBDebugLevel\fR configuration parameter).
-If the slurmdbd daemon is run in the foreground (started with the \fB\-D\fR
-command line option) the \fBDebugLevelSyslog\fR configuration parameter
-will be ignored.
-The default value is \fBquiet\fR unless there is no configured
-\fBSlurmdLogFile\fR, in which case the default value will be \fBfatal\bR so
-that fatal errors are logged somewhere.
+level of detail. If not set, the slurmdbd daemon will log to syslog at
+level \fBfatal\fR, unless there is no \fBLogFile\fR and it is running
+in the background, in which case it will log to syslog at the level specified
+by \fBDebugLevel\fR (at \fBfatal\fR in the case that \fBDebugLevel\fR
+is set to \fBquiet\fR) or it is run in the foreground, when it will be set to
+quiet.
 
 .RS
 .TP 10
@@ -355,6 +350,16 @@ fail to complete with ESLURM_RESULT_TOO_LARGE.
 \fBMessageTimeout\fR
 Time permitted for a round\-trip communication to complete
 in seconds. Default value is 10 seconds.
+
+.TP
+\fBParameters\fR
+Contains arbitrary comma separated parameters used to alter the behavior of
+the slurmdbd.
+.RS
+.TP
+\fBPreserveCaseUser\fR
+When defining users do not force lower case which is the default behavior.
+.RE
 
 .TP
 \fBPidFile\fR
@@ -525,12 +530,12 @@ Default is none.
 .TP
 \fBStorageLoc\fR
 Specify the name of the database as the location where accounting
-records are written.
+records are written. Defaults to "slurm_acct_db".
 
 .TP
 \fBStoragePass\fR
 Define the password used to gain access to the database to store
-the job accounting data.
+the job accounting data. The '#' character is not permitted in a password.
 
 .TP
 \fBStoragePort\fR

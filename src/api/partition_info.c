@@ -8,11 +8,11 @@
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -46,7 +46,9 @@
 #include "slurm/slurmdb.h"
 
 #include "src/common/parse_time.h"
+#include "src/common/read_config.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_resource_info.h"
 #include "src/common/slurm_selecttype_info.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -118,11 +120,9 @@ void slurm_print_partition_info ( FILE* out, partition_info_t * part_ptr,
 char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 				    int one_liner )
 {
-	char tmp[16];
 	char *out = NULL;
 	char *allow_deny, *value;
 	uint16_t force, preempt_mode, val;
-	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 	char *line_end = (one_liner) ? " " : "\n   ";
 
 	/****** Line 1 ******/
@@ -181,20 +181,18 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	else
 		xstrcat(out, " Default=NO");
 
+	if (part_ptr->cpu_bind) {
+		char tmp_str[128];
+		slurm_sprint_cpu_bind_type(tmp_str, part_ptr->cpu_bind);
+		xstrfmtcat(out, " CpuBind=%s ", tmp_str);
+	}
+
 	if (part_ptr->qos_char)
 		xstrfmtcat(out, " QoS=%s", part_ptr->qos_char);
 	else
 		xstrcat(out, " QoS=N/A");
 
 	xstrcat(out, line_end);
-
-	/****** Line 4 added here for BG partitions only
-	 ****** to maintain alphabetized output ******/
-
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		xstrfmtcat(out, "Midplanes=%s", part_ptr->nodes);
-		xstrcat(out, line_end);
-	}
 
 	/****** Line 5 ******/
 
@@ -232,16 +230,8 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 
 	if (part_ptr->max_nodes == INFINITE)
 		xstrcat(out, "MaxNodes=UNLIMITED");
-	else {
-		if (cluster_flags & CLUSTER_FLAG_BG) {
-			convert_num_unit((float)part_ptr->max_nodes, tmp,
-					 sizeof(tmp), UNIT_NONE, NO_VAL,
-					 CONVERT_NUM_UNIT_EXACT);
-			xstrfmtcat(out, "MaxNodes=%s", tmp);
-		} else
-			xstrfmtcat(out, "MaxNodes=%u", part_ptr->max_nodes);
-
-	}
+	else
+		xstrfmtcat(out, "MaxNodes=%u", part_ptr->max_nodes);
 
 	if (part_ptr->max_time == INFINITE)
 		xstrcat(out, " MaxTime=UNLIMITED");
@@ -252,12 +242,7 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 		xstrfmtcat(out, " MaxTime=%s", time_line);
 	}
 
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		convert_num_unit((float)part_ptr->min_nodes, tmp, sizeof(tmp),
-				 UNIT_NONE, NO_VAL, CONVERT_NUM_UNIT_EXACT);
-		xstrfmtcat(out, " MinNodes=%s", tmp);
-	} else
-		xstrfmtcat(out, " MinNodes=%u", part_ptr->min_nodes);
+	xstrfmtcat(out, " MinNodes=%u", part_ptr->min_nodes);
 
 	if (part_ptr->flags & PART_FLAG_LLN)
 		xstrcat(out, " LLN=YES");
@@ -273,13 +258,9 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 
 	xstrcat(out, line_end);
 
-	/****** Line added here for non BG nodes
-	 to keep with alphabetized output******/
-
-	if (!(cluster_flags & CLUSTER_FLAG_BG)) {
-		xstrfmtcat(out, "Nodes=%s", part_ptr->nodes);
-		xstrcat(out, line_end);
-	}
+	/****** Line 7 ******/
+	xstrfmtcat(out, "Nodes=%s", part_ptr->nodes);
+	xstrcat(out, line_end);
 
 	/****** Line 7 ******/
 
@@ -336,27 +317,22 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	else
 		xstrcat(out, "State=UNKNOWN");
 
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		convert_num_unit((float)part_ptr->total_cpus, tmp, sizeof(tmp),
-				 UNIT_NONE, NO_VAL, CONVERT_NUM_UNIT_EXACT);
-		xstrfmtcat(out, " TotalCPUs=%s", tmp);
-	} else
-		xstrfmtcat(out, " TotalCPUs=%u", part_ptr->total_cpus);
+	xstrfmtcat(out, " TotalCPUs=%u", part_ptr->total_cpus);
 
-
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		convert_num_unit((float)part_ptr->total_nodes, tmp, sizeof(tmp),
-				 UNIT_NONE, NO_VAL, CONVERT_NUM_UNIT_EXACT);
-		xstrfmtcat(out, " TotalNodes=%s", tmp);
-	} else
-		xstrfmtcat(out, " TotalNodes=%u", part_ptr->total_nodes);
+	xstrfmtcat(out, " TotalNodes=%u", part_ptr->total_nodes);
 
 	xstrfmtcat(out, " SelectTypeParameters=%s",
 		   select_type_param_string(part_ptr->cr_type));
 
 	xstrcat(out, line_end);
 
-	/****** Line 9 ******/
+	/****** Line ******/
+	value = job_defaults_str(part_ptr->job_defaults_list);
+	xstrfmtcat(out, "JobDefaults=%s", value);
+	xfree(value);
+	xstrcat(out, line_end);
+
+	/****** Line ******/
 	if (part_ptr->def_mem_per_cpu & MEM_PER_CPU) {
 		if (part_ptr->def_mem_per_cpu == MEM_PER_CPU) {
 			xstrcat(out, "DefMemPerCPU=UNLIMITED");
@@ -367,7 +343,8 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	} else if (part_ptr->def_mem_per_cpu == 0) {
 		xstrcat(out, "DefMemPerNode=UNLIMITED");
 	} else {
-		xstrfmtcat(out, "DefMemPerNode=%"PRIu64"", part_ptr->def_mem_per_cpu);
+		xstrfmtcat(out, "DefMemPerNode=%"PRIu64"",
+			   part_ptr->def_mem_per_cpu);
 	}
 
 	if (part_ptr->max_mem_per_cpu & MEM_PER_CPU) {
@@ -380,7 +357,8 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	} else if (part_ptr->max_mem_per_cpu == 0) {
 		xstrcat(out, " MaxMemPerNode=UNLIMITED");
 	} else {
-		xstrfmtcat(out, " MaxMemPerNode=%"PRIu64"", part_ptr->max_mem_per_cpu);
+		xstrfmtcat(out, " MaxMemPerNode=%"PRIu64"",
+			   part_ptr->max_mem_per_cpu);
 	}
 
 	/****** Line 10 ******/
@@ -604,7 +582,7 @@ extern int slurm_load_partitions(time_t update_time,
 	req_msg.msg_type = REQUEST_PARTITION_INFO;
 	req_msg.data     = &req;
 
-	if (show_flags & SHOW_FEDERATION) {
+	if ((show_flags & SHOW_FEDERATION) && ptr) { /* "ptr" check for CLANG */
 		fed = (slurmdb_federation_rec_t *) ptr;
 		rc = _load_fed_parts(&req_msg, resp, show_flags, cluster_name,
 				     fed);

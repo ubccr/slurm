@@ -9,11 +9,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,13 +29,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -63,6 +63,9 @@ uint32_t my_uid = 0;
 List g_qos_list = NULL;
 List g_res_list = NULL;
 List g_tres_list = NULL;
+
+/* by default, normalize all usernames to lower case */
+bool user_case_norm = true;
 bool tree_display = 0;
 
 static void	_add_it(int argc, char **argv);
@@ -84,6 +87,8 @@ int main(int argc, char **argv)
 	int local_exit_code = 0;
 	char *temp = NULL;
 	int option_index;
+	uint16_t persist_conn_flags = 0;
+
 	static struct option long_options[] = {
 		{"help",     0, 0, 'h'},
 		{"usage",    0, 0, 'h'},
@@ -197,7 +202,8 @@ int main(int argc, char **argv)
 	xfree(temp);
 
 	errno = 0;
-	db_conn = slurmdb_connection_get();
+	db_conn = slurmdb_connection_get2(&persist_conn_flags);
+
 	if (errno != SLURM_SUCCESS) {
 		int tmp_errno = errno;
 		if ((input_field_count == 2) &&
@@ -216,6 +222,9 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 	my_uid = getuid();
+
+	if (persist_conn_flags & PERSIST_FLAG_P_USER_CASE)
+		user_case_norm = false;
 
 	if (input_field_count)
 		exit_flag = 1;

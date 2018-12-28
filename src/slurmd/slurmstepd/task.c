@@ -7,11 +7,11 @@
  *  Written by Mark A. Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -318,16 +318,30 @@ _setup_mpi(stepd_step_rec_t *job, int ltaskid)
 {
 	mpi_plugin_task_info_t info[1];
 
-	info->jobid = job->jobid;
-	info->stepid = job->stepid;
-	info->nnodes = job->nnodes;
-	info->nodeid = job->nodeid;
-	info->ntasks = job->ntasks;
-	info->ltasks = job->node_tasks;
-	info->gtaskid = job->task[ltaskid]->gtid;
-	info->ltaskid = job->task[ltaskid]->id;
-	info->self = job->envtp->self;
-	info->client = job->envtp->cli;
+	if (job->pack_jobid && (job->pack_jobid != NO_VAL)) {
+		info->jobid   = job->pack_jobid;
+		info->stepid  = job->stepid;
+		info->nnodes  = job->pack_nnodes;
+		info->nodeid  = job->node_offset + job->nodeid;
+		info->ntasks  = job->pack_ntasks ;
+		info->ltasks  = job->node_tasks;
+		info->gtaskid = job->pack_task_offset +
+				job->task[ltaskid]->gtid;
+		info->ltaskid = job->task[ltaskid]->id;
+		info->self    = job->envtp->self;
+		info->client  = job->envtp->cli;
+	} else {
+		info->jobid   = job->jobid;
+		info->stepid  = job->stepid;
+		info->nnodes  = job->nnodes;
+		info->nodeid  = job->nodeid;
+		info->ntasks  = job->ntasks;
+		info->ltasks  = job->node_tasks;
+		info->gtaskid = job->task[ltaskid]->gtid;
+		info->ltaskid = job->task[ltaskid]->id;
+		info->self    = job->envtp->self;
+		info->client  = job->envtp->cli;
+	}
 
 	return mpi_hook_slurmstepd_task(info, &job->env);
 }
@@ -348,8 +362,6 @@ extern void exec_task(stepd_step_rec_t *job, int i)
 		node_offset = job->node_offset;
 	if (job->pack_task_offset != NO_VAL)
 		task_offset = job->pack_task_offset;
-	if (i == 0)
-		_make_tmpdir(job);
 
 	gtids = xmalloc(job->node_tasks * sizeof(uint32_t));
 	for (j = 0; j < job->node_tasks; j++)
@@ -390,6 +402,14 @@ extern void exec_task(stepd_step_rec_t *job, int i)
 	setup_env(job->envtp, false);
 	setenvf(&job->envtp->env, "SLURM_JOB_GID", "%d", job->gid);
 	setenvf(&job->envtp->env, "SLURMD_NODENAME", "%s", conf->node_name);
+	if (job->tres_bind) {
+		setenvf(&job->envtp->env, "SLURMD_TRES_BIND", "%s",
+			job->tres_bind);
+	}
+	if (job->tres_freq) {
+		setenvf(&job->envtp->env, "SLURMD_TRES_FREQ", "%s",
+			job->tres_freq);
+	}
 	tmp_env = job->env;
 	job->env = job->envtp->env;
 	env_array_free(tmp_env);
@@ -460,6 +480,13 @@ extern void exec_task(stepd_step_rec_t *job, int i)
 		_run_script_and_set_env("user task_prolog",
 					job->task_prolog, job);
 	}
+
+	/*
+	 * Set TMPDIR after running prolog scripts, since TMPDIR
+	 * might be set or changed in one of the prolog scripts.
+	 */
+	if (i == 0)
+		_make_tmpdir(job);
 
 	if (!job->batch)
 		pdebug_stop_current(job);

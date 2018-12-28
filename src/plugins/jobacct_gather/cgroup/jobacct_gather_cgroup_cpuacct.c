@@ -6,11 +6,11 @@
  *  Written by Martin Perry (martin.perry@bull.com) based on code from
  *  Matthieu Hautreux
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -57,7 +57,8 @@ static xcgroup_ns_t cpuacct_ns;
 static xcgroup_t user_cpuacct_cg;
 static xcgroup_t job_cpuacct_cg;
 static xcgroup_t step_cpuacct_cg;
-xcgroup_t task_cpuacct_cg;
+
+List task_cpuacct_cg_list = NULL;
 
 static uint32_t max_task_id;
 
@@ -68,6 +69,7 @@ jobacct_gather_cgroup_cpuacct_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	user_cgroup_path[0]='\0';
 	job_cgroup_path[0]='\0';
 	jobstep_cgroup_path[0]='\0';
+	task_cgroup_path[0]='\0';
 
 	/* initialize cpuacct cgroup namespace */
 	if (xcgroup_ns_create(slurm_cgroup_conf, &cpuacct_ns,  "", "cpuacct")
@@ -76,6 +78,9 @@ jobacct_gather_cgroup_cpuacct_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		      "namespace");
 		return SLURM_ERROR;
 	}
+
+	FREE_NULL_LIST(task_cpuacct_cg_list);
+	task_cpuacct_cg_list = list_create(free_task_cg_info);
 
 	return SLURM_SUCCESS;
 }
@@ -90,7 +95,7 @@ jobacct_gather_cgroup_cpuacct_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	if (user_cgroup_path[0] == '\0'
 	    || job_cgroup_path[0] == '\0'
 	    || jobstep_cgroup_path[0] == '\0'
-	    || task_cgroup_path[0] == 0)
+	    || task_cgroup_path[0] == '\0')
 		return SLURM_SUCCESS;
 
 	/*
@@ -117,18 +122,20 @@ jobacct_gather_cgroup_cpuacct_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	 */
 	for (cc = 0; cc <= max_task_id; cc++) {
 		xcgroup_t cgroup;
-		char buf[PATH_MAX];
+		char *buf = NULL;
 
 		/* rmdir all tasks this running slurmstepd
 		 * was responsible for.
 		 */
-		sprintf(buf, "%s%s/task_%d",
-			cpuacct_ns.mnt_point, jobstep_cgroup_path, cc);
+		xstrfmtcat(buf, "%s%s/task_%d",
+			   cpuacct_ns.mnt_point, jobstep_cgroup_path, cc);
 		cgroup.path = buf;
 
 		if (xcgroup_delete(&cgroup) != XCGROUP_SUCCESS) {
 			debug2("%s: failed to delete %s %m", __func__, buf);
 		}
+
+		xfree(buf);
 	}
 
 	if (xcgroup_delete(&step_cpuacct_cg) != XCGROUP_SUCCESS) {
@@ -149,16 +156,16 @@ jobacct_gather_cgroup_cpuacct_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	if (lock_ok == true)
 		xcgroup_unlock(&cpuacct_cg);
 
-	xcgroup_destroy(&task_cpuacct_cg);
 	xcgroup_destroy(&user_cpuacct_cg);
 	xcgroup_destroy(&job_cpuacct_cg);
 	xcgroup_destroy(&step_cpuacct_cg);
 	xcgroup_destroy(&cpuacct_cg);
+	FREE_NULL_LIST(task_cpuacct_cg_list);
 
 	user_cgroup_path[0]='\0';
 	job_cgroup_path[0]='\0';
 	jobstep_cgroup_path[0]='\0';
-	task_cgroup_path[0] = 0;
+	task_cgroup_path[0]='\0';
 
 	xcgroup_ns_destroy(&cpuacct_ns);
 
@@ -178,6 +185,8 @@ jobacct_gather_cgroup_cpuacct_attach_task(pid_t pid, jobacct_id_t *jobacct_id)
 	int fstatus = SLURM_SUCCESS;
 	int rc;
 	char* slurm_cgpath;
+	task_cg_info_t *task_cg_info;
+	bool need_to_add = false;
 
 	job = jobacct_id->job;
 	uid = job->uid;
@@ -188,6 +197,8 @@ jobacct_gather_cgroup_cpuacct_attach_task(pid_t pid, jobacct_id_t *jobacct_id)
 
 	if (taskid >= max_task_id)
 		max_task_id = taskid;
+
+	xassert(task_cpuacct_cg_list);
 
 	debug("%s: jobid %u stepid %u taskid %u max_task_id %u",
 	      __func__, jobid, stepid, taskid, max_task_id);
@@ -208,6 +219,7 @@ jobacct_gather_cgroup_cpuacct_attach_task(pid_t pid, jobacct_id_t *jobacct_id)
 			return SLURM_ERROR;
 		}
 	}
+	xfree(slurm_cgpath);
 
 	/* build job cgroup relative path if not set (may not be) */
 	if (*job_cgroup_path == '\0') {
@@ -257,7 +269,7 @@ jobacct_gather_cgroup_cpuacct_attach_task(pid_t pid, jobacct_id_t *jobacct_id)
 	 * setting it up. As soon as the step cgroup is created, we can release
 	 * the lock.
 	 * Indeed, consecutive slurm steps could result in cg being removed
-	 * between the next EEXIST instanciation and the first addition of
+	 * between the next EEXIST instantiation and the first addition of
 	 * a task. The release_agent will have to lock the root cpuacct cgroup
 	 * to avoid this scenario.
 	 */
@@ -342,26 +354,40 @@ jobacct_gather_cgroup_cpuacct_attach_task(pid_t pid, jobacct_id_t *jobacct_id)
 		goto error;
 	}
 
+	if (!(task_cg_info = list_find_first(task_cpuacct_cg_list,
+					     find_task_cg_info,
+					     &taskid))) {
+		task_cg_info = xmalloc(sizeof(*task_cg_info));
+		task_cg_info->taskid = taskid;
+		need_to_add = true;
+	}
+
 	/*
 	 * Create task cgroup in the cpuacct ns
 	 */
-	if (xcgroup_create(&cpuacct_ns, &task_cpuacct_cg,
+	if (xcgroup_create(&cpuacct_ns, &task_cg_info->task_cg,
 			   task_cgroup_path,
 			   uid, gid) != XCGROUP_SUCCESS) {
 		/* do not delete user/job cgroup as they can exist for other
 		 * steps, but release cgroup structures */
 		xcgroup_destroy(&user_cpuacct_cg);
 		xcgroup_destroy(&job_cpuacct_cg);
+
+		/* Don't use free_task_cg_info as the task_cg isn't there */
+		xfree(task_cg_info);
+
 		error("jobacct_gather/cgroup: unable to create jobstep %u.%u "
 		      "task %u cpuacct cgroup", jobid, stepid, taskid);
 		fstatus = SLURM_ERROR;
 		goto error;
 	}
 
-	if (xcgroup_instantiate(&task_cpuacct_cg) != XCGROUP_SUCCESS) {
+	if (xcgroup_instantiate(&task_cg_info->task_cg)
+	    != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&user_cpuacct_cg);
 		xcgroup_destroy(&job_cpuacct_cg);
 		xcgroup_destroy(&step_cpuacct_cg);
+		free_task_cg_info(task_cg_info);
 		error("jobacct_gather/cgroup: unable to instantiate jobstep "
 		      "%u.%u task %u cpuacct cgroup", jobid, stepid, taskid);
 		fstatus = SLURM_ERROR;
@@ -371,13 +397,17 @@ jobacct_gather_cgroup_cpuacct_attach_task(pid_t pid, jobacct_id_t *jobacct_id)
 	/*
 	 * Attach the slurmstepd to the task cpuacct cgroup
 	 */
-	rc = xcgroup_add_pids(&task_cpuacct_cg, &pid, 1);
+	rc = xcgroup_add_pids(&task_cg_info->task_cg, &pid, 1);
 	if (rc != XCGROUP_SUCCESS) {
-		error("jobacct_gather/cgroup: unable to add slurmstepd to "
-		      "cpuacct cg '%s'", task_cpuacct_cg.path);
+		error("jobacct_gather/cgroup: unable to add slurmstepd to cpuacct cg '%s'",
+		      task_cg_info->task_cg.path);
 		fstatus = SLURM_ERROR;
 	} else
 		fstatus = SLURM_SUCCESS;
+
+	/* Add the task cgroup to the list now that it is initialized. */
+	if (need_to_add)
+		list_append(task_cpuacct_cg_list , task_cg_info);
 
 error:
 	xcgroup_unlock(&cpuacct_cg);

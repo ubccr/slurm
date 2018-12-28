@@ -11,22 +11,22 @@
 #		Bull, Rue Jean Jaures, B.P.68, 78340, Les Clayes-sous-Bois.
 #  Written by Rod Schultz <Rod.Schultz@bull.com>
 #
-# This file is part of SLURM, a resource management program.
+# This file is part of Slurm, a resource management program.
 # For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -52,6 +52,8 @@ print_header	$test_id
 
 ################################################################
 # Run a test case.
+# "test_case" is a wrapper for "test_freq" due to current Linux
+# not reliably changing frequency, so we can repeat a test
 #
 # Parameters
 # - opt		value of --cpu-freq
@@ -61,15 +63,16 @@ print_header	$test_id
 # - expgov      expected value of scaling_governor (if 0, don't check)
 #
 # Returns
-# 0 on success, 1 on failure.
+# 0 on success, 1 on failure
+ # 2 if measured frequency differs too much from target frequency
 #   FAILURE message is sent to user on failure.
 ################################################################
-proc test_case {opt expmin expcur expmax expgov} {
+proc test_freq {opt expmin expcur expmax expgov} {
 	global bin_rm srun sbatch test_node test_cpu wd number
 	log_user 0
 	exec $bin_rm -f $wd/test1.76.out
 	set job_id 0
-	spawn $sbatch -w $test_node --exclusive -o test1.76.out test1.76.batch $test_cpu $opt $wd $srun
+	spawn $sbatch -w $test_node --exclusive -o test1.76.out -t1 test1.76.batch $test_cpu $opt $wd $srun
 	expect {
 		-re "Submitted batch job ($number)" {
 			set job_id $expect_out(1,string)
@@ -111,7 +114,7 @@ proc test_case {opt expmin expcur expmax expgov} {
 		} 
 	}
 	if {[string compare $start_value ""] == 0} {
-		send_user "\nERROR: --cpu-freq=$opt -- can't find starting values\n"
+		send_user "\nFAILURE: --cpu-freq=$opt -- can't find starting values\n"
 		close $fd
 		log_user 1
 		return 1
@@ -127,7 +130,7 @@ proc test_case {opt expmin expcur expmax expgov} {
 		} 
 	}
 	if {[string compare $test_value ""] == 0} {
-		send_user "\nERROR: --cpu-freq=$opt -- can't find test values\n"
+		send_user "\nFAILURE: --cpu-freq=$opt -- can't find test values\n"
 		close $fd
 		log_user 1
 		return 1
@@ -143,7 +146,7 @@ proc test_case {opt expmin expcur expmax expgov} {
 		} 
 	}
 	if {[string compare $end_value ""] == 0} {
-		send_user "\nERROR: --cpu-freq=$opt -- can't find ending values\n"
+		send_user "\nFAILURE: --cpu-freq=$opt -- can't find ending values\n"
 		close $fd
 		log_user 1
 		return 1
@@ -173,23 +176,40 @@ proc test_case {opt expmin expcur expmax expgov} {
 	set ecur [string range [lindex $end_vals 2] 4 end]
 	set emax [string range [lindex $end_vals 3] 4 end]
 
-	if {[string compare $expgov 0] !=0 
+	if {[string compare $expgov 0] != 0 
 	    && [string compare $tgov $expgov] != 0} {
-		send_user "\nERROR: --cpu-freq=$opt -- test governor $tgov not expected ($expgov)\n"
+		send_user "\nFAILURE: --cpu-freq=$opt -- test governor $tgov not expected ($expgov)\n"
 		log_user 1
 		return 1
 	}
-	if {[string compare $expmin 0] !=0 
+	if {[string compare $expmin 0] != 0 
 	    && [string compare $tmin $expmin] != 0} {
-		send_user "\nERROR: --cpu-freq=$opt -- test min $tmin not expected ($expmin)\n"
+		send_user "\nFAILURE: --cpu-freq=$opt -- test min $tmin not expected ($expmin)\n"
 		log_user 1
 		return 1
 	}
-	if {[string compare $expcur 0] !=0 
-	    && [string compare $tcur $expcur] != 0} {
-		send_user "\nERROR: --cpu-freq=$opt -- test cur $tcur not expected ($expcur)\n"
-		log_user 1
-		return 1
+	# Check that actual frequency is within 10 percent of target
+	if {$expcur != 0} {
+		set percent_error [expr abs($tcur - $expcur) * 100 / $expcur]
+	} else {
+		set percent_error 0
+	}
+	if {$percent_error > 10} {
+		set real_error 1
+		if {![string compare $opt "High"]} {
+			if {$tcur > $expcur} {
+				send_user "\nWARNING: --cpu-freq=$opt -- test cur $tcur higher than ($expcur).  This is expected on overclocked systems.\n\n"
+				set real_error 0
+			}
+		}
+
+		if {$real_error} {
+			send_user "\nWARNING: --cpu-freq=$opt -- test cur $tcur not expected ($expcur, error is $percent_error percent)\n"
+			log_user 1
+			return 2
+		}
+	} elseif {$expcur != 0} {
+		send_user "\nDifference between requested and actual frequency is $percent_error percent ($tcur vs. $expcur)\n\n"
 	}
 	if {[string compare $expmax 0] !=0 
 	    && [string compare $tmax $expmax] != 0} {
@@ -199,23 +219,35 @@ proc test_case {opt expmin expcur expmax expgov} {
 	}
 	
 	if {[string compare $sgov $egov] != 0} {
-		send_user "\nERROR: --cpu-freq=$opt -- starting governor $sgov not reset ($egov)\n"
+		send_user "\nFAILURE: --cpu-freq=$opt -- starting governor $sgov not reset ($egov)\n"
 		log_user 1
 		return 1
 	}
 	if {[string compare $smin $emin] != 0} {
-		send_user "\nERROR: --cpu-freq=$opt -- starting min $smin not reset ($emin)\n"
+		send_user "\nFAILURE: --cpu-freq=$opt -- starting min $smin not reset ($emin)\n"
 		log_user 1
 		return 1
 	}
 	if {[string compare $smax $emax] != 0} {
-		send_user "\nERROR: --cpu-freq=$opt -- starting max $smax not reset ($emax)\n"
+		send_user "\nFAILURE: --cpu-freq=$opt -- starting max $smax not reset ($emax)\n"
 		log_user 1
 		return 1
 	}
 
 	log_user 1
 	return 0	
+}
+
+proc test_case {opt expmin expcur expmax expgov} {
+	set retry_cnt 5
+	for {set inx 0} {$inx < $retry_cnt} {incr inx} {
+		set rc [test_freq $opt $expmin $expcur $expmax $expgov]
+		if {$rc != 2} {
+			return $rc
+		}
+	}
+	send_user "\nFAILURE: --cpu-freq control failing repeatedly\n"
+	return $rc
 }
 
 # Check environment
@@ -225,7 +257,7 @@ if {[test_cpu_affinity_or_cgroup] == 0} {
 }
 if {[test_fast_schedule] != 0} {
 	send_user "\nWARNING: FastSchedule=0 is recommended.\n"
-	send_user "         Proceeding assuming that the number of cpu declared is accurate.\n"
+	send_user "         Proceeding assuming that the number of CPUs declared is accurate.\n"
 }
 log_user 0
 spawn $scontrol show config
@@ -243,94 +275,88 @@ expect {
 		wait
 	}
 }
-# Identify a node to use
-spawn $srun --exclusive -n1 env
-expect
-wait
-set pos [string first "SLURMD_NODENAME=" $expect_out(buffer)]
-set tmp [string range $expect_out(buffer) $pos+16 end]
-set pos [string first "\n" $tmp]
-set test_node [string range $tmp 0 $pos-1]
-set test_node [string trim $test_node "\r"]
 
-# See how many cpu's on that node.
-# We will assume the tests will run on the highest numbered cpu
+# Identify a node to use
+set timeout $max_job_delay
+set test_node 0
+spawn $srun --exclusive -n1 -t1 env
+expect {
+	-re "SLURMD_NODENAME=($alpha_numeric_nodelist)" {
+		set test_node $expect_out(1,string)
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+if {$test_node == 0} {
+	send_user "\nFAILURE: failed to get hostname\n"
+	exit 1
+}
+
+# Determine CPU count on that node.
+# We will assume the tests will run on the highest numbered CPU
+set test_cpu -1
 spawn $scontrol show node $test_node
-expect
-wait
-set lines [split $expect_out(buffer) "\n"]
-set ll [llength $lines]
-if {$ll < 2} {
-	send_user "\nFAILURE: scontrol node failed\n"
+expect {
+	-re "CPUTot=($number)" {
+		set test_cpu $expect_out(1,string)
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+
+log_user 1
+if {$test_cpu == -1} {
+	send_user "\nFAILURE: failed to get CPU count on node $test_node\n"
 	exit 1
 }
-set line [lindex $lines 1]
-set line [string trim $line]
-set opts [split $line " "]
-if {[llength $opts] < 3} {
-	send_user "\nFAILURE: scontrol node output is bad\n"
-	exit 1
-} 
-set opt3 [lindex $opts 2]
-if {[string first "CPUTot" $opt3] != 0} {
-	send_user "\nFAILURE: CPUTot not found in scontrol node output\n"
-	exit 1
-}
-set test_cpu [string range $opt3 7 end]
 incr test_cpu -1
 send_user "test node is $test_node, test_cpu is $test_cpu\n"
 
-# Verify that selected cpu on selected node supports cpu_frequency
-spawn $srun -w $test_node --exclusive ./test1.76.bash $test_cpu
-expect
-wait
-set pos [string first "not supported" $expect_out(buffer)]
-if {$pos > 0} {
-	send_user "\nWARNING: Test requires frequency scaling\n"
-	exit 0
-}
-set pos [string first "userspace" $expect_out(buffer)]
-if {$pos < 0} {
-	set have_user_space 0
-}
-set pos [string first "ondemand" $expect_out(buffer)]
-if {$pos < 0} {
-	set have_on_demand 0
-}
-
-set lines [split $expect_out(buffer) "\n"]
-set ll [llength $lines]
-for {set lx 0} {$lx < $ll} {incr lx} {
-	set line [lindex $lines $lx]
-	set line [string trim $line "\r"]
-	set pos [string first "frequencies" $line]
-	if {$pos > 0} {
-		set tmp [string range $line 22 end]
-		set freqs [split $tmp " "]
-		set avail_freq [lsort $freqs]
+# Verify that selected CPU on selected node supports cpu_frequency
+set have_on_demand 0
+set have_user_space 0
+set nfreq 0
+spawn $srun -w $test_node --exclusive -t1 ./test1.76.bash $test_cpu
+expect {
+	-re "scaling frequency not supported" {
+		send_user "\nWARNING: Test requires frequency scaling\n"
+		exit 0
+	}
+	-re "available_governors (\[a-zA-Z \]+)" {
+		if {[string first "ondemand" $expect_out(1,string)] >= 0} {
+			set have_on_demand 1
+		}
+		if {[string first "userspace" $expect_out(1,string)] >= 0} {
+			set have_user_space 1
+		}
+		exp_continue
+	}
+	-re "available_frequencies (\[0-9 \]+)" {
+		set tmp [string trimright $expect_out(1,string)]
+		set freq_line [string trimright $tmp]
+		set freqs [split $freq_line " "]
+		set avail_freq [lsort -integer $freqs]
 		set nfreq [llength $avail_freq]
-		break
+		exp_continue
+	}
+	eof {
+		wait
 	}
 }
-incr nfreq -1
 if {$nfreq < 2} {
-	send_user "\nWARNING: Test requires at least 2 available frequencies.\n"
+	send_user "\nWARNING: Test requires at least 2 available frequencies\n"
 	exit 0
 }
 if {$have_user_space == 0} {
-	send_user "\nWARNING: Test recommends UserSpace governor\n"
+	send_user "\nWARNING: Test requires UserSpace governor\n"
 	exit 0
 }
 if {$have_on_demand == 0} {
-	send_user "\nWARNING: Test recommends OnDemand governor\n"
-}
-
-set avail_freq {}
-set iy $nfreq
-incr iy -1
-for {set ix 0} {$ix<$nfreq} {incr ix} {
-	lappend avail_freq [lindex $freqs $iy]
-	incr iy -1
+	send_user "\nWARNING: Test requires OnDemand governor\n"
 }
 
 set xmx [expr ($nfreq - 1) / 2]
@@ -338,7 +364,11 @@ set xlow [lindex $avail_freq 0]
 set xhigh [lindex $avail_freq $nfreq-1]
 set xhighm1 [lindex $avail_freq $nfreq-2]
 set xmed [lindex $avail_freq $xmx]
+send_user "\nFrequencies: low:$xlow medium:$xmed highm1:$xhighm1 high:$xhigh\n"
 
+#
+# Now run the tests
+#
 incr nerr [test_case userspace 0 0 0 userspace]
 if {$have_on_demand == 1} {
 	incr nerr [test_case ondemand 0 0 0 ondemand]

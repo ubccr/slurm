@@ -6,11 +6,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -92,19 +92,16 @@ extern ssize_t slurm_msg_recvfrom_timeout(int fd, char **buf,
  * IN open_fd - an open file descriptor
  * IN buffer - data to transmit
  * IN size - size of buffer in bytes
- * IN flags - communication specific flags
  * RET number of bytes written
  */
 extern ssize_t slurm_msg_sendto(int open_fd,
 				char *buffer,
-				size_t size,
-				uint32_t flags);
+				size_t size);
 /* slurm_msg_sendto_timeout is identical to _slurm_msg_sendto except
  * IN timeout - maximum time to wait for a message in milliseconds */
 extern ssize_t slurm_msg_sendto_timeout(int open_fd,
 					char *buffer,
 					size_t size,
-					uint32_t flags,
 					int timeout);
 
 /********************/
@@ -196,7 +193,7 @@ extern void slurm_pack_slurm_addr ( slurm_addr_t * slurm_address ,
  * unpacks a buffer into a slurm_addr_t after serialization transport
  * OUT slurm_address	- slurm_addr_t to unpack to
  * IN/OUT buffer	- buffer to upack the slurm_addr_t from
- * returns 		- SLURM error code
+ * returns 		- Slurm error code
  */
 extern int slurm_unpack_slurm_addr_no_alloc (
 	slurm_addr_t * slurm_address , Buf buffer ) ;

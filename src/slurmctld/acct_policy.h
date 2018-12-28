@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -152,5 +152,26 @@ extern int acct_policy_update_pending_job(struct job_record *job_ptr);
  *	timed out and sets job_ptr->state_reason = FAIL_TIMEOUT;
  */
 extern bool acct_policy_job_time_out(struct job_record *job_ptr);
+
+/*
+ * acct_policy_handle_accrue_time - Set accrue time if we are under a limit.  If
+ * we are a task array we will also split off things to handle them
+ * individually.
+ */
+extern int acct_policy_handle_accrue_time(struct job_record *job_ptr,
+					  bool assoc_mgr_locked);
+
+/*
+ * acct_policy_add_accrue_time - Implicitly add job to the accrue_cnt of the
+ * assoc and QOS of the job/part.
+ */
+extern void acct_policy_add_accrue_time(struct job_record *job_ptr,
+					bool assoc_mgr_locked);
+
+extern void acct_policy_remove_accrue_time(struct job_record *job_ptr,
+					   bool assoc_mgr_locked);
+
+extern uint32_t acct_policy_get_prio_thresh(struct job_record *job_ptr,
+					    bool assoc_mgr_locked);
 
 #endif /* !_HAVE_ACCT_POLICY_H */

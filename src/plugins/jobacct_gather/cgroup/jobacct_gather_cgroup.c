@@ -6,11 +6,11 @@
  *  from other parts of SLURM
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
  *  This file is patterned after jobcomp_linux.c, written by Morris Jette and
@@ -78,14 +78,14 @@ int bg_recover = NOT_FROM_CONTROLLER;
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "jobacct" for SLURM job completion logging) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "jobacct" for Slurm job completion logging) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
@@ -99,17 +99,45 @@ const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 /* Other useful declarations */
 static slurm_cgroup_conf_t slurm_cgroup_conf;
 
-static void _prec_extra(jag_prec_t *prec)
+static void _prec_extra(jag_prec_t *prec, uint32_t taskid)
 {
 	unsigned long utime, stime, total_rss, total_pgpgin;
 	char *cpu_time = NULL, *memory_stat = NULL, *ptr;
 	size_t cpu_time_size = 0, memory_stat_size = 0;
+	xcgroup_t *task_cpuacct_cg = NULL;;
+	xcgroup_t *task_memory_cg = NULL;
+	bool exit_early = false;
+
+	/* Find which task cgroups to use */
+	task_memory_cg = list_find_first(task_memory_cg_list,
+					 find_task_cg_info,
+					 &taskid);
+	task_cpuacct_cg = list_find_first(task_cpuacct_cg_list,
+					  find_task_cg_info,
+					  &taskid);
+
+	/*
+	 * We should always find the task cgroups; if we don't for some reason,
+	 * just print an error and return.
+	 */
+	if (!task_cpuacct_cg) {
+		error("%s: Could not find task_cpuacct_cg, this should never happen",
+		      __func__);
+		exit_early = true;
+	}
+	if (!task_memory_cg) {
+		error("%s: Could not find task_memory_cg, this should never happen",
+		      __func__);
+		exit_early = true;
+	}
+	if (exit_early)
+		return;
 
 	//DEF_TIMERS;
 	//START_TIMER;
 	/* info("before"); */
 	/* print_jag_prec(prec); */
-	xcgroup_get_param(&task_cpuacct_cg, "cpuacct.stat",
+	xcgroup_get_param(task_cpuacct_cg, "cpuacct.stat",
 			  &cpu_time, &cpu_time_size);
 	if (cpu_time == NULL) {
 		debug2("%s: failed to collect cpuacct.stat pid %d ppid %d",
@@ -120,7 +148,7 @@ static void _prec_extra(jag_prec_t *prec)
 		prec->ssec = stime;
 	}
 
-	xcgroup_get_param(&task_memory_cg, "memory.stat",
+	xcgroup_get_param(task_memory_cg, "memory.stat",
 			  &memory_stat, &memory_stat_size);
 	if (memory_stat == NULL) {
 		debug2("%s: failed to collect memory.stat  pid %d ppid %d",
@@ -134,7 +162,7 @@ static void _prec_extra(jag_prec_t *prec)
 		 */
 		if ((ptr = strstr(memory_stat, "total_rss"))) {
 			sscanf(ptr, "total_rss %lu", &total_rss);
-			prec->rss = total_rss / 1024; /* bytes to KB */
+			prec->tres_data[TRES_ARRAY_MEM].size_read = total_rss;
 		}
 
 		/*
@@ -143,7 +171,8 @@ static void _prec_extra(jag_prec_t *prec)
 		 */
 		if ((ptr = strstr(memory_stat, "total_pgmajfault"))) {
 			sscanf(ptr, "total_pgmajfault %lu", &total_pgpgin);
-			prec->pages = total_pgpgin;
+			prec->tres_data[TRES_ARRAY_PAGES].size_read =
+				total_pgpgin;
 		}
 	}
 
@@ -363,3 +392,23 @@ extern char* jobacct_cgroup_create_slurm_cg(xcgroup_ns_t* ns)
 	return pre;
 }
 
+extern int find_task_cg_info(void *x, void *key)
+{
+	task_cg_info_t *task_cg = (task_cg_info_t*)x;
+	uint32_t taskid = *(uint32_t*)key;
+
+	if (task_cg->taskid == taskid)
+		return 1;
+
+	return 0;
+}
+
+extern void free_task_cg_info(void *object)
+{
+	task_cg_info_t *task_cg = (task_cg_info_t *)object;
+
+	if (task_cg) {
+		xcgroup_destroy(&task_cg->task_cg);
+		xfree(task_cg);
+	}
+}

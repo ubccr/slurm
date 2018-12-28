@@ -4,7 +4,7 @@
 
 <h2> Overview</h2>
 <p> This document describes Slurm MPI selection plugins and the API that defines
-them. It is intended as a resource to programmers wishing to write their own SLURM
+them. It is intended as a resource to programmers wishing to write their own Slurm
 node selection plugins.</p>
 
 <p>Slurm MPI selection plugins are Slurm plugins that implement the which version of
@@ -56,7 +56,6 @@ slurmstepd process runs
 which executes immediately before fork/exec of tasks.
 <br>
 
-<p class="footer"><a href="#top">top</a></p>
 
 <h2>Data Objects</h2>
 <p> These functions are expected to read and/or modify data structures directly in
@@ -64,7 +63,6 @@ the slurmd daemon's and srun memory. Slurmd is a multi-threaded program with ind
 read and write locks on each data structure type. Therefore the type of operations
 permitted on various data structures is identified for each function.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
 <h2>API Functions</h2>
 <p>The following functions must appear. Functions which are not implemented should
@@ -86,8 +84,8 @@ be stubbed.</p>
 <p><b>Note</b>: These init and fini functions are not the same as those
 described in the <span class="commandline">dlopen (3)</span> system library.
 The C run-time system co-opts those symbols for its own initialization.
-The system <span class="commandline">_init()</span> is called before the SLURM
-<span class="commandline">init()</span>, and the SLURM
+The system <span class="commandline">_init()</span> is called before the Slurm
+<span class="commandline">init()</span>, and the Slurm
 <span class="commandline">fini()</span> is called before the system's
 <span class="commandline">_fini()</span>.</p>
 
@@ -137,7 +135,6 @@ execution.</p>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful. On failure,
 the plugin should return SLURM_ERROR, causing slurmctld to exit.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
 <p style="text-align:center;">Last modified 15 September 2017</p>
 

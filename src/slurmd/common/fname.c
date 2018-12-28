@@ -6,11 +6,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #include <ctype.h>
@@ -81,7 +81,7 @@ extern char *fname_create(stepd_step_rec_t *job, const char *format, int taskid)
 		return (xstrdup ("/dev/null"));
 
 	orig = xstrdup(format);
-	esc = is_path_escaped(orig);
+	esc = remove_path_slashes(orig);
 
 	/* If format doesn't specify an absolute pathname, use cwd
 	 */
@@ -124,7 +124,7 @@ extern char *fname_create2(batch_job_launch_msg_t *req)
 		orig = xstrdup(req->std_out);
 	else
 		xstrfmtcat(orig, "slurm-%u.out", req->job_id);
-	esc = is_path_escaped(orig);
+	esc = remove_path_slashes(orig);
 
 	/* If format doesn't specify an absolute pathname, use cwd
 	 */
@@ -385,15 +385,14 @@ extern int fname_single_task_io (const char *fmt)
 	return -1;
 }
 
-/* is_path_escaped()
+/* remove_path_slashes()
  *
- * If there are \ chars in the path strip them.
- * The new path will tell the caller not to
- * translate escaped characters.
+ * If there are \ chars in the path strip the escaping ones.
+ * The new path will tell the caller not to translate escaped characters.
  */
-extern char *is_path_escaped(char *p)
+extern char *remove_path_slashes(char *p)
 {
-	char *buf;
+	char *buf, *pp;
 	bool t;
 	int i;
 
@@ -404,20 +403,31 @@ extern char *is_path_escaped(char *p)
 	t = false;
 	i = 0;
 
+	pp = p;
+	++pp;
 	while (*p) {
-		if (*p == '\\') {
+		if (*p == '\\' && *pp == '\\') {
+			t = true;
+			buf[i] = *pp;
+			++i;
+			p = p + 2;
+			pp = pp + 2;
+		} else if (*p == '\\') {
 			t = true;
 			++p;
-			continue;
+			++pp;
+		} else {
+			buf[i] = *p;
+			++i;
+			++p;
+			++pp;
 		}
-		buf[i] = *p;
-		++i;
-		++p;
 	}
 
 	if (t == false) {
 		xfree(buf);
 		return NULL;
 	}
+
 	return buf;
 }

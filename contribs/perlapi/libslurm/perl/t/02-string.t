@@ -69,19 +69,6 @@ $str = $slurm->accounting_enforce_string(6);
 cmp_ok($str, "eq", "limits,wckeys", "accounting enforce string");
 
 
-# 14
-$str = $slurm->conn_type_string(SELECT_MESH);
-cmp_ok($str, "eq", "Mesh", "conn type string");
-
-
 # 15
 $str = $slurm->node_use_string(SELECT_VIRTUAL_NODE_MODE);
 cmp_ok($str, "eq", "VIRTUAL", "node use type string");
-
-
-# 16
-$str = $slurm->bg_block_state_string(4);
-cmp_ok($str, "eq", "Ready", "bg block state string");
-
-
-

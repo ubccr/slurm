@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -138,17 +138,6 @@ int main(int argc, char **argv)
 	_update_logging(true);
 	_update_nice();
 
-	if (slurm_auth_init(NULL) != SLURM_SUCCESS) {
-		fatal("Unable to initialize %s authentication plugin",
-		      slurmdbd_conf->auth_type);
-	}
-	if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS) {
-		fatal("Unable to initialize %s accounting storage plugin",
-		      slurmdbd_conf->storage_type);
-	}
-
-	slurmdbd_defs_init(slurmdbd_conf->auth_info);
-
 	_kill_old_slurmdbd();
 	if (foreground == 0)
 		_daemonize();
@@ -160,6 +149,21 @@ int main(int argc, char **argv)
 	 * able to write a core dump.
 	 */
 	_init_pidfile();
+
+	/*
+	 * Do plugin init's after _init_pidfile so systemd is happy as
+	 * slurm_acct_storage_init() could take a long time to finish if running
+	 * for the first time after an upgrade.
+	 */
+	if (slurm_auth_init(NULL) != SLURM_SUCCESS) {
+		fatal("Unable to initialize %s authentication plugin",
+		      slurmdbd_conf->auth_type);
+	}
+	if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS) {
+		fatal("Unable to initialize %s accounting storage plugin",
+		      slurmdbd_conf->storage_type);
+	}
+
 	_become_slurm_user();
 	if (foreground == 0)
 		_set_work_dir();
@@ -192,7 +196,7 @@ int main(int argc, char **argv)
 	if (slurmdbd_conf->track_wckey)
 		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
 
-	db_conn = acct_storage_g_get_connection(NULL, 0, true, NULL);
+	db_conn = acct_storage_g_get_connection(NULL, 0, NULL, true, NULL);
 	if (assoc_mgr_init(db_conn, &assoc_init_arg, errno) == SLURM_ERROR) {
 		error("Problem getting cache of data");
 		acct_storage_g_close_connection(&db_conn);
@@ -311,13 +315,12 @@ end_it:
 		_restart_self(argc, argv);
 	}
 
-	assoc_mgr_fini(NULL);
+	assoc_mgr_fini(0);
 	slurm_acct_storage_fini();
 	slurm_auth_fini();
 	log_fini();
 	free_slurmdbd_conf();
 	_free_dbd_stats();
-	slurmdbd_defs_fini();
 	exit(0);
 }
 
@@ -501,22 +504,22 @@ static void _update_logging(bool startup)
 			(LOG_LEVEL_END - 1));
 	}
 
-	log_opts.stderr_level  = slurmdbd_conf->debug_level;
 	log_opts.logfile_level = slurmdbd_conf->debug_level;
-	log_opts.syslog_level  = slurmdbd_conf->debug_level;
 
-	if (foreground) {
-		log_opts.syslog_level = LOG_LEVEL_QUIET;
-	} else {
+	if (foreground)
+		log_opts.stderr_level  = slurmdbd_conf->debug_level;
+	else
 		log_opts.stderr_level = LOG_LEVEL_QUIET;
-		if (!slurmdbd_conf->log_file &&
-		    (slurmdbd_conf->syslog_debug == LOG_LEVEL_QUIET)) {
-			/* Ensure fatal errors get logged somewhere */
- 			log_opts.syslog_level = LOG_LEVEL_FATAL;
-		} else {
-			log_opts.syslog_level = slurmdbd_conf->syslog_debug;
-		}
-	}
+
+	if (slurmdbd_conf->syslog_debug != LOG_LEVEL_END) {
+		log_opts.syslog_level =	slurmdbd_conf->syslog_debug;
+	} else if (foreground) {
+		log_opts.syslog_level = LOG_LEVEL_QUIET;
+	} else if ((slurmdbd_conf->debug_level > LOG_LEVEL_QUIET)
+		   && !slurmdbd_conf->log_file) {
+		log_opts.syslog_level = slurmdbd_conf->debug_level;
+	} else
+		log_opts.syslog_level = LOG_LEVEL_FATAL;
 
 	log_alter(log_opts, SYSLOG_FACILITY_DAEMON, slurmdbd_conf->log_file);
 	log_set_timefmt(slurmdbd_conf->log_fmt);
@@ -732,7 +735,6 @@ static void *_rollup_handler(void *db_conn)
 		tm.tm_sec = 0;
 		tm.tm_min = 0;
 		tm.tm_hour++;
-		tm.tm_isdst = -1;
 		next_time = slurm_mktime(&tm);
 
 		sleep((next_time - start_time));

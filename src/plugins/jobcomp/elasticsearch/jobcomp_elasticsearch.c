@@ -6,11 +6,11 @@
  *  Written by Alejandro Sanchez Graells <alejandro.sanchezgraells@bsc.es>,
  *  <asanchez1987@gmail.com>, who borrowed heavily from jobcomp/filetxt
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -77,21 +77,21 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything. SLURM uses the higher-level plugin
+ * unimportant and may be anything. Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "jobcomp" for SLURM job completion logging) and <method>
- * is a description of how this plugin satisfies that application. SLURM will
+ * the plugin (e.g., "jobcomp" for Slurm job completion logging) and <method>
+ * is a description of how this plugin satisfies that application. Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobcomp/".
  *
  * plugin_version - an unsigned 32-bit integer giving the version number
  * of the plugin. If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
- * as 100 or 1000. Various SLURM versions will likely require a certain
+ * as 100 or 1000. Various Slurm versions will likely require a certain
  * minimum version for their plugins as the job completion logging API
  * matures.
  */
@@ -617,7 +617,8 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 {
 	char usr_str[32], grp_str[32], start_str[32], end_str[32], time_str[32];
 	char *json_str = NULL, *script_str = NULL, *state_string = NULL;
-	char *exit_code_str = NULL, *derived_ec_str = NULL, *script = NULL;
+	char *exit_code_str = NULL, *derived_ec_str = NULL;
+	Buf script;
 	enum job_states job_state;
 	int i, tmp_int, tmp_int2;
 	time_t elapsed_time;
@@ -832,12 +833,12 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 	}
 
 	script = get_job_script(job_ptr);
-	if (script && script[0]) {
-		script_str = _json_escape(script);
+	if (script) {
+		script_str = _json_escape(script->head);
 		xstrfmtcat(json_str, ",\"script\":\"%s\"", script_str);
 		xfree(script_str);
 	}
-	xfree(script);
+	free_buf(script);
 
 	if (job_ptr->assoc_ptr) {
 		assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
@@ -959,7 +960,7 @@ extern int fini(void)
 }
 
 /*
- * The remainder of this file implements the standard SLURM job completion
+ * The remainder of this file implements the standard Slurm job completion
  * logging API.
  */
 extern int slurm_jobcomp_set_location(char *location)

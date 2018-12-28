@@ -7,11 +7,11 @@
  *  Written by Danny Auble <da@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -61,8 +61,8 @@ uid_t db_api_uid = -1;
 
 typedef struct slurm_acct_storage_ops {
 	void *(*get_conn)          (const slurm_trigger_callbacks_t *callbacks,
-				    int conn_num, bool rollback,
-				    char *cluster_name);
+				    int conn_num, uint16_t *persist_conn_flags,
+				    bool rollback, char *cluster_name);
 	int  (*close_conn)         (void **db_conn);
 	int  (*commit)             (void *db_conn, bool commit);
 	int  (*add_users)          (void *db_conn, uint32_t uid,
@@ -212,6 +212,8 @@ typedef struct slurm_acct_storage_ops {
 				    List cluster_list);
 	int (*get_stats)           (void *db_conn, slurmdb_stats_rec_t **stats);
 	int (*clear_stats)         (void *db_conn);
+	int (*get_data)            (void *db_conn, acct_storage_info_t dinfo,
+				    void *data);
 	int (*shutdown)            (void *db_conn);
 } slurm_acct_storage_ops_t;
 /*
@@ -289,6 +291,7 @@ static const char *syms[] = {
 	"acct_storage_p_reset_lft_rgt",
 	"acct_storage_p_get_stats",
 	"acct_storage_p_clear_stats",
+	"acct_storage_p_get_data",
 	"acct_storage_p_shutdown",
 };
 
@@ -365,11 +368,13 @@ extern int slurm_acct_storage_fini(void)
 
 extern void *acct_storage_g_get_connection(
 	const slurm_trigger_callbacks_t *callbacks,
-	int conn_num, bool rollback,char *cluster_name)
+	int conn_num, uint16_t *persist_conn_flags,
+	bool rollback,char *cluster_name)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
-	return (*(ops.get_conn))(callbacks, conn_num, rollback, cluster_name);
+	return (*(ops.get_conn))(callbacks, conn_num, persist_conn_flags,
+				 rollback, cluster_name);
 }
 
 extern int acct_storage_g_close_connection(void **db_conn)
@@ -811,64 +816,9 @@ extern int clusteracct_storage_g_node_up(void *db_conn,
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;
 
-	/* on some systems we need to make sure we don't say something
-	   is completely up if there are cpus in an error state */
-	if (node_ptr->select_nodeinfo) {
-		uint16_t err_cpus = 0;
-		static uint32_t node_scaling = 0;
-		static uint16_t cpu_cnt = 1;
-
-		if (!node_scaling) {
-			select_g_alter_node_cnt(SELECT_GET_NODE_SCALING,
-						&node_scaling);
-			select_g_alter_node_cnt(SELECT_GET_NODE_CPU_CNT,
-						&cpu_cnt);
-			if (!node_scaling)
-				node_scaling = 1;
-		}
-
-		select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
-					     SELECT_NODEDATA_SUBCNT,
-					     NODE_STATE_ERROR,
-					     &err_cpus);
-		if (err_cpus) {
-			char *reason = "Setting partial node down.";
-			struct node_record send_node;
-			struct config_record config_rec;
-
-			if (!node_ptr->reason) {
-				if (err_cpus == node_scaling)
-					reason = "Setting node down.";
-				node_ptr->reason = xstrdup(reason);
-				node_ptr->reason_time = event_time;
-				node_ptr->reason_uid =
-					slurm_get_slurm_user_id();
-			} else
-				reason = node_ptr->reason;
-
-			err_cpus *= cpu_cnt;
-			memset(&send_node, 0, sizeof(struct node_record));
-			memset(&config_rec, 0, sizeof(struct config_record));
-			send_node.name = node_ptr->name;
-			send_node.config_ptr = &config_rec;
-			send_node.cpus = err_cpus;
-			config_rec.cpus = err_cpus;
-
-			send_node.node_state = NODE_STATE_ERROR;
-
-			return (*(ops.node_down))
-				(db_conn, &send_node,
-				 event_time, reason, slurm_get_slurm_user_id());
-		} else {
-			xfree(node_ptr->reason);
-			node_ptr->reason_time = 0;
-			node_ptr->reason_uid = NO_VAL;
-		}
-	} else {
-		xfree(node_ptr->reason);
-		node_ptr->reason_time = 0;
-		node_ptr->reason_uid = NO_VAL;
-	}
+	xfree(node_ptr->reason);
+	node_ptr->reason_time = 0;
+	node_ptr->reason_uid = NO_VAL;
 
 	return (*(ops.node_up))(db_conn, node_ptr, event_time);
 }
@@ -982,7 +932,7 @@ extern int jobacct_storage_g_step_complete(void *db_conn,
 }
 
 /*
- * load into the storage a suspention of a job
+ * load into the storage a suspension of a job
  */
 extern int jobacct_storage_g_job_suspend(void *db_conn,
 					 struct job_record *job_ptr)
@@ -1129,6 +1079,19 @@ extern int acct_storage_g_clear_stats(void *db_conn)
 		return SLURM_ERROR;
 	return (*(ops.clear_stats))(db_conn);
 }
+
+/*
+ * Get generic data.
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int acct_storage_g_get_data(void *db_conn, acct_storage_info_t dinfo,
+				    void *data)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return SLURM_ERROR;
+	return (*(ops.get_data))(db_conn, dinfo, data);
+}
+
 
 /*
  * Shutdown database server.

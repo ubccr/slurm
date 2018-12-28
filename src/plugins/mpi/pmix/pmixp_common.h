@@ -5,11 +5,11 @@
  *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
@@ -46,7 +46,7 @@
 #include <unistd.h>
 
 /* Common includes for all source files
- * Define SLURM translator header first to override
+ * Define Slurm translator header first to override
  * all translated functions
  */
 #include "src/common/slurm_xlator.h"
@@ -63,7 +63,7 @@
 #include "src/common/net.h"
 
 /* ----------------------------------------------------------
- * SLURM environment that influence us:
+ * Slurm environment that influence us:
  * Job/step resource description
  * ---------------------------------------------------------- */
 #define PMIXP_STEP_NODES_ENV "SLURM_STEP_NODELIST"
@@ -145,6 +145,9 @@
 #define PMIXP_CPERF_LITER "SLURM_PMIX_COLL_PERF_ITER_LARGE"
 /* The bound after which message is considered large */
 #define PMIXP_CPERF_BOUND "SLURM_PMIX_COLL_PERF_LARGE_PWR2"
+/* The prefered fence type, values:[auto|tree|ring] */
+#define PMIXP_COLL_FENCE "SLURM_PMIX_FENCE"
+#define SLURM_PMIXP_FENCE_BARRIER "SLURM_PMIX_FENCE_BARRIER"
 
 typedef enum {
 	PMIXP_P2P_INLINE,

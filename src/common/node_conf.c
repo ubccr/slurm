@@ -8,16 +8,16 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Copyright (C) 2010-2016 SchedMD LLC.
+ *  Copyright (C) 2010-2017 SchedMD LLC.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -33,13 +33,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -239,6 +239,7 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 				node_rec->node_state = state_val;
 			node_rec->last_response = (time_t) 0;
 			node_rec->comm_name = xstrdup(address);
+			node_rec->cpu_bind  = node_ptr->cpu_bind;
 			node_rec->node_hostname = xstrdup(hostname);
 			node_rec->port      = port;
 			node_rec->weight    = node_ptr->weight;
@@ -540,6 +541,7 @@ extern int build_all_nodeline_info (bool set_bitmap, int tres_cnt)
 
 		config_ptr = create_config_record();
 		config_ptr->nodes = xstrdup(node->nodenames);
+		config_ptr->cpu_bind = node->cpu_bind;
 		config_ptr->cpus = node->cpus;
 		config_ptr->boards = node->boards;
 		config_ptr->sockets = node->sockets;
@@ -557,7 +559,7 @@ extern int build_all_nodeline_info (bool set_bitmap, int tres_cnt)
 			config_ptr->tres_weights =
 				slurm_get_tres_weight_array(
 						node->tres_weights_str,
-						tres_cnt);
+						tres_cnt, true);
 		}
 
 		config_ptr->weight = node->weight;
@@ -651,8 +653,7 @@ extern struct node_record *create_node_record (
 	node_ptr = node_record_table_ptr + (node_record_count++);
 	node_ptr->name = xstrdup(node_name);
 	if (!node_hash_table)
-		node_hash_table = xhash_init(_node_record_hash_identity,
-					     NULL, NULL, 0);
+		node_hash_table = xhash_init(_node_record_hash_identity, NULL);
 	xhash_add(node_hash_table, node_ptr);
 
 	node_ptr->config_ptr = config_ptr;
@@ -675,6 +676,7 @@ extern struct node_record *create_node_record (
 	node_ptr->ext_sensors = ext_sensors_alloc();
 	node_ptr->owner = NO_VAL;
 	node_ptr->mcs_label = NULL;
+	node_ptr->next_state = NO_VAL;
 	node_ptr->protocol_version = SLURM_MIN_PROTOCOL_VERSION;
 	xassert (node_ptr->magic = NODE_MAGIC)  /* set value */;
 	return node_ptr;
@@ -947,8 +949,7 @@ extern void rehash_node (void)
 	struct node_record *node_ptr = node_record_table_ptr;
 
 	xhash_free (node_hash_table);
-	node_hash_table = xhash_init(_node_record_hash_identity,
-				     NULL, NULL, 0);
+	node_hash_table = xhash_init(_node_record_hash_identity, NULL);
 	for (i = 0; i < node_record_count; i++, node_ptr++) {
 		if ((node_ptr->name == NULL) ||
 		    (node_ptr->name[0] == '\0'))
@@ -1005,10 +1006,6 @@ extern void cr_init_global_core_data(struct node_record *node_ptr, int node_cnt,
 
 	for (n = 0; n < node_cnt; n++) {
 		uint16_t cores;
-#ifdef HAVE_BG
-		cores = node_ptr[n].sockets;
-
-#else
 		if (fast_schedule) {
 			cores  = node_ptr[n].config_ptr->cores;
 			cores *= node_ptr[n].config_ptr->sockets;
@@ -1016,7 +1013,7 @@ extern void cr_init_global_core_data(struct node_record *node_ptr, int node_cnt,
 			cores  = node_ptr[n].cores;
 			cores *= node_ptr[n].sockets;
 		}
-#endif
+
 		cr_node_num_cores[n] = cores;
 		if (n > 0) {
 			cr_node_cores_offset[n] = cr_node_cores_offset[n-1] +
@@ -1081,4 +1078,22 @@ extern int adjust_cpus_nppcu(uint16_t ntasks_per_core, uint16_t threads,
 	}
 
 	return cpus;
+}
+
+extern char *find_hostname(uint32_t pos, char *hosts)
+{
+	hostlist_t hostlist = NULL;
+	char *temp = NULL, *host = NULL;
+
+	if (!hosts || (pos == NO_VAL) || (pos == INFINITE))
+		return NULL;
+
+	hostlist = hostlist_create(hosts);
+	temp = hostlist_nth(hostlist, pos);
+	if (temp) {
+		host = xstrdup(temp);
+		free(temp);
+	}
+	hostlist_destroy(hostlist);
+	return host;
 }

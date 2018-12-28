@@ -1,14 +1,14 @@
 /*****************************************************************************\
  *  burst_buffer_cray.c - Plugin for managing a Cray burst_buffer
  *****************************************************************************
- *  Copyright (C) 2014-2016 SchedMD LLC.
+ *  Copyright (C) 2014-2018 SchedMD LLC.
  *  Written by Morris Jette <jette@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -98,14 +98,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *      <application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "burst_buffer" for SLURM burst_buffer) and <method> is a
- * description of how this plugin satisfies that application.  SLURM will only
+ * the plugin (e.g., "burst_buffer" for Slurm burst_buffer) and <method> is a
+ * description of how this plugin satisfies that application.  Slurm will only
  * load a burst_buffer plugin if the plugin_type string has a prefix of
  * "burst_buffer/".
  *
@@ -205,6 +205,7 @@ struct bb_total_size {
 	uint64_t capacity;
 };
 
+static void	_add_bb_to_script(char **script_body, char *burst_buffer_file);
 static int	_alloc_job_bb(struct job_record *job_ptr, bb_job_t *bb_job,
 			      bool job_ready);
 static void	_apply_limits(void);
@@ -279,7 +280,7 @@ static int	_test_size_limit(struct job_record *job_ptr, bb_job_t *bb_job);
 static void	_timeout_bb_rec(void);
 static int	_write_file(char *file_name, char *buf);
 static int	_write_nid_file(char *file_name, char *node_list,
-				uint32_t job_id);
+				struct job_record *job_ptr);
 static int	_xlate_batch(struct job_descriptor *job_desc);
 static int	_xlate_interactive(struct job_descriptor *job_desc);
 
@@ -343,6 +344,7 @@ static void _purge_bb_files(uint32_t job_id, struct job_record *job_ptr)
 {
 	char *hash_dir = NULL, *job_dir = NULL;
 	char *script_file = NULL, *path_file = NULL, *client_nids_file = NULL;
+	char *exec_host_file = NULL;
 	int hash_inx;
 
 	hash_inx = job_id % 10;
@@ -354,6 +356,10 @@ static void _purge_bb_files(uint32_t job_id, struct job_record *job_ptr)
 	xstrfmtcat(client_nids_file, "%s/client_nids", job_dir);
 	(void) unlink(client_nids_file);
 	xfree(client_nids_file);
+
+	xstrfmtcat(exec_host_file, "%s/exec_host", job_dir);
+	(void) unlink(exec_host_file);
+	xfree(exec_host_file);
 
 	xstrfmtcat(path_file, "%s/pathfile", job_dir);
 	(void) unlink(path_file);
@@ -378,18 +384,21 @@ static void _test_config(void)
 		bb_state.bb_config.get_sys_state =
 			xstrdup("/opt/cray/dw_wlm/default/bin/dw_wlm_cli");
 	}
+	if (!bb_state.bb_config.get_sys_status) {
+		debug("%s: GetSysStatus is NULL", __func__);
+		bb_state.bb_config.get_sys_status =
+			xstrdup("/opt/cray/dws/default/bin/dwstat");
+	}
 }
 
 /* Allocate resources to a job and begin setup/stage-in */
 static int _alloc_job_bb(struct job_record *job_ptr, bb_job_t *bb_job,
 			 bool job_ready)
 {
-	char jobid_buf[32];
 	int rc = SLURM_SUCCESS;
 
 	if (bb_state.bb_config.debug_flag) {
-		info("%s: start job allocate %s", __func__,
-		     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
+		info("%s: start job allocate %pJ", __func__, job_ptr);
 	}
 
 	if (bb_job->buf_cnt &&
@@ -488,10 +497,27 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 	bb_specs = xstrdup(job_ptr->burst_buffer);
 	tok = strtok_r(bb_specs, "\n", &save_ptr);
 	while (tok) {
-		if ((tok[1] == 'B') && (tok[2] == 'B')) {
+		uint32_t bb_flag = 0;
+		if (tok[0] != '#') {
+			tok = strtok_r(NULL, "\n", &save_ptr);
+			continue;
+		}
+		if ((tok[1] == 'B') && (tok[2] == 'B'))
+			bb_flag = BB_FLAG_BB_OP;
+		else if ((tok[1] == 'D') && (tok[2] == 'W'))
+			bb_flag = BB_FLAG_DW_OP;
+
+		/*
+		 * Effective Slurm v18.08 and CLE6.0UP06 the create_persistent
+		 * and destroy_persistent functions are directly supported by
+		 * dw_wlm_cli. Support "#BB" format for backward compatibility.
+		 */
+		if (bb_flag != 0) {
 			tok += 3;
 			while (isspace(tok[0]))
 				tok++;
+		}
+		if (bb_flag == BB_FLAG_BB_OP) {
 			if (!xstrncmp(tok, "create_persistent", 17)) {
 				have_bb = true;
 				bb_access = NULL;
@@ -541,6 +567,7 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 							   bb_job->buf_cnt);
 				bb_job->buf_ptr[inx].access = bb_access;
 				bb_job->buf_ptr[inx].create = true;
+				bb_job->buf_ptr[inx].flags = bb_flag;
 				//bb_job->buf_ptr[inx].hurry = false;
 				bb_job->buf_ptr[inx].name = bb_name;
 				bb_job->buf_ptr[inx].pool = bb_pool;
@@ -550,8 +577,7 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 				bb_job->buf_ptr[inx].type = bb_type;
 				//bb_job->buf_ptr[inx].use = false;
 				bb_job->persist_add += tmp_cnt;
-			} else if (!xstrncmp(tok, "destroy_persistent", 17) ||
-				   !xstrncmp(tok, "delete_persistent", 16)) {
+			} else if (!xstrncmp(tok, "destroy_persistent", 18)) {
 				have_bb = true;
 				bb_name = NULL;
 				if ((sub_tok = strstr(tok, "name="))) {
@@ -574,6 +600,7 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 				//bb_job->buf_ptr[inx].access = NULL;
 				//bb_job->buf_ptr[inx].create = false;
 				bb_job->buf_ptr[inx].destroy = true;
+				bb_job->buf_ptr[inx].flags = bb_flag;
 				bb_job->buf_ptr[inx].hurry = (bb_hurry != NULL);
 				bb_job->buf_ptr[inx].name = bb_name;
 				//bb_job->buf_ptr[inx].pool = NULL;
@@ -584,10 +611,8 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 			} else {
 				/* Ignore other (future) options */
 			}
-		} else if ((tok[1] == 'D') && (tok[2] == 'W')) {
-			tok += 3;
-			while (isspace(tok[0]))
-				tok++;
+		}
+		if (bb_flag == BB_FLAG_DW_OP) {
 			if (!xstrncmp(tok, "jobdw", 5)) {
 				have_bb = true;
 				if ((sub_tok = strstr(tok, "capacity="))) {
@@ -609,6 +634,7 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 							   bb_job->job_pool);
 				bb_job->req_size += tmp_cnt;
 				bb_job->total_size += tmp_cnt;
+				bb_job->use_job_buf = true;
 			} else if (!xstrncmp(tok, "persistentdw", 12)) {
 				/* Persistent buffer use */
 				have_bb = true;
@@ -656,7 +682,7 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 					sub_tok = strchr(bb_job->job_pool, ' ');
 					if (sub_tok)
 						sub_tok[0] = '\0';
-				} else {
+				} else if (!bb_job->job_pool) {
 					bb_job->job_pool = xstrdup(
 						bb_state.bb_config.default_pool);
 				}
@@ -664,6 +690,7 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 							   bb_job->job_pool);
 				bb_job->req_size += tmp_cnt;
 				bb_job->total_size += tmp_cnt;
+				bb_job->use_job_buf = true;
 			} else {
 				/* Ignore stage-in, stage-out, etc. */
 			}
@@ -679,8 +706,8 @@ static bb_job_t *_get_bb_job(struct job_record *job_ptr)
 			   "%s: Invalid burst buffer spec (%s)",
 			   plugin_type, job_ptr->burst_buffer);
 		job_ptr->priority = 0;
-		info("Invalid burst buffer spec for job %u (%s)",
-		     job_ptr->job_id, job_ptr->burst_buffer);
+		info("Invalid burst buffer spec for %pJ (%s)",
+		     job_ptr, job_ptr->burst_buffer);
 		bb_job_del(&bb_state, job_ptr->job_id);
 		return NULL;
 	}
@@ -1073,8 +1100,8 @@ static void _pick_alloc_account(bb_alloc_t *bb_alloc)
 static void _set_assoc_mgr_ptrs(bb_alloc_t *bb_alloc)
 {
 	/* read locks on assoc */
-	assoc_mgr_lock_t assoc_locks = { READ_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
-					 NO_LOCK, NO_LOCK, NO_LOCK };
+	assoc_mgr_lock_t assoc_locks =
+		{ .assoc = READ_LOCK, .qos = READ_LOCK, .user = READ_LOCK };
 	slurmdb_assoc_rec_t assoc_rec;
 	slurmdb_qos_rec_t qos_rec;
 
@@ -1121,8 +1148,9 @@ static void _load_state(bool init_config)
 	char *end_ptr = NULL;
 	time_t now = time(NULL);
 	uint32_t timeout;
-	assoc_mgr_lock_t assoc_locks = { READ_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
-					 NO_LOCK, NO_LOCK, NO_LOCK };
+	assoc_mgr_lock_t assoc_locks = { .assoc = READ_LOCK,
+					 .qos = READ_LOCK,
+					 .user = READ_LOCK };
 	bool found_pool;
 	bitstr_t *pools_bitmap;
 
@@ -1304,7 +1332,8 @@ static void _load_state(bool init_config)
  * file location
  * RET 0 or Slurm error code
  */
-static int _write_nid_file(char *file_name, char *node_list, uint32_t job_id)
+static int _write_nid_file(char *file_name, char *node_list,
+			   struct job_record *job_ptr)
 {
 #if defined(HAVE_NATIVE_CRAY)
 	char *tmp, *sep, *buf = NULL;
@@ -1350,8 +1379,8 @@ static int _write_nid_file(char *file_name, char *node_list, uint32_t job_id)
 	if (buf[0]) {
 		rc = _write_file(file_name, buf);
 	} else {
-		error("%s: job %u has node list without numeric component (%s)",
-		      __func__, job_id, node_list);
+		error("%s: %pJ has node list without numeric component (%s)",
+		      __func__, job_ptr, node_list);
 		rc = EINVAL;
 	}
 	xfree(buf);
@@ -1371,7 +1400,7 @@ static int _write_nid_file(char *file_name, char *node_list, uint32_t job_id)
 		rc = _write_file(file_name, buf);
 		xfree(buf);
 	} else {
-		error("%s: job %u lacks a node list",  __func__, job_id);
+		error("%s: %pJ lacks a node list",  __func__, job_ptr);
 		rc = EINVAL;
 	}
 	return rc;
@@ -1427,7 +1456,7 @@ static int _queue_stage_in(struct job_record *job_ptr, bb_job_t *bb_job)
 	if (job_ptr->sched_nodes) {
 		xstrfmtcat(client_nodes_file_nid, "%s/client_nids", job_dir);
 		if (_write_nid_file(client_nodes_file_nid,
-				    job_ptr->sched_nodes, job_ptr->job_id))
+				    job_ptr->sched_nodes, job_ptr))
 			xfree(client_nodes_file_nid);
 	}
 	setup_argv = xmalloc(sizeof(char *) * 20);	/* NULL terminated */
@@ -1488,23 +1517,45 @@ static int _queue_stage_in(struct job_record *job_ptr, bb_job_t *bb_job)
 	return rc;
 }
 
-static void _update_comment(struct job_record *job_ptr, char *operation,
-			    char *resp_msg)
+static void _update_system_comment(struct job_record *job_ptr, char *operation,
+				   char *resp_msg, bool update_database)
 {
 	char *sep = NULL;
 
-	if (job_ptr->comment && (strlen(job_ptr->comment) >= 1024)) {
+	if (job_ptr->system_comment &&
+	    (strlen(job_ptr->system_comment) >= 1024)) {
 		/* Avoid filling comment with repeated BB failures */
 		return;
 	}
 
-	if (job_ptr->comment)
+	if (job_ptr->system_comment)
 		xstrftimecat(sep, "\n%x %X");
 	else
 		xstrftimecat(sep, "%x %X");
-	xstrfmtcat(job_ptr->comment, "%s %s: %s: %s",
+	xstrfmtcat(job_ptr->system_comment, "%s %s: %s: %s",
 		   sep, plugin_type, operation, resp_msg);
 	xfree(sep);
+
+	if (update_database) {
+		slurmdb_job_modify_cond_t job_cond;
+		slurmdb_job_rec_t job_rec;
+		List ret_list;
+
+		memset(&job_cond, 0, sizeof(slurmdb_job_modify_cond_t));
+		memset(&job_rec, 0, sizeof(slurmdb_job_rec_t));
+
+		job_cond.job_id = job_ptr->job_id;
+		job_cond.flags = SLURMDB_MODIFY_NO_WAIT;
+		job_cond.cluster = slurmctld_conf.cluster_name;
+		job_cond.submit_time = job_ptr->details->submit_time;
+
+		job_rec.system_comment = job_ptr->system_comment;
+
+		ret_list = acct_storage_g_modify_job(
+			acct_db_conn, slurmctld_conf.slurm_user_id,
+			&job_cond, &job_rec);
+		FREE_NULL_LIST(ret_list);
+	}
 }
 
 static void *_start_stage_in(void *x)
@@ -1536,7 +1587,7 @@ static void *_start_stage_in(void *x)
 			       bb_state.bb_config.get_sys_state,
 			       setup_argv, timeout, &status);
 	END_TIMER;
-	info("%s: setup for job %u ran for %s",
+	info("%s: setup for job JobId=%u ran for %s",
 	     __func__, stage_args->job_id, TIME_STR);
 	_log_script_argv(setup_argv, resp_msg);
 	lock_slurmctld(job_write_lock);
@@ -1550,22 +1601,22 @@ static void *_start_stage_in(void *x)
 		     &bb_state);
 	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
 		trigger_burst_buffer();
-		error("%s: setup for job %u status:%u response:%s",
+		error("%s: setup for JobId=%u status:%u response:%s",
 		      __func__, stage_args->job_id, status, resp_msg);
 		rc = SLURM_ERROR;
 		job_ptr = find_job_record(stage_args->job_id);
 		if (job_ptr)
-			_update_comment(job_ptr, "setup", resp_msg);
+			_update_system_comment(job_ptr, "setup", resp_msg, 0);
 	} else {
 		job_ptr = find_job_record(stage_args->job_id);
 		bb_job = bb_job_find(&bb_state, stage_args->job_id);
 		if (!job_ptr) {
-			error("%s: unable to find job record for job %u",
+			error("%s: unable to find job record for JobId=%u",
 			      __func__, stage_args->job_id);
 			rc = SLURM_ERROR;
 		} else if (!bb_job) {
-			error("%s: unable to find bb_job record for job %u",
-			      __func__, stage_args->job_id);
+			error("%s: unable to find bb_job record for %pJ",
+			      __func__, job_ptr);
 		} else {
 			bb_job->state = BB_STATE_STAGING_IN;
 			bb_alloc = bb_find_alloc_rec(&bb_state, job_ptr);
@@ -1597,20 +1648,20 @@ static void *_start_stage_in(void *x)
 				       bb_state.bb_config.get_sys_state,
 				       data_in_argv, timeout, &status);
 		END_TIMER;
-		info("%s: dws_data_in for job %u ran for %s",
+		info("%s: dws_data_in for JobId=%u ran for %s",
 		     __func__, stage_args->job_id, TIME_STR);
 		_log_script_argv(data_in_argv, resp_msg);
 		if ((!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) &&
 		    !strstr(resp_msg, "No matching session")) {
 			trigger_burst_buffer();
-			error("%s: dws_data_in for job %u status:%u "
-			      "response:%s",
+			error("%s: dws_data_in for JobId=%u status:%u response:%s",
 			      __func__, stage_args->job_id, status, resp_msg);
 			rc = SLURM_ERROR;
 			lock_slurmctld(job_write_lock);
 			job_ptr = find_job_record(stage_args->job_id);
 			if (job_ptr)
-				_update_comment(job_ptr, "data_in",resp_msg);
+				_update_system_comment(job_ptr, "data_in",
+						       resp_msg, 0);
 			unlock_slurmctld(job_write_lock);
 		}
 	}
@@ -1646,14 +1697,14 @@ static void *_start_stage_in(void *x)
 			debug("%s: Old dw_wlm_cli does not support real_size function",
 			      __func__);
 		} else if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
-			error("%s: real_size for job %u status:%u response:%s",
+			error("%s: real_size for JobId=%u status:%u response:%s",
 			      __func__, stage_args->job_id, status, resp_msg2);
-		} else {
+		} else if (resp_msg2 && resp_msg2[0]) {
 			json_object *j;
 			struct bb_total_size *ent;
 			j = json_tokener_parse(resp_msg2);
 			if (j == NULL) {
-				error("%s: json parser failed on %s",
+				error("%s: json parser failed on \"%s\"",
 				      __func__, resp_msg2);
 			} else {
 				ent = _json_parse_real_size(j);
@@ -1670,7 +1721,7 @@ static void *_start_stage_in(void *x)
 	lock_slurmctld(job_write_lock);
 	job_ptr = find_job_record(stage_args->job_id);
 	if (!job_ptr) {
-		error("%s: unable to find job record for job %u",
+		error("%s: unable to find job record for JobId=%u",
 		      __func__, stage_args->job_id);
 	} else if (rc == SLURM_SUCCESS) {
 		slurm_mutex_lock(&bb_state.bb_mutex);
@@ -1679,9 +1730,9 @@ static void *_start_stage_in(void *x)
 			bb_job->state = BB_STATE_STAGED_IN;
 		if (bb_job && bb_job->total_size) {
 			if (real_size > bb_job->req_size) {
-				info("%s: Job %u total_size increased from %"PRIu64" to %"PRIu64,
-				      __func__, stage_args->job_id,
-				      bb_job->req_size, real_size);
+				info("%s: %pJ total_size increased from %"PRIu64" to %"PRIu64,
+				      __func__, job_ptr, bb_job->req_size,
+				     real_size);
 				bb_job->total_size = real_size;
 			}
 			bb_alloc = bb_find_alloc_rec(&bb_state, job_ptr);
@@ -1689,16 +1740,14 @@ static void *_start_stage_in(void *x)
 				bb_alloc->state = BB_STATE_STAGED_IN;
 				bb_alloc->state_time = time(NULL);
 				if (bb_state.bb_config.debug_flag) {
-					info("%s: Setup/stage-in complete for "
-					     "job %u",
-					     __func__, stage_args->job_id);
+					info("%s: Setup/stage-in complete for %pJ",
+					     __func__, job_ptr);
 				}
 				queue_job_scheduler();
 				bb_state.last_update_time = time(NULL);
 			} else {
-				error("%s: unable to find bb_alloc record "
-				      "for job %u",
-				      __func__, stage_args->job_id);
+				error("%s: unable to find bb_alloc record for %pJ",
+				      __func__, job_ptr);
 			}
 		}
 		slurm_mutex_unlock(&bb_state.bb_mutex);
@@ -1804,7 +1853,7 @@ static void *_start_stage_out(void *x)
 	END_TIMER;
 	if ((DELTA_TIMER > 500000) ||	/* 0.5 secs */
 	    bb_state.bb_config.debug_flag) {
-		info("%s: dws_post_run for job %u ran for %s",
+		info("%s: dws_post_run for JobId=%u ran for %s",
 		     __func__, stage_args->job_id, TIME_STR);
 	}
 	_log_script_argv(post_run_argv, resp_msg);
@@ -1812,7 +1861,7 @@ static void *_start_stage_out(void *x)
 	job_ptr = find_job_record(stage_args->job_id);
 	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
 		trigger_burst_buffer();
-		error("%s: dws_post_run for job %u status:%u response:%s",
+		error("%s: dws_post_run for JobId=%u status:%u response:%s",
 		      __func__, stage_args->job_id, status, resp_msg);
 		rc = SLURM_ERROR;
 		if (job_ptr) {
@@ -1820,12 +1869,12 @@ static void *_start_stage_out(void *x)
 			xfree(job_ptr->state_desc);
 			xstrfmtcat(job_ptr->state_desc, "%s: post_run: %s",
 				   plugin_type, resp_msg);
-			_update_comment(job_ptr, "post_run", resp_msg);
-//FIXME: WRITE COMMENT UPDATE TO DATABASE HERE, JOB IS ALREADY COMPLETED
+			_update_system_comment(job_ptr, "post_run",
+					       resp_msg, 1);
 		}
 	}
 	if (!job_ptr) {
-		error("%s: unable to find job record for job %u",
+		error("%s: unable to find job record for JobId=%u",
 		      __func__, stage_args->job_id);
 	} else {
 		slurm_mutex_lock(&bb_state.bb_mutex);
@@ -1850,15 +1899,14 @@ static void *_start_stage_out(void *x)
 		END_TIMER;
 		if ((DELTA_TIMER > 1000000) ||	/* 10 secs */
 		    bb_state.bb_config.debug_flag) {
-			info("%s: dws_data_out for job %u ran for %s",
+			info("%s: dws_data_out for JobId=%u ran for %s",
 			     __func__, stage_args->job_id, TIME_STR);
 		}
 		_log_script_argv(data_out_argv, resp_msg);
 		if ((!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) &&
 		    !strstr(resp_msg, "No matching session")) {
 			trigger_burst_buffer();
-			error("%s: dws_data_out for job %u "
-			      "status:%u response:%s",
+			error("%s: dws_data_out for JobId=%u status:%u response:%s",
 			      __func__, stage_args->job_id, status, resp_msg);
 			rc = SLURM_ERROR;
 			lock_slurmctld(job_write_lock);
@@ -1869,8 +1917,8 @@ static void *_start_stage_out(void *x)
 				xstrfmtcat(job_ptr->state_desc,
 					   "%s: stage-out: %s",
 					   plugin_type, resp_msg);
-				_update_comment(job_ptr, "data_out", resp_msg);
-//FIXME: WRITE COMMENT UPDATE TO DATABASE HERE, JOB IS ALREADY COMPLETED
+				_update_system_comment(job_ptr, "data_out",
+						       resp_msg, 1);
 			}
 			unlock_slurmctld(job_write_lock);
 		}
@@ -1879,7 +1927,7 @@ static void *_start_stage_out(void *x)
 	lock_slurmctld(job_write_lock);
 	job_ptr = find_job_record(stage_args->job_id);
 	if (!job_ptr) {
-		error("%s: unable to find job record for job %u",
+		error("%s: unable to find job record for JobId=%u",
 		      __func__, stage_args->job_id);
 	} else {
 		if (rc != SLURM_SUCCESS) {
@@ -1887,6 +1935,10 @@ static void *_start_stage_out(void *x)
 			xfree(job_ptr->state_desc);
 			xstrfmtcat(job_ptr->state_desc, "%s: %s: %s",
 				   plugin_type, op, resp_msg);
+		} else {
+			job_ptr->job_state &= (~JOB_STAGE_OUT);
+			xfree(job_ptr->state_desc);
+			last_job_update = time(NULL);
 		}
 		slurm_mutex_lock(&bb_state.bb_mutex);
 		bb_job = _get_bb_job(job_ptr);
@@ -1896,9 +1948,8 @@ static void *_start_stage_out(void *x)
 		if (bb_alloc) {
 			if (rc == SLURM_SUCCESS) {
 				if (bb_state.bb_config.debug_flag) {
-					info("%s: Stage-out/post-run complete "
-					     "for job %u",
-					     __func__, stage_args->job_id);
+					info("%s: Stage-out/post-run complete for %pJ",
+					     __func__, job_ptr);
 				}
 				/* bb_alloc->state = BB_STATE_STAGED_OUT; */
 				bb_alloc->state = BB_STATE_TEARDOWN;
@@ -1913,14 +1964,14 @@ static void *_start_stage_out(void *x)
 				} else
 					bb_alloc->state = BB_STATE_STAGED_IN;
 				if (bb_state.bb_config.debug_flag) {
-					info("%s: Stage-out failed for job %u",
-					     __func__, stage_args->job_id);
+					info("%s: Stage-out failed for %pJ",
+					     __func__, job_ptr);
 				}
 			}
 			bb_state.last_update_time = time(NULL);
 		} else if (bb_job && bb_job->total_size) {
-			error("%s: unable to find bb record for job %u",
-			      __func__, stage_args->job_id);
+			error("%s: unable to find bb record for %pJ",
+			      __func__, job_ptr);
 		}
 		if (rc == SLURM_SUCCESS) {
 			_queue_teardown(stage_args->job_id, stage_args->user_id,
@@ -2002,6 +2053,7 @@ static void *_start_teardown(void *x)
 	slurmctld_lock_t job_write_lock = {
 		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	DEF_TIMERS;
+	bool hurry;
 
 	teardown_args = (stage_args_t *) x;
 	teardown_argv = teardown_args->args1;
@@ -2019,9 +2071,10 @@ static void *_start_teardown(void *x)
 			       bb_state.bb_config.get_sys_state,
 			       teardown_argv, timeout, &status);
 	END_TIMER;
-	info("%s: teardown for job %u ran for %s",
+	info("%s: teardown for JobId=%u ran for %s",
 	     __func__, teardown_args->job_id, TIME_STR);
 	_log_script_argv(teardown_argv, resp_msg);
+
 	/*
 	 * "Teardown" is run at every termination of every job that _might_
 	 * have a burst buffer, so an error of "token not found" should be
@@ -2031,9 +2084,18 @@ static void *_start_teardown(void *x)
 	    (!resp_msg ||
 	     (!strstr(resp_msg, "No matching session") &&
 	      !strstr(resp_msg, "token not found")))) {
-		bool hurry = false;
+		lock_slurmctld(job_write_lock);
+		slurm_mutex_lock(&bb_state.bb_mutex);
+		job_ptr = find_job_record(teardown_args->job_id);
+		if (job_ptr &&
+		    (bb_alloc = bb_find_alloc_rec(&bb_state, job_ptr))) {
+			bb_alloc->state = BB_STATE_TEARDOWN_FAIL;
+		}
+		slurm_mutex_unlock(&bb_state.bb_mutex);
+		unlock_slurmctld(job_write_lock);
+
 		trigger_burst_buffer();
-		error("%s: %s: teardown for job %u status:%u response:%s",
+		error("%s: %s: teardown for JobId=%u status:%u response:%s",
 		      plugin_name, __func__, teardown_args->job_id, status,
 		      resp_msg);
 
@@ -2045,13 +2107,16 @@ static void *_start_teardown(void *x)
 			xfree(job_ptr->state_desc);
 			xstrfmtcat(job_ptr->state_desc, "%s: teardown: %s",
 				   plugin_type, resp_msg);
-			_update_comment(job_ptr, "teardown", resp_msg);
+			_update_system_comment(job_ptr, "teardown",
+					       resp_msg, 0);
 		}
 		unlock_slurmctld(job_write_lock);
 
 
 		if (!xstrcmp(teardown_argv[7], "--hurry"))
 			hurry = true;
+		else
+			hurry = false;
 		_queue_teardown(teardown_args->job_id, teardown_args->user_id,
 				hurry);
 	} else {
@@ -2069,15 +2134,19 @@ static void *_start_teardown(void *x)
 				bb_job->state = BB_STATE_COMPLETE;
 			if (!IS_JOB_PENDING(job_ptr) &&	/* No email if requeue */
 			    (job_ptr->mail_type & MAIL_JOB_STAGE_OUT)) {
-				/* NOTE: If a job uses multiple burst buffer
+				/*
+				 * NOTE: If a job uses multiple burst buffer
 				 * plugins, the message will be sent after the
-				 * teardown completes in the first plugin */
+				 * teardown completes in the first plugin
+				 */
 				mail_job_info(job_ptr, MAIL_JOB_STAGE_OUT);
 				job_ptr->mail_type &= (~MAIL_JOB_STAGE_OUT);
 			}
 		} else {
-			/* This will happen when slurmctld restarts and needs
-			 * to clear vestigial buffers */
+			/*
+			 * This will happen when slurmctld restarts and needs
+			 * to clear vestigial buffers
+			 */
 			char buf_name[32];
 			snprintf(buf_name, sizeof(buf_name), "%u",
 				 teardown_args->job_id);
@@ -2159,7 +2228,6 @@ static int _test_size_limit(struct job_record *job_ptr, bb_job_t *bb_job)
 	time_t now = time(NULL);
 	List preempt_list = NULL;
 	ListIterator preempt_iter;
-	char jobid_buf[32];
 
 	xassert(bb_job);
 
@@ -2263,7 +2331,7 @@ static int _test_size_limit(struct job_record *job_ptr, bb_job_t *bb_job)
 	}
 
 #if _DEBUG
-	info("TEST_SIZE_LIMIT for job %u", job_ptr->job_id);
+	info("TEST_SIZE_LIMIT for %pJ", job_ptr);
 	for (j = 0; j < ds_len; j++) {
 		info("POOL:%s ADD:%"PRIu64" AVAIL:%"PRIu64
 		     " GRANULARITY:%"PRIu64" RESV:%"PRIu64" TOTAL:%"PRIu64,
@@ -2372,11 +2440,9 @@ static int _test_size_limit(struct job_record *job_ptr, bb_job_t *bb_job)
 			_queue_teardown(preempt_ptr->job_id,
 					preempt_ptr->user_id, true);
 			if (bb_state.bb_config.debug_flag) {
-				info("%s: %s: Preempting stage-in of job %u "
-				     "for %s", plugin_type,
-				     __func__, preempt_ptr->job_id,
-				     jobid2fmt(job_ptr, jobid_buf,
-					       sizeof(jobid_buf)));
+				info("%s: %s: Preempting stage-in of JobId=%u for %pJ",
+				     plugin_type, __func__,
+				     preempt_ptr->job_id, job_ptr);
 			}
 		}
 
@@ -2418,22 +2484,34 @@ static void _timeout_bb_rec(void)
 			if (((bb_alloc->seen_time + TIME_SLOP) <
 			     bb_state.last_load_time) &&
 			    (bb_alloc->state == BB_STATE_TEARDOWN)) {
-				/* Teardown complete, but bb_alloc state not yet
-				 * updated; go to next allocation */
+				/*
+				 * Teardown likely complete, but bb_alloc state
+				 * not yet updated; skip the record
+				 */
 			} else if ((bb_alloc->seen_time + TIME_SLOP) <
 				   bb_state.last_load_time) {
+				assoc_mgr_lock_t assoc_locks =
+					{ .assoc = READ_LOCK,
+					  .qos = READ_LOCK };
+				/*
+				 * assoc_mgr needs locking to call
+				 * bb_post_persist_delete
+				 */
 				if (bb_alloc->job_id == 0) {
 					info("%s: Persistent burst buffer %s "
 					     "purged",
 					     __func__, bb_alloc->name);
 				} else if (bb_state.bb_config.debug_flag) {
-					info("%s: burst buffer for job %u "
-					     "purged",
+					info("%s: burst buffer for JobId=%u purged",
 					     __func__, bb_alloc->job_id);
 				}
 				bb_limit_rem(bb_alloc->user_id, bb_alloc->size,
 					     bb_alloc->pool, &bb_state);
+
+				assoc_mgr_lock(&assoc_locks);
 				bb_post_persist_delete(bb_alloc, &bb_state);
+				assoc_mgr_unlock(&assoc_locks);
+
 				*bb_pptr = bb_alloc->next;
 				bb_free_alloc_buf(bb_alloc);
 				break;
@@ -2480,10 +2558,22 @@ static int _parse_bb_opts(struct job_descriptor *job_desc, uint64_t *bb_size,
 	bb_script = xstrdup(job_desc->burst_buffer);
 	tok = strtok_r(bb_script, "\n", &save_ptr);
 	while (tok) {
+		uint32_t bb_flag = 0;
 		tmp_cnt = 0;
-		if (tok[0] != '#') {
+		if (tok[0] != '#')
 			break;	/* Quit at first non-comment */
-		} else if ((tok[1] == 'B') && (tok[2] == 'B')) {
+
+		if ((tok[1] == 'B') && (tok[2] == 'B'))
+			bb_flag = BB_FLAG_BB_OP;
+		else if ((tok[1] == 'D') && (tok[2] == 'W'))
+			bb_flag = BB_FLAG_DW_OP;
+
+		/*
+		 * Effective Slurm v18.08 and CLE6.0UP06 the create_persistent
+		 * and destroy_persistent functions are directly supported by
+		 * dw_wlm_cli. Support "#BB" format for backward compatibility.
+		 */
+		if (bb_flag == BB_FLAG_BB_OP) {
 			tok += 3;
 			while (isspace(tok[0]))
 				tok++;
@@ -2526,14 +2616,14 @@ static int _parse_bb_opts(struct job_descriptor *job_desc, uint64_t *bb_size,
 				xfree(bb_pool);
 				if (rc != SLURM_SUCCESS)
 					break;
-			} else if (!xstrncmp(tok, "destroy_persistent", 17) &&
+			} else if (!xstrncmp(tok, "destroy_persistent", 18) &&
 				   !enable_persist) {
 				info("%s: User %d disabled from destroying "
 				     "persistent burst buffer",
 				     __func__, submit_uid);
 				rc = ESLURM_BURST_BUFFER_PERMISSION;
 				break;
-			} else if (!xstrncmp(tok, "destroy_persistent", 17)) {
+			} else if (!xstrncmp(tok, "destroy_persistent", 18)) {
 				have_bb = true;
 				if (!(sub_tok = strstr(tok, "name="))) {
 					rc =ESLURM_INVALID_BURST_BUFFER_REQUEST;
@@ -2542,9 +2632,10 @@ static int _parse_bb_opts(struct job_descriptor *job_desc, uint64_t *bb_size,
 			} else {
 				/* Ignore other (future) options */
 			}
-		} else if ((tok[1] == 'D') && (tok[2] == 'W')) {
+		}
+		if (bb_flag == BB_FLAG_DW_OP) {
 			tok += 3;
-			while (isspace(tok[0]) && (tok[0] != '\0'))
+			while (isspace(tok[0]))
 				tok++;
 			if (!xstrncmp(tok, "jobdw", 5) &&
 			    (capacity = strstr(tok, "capacity="))) {
@@ -2632,7 +2723,17 @@ static int _xlate_batch(struct job_descriptor *job_desc)
 	bool is_cont = false, has_space = false;
 	int len, rc = SLURM_SUCCESS;
 
-	xfree(job_desc->burst_buffer);
+	/*
+	 * Any command line --bb options get added to the script
+	 */
+	if (job_desc->burst_buffer) {
+		rc = _xlate_interactive(job_desc);
+		if (rc != SLURM_SUCCESS)
+			return rc;
+		_add_bb_to_script(&job_desc->script, job_desc->burst_buffer);
+		xfree(job_desc->burst_buffer);
+	}
+
 	script = xstrdup(job_desc->script);
 	tok = strtok_r(script, "\n", &save_ptr);
 	while (tok) {
@@ -2842,6 +2943,52 @@ fini:	xfree(access);
 	return rc;
 }
 
+/* Insert the contents of "burst_buffer_file" into "script_body" */
+static void  _add_bb_to_script(char **script_body, char *burst_buffer_file)
+{
+	char *orig_script = *script_body;
+	char *new_script, *sep, save_char;
+	int i;
+
+	if (!burst_buffer_file || (burst_buffer_file[0] == '\0'))
+		return;	/* No burst buffer file or empty file */
+
+	if (!orig_script) {
+		*script_body = xstrdup(burst_buffer_file);
+		return;
+	}
+
+	i = strlen(burst_buffer_file) - 1;
+	if (burst_buffer_file[i] != '\n')	/* Append new line as needed */
+		xstrcat(burst_buffer_file, "\n");
+
+	if (orig_script[0] != '#') {
+		/* Prepend burst buffer file */
+		new_script = xstrdup(burst_buffer_file);
+		xstrcat(new_script, orig_script);
+		*script_body = new_script;
+		return;
+	}
+
+	sep = strchr(orig_script, '\n');
+	if (sep) {
+		save_char = sep[1];
+		sep[1] = '\0';
+		new_script = xstrdup(orig_script);
+		xstrcat(new_script, burst_buffer_file);
+		sep[1] = save_char;
+		xstrcat(new_script, sep + 1);
+		*script_body = new_script;
+		return;
+	} else {
+		new_script = xstrdup(orig_script);
+		xstrcat(new_script, "\n");
+		xstrcat(new_script, burst_buffer_file);
+		*script_body = new_script;
+		return;
+	}
+}
+
 /* For interactive jobs, build a script containing the relevant DataWarp
  * commands, as needed by the Cray API */
 static int _build_bb_script(struct job_record *job_ptr, char *script_file)
@@ -2938,7 +3085,7 @@ static void _purge_vestigial_bufs(void)
 			if (bb_alloc->job_id == 0) {
 				/* Persistent buffer, do not purge */
 			} else if (!job_ptr) {
-				info("%s: Purging vestigial buffer for job %u",
+				info("%s: Purging vestigial buffer for JobId=%u",
 				     plugin_type, bb_alloc->job_id);
 				_queue_teardown(bb_alloc->job_id,
 						bb_alloc->user_id, false);
@@ -2946,7 +3093,7 @@ static void _purge_vestigial_bufs(void)
 				/* We do not know the state of file staging,
 				 * so teardown the buffer and defer the job
 				 * for at least 60 seconds (for the teardown) */
-				debug("%s: Purging buffer for pending job %u",
+				debug("%s: Purging buffer for pending JobId=%u",
 				      plugin_type, bb_alloc->job_id);
 				_queue_teardown(bb_alloc->job_id,
 						bb_alloc->user_id, true);
@@ -2981,7 +3128,7 @@ extern uint64_t bb_p_get_system_size(void)
  * etc.)
  *
  * init_config IN - true if called as part of slurmctld initialization
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int bb_p_load_state(bool init_config)
 {
@@ -3004,9 +3151,35 @@ extern int bb_p_load_state(bool init_config)
 }
 
 /*
+ * Return string containing current burst buffer status
+ * argc IN - count of status command arguments
+ * argv IN - status command arguments
+ * RET status string, release memory using xfree()
+ */
+extern char *bb_p_get_status(uint32_t argc, char **argv)
+{
+	char *status_resp, **script_argv;
+	int i, status = 0;
+
+	script_argv = xmalloc(sizeof(char *) * (argc + 2));
+	script_argv[0] = "dwstat";
+	for (i = 0; i < argc; i++)
+		script_argv[i + 1] = argv[i];
+	status_resp = run_command("dwstat", bb_state.bb_config.get_sys_status,
+				  script_argv, 2000, &status);
+	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
+		xfree(status_resp);
+		status_resp = xstrdup("Error running dwstat\n");
+	}
+	xfree(script_argv);
+
+	return status_resp;
+}
+
+/*
  * Note configuration may have changed. Handle changes in BurstBufferParameters.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int bb_p_reconfig(void)
 {
@@ -3042,7 +3215,7 @@ extern int bb_p_reconfig(void)
  * Pack current burst buffer state information for network transmission to
  * user (e.g. "scontrol show burst")
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int bb_p_state_pack(uid_t uid, Buf buffer, uint16_t protocol_version)
 {
@@ -3071,7 +3244,7 @@ extern int bb_p_state_pack(uid_t uid, Buf buffer, uint16_t protocol_version)
  * options. Performed after setting default account + qos, but prior to
  * establishing job ID or creating script file.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int bb_p_job_validate(struct job_descriptor *job_desc,
 			     uid_t submit_uid)
@@ -3248,7 +3421,7 @@ static bool _have_dw_cmd_opts(bb_job_t *bb_job)
  * NOTE: We do this work inline so the user can be notified immediately if
  * there is some problem with their script.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int bb_p_job_validate2(struct job_record *job_ptr, char **err_msg)
 {
@@ -3257,29 +3430,37 @@ extern int bb_p_job_validate2(struct job_record *job_ptr, char **err_msg)
 	char *resp_msg = NULL, **script_argv;
 	char *dw_cli_path;
 	int fd = -1, hash_inx, rc = SLURM_SUCCESS, status = 0;
-	char jobid_buf[32];
 	bb_job_t *bb_job;
 	uint32_t timeout;
 	bool using_master_script = false;
 	DEF_TIMERS;
 
 	if ((job_ptr->burst_buffer == NULL) ||
-	    (job_ptr->burst_buffer[0] == '\0'))
+	    (job_ptr->burst_buffer[0] == '\0')) {
+		if (job_ptr->details->min_nodes == 0)
+			rc = ESLURM_INVALID_NODE_COUNT;
 		return rc;
+	}
 
 	/* Initialization */
 	slurm_mutex_lock(&bb_state.bb_mutex);
 	if (bb_state.last_load_time == 0) {
 		/* Assume request is valid for now, can't test it anyway */
-		info("%s: %s: Burst buffer down, skip tests for job %u",
-		      plugin_type, __func__, job_ptr->job_id);
+		info("%s: %s: Burst buffer down, skip tests for %pJ",
+		      plugin_type, __func__, job_ptr);
 		slurm_mutex_unlock(&bb_state.bb_mutex);
 		return rc;
 	}
 	bb_job = _get_bb_job(job_ptr);
 	if (bb_job == NULL) {
 		slurm_mutex_unlock(&bb_state.bb_mutex);
+		if (job_ptr->details->min_nodes == 0)
+			rc = ESLURM_INVALID_NODE_COUNT;
 		return rc;
+	}
+	if ((job_ptr->details->min_nodes == 0) && bb_job->use_job_buf) {
+		slurm_mutex_unlock(&bb_state.bb_mutex);
+		return ESLURM_INVALID_BURST_BUFFER_REQUEST;
 	}
 
 	if (!_have_dw_cmd_opts(bb_job)) {
@@ -3287,10 +3468,9 @@ extern int bb_p_job_validate2(struct job_record *job_ptr, char **err_msg)
 		return rc;
 	}
 
-	if (bb_state.bb_config.debug_flag) {
-		info("%s: %s: %s", plugin_type, __func__,
-		     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
-	}
+	if (bb_state.bb_config.debug_flag)
+		info("%s: %s: %pJ", plugin_type, __func__, job_ptr);
+
 	if (bb_state.bb_config.validate_timeout)
 		timeout = bb_state.bb_config.validate_timeout * 1000;
 	else
@@ -3343,8 +3523,8 @@ extern int bb_p_job_validate2(struct job_record *job_ptr, char **err_msg)
 		info("%s: job_process ran for %s", __func__, TIME_STR);
 	_log_script_argv(script_argv, resp_msg);
 	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
-		error("%s: job_process for job %u status:%u response:%s",
-		      __func__, job_ptr->job_id, status, resp_msg);
+		error("%s: job_process for %pJ status:%u response:%s",
+		      __func__, job_ptr, status, resp_msg);
 		if (err_msg) {
 			xfree(*err_msg);
 			xstrfmtcat(*err_msg, "%s: %s", plugin_type, resp_msg);
@@ -3433,8 +3613,8 @@ extern void bb_p_job_set_tres_cnt(struct job_record *job_ptr,
 	bb_job_t *bb_job;
 
 	if (!tres_cnt) {
-		error("%s: No tres_cnt given when looking at job %u",
-		      __func__, job_ptr->job_id);
+		error("%s: No tres_cnt given when looking at %pJ",
+		      __func__, job_ptr);
 	}
 
 	if (bb_state.tres_pos < 0) {
@@ -3457,7 +3637,6 @@ extern time_t bb_p_job_get_est_start(struct job_record *job_ptr)
 {
 	time_t est_start = time(NULL);
 	bb_job_t *bb_job;
-	char jobid_buf[32];
 	int rc;
 
 	if ((job_ptr->burst_buffer == NULL) ||
@@ -3483,11 +3662,8 @@ extern time_t bb_p_job_get_est_start(struct job_record *job_ptr)
 		return est_start;
 	}
 
-	if (bb_state.bb_config.debug_flag) {
-		info("%s: %s: %s",
-		     plugin_type, __func__,
-		     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
-	}
+	if (bb_state.bb_config.debug_flag)
+		info("%s: %s: %pJ", plugin_type, __func__, job_ptr);
 
 	if ((bb_job->persist_add == 0) && (bb_job->swap_size == 0) &&
 	    (bb_job->total_size == 0)) {
@@ -3509,49 +3685,6 @@ extern time_t bb_p_job_get_est_start(struct job_record *job_ptr)
 	slurm_mutex_unlock(&bb_state.bb_mutex);
 
 	return est_start;
-}
-
-/*
- * Return true if this job is dependent upon another job that uses burst
- * buffers. We need to wait for that first job's stage-out to complete before
- * doing a stage-in for this job.
- */
-static bool _wait_for_dependency(struct job_record *job_ptr)
-{
-	ListIterator iter;
-	struct depend_spec *dep_spec;
-	struct job_record *dep_job_ptr;	/* pointer to dependent job */
-	bool need_to_wait = false;
-	bb_job_t *bb_job;
-
-	if (!job_ptr->details || !job_ptr->details->depend_list)
-		return false;
-
-	iter = list_iterator_create(job_ptr->details->depend_list);
-	while ((dep_spec = (struct depend_spec *) list_next(iter))) {
-		/* Validate the job pointer */
-		if (!dep_spec->job_ptr ||
-		    (dep_spec->job_ptr->job_id != dep_spec->job_id))
-			dep_spec->job_ptr = find_job_record(dep_spec->job_id);
-		if (!dep_spec->job_ptr)
-			continue;
-		dep_job_ptr = dep_spec->job_ptr;
-		if ((dep_job_ptr->burst_buffer == NULL) ||
-		    (dep_job_ptr->burst_buffer[0] == '\0'))
-			continue;	/* No burst buffer use to synchronize */
-		if (!IS_JOB_FINISHED(dep_job_ptr)) {
-			need_to_wait = true;
-			break;
-		}
-		bb_job = bb_job_find(&bb_state, dep_job_ptr->job_id);
-		if (bb_job && (bb_job->state < BB_STATE_STAGED_OUT)) {
-			need_to_wait = true;
-			break;
-		}
-	}
-	list_iterator_destroy(iter);
-
-	return need_to_wait;
 }
 
 /*
@@ -3588,8 +3721,6 @@ extern int bb_p_job_try_stage_in(List job_queue)
 		    ((job_ptr->array_task_id == NO_VAL) ||
 		     (job_ptr->array_task_id == INFINITE)))
 			continue;	/* Can't operate on job array struct */
-		if (_wait_for_dependency(job_ptr))
-			continue;	/* Wait for dependent job stage-out */
 		bb_job = _get_bb_job(job_ptr);
 		if (bb_job == NULL)
 			continue;
@@ -3643,7 +3774,6 @@ extern int bb_p_job_test_stage_in(struct job_record *job_ptr, bool test_only)
 {
 	bb_job_t *bb_job = NULL;
 	int rc = 1;
-	char jobid_buf[32];
 
 	if ((job_ptr->burst_buffer == NULL) ||
 	    (job_ptr->burst_buffer[0] == '\0'))
@@ -3654,15 +3784,10 @@ extern int bb_p_job_test_stage_in(struct job_record *job_ptr, bool test_only)
 	     (job_ptr->array_task_id == INFINITE)))
 		return -1;	/* Can't operate on job array structure */
 
-	if (_wait_for_dependency(job_ptr))
-		return -1;
-
 	slurm_mutex_lock(&bb_state.bb_mutex);
 	if (bb_state.bb_config.debug_flag) {
-		info("%s: %s: %s test_only:%d",
-		     plugin_type, __func__,
-		     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)),
-		     (int) test_only);
+		info("%s: %s: %pJ test_only:%d",
+		     plugin_type, __func__, job_ptr, (int) test_only);
 	}
 	if (bb_state.last_load_time != 0)
 		bb_job = _get_bb_job(job_ptr);
@@ -3695,47 +3820,44 @@ extern int bb_p_job_test_stage_in(struct job_record *job_ptr, bool test_only)
  * At this time, bb_g_job_test_stage_in() should have been run sucessfully AND
  * the compute nodes selected for the job.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int bb_p_job_begin(struct job_record *job_ptr)
 {
-	char *client_nodes_file_nid = NULL;
+	char *client_nodes_file_nid = NULL, *exec_host_file = NULL;
 	pre_run_args_t *pre_run_args;
 	char **pre_run_argv = NULL, **script_argv = NULL;
 	char *job_dir = NULL, *path_file, *resp_msg;
-	int hash_inx, rc = SLURM_SUCCESS, status = 0;
+	int arg_inx, hash_inx, rc = SLURM_SUCCESS, status = 0;
 	bb_job_t *bb_job;
-	char jobid_buf[64];
 	uint32_t timeout;
-	bool do_pre_run;
+	bool do_pre_run, set_exec_host;
 	DEF_TIMERS;
 
 	if ((job_ptr->burst_buffer == NULL) ||
 	    (job_ptr->burst_buffer[0] == '\0'))
 		return SLURM_SUCCESS;
 
-	if (!job_ptr->job_resrcs || !job_ptr->job_resrcs->nodes) {
-		error("%s: %s lacks node allocation", __func__,
-		      jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
+	if (((!job_ptr->job_resrcs || !job_ptr->job_resrcs->nodes)) &&
+	    (job_ptr->details->min_nodes != 0)) {
+		error("%s: %pJ lacks node allocation", __func__, job_ptr);
 		return SLURM_ERROR;
 	}
 
 	slurm_mutex_lock(&bb_state.bb_mutex);
-	if (bb_state.bb_config.debug_flag) {
-		info("%s: %s: %s",
-		     plugin_type, __func__,
-		     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
-	}
+	if (bb_state.bb_config.debug_flag)
+		info("%s: %s: %pJ", plugin_type, __func__, job_ptr);
+
 	if (bb_state.last_load_time == 0) {
-		info("%s: %s: Burst buffer down, can not start job %u",
-		      plugin_type, __func__, job_ptr->job_id);
+		info("%s: %s: Burst buffer down, can not start %pJ",
+		      plugin_type, __func__, job_ptr);
 		slurm_mutex_unlock(&bb_state.bb_mutex);
 		return SLURM_ERROR;
 	}
 	bb_job = _get_bb_job(job_ptr);
 	if (!bb_job) {
-		error("%s: %s: no job record buffer for job %u",
-		      plugin_type, __func__, job_ptr->job_id);
+		error("%s: %s: no job record buffer for %pJ",
+		      plugin_type, __func__, job_ptr);
 		xfree(job_ptr->state_desc);
 		job_ptr->state_desc =
 			xstrdup("Could not find burst buffer record");
@@ -3765,11 +3887,23 @@ extern int bb_p_job_begin(struct job_record *job_ptr)
 		bb_job->state = BB_STATE_PRE_RUN;
 	else
 		bb_job->state = BB_STATE_RUNNING;
+	if (bb_state.bb_config.flags & BB_FLAG_SET_EXEC_HOST)
+		set_exec_host = true;
+	else
+		set_exec_host = false;
 	slurm_mutex_unlock(&bb_state.bb_mutex);
 
-	if (_write_nid_file(client_nodes_file_nid, job_ptr->job_resrcs->nodes,
-			    job_ptr->job_id)) {
+	if (job_ptr->job_resrcs && job_ptr->job_resrcs->nodes &&
+	    _write_nid_file(client_nodes_file_nid, job_ptr->job_resrcs->nodes,
+			    job_ptr)) {
 		xfree(client_nodes_file_nid);
+	}
+	if (set_exec_host && !job_ptr->batch_host && job_ptr->alloc_node) {
+		xstrfmtcat(exec_host_file, "%s/exec_host", job_dir);
+		if (_write_nid_file(exec_host_file, job_ptr->alloc_node,
+				    job_ptr)) {
+			xfree(exec_host_file);
+		}
 	}
 
 	/* Run "paths" function, get DataWarp environment variables */
@@ -3803,12 +3937,13 @@ extern int bb_p_job_begin(struct job_record *job_ptr)
 #if 1
 		//FIXME: Cray API returning "job_file_valid True" but exit 1 in some cases
 		if ((!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) &&
-		    (!resp_msg || strncmp(resp_msg, "job_file_valid True", 19))) {
+		    (!resp_msg ||
+		     strncmp(resp_msg, "job_file_valid True", 19))) {
 #else
 		if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
 #endif
-			error("%s: paths for job %u status:%u response:%s",
-			      __func__, job_ptr->job_id, status, resp_msg);
+			error("%s: paths for %pJ status:%u response:%s",
+			      __func__, job_ptr, status, resp_msg);
 			xfree(resp_msg);
 			rc = ESLURM_INVALID_BURST_BUFFER_REQUEST;
 			goto fini;
@@ -3818,7 +3953,7 @@ extern int bb_p_job_begin(struct job_record *job_ptr)
 		}
 
 		/* Setup "pre_run" operation */
-		pre_run_argv = xmalloc(sizeof(char *) * 10);
+		pre_run_argv = xmalloc(sizeof(char *) * 12);
 		pre_run_argv[0] = xstrdup("dw_wlm_cli");
 		pre_run_argv[1] = xstrdup("--function");
 		pre_run_argv[2] = xstrdup("pre_run");
@@ -3826,13 +3961,26 @@ extern int bb_p_job_begin(struct job_record *job_ptr)
 		xstrfmtcat(pre_run_argv[4], "%u", job_ptr->job_id);
 		pre_run_argv[5] = xstrdup("--job");
 		xstrfmtcat(pre_run_argv[6], "%s/script", job_dir);
+		arg_inx = 7;
 		if (client_nodes_file_nid) {
 #if defined(HAVE_NATIVE_CRAY)
-			pre_run_argv[7] = xstrdup("--nidlistfile");
+			pre_run_argv[arg_inx++] = xstrdup("--nidlistfile");
 #else
-			pre_run_argv[7] = xstrdup("--nodehostnamefile");
+			pre_run_argv[arg_inx++] = xstrdup("--nodehostnamefile");
 #endif
-			pre_run_argv[8] = xstrdup(client_nodes_file_nid);
+			pre_run_argv[arg_inx++] =
+				xstrdup(client_nodes_file_nid);
+		}
+		if (exec_host_file) {
+#if defined(HAVE_NATIVE_CRAY)
+			pre_run_argv[arg_inx++] =
+				xstrdup("--jobexecutionnodefilenids");
+#else
+			pre_run_argv[arg_inx++] =
+				xstrdup("--jobexecutionnodefile");
+#endif
+			pre_run_argv[arg_inx++] =
+				xstrdup(exec_host_file);
 		}
 		pre_run_args = xmalloc(sizeof(pre_run_args_t));
 		pre_run_args->args    = pre_run_argv;
@@ -3844,11 +3992,13 @@ extern int bb_p_job_begin(struct job_record *job_ptr)
 			job_ptr->job_state |= JOB_CONFIGURING;
 		}
 
-		slurm_thread_create_detached(NULL, _start_pre_run, pre_run_args);
+		slurm_thread_create_detached(NULL, _start_pre_run,
+					     pre_run_args);
 	}
 
 fini:
 	xfree(client_nodes_file_nid);
+	xfree(exec_host_file);
 	xfree(job_dir);
 	return rc;
 }
@@ -3883,7 +4033,6 @@ static void *_start_pre_run(void *x)
 		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK, READ_LOCK };
 	pre_run_args_t *pre_run_args = (pre_run_args_t *) x;
 	char *resp_msg = NULL;
-	char jobid_buf[64];
 	bb_job_t *bb_job = NULL;
 	int status = 0;
 	struct job_record *job_ptr;
@@ -3921,18 +4070,10 @@ static void *_start_pre_run(void *x)
 	lock_slurmctld(job_write_lock);
 	slurm_mutex_lock(&bb_state.bb_mutex);
 	job_ptr = find_job_record(pre_run_args->job_id);
-	if (job_ptr) {
-		jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf));
-	} else {
-		error("%s: Could not find job record for job %u", __func__,
-		      pre_run_args->job_id);
-		snprintf(jobid_buf, sizeof(jobid_buf), "%u",
-			 pre_run_args->job_id);
-	}
 	if ((DELTA_TIMER > 500000) ||	/* 0.5 secs */
 	    bb_state.bb_config.debug_flag) {
-		info("%s: dws_pre_run for %s ran for %s", __func__,
-		     jobid_buf, TIME_STR);
+		info("%s: dws_pre_run for %pJ ran for %s",
+		     __func__, job_ptr, TIME_STR);
 	}
 	if (job_ptr)
 		bb_job = _get_bb_job(job_ptr);
@@ -3940,10 +4081,10 @@ static void *_start_pre_run(void *x)
 	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
 		/* Pre-run failure */
 		trigger_burst_buffer();
-		error("%s: dws_pre_run for %s status:%u response:%s", __func__,
-		      jobid_buf, status, resp_msg);
+		error("%s: dws_pre_run for %pJ status:%u response:%s",
+		      __func__, job_ptr, status, resp_msg);
 		if (job_ptr) {
-			_update_comment(job_ptr, "pre_run", resp_msg);
+			_update_system_comment(job_ptr, "pre_run", resp_msg, 0);
 			if (IS_JOB_RUNNING(job_ptr))
 				run_kill_job = true;
 			if (bb_job) {
@@ -3961,11 +4102,16 @@ static void *_start_pre_run(void *x)
 		else
 			bb_job->state = BB_STATE_RUNNING;
 	}
-	if (job_ptr)
+	if (job_ptr) {
+		if (run_kill_job)
+			job_ptr->job_state &= ~JOB_CONFIGURING;
 		prolog_running_decr(job_ptr);
+	}
 	slurm_mutex_unlock(&bb_state.bb_mutex);
-	if (run_kill_job)
+	if (run_kill_job) {
+		/* bb_mutex must be unlocked before calling this */
 		_kill_job(job_ptr, hold_job);
+	}
 	unlock_slurmctld(job_write_lock);
 
 	xfree(resp_msg);
@@ -3978,7 +4124,7 @@ static void *_start_pre_run(void *x)
  * Executed after bb_p_job_begin() if there was an allocation failure.
  * Does not release previously allocated resources.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int bb_p_job_revoke_alloc(struct job_record *job_ptr)
 {
@@ -4004,39 +4150,40 @@ extern int bb_p_job_revoke_alloc(struct job_record *job_ptr)
 /*
  * Trigger a job's burst buffer stage-out to begin
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int bb_p_job_start_stage_out(struct job_record *job_ptr)
 {
 	bb_job_t *bb_job;
-	char jobid_buf[32];
 
 	if ((job_ptr->burst_buffer == NULL) ||
 	    (job_ptr->burst_buffer[0] == '\0'))
 		return SLURM_SUCCESS;
 
 	slurm_mutex_lock(&bb_state.bb_mutex);
-	if (bb_state.bb_config.debug_flag) {
-		info("%s: %s: %s", plugin_type, __func__,
-		     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
-	}
+	if (bb_state.bb_config.debug_flag)
+		info("%s: %s: %pJ", plugin_type, __func__, job_ptr);
+
 	if (bb_state.last_load_time == 0) {
-		info("%s: %s: Burst buffer down, can not stage out job %u",
-		      plugin_type, __func__, job_ptr->job_id);
+		info("%s: %s: Burst buffer down, can not stage out %pJ",
+		      plugin_type, __func__, job_ptr);
 		slurm_mutex_unlock(&bb_state.bb_mutex);
 		return SLURM_ERROR;
 	}
 	bb_job = _get_bb_job(job_ptr);
 	if (!bb_job) {
 		/* No job buffers. Assuming use of persistent buffers only */
-		verbose("%s: %s bb job record not found", __func__,
-			jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
+		verbose("%s: %pJ bb job record not found", __func__, job_ptr);
 	} else if (bb_job->state < BB_STATE_RUNNING) {
 		/* Job never started. Just teardown the buffer */
 		bb_job->state = BB_STATE_TEARDOWN;
 		_queue_teardown(job_ptr->job_id, job_ptr->user_id, true);
 	} else if (bb_job->state < BB_STATE_POST_RUN) {
 		bb_job->state = BB_STATE_POST_RUN;
+		job_ptr->job_state |= JOB_STAGE_OUT;
+		xfree(job_ptr->state_desc);
+		xstrfmtcat(job_ptr->state_desc, "%s: Stage-out in progress",
+			   plugin_type);
 		_queue_stage_out(bb_job);
 	}
 	slurm_mutex_unlock(&bb_state.bb_mutex);
@@ -4055,28 +4202,25 @@ extern int bb_p_job_test_post_run(struct job_record *job_ptr)
 {
 	bb_job_t *bb_job;
 	int rc = -1;
-	char jobid_buf[32];
 
 	if ((job_ptr->burst_buffer == NULL) ||
 	    (job_ptr->burst_buffer[0] == '\0'))
 		return 1;
 
 	slurm_mutex_lock(&bb_state.bb_mutex);
-	if (bb_state.bb_config.debug_flag) {
-		info("%s: %s: %s", plugin_type, __func__,
-		     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
-	}
+	if (bb_state.bb_config.debug_flag)
+		info("%s: %s: %pJ", plugin_type, __func__, job_ptr);
+
 	if (bb_state.last_load_time == 0) {
-		info("%s: %s: Burst buffer down, can not post_run job %u",
-		      plugin_type, __func__, job_ptr->job_id);
+		info("%s: %s: Burst buffer down, can not post_run %pJ",
+		      plugin_type, __func__, job_ptr);
 		slurm_mutex_unlock(&bb_state.bb_mutex);
 		return -1;
 	}
 	bb_job = bb_job_find(&bb_state, job_ptr->job_id);
 	if (!bb_job) {
 		/* No job buffers. Assuming use of persistent buffers only */
-		verbose("%s: %s bb job record not found", __func__,
-			jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
+		verbose("%s: %pJ bb job record not found", __func__, job_ptr);
 		rc =  1;
 	} else {
 		if (bb_job->state < BB_STATE_POST_RUN) {
@@ -4103,28 +4247,25 @@ extern int bb_p_job_test_stage_out(struct job_record *job_ptr)
 {
 	bb_job_t *bb_job;
 	int rc = -1;
-	char jobid_buf[32];
 
 	if ((job_ptr->burst_buffer == NULL) ||
 	    (job_ptr->burst_buffer[0] == '\0'))
 		return 1;
 
 	slurm_mutex_lock(&bb_state.bb_mutex);
-	if (bb_state.bb_config.debug_flag) {
-		info("%s: %s: %s", plugin_type, __func__,
-		     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
-	}
+	if (bb_state.bb_config.debug_flag)
+		info("%s: %s: %pJ", plugin_type, __func__, job_ptr);
+
 	if (bb_state.last_load_time == 0) {
-		info("%s: %s: Burst buffer down, can not stage-out job %u",
-		      plugin_type, __func__, job_ptr->job_id);
+		info("%s: %s: Burst buffer down, can not stage-out %pJ",
+		      plugin_type, __func__, job_ptr);
 		slurm_mutex_unlock(&bb_state.bb_mutex);
 		return -1;
 	}
 	bb_job = bb_job_find(&bb_state, job_ptr->job_id);
 	if (!bb_job) {
 		/* No job buffers. Assuming use of persistent buffers only */
-		verbose("%s: %s bb job record not found", __func__,
-			jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
+		verbose("%s: %pJ bb job record not found", __func__, job_ptr);
 		rc =  1;
 	} else {
 		if (bb_job->state == BB_STATE_PENDING) {
@@ -4150,22 +4291,20 @@ extern int bb_p_job_test_stage_out(struct job_record *job_ptr)
 /*
  * Terminate any file staging and completely release burst buffer resources
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int bb_p_job_cancel(struct job_record *job_ptr)
 {
 	bb_job_t *bb_job;
 	bb_alloc_t *bb_alloc;
-	char jobid_buf[32];
 
 	slurm_mutex_lock(&bb_state.bb_mutex);
-	if (bb_state.bb_config.debug_flag) {
-		info("%s: %s: %s", plugin_type, __func__,
-		     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
-	}
+	if (bb_state.bb_config.debug_flag)
+		info("%s: %s: %pJ", plugin_type, __func__, job_ptr);
+
 	if (bb_state.last_load_time == 0) {
-		info("%s: %s: Burst buffer down, can not cancel job %u",
-		      plugin_type, __func__, job_ptr->job_id);
+		info("%s: %s: Burst buffer down, can not cancel %pJ",
+		      plugin_type, __func__, job_ptr);
 		slurm_mutex_unlock(&bb_state.bb_mutex);
 		return SLURM_ERROR;
 	}
@@ -4229,14 +4368,16 @@ static int _create_bufs(struct job_record *job_ptr, bb_job_t *bb_job,
 			rc++;
 		} else if (buf_ptr->state != BB_STATE_PENDING) {
 			;	/* Nothing to do */
+		} else if (buf_ptr->flags != BB_FLAG_BB_OP) {
+			;	/* Not processed using dw_wlm_cli */
 		} else if (buf_ptr->create) {	/* Create the buffer */
 			bb_alloc = bb_find_name_rec(buf_ptr->name,
 						    job_ptr->user_id,
 						    &bb_state);
 			if (bb_alloc &&
 			    (bb_alloc->user_id != job_ptr->user_id)) {
-				info("Attempt by job %u user %u to create duplicate persistent burst buffer named %s and currently owned by user %u",
-				      job_ptr->job_id, job_ptr->user_id,
+				info("Attempt by %pJ user %u to create duplicate persistent burst buffer named %s and currently owned by user %u",
+				      job_ptr, job_ptr->user_id,
 				      buf_ptr->name, bb_alloc->user_id);
 				job_ptr->priority = 0;
 				job_ptr->state_reason = FAIL_BURST_BUFFER_OP;
@@ -4244,21 +4385,22 @@ static int _create_bufs(struct job_record *job_ptr, bb_job_t *bb_job,
 				job_ptr->state_desc = xstrdup(
 					"Burst buffer create_persistent error");
 				buf_ptr->state = BB_STATE_COMPLETE;
-				_update_comment(job_ptr, "create_persistent",
-						"Duplicate buffer name");
+				_update_system_comment(job_ptr,
+						       "create_persistent",
+						       "Duplicate buffer name",
+						       0);
 				rc++;
 				break;
 			} else if (bb_alloc) {
 				/* Duplicate create likely result of requeue */
-				debug("Attempt by job %u to create duplicate persistent burst buffer named %s",
-				      job_ptr->job_id, buf_ptr->name);
+				debug("Attempt by %pJ to create duplicate persistent burst buffer named %s",
+				      job_ptr, buf_ptr->name);
 				buf_ptr->create = false; /* Creation complete */
 				if (bb_job->persist_add >= bb_alloc->size) {
 					bb_job->persist_add -= bb_alloc->size;
 				} else {
-					error("%s: Persistent buffer size "
-					      "underflow for job %u",
-					      __func__, job_ptr->job_id);
+					error("%s: Persistent buffer size underflow for %pJ",
+					      __func__, job_ptr);
 					bb_job->persist_add = 0;
 				}
 				continue;
@@ -4290,21 +4432,16 @@ static int _create_bufs(struct job_record *job_ptr, bb_job_t *bb_job,
 						    &bb_state);
 			if (!bb_alloc) {
 				/* Ignore request if named buffer not found */
-				info("%s: destroy_persistent: No burst buffer "
-				     "with name '%s' found for job %u",
-				     plugin_type, buf_ptr->name,
-				     job_ptr->job_id);
+				info("%s: destroy_persistent: No burst buffer with name '%s' found for %pJ",
+				     plugin_type, buf_ptr->name, job_ptr);
 				continue;
 			}
 			rc++;
 			if ((bb_alloc->user_id != job_ptr->user_id) &&
 			    !validate_super_user(job_ptr->user_id)) {
-				info("%s: destroy_persistent: Attempt by "
-				     "user %u job %u to destroy buffer %s "
-				     "owned by user %u",
-				     plugin_type, job_ptr->user_id,
-				     job_ptr->job_id, buf_ptr->name,
-				     bb_alloc->user_id);
+				info("%s: destroy_persistent: Attempt by user %u %pJ to destroy buffer %s owned by user %u",
+				     plugin_type, job_ptr->user_id, job_ptr,
+				     buf_ptr->name, bb_alloc->user_id);
 				job_ptr->state_reason = FAIL_BURST_BUFFER_OP;
 				xstrfmtcat(job_ptr->state_desc,
 					   "%s: Delete buffer %s permission "
@@ -4392,7 +4529,8 @@ static void _reset_buf_state(uint32_t user_id, uint32_t job_id, char *name,
 
 	bb_job = bb_job_find(&bb_state, job_id);
 	if (!bb_job) {
-		error("%s: Could not find job record for %u", __func__, job_id);
+		error("%s: Could not find job record for JobId=%u",
+		      __func__, job_id);
 		return;
 	}
 
@@ -4420,8 +4558,7 @@ static void _reset_buf_state(uint32_t user_id, uint32_t job_id, char *name,
 			if (bb_job->persist_add >= buf_size) {
 				bb_job->persist_add -= buf_size;
 			} else {
-				error("%s: Persistent buffer size underflow "
-				      "for job %u",
+				error("%s: Persistent buffer size underflow for JobId=%u",
 				      __func__, job_id);
 				bb_job->persist_add = 0;
 			}
@@ -4435,7 +4572,8 @@ static void _reset_buf_state(uint32_t user_id, uint32_t job_id, char *name,
 		if ((old_state == BB_STATE_PENDING)    ||
 		    (old_state == BB_STATE_ALLOCATING) ||
 		    (old_state == BB_STATE_DELETING)   ||
-		    (old_state == BB_STATE_TEARDOWN))
+		    (old_state == BB_STATE_TEARDOWN)   ||
+		    (old_state == BB_STATE_TEARDOWN_FAIL))
 			active_buf = true;
 		break;
 	}
@@ -4503,13 +4641,13 @@ static void *_create_persistent(void *x)
 	     create_args->name, TIME_STR);
 	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
 		trigger_burst_buffer();
-		error("%s: For JobID=%u Name=%s status:%u response:%s",
+		error("%s: For JobId=%u Name=%s status:%u response:%s",
 		      __func__, create_args->job_id, create_args->name,
 		      status, resp_msg);
 		lock_slurmctld(job_write_lock);
 		job_ptr = find_job_record(create_args->job_id);
 		if (!job_ptr) {
-			error("%s: unable to find job record for job %u",
+			error("%s: unable to find job record for JobId=%u",
 			      __func__, create_args->job_id);
 		} else {
 			job_ptr->state_reason = FAIL_BAD_CONSTRAINTS;
@@ -4517,7 +4655,8 @@ static void *_create_persistent(void *x)
 			xfree(job_ptr->state_desc);
 			xstrfmtcat(job_ptr->state_desc, "%s: %s: %s",
 				   plugin_type, __func__, resp_msg);
-			_update_comment(job_ptr, "create_persistent", resp_msg);
+			_update_system_comment(job_ptr, "create_persistent",
+					       resp_msg, 0);
 		}
 		slurm_mutex_lock(&bb_state.bb_mutex);
 		_reset_buf_state(create_args->user_id, create_args->job_id,
@@ -4527,12 +4666,11 @@ static void *_create_persistent(void *x)
 		unlock_slurmctld(job_write_lock);
 	} else if (resp_msg && strstr(resp_msg, "created")) {
 		assoc_mgr_lock_t assoc_locks =
-			{ READ_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
-			  NO_LOCK, NO_LOCK, NO_LOCK };
+			{ .assoc = READ_LOCK, .qos = READ_LOCK };
 		lock_slurmctld(job_write_lock);
 		job_ptr = find_job_record(create_args->job_id);
 		if (!job_ptr) {
-			error("%s: unable to find job record for job %u",
+			error("%s: unable to find job record for JobId=%u",
 			      __func__, create_args->job_id);
 		}
 		assoc_mgr_lock(&assoc_locks);
@@ -4614,8 +4752,7 @@ static void *_destroy_persistent(void *x)
 	bb_alloc = bb_find_name_rec(destroy_args->name, destroy_args->user_id,
 				    &bb_state);
 	if (!bb_alloc) {
-		info("%s: destroy_persistent: No burst buffer with name "
-		     "'%s' found for job %u",
+		info("%s: destroy_persistent: No burst buffer with name '%s' found for JobId=%u",
 		     plugin_type, destroy_args->name, destroy_args->job_id);
 	}
 	if (bb_state.bb_config.other_timeout)
@@ -4646,17 +4783,17 @@ static void *_destroy_persistent(void *x)
 	     destroy_args->name, TIME_STR);
 	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
 		trigger_burst_buffer();
-		error("%s: destroy_persistent for JobID=%u Name=%s "
-		      "status:%u response:%s",
+		error("%s: destroy_persistent for JobId=%u Name=%s status:%u response:%s",
 		      __func__, destroy_args->job_id, destroy_args->name,
 		      status, resp_msg);
 		lock_slurmctld(job_write_lock);
 		job_ptr = find_job_record(destroy_args->job_id);
 		if (!job_ptr) {
-			error("%s: unable to find job record for job %u",
+			error("%s: unable to find job record for JobId=%u",
 			      __func__, destroy_args->job_id);
 		} else {
-			_update_comment(job_ptr, "teardown", resp_msg);
+			_update_system_comment(job_ptr, "teardown",
+					       resp_msg, 0);
 			job_ptr->state_reason = FAIL_BAD_CONSTRAINTS;
 			xfree(job_ptr->state_desc);
 			xstrfmtcat(job_ptr->state_desc, "%s: %s: %s",
@@ -4670,8 +4807,7 @@ static void *_destroy_persistent(void *x)
 		unlock_slurmctld(job_write_lock);
 	} else {
 		assoc_mgr_lock_t assoc_locks =
-			{ READ_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
-			  NO_LOCK, NO_LOCK, NO_LOCK };
+			{ .assoc = READ_LOCK, .qos = READ_LOCK };
 		/* assoc_mgr needs locking to call bb_post_persist_delete */
 		if (bb_alloc)
 			assoc_mgr_lock(&assoc_locks);
@@ -4751,7 +4887,7 @@ _bb_get_configs(int *num_ent, bb_state_t *state_ptr, uint32_t timeout)
 	_python2json(resp_msg);
 	j = json_tokener_parse(resp_msg);
 	if (j == NULL) {
-		error("%s: json parser failed on %s", __func__, resp_msg);
+		error("%s: json parser failed on \"%s\"", __func__, resp_msg);
 		xfree(resp_msg);
 		return ents;
 	}
@@ -4818,7 +4954,7 @@ _bb_get_instances(int *num_ent, bb_state_t *state_ptr, uint32_t timeout)
 	_python2json(resp_msg);
 	j = json_tokener_parse(resp_msg);
 	if (j == NULL) {
-		error("%s: json parser failed on %s", __func__, resp_msg);
+		error("%s: json parser failed on \"%s\"", __func__, resp_msg);
 		xfree(resp_msg);
 		return ents;
 	}
@@ -4887,7 +5023,7 @@ _bb_get_pools(int *num_ent, bb_state_t *state_ptr, uint32_t timeout)
 	_python2json(resp_msg);
 	j = json_tokener_parse(resp_msg);
 	if (j == NULL) {
-		error("%s: json parser failed on %s", __func__, resp_msg);
+		error("%s: json parser failed on \"%s\"", __func__, resp_msg);
 		xfree(resp_msg);
 		return ents;
 	}
@@ -4951,7 +5087,7 @@ _bb_get_sessions(int *num_ent, bb_state_t *state_ptr, uint32_t timeout)
 	_python2json(resp_msg);
 	j = json_tokener_parse(resp_msg);
 	if (j == NULL) {
-		error("%s: json parser failed on %s", __func__, resp_msg);
+		error("%s: json parser failed on \"%s\"", __func__, resp_msg);
 		xfree(resp_msg);
 		return ents;
 	}

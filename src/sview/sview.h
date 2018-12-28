@@ -6,22 +6,22 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \****************************************************************************/
 
@@ -57,7 +57,6 @@
 #include "src/common/uid.h"
 #include "src/common/xstring.h"
 
-#include "src/plugins/select/bluegene/bg_enums.h"
 #include "gthread_helper.h"
 
 /* getopt_long options, integers but not characters */
@@ -83,7 +82,6 @@ enum { JOB_PAGE,
        PART_PAGE,
        RESV_PAGE,
        BB_PAGE,
-       BLOCK_PAGE,
        NODE_PAGE,
        FRONT_END_PAGE,
        SUBMIT_PAGE,
@@ -133,10 +131,6 @@ typedef enum {
 	       SEARCH_JOB_ID = 10,
 	       SEARCH_JOB_USER,
 	       SEARCH_JOB_STATE,
-	       SEARCH_BLOCK_NAME,
-	       SEARCH_BLOCK_NODENAME,
-	       SEARCH_BLOCK_SIZE,
-	       SEARCH_BLOCK_STATE,
 	       SEARCH_PARTITION_NAME,
 	       SEARCH_PARTITION_STATE,
 	       SEARCH_NODE_NAME,
@@ -326,15 +320,12 @@ extern int global_row_count;
 extern gint last_event_x;
 extern gint last_event_y;
 extern GdkCursor* in_process_cursor;
-extern int cpus_per_node;
-extern int g_node_scaling;
 extern char *sview_colors[];
 extern int sview_colors_cnt;
 extern int cluster_dims;
 extern uint32_t cluster_flags;
 extern List cluster_list;
 extern char *orig_cluster_name;
-extern block_info_msg_t *g_block_info_ptr;
 extern front_end_info_msg_t *g_front_end_info_ptr;
 extern job_info_msg_t *g_job_info_ptr;
 extern node_info_msg_t *g_node_info_ptr;
@@ -395,9 +386,6 @@ extern void set_grid_used(List button_list, int start, int end,
 extern void get_button_list_from_main(List *button_list, int start, int end,
 				      int color_inx);
 extern List copy_main_button_list(int initial_color);
-extern void add_extra_bluegene_buttons(List *button_list, int inx,
-				       int *color_inx);
-extern void add_extra_cr_buttons(List *button_list, node_info_t *node_ptr);
 extern void put_buttons_in_table(GtkTable *table, List button_list);
 extern int get_system_stats(GtkTable *table);
 extern int setup_grid_table(GtkTable *table, List button_list, List node_list);
@@ -435,25 +423,6 @@ extern void admin_edit_accnt(GtkCellRendererText *cell,
 			     const char *new_text,
 			     gpointer data);
 extern void specific_info_accnt(popup_info_t *popup_win);
-
-// block_info.c
-extern void refresh_block(GtkAction *action, gpointer user_data);
-extern int update_state_block(GtkDialog *dialog,
-			      const char *blockid, const char *type);
-extern GtkListStore *create_model_block(int type);
-extern void admin_edit_block(GtkCellRendererText *cell,
-			     const char *path_string,
-			     const char *new_text,
-			     gpointer data);
-extern int get_new_info_block(block_info_msg_t **block_ptr, int force);
-extern void get_info_block(GtkTable *table, display_data_t *display_data);
-extern void specific_info_block(popup_info_t *popup_win);
-extern void set_menus_block(void *arg, void *arg2, GtkTreePath *path, int type);
-extern void popup_all_block(GtkTreeModel *model, GtkTreeIter *iter, int id);
-extern void select_admin_block(GtkTreeModel *model, GtkTreeIter *iter,
-			       display_data_t *display_data,
-			       GtkTreeView *treeview);
-extern void cluster_change_block(void);
 
 // front_end_info.c
 extern void admin_edit_front_end(GtkCellRendererText *cell,

@@ -2,14 +2,14 @@
  **  pmix_agent.c - PMIx agent thread
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2018 Mellanox Technologies. All rights reserved.
  *  Written by Artem Y. Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
@@ -79,7 +79,6 @@ static struct io_operations to_ops = {
 
 static bool _conn_readable(eio_obj_t *obj)
 {
-	PMIXP_DEBUG("fd = %d", obj->fd);
 	if (obj->shutdown == true) {
 		if (obj->fd != -1) {
 			close(obj->fd);
@@ -97,8 +96,6 @@ static int _server_conn_read(eio_obj_t *obj, List objs)
 	struct sockaddr addr;
 	socklen_t size = sizeof(addr);
 	int shutdown = 0;
-
-	PMIXP_DEBUG("fd = %d", obj->fd);
 
 	while (1) {
 		/* Return early if fd is not now ready */
@@ -128,7 +125,7 @@ static int _server_conn_read(eio_obj_t *obj, List objs)
 		}
 
 		if (pmixp_info_srv_usock_fd() == obj->fd) {
-			PMIXP_DEBUG("SLURM PROTO: accepted connection: sd=%d",
+			PMIXP_DEBUG("Slurm PROTO: accepted connection: sd=%d",
 				    fd);
 			/* read command from socket and handle it */
 			pmixp_server_slurm_conn(fd);
@@ -147,7 +144,6 @@ static int _timer_conn_read(eio_obj_t *obj, List objs)
 {
 	char *tmpbuf[32];
 	int shutdown;
-	PMIXP_DEBUG("Timeout thread, fd = %d", obj->fd);
 
 	/* drain everything from in fd */
 	while (32 == pmixp_read_buf(obj->fd, tmpbuf, 32, &shutdown, false))
@@ -293,13 +289,6 @@ rwfail:
 	return NULL;
 }
 
-void _direct_init_sent_buf_cb(int rc, pmixp_p2p_ctx_t ctx, void *data)
-{
-	Buf buf = (Buf) data;
-	FREE_NULL_BUFFER(buf);
-	return;
-}
-
 int pmixp_agent_start(void)
 {
 	slurm_mutex_lock(&agent_mutex);
@@ -312,6 +301,13 @@ int pmixp_agent_start(void)
 	/* wait for the agent thread to initialize */
 	slurm_cond_wait(&agent_running_cond, &agent_mutex);
 
+	/* Establish the early direct connection */
+	if (pmixp_info_srv_direct_conn_early()) {
+		if (pmixp_server_direct_conn_early()) {
+			slurm_mutex_unlock(&agent_mutex);
+			return SLURM_ERROR;
+		}
+	}
 	/* Check if a ping-pong run was requested by user
 	 * NOTE: enabled only if `--enable-debug` configuration
 	 * option was passed
@@ -330,39 +326,6 @@ int pmixp_agent_start(void)
 
 	PMIXP_DEBUG("agent thread started: tid = %lu",
 		    (unsigned long) _agent_tid);
-
-	if (pmixp_info_srv_direct_conn_early()) {
-		pmixp_coll_t *coll = NULL;
-		int rc;
-		pmixp_proc_t proc;
-
-		pmixp_debug_hang(0);
-
-		proc.rank = pmixp_lib_get_wildcard();
-		strncpy(proc.nspace, _pmixp_job_info.nspace, PMIXP_MAX_NSLEN);
-
-		coll = pmixp_state_coll_get(PMIXP_COLL_TYPE_FENCE, &proc, 1);
-
-		if (coll->prnt_host) {
-			pmixp_ep_t ep = {0};
-			Buf buf = pmixp_server_buf_new();
-
-			pmixp_debug_hang(0);
-
-			ep.type = PMIXP_EP_NOIDEID;
-			ep.ep.nodeid = coll->prnt_peerid;
-
-			rc = pmixp_server_send_nb(
-				&ep, PMIXP_MSG_INIT_DIRECT, coll->seq,
-				buf, _direct_init_sent_buf_cb, NULL);
-
-			if (SLURM_SUCCESS != rc) {
-				PMIXP_ERROR_STD("send init msg error");
-				slurm_mutex_unlock(&agent_mutex);
-				return SLURM_ERROR;
-			}
-		}
-	}
 
 	slurm_thread_create(&_timer_tid, _pmix_timer_thread, NULL);
 

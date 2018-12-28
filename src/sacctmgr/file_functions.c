@@ -8,11 +8,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -141,7 +141,7 @@ static void _strip_escapes(char *line)
 /*
  * Reads the next line from the "file" into buffer "buf".
  *
- * Concatonates together lines that are continued on
+ * Concatenates together lines that are continued on
  * the next line by a trailing "\".  Strips out comments,
  * replaces escaped "\#" with "#", and replaces "\\" with "\".
  */
@@ -340,7 +340,7 @@ static int _print_out_assoc(List assoc_list, bool user, bool add)
 		slurm_addto_char_list(format_list,
 				      "Account,ParentName");
 	slurm_addto_char_list(format_list,
-			      "Share,GrpTRESM,GrpTRESR,GrpTRES,GrpJ,"
+			      "Share,GrpTRESM,GrpTRESR,GrpTRES,GrpJ,GrpJobsA,"
 			      "GrpMEM,GrpN,GrpS,GrpW,MaxTRESM,MaxTRES,"
 			      "MaxTRESPerN,MaxJ,MaxS,MaxN,MaxW,QOS,DefaultQOS");
 
@@ -465,6 +465,20 @@ static int _mod_assoc(sacctmgr_file_opts_t *file_opts,
 			   file_opts->assoc_rec.grp_jobs);
 	}
 
+	if ((file_opts->assoc_rec.grp_jobs_accrue != NO_VAL)
+	    && (assoc->grp_jobs_accrue !=
+		file_opts->assoc_rec.grp_jobs_accrue)) {
+		mod_assoc.grp_jobs_accrue =
+			file_opts->assoc_rec.grp_jobs_accrue;
+		changed = 1;
+		xstrfmtcat(my_info,
+			   "%-30.30s for %-7.7s %-10.10s %8d -> %d\n",
+			   " Changed GrpJobsAccrue",
+			   type, name,
+			   assoc->grp_jobs_accrue,
+			   file_opts->assoc_rec.grp_jobs_accrue);
+	}
+
 	if ((file_opts->assoc_rec.grp_submit_jobs != NO_VAL)
 	    && (assoc->grp_submit_jobs !=
 		file_opts->assoc_rec.grp_submit_jobs)) {
@@ -555,6 +569,20 @@ static int _mod_assoc(sacctmgr_file_opts_t *file_opts,
 			   type, name,
 			   assoc->max_jobs,
 			   file_opts->assoc_rec.max_jobs);
+	}
+
+	if ((file_opts->assoc_rec.max_jobs_accrue != NO_VAL)
+	    && (assoc->max_jobs_accrue !=
+		file_opts->assoc_rec.max_jobs_accrue)) {
+		mod_assoc.max_jobs_accrue =
+			file_opts->assoc_rec.max_jobs_accrue;
+		changed = 1;
+		xstrfmtcat(my_info,
+			   "%-30.30s for %-7.7s %-10.10s %8d -> %d\n",
+			   " Changed MaxJobsAccrue",
+			   type, name,
+			   assoc->max_jobs_accrue,
+			   file_opts->assoc_rec.max_jobs_accrue);
 	}
 
 	if ((file_opts->assoc_rec.max_submit_jobs != NO_VAL)
@@ -1411,7 +1439,7 @@ extern int print_file_add_limits_to_line(char **line,
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->grp_tres_mins, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		xstrfmtcat(*line, ":GrpTRESMins=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1420,7 +1448,7 @@ extern int print_file_add_limits_to_line(char **line,
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->grp_tres_run_mins, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		xstrfmtcat(*line, ":GrpTRESRunMins=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1429,13 +1457,16 @@ extern int print_file_add_limits_to_line(char **line,
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->grp_tres, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		xstrfmtcat(*line, ":GrpTRES=%s", tmp_char);
 		xfree(tmp_char);
 	}
 
 	if (assoc->grp_jobs != INFINITE)
 		xstrfmtcat(*line, ":GrpJobs=%u", assoc->grp_jobs);
+
+	if (assoc->grp_jobs_accrue != INFINITE)
+		xstrfmtcat(*line, ":GrpJobsAccrue=%u", assoc->grp_jobs_accrue);
 
 	if (assoc->grp_submit_jobs != INFINITE)
 		xstrfmtcat(*line, ":GrpSubmitJobs=%u", assoc->grp_submit_jobs);
@@ -1447,7 +1478,7 @@ extern int print_file_add_limits_to_line(char **line,
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->max_tres_mins_pj, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		xstrfmtcat(*line, ":MaxTRESMinsPerJob=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1456,7 +1487,7 @@ extern int print_file_add_limits_to_line(char **line,
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->max_tres_run_mins, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		xstrfmtcat(*line, ":MaxTRESRunMins=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1465,7 +1496,7 @@ extern int print_file_add_limits_to_line(char **line,
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->max_tres_pj, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		xstrfmtcat(*line, ":MaxTRESPerJob=%s", tmp_char);
 		xfree(tmp_char);
 	}
@@ -1474,13 +1505,16 @@ extern int print_file_add_limits_to_line(char **line,
 		sacctmgr_initialize_g_tres_list();
 		tmp_char = slurmdb_make_tres_string_from_simple(
 			assoc->max_tres_pn, g_tres_list, NO_VAL,
-			CONVERT_NUM_UNIT_EXACT);
+			CONVERT_NUM_UNIT_EXACT, 0, NULL);
 		xstrfmtcat(*line, ":MaxTRESPerNode=%s", tmp_char);
 		xfree(tmp_char);
 	}
 
 	if (assoc->max_jobs != INFINITE)
 		xstrfmtcat(*line, ":MaxJobs=%u", assoc->max_jobs);
+
+	if (assoc->max_jobs_accrue != INFINITE)
+		xstrfmtcat(*line, ":MaxJobsAccrue=%u", assoc->max_jobs_accrue);
 
 	if (assoc->max_submit_jobs != INFINITE)
 		xstrfmtcat(*line, ":MaxSubmitJobs=%u", assoc->max_submit_jobs);

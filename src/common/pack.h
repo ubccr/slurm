@@ -8,11 +8,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov>, Morris Jette <jette1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \****************************************************************************/
 
@@ -44,6 +44,7 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <time.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "src/common/bitstring.h"
@@ -64,6 +65,7 @@ struct slurm_buf {
 	char *head;
 	uint32_t size;
 	uint32_t processed;
+	bool mmaped;
 };
 
 typedef struct slurm_buf * Buf;
@@ -75,6 +77,7 @@ typedef struct slurm_buf * Buf;
 #define size_buf(__buf)			(__buf->size)
 
 Buf	create_buf (char *data, uint32_t size);
+Buf	create_mmap_buf(char *file);
 void	free_buf(Buf my_buf);
 Buf	init_buf(uint32_t size);
 void    grow_buf (Buf my_buf, uint32_t size);

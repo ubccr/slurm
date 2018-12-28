@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "April 2018" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "November 2018" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -19,6 +19,11 @@ The following document describes the influence of various options on the
 allocation of cpus to jobs and tasks.
 .br
 https://slurm.schedmd.com/cpu_management.html
+
+.SH "RETURN VALUE"
+srun will return the highest exit code of all tasks run or the highest signal
+(with the high-order bit set in an 8-bit integer -- e.g. 128 + signal) of any
+task that exited with a signal.
 
 .SH "OPTIONS"
 .LP
@@ -128,8 +133,6 @@ if the \fB\-B\fR option specifies a thread count, otherwise an option of
 If SelectType is configured to select/cons_res, it must have a parameter of
 CR_Core, CR_Core_Memory, CR_Socket, or CR_Socket_Memory for this option
 to be honored.
-This option is not supported on BlueGene systems (select/bluegene plugin
-is configured).
 If not specified, the scontrol show job will display 'ReqS:C:T=*:*:*'. This
 option applies to job allocations.
 
@@ -284,7 +287,19 @@ For example: "\fB\-\-constraint=[rack1*2&rack2*4]"\fR might
 be used to specify that two nodes must be allocated from nodes with the feature
 of "rack1" and four nodes must be allocated from nodes with the feature
 "rack2".
+
+\fBNOTE:\fR This construct does not support multiple Intel KNL NUMA or MCDRAM
+modes. For example, while "\fB\-\-constraint=[(knl&quad)*2&(knl&hemi)*4]"\fR is
+not supported, "\fB\-\-constraint=[haswell*2&(knl&hemi)*4]"\fR is supported.
+Specification of multiple KNL modes requires the use of a heterogeneous job.
+
 .TP
+\fBParenthesis\fR
+Parenthesis can be used to group like node features together. For example
+"\fB\-\-constraint=[(knl&snc4&flat)*4&haswell*1]"\fR might be used to specify
+that four nodes with the features "knl", "snc4" and "flat" plus one node with
+the feature "haswell" are required. All options within parenthesis should be
+grouped with AND (e.g. "&") operands.
 .RE
 
 \fBWARNING\fR: When srun is executed from within salloc or sbatch,
@@ -349,6 +364,13 @@ Binding a task to a NUMA locality domain means to bind the task to the set of
 CPUs that belong to the NUMA locality domain or "NUMA node".
 If NUMA locality domain options are used on systems with no NUMA support, then
 each socket is considered a locality domain.
+
+If the -\-cpu\-bind option is not used, the default binding mode will depend
+upon Slurm's configuration and the step's resource allocation.
+If all allocated nodes have the same configured CpuBind mode, that will be used.
+Otherwise if the job's Partition has a configured CpuBind mode, that will be used.
+Otherwise if Slurm has a configured TaskPluginParam value, that mode will be used.
+Otherwise automatic binding will be performed as described below.
 
 .PD
 .RS
@@ -561,7 +583,6 @@ Accounting is able to poll for job information. As a result not all of
 accounting information will be present.
 
 This option applies to job and step allocations.
-
 .RE
 
 .TP
@@ -649,6 +670,10 @@ execution.
 \fBafterany:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have terminated.
 .TP
+\fBafterburstbuffer:job_id[:jobid...]\fR
+This job can begin execution after the specified jobs have terminated and
+any associated burst buffer stage out operations have completed.
+.TP
 \fBaftercorr:job_id[:jobid...]\fR
 A task of this job array can begin execution after the corresponding task ID
 in the specified job has completed successfully (ran to completion with an
@@ -670,6 +695,8 @@ Gang scheduling of resources in the partition is also not supported.
 \fBsingleton\fR
 This job can begin execution after any previously launched jobs
 sharing the same job name and user have terminated.
+In other words, only one job by that name and owned by that user can be running
+or suspended at any point in time.
 .RE
 
 .TP
@@ -743,21 +770,24 @@ See \fBEXAMPLE\fR below.
 
 .TP
 \fB\-\-export\fR=<\fIenvironment variables [ALL] | NONE\fR>
-Identify which environment variables are propagated to the launched application,
-by default all are propagated.
+Identify which environment variables are propagated to the launched application.
+By default, \fIall\fR are propagated.
 Multiple environment variable names should be comma separated.
 Environment variable names may be specified to propagate the current
 value (e.g. "\-\-export=EDITOR") or specific values
-may be exported (e.g. "\-\-export=EDITOR=/bin/emacs").  In these two examples
-the environment propagated will only contain the variable "EDITOR"
-and nothing else.
-If one desires to add to the environment instead of replacing it have the
-argument include \fIALL\fR (e.g. "\-\-export=EDITOR,ALL").  This will propagate
-"EDITOR" along with the current environment.
-If one desires no environment variables be propagated use the argument
+may be exported (e.g. "\-\-export=EDITOR=/bin/emacs"). In these two examples,
+the propagated environment will only contain the variable \fIEDITOR\fR.
+If one desires to add to the environment instead of replacing it, have the
+argument include \fIALL\fR (e.g. "\-\-export=ALL,EDITOR=/bin/emacs").
+This will propagate \fIEDITOR\fR along with the current environment.
+Unlike sbatch, if \fIALL\fR is specified, any additional specified environment
+variables are ignored.
+If one desires no environment variables be propagated, use the argument
 \fINONE\fR.
-Regardless of this setting, the appropriate "SLURM_*" task environment variables
-are always exported to the environment.
+Regardless of this setting, the appropriate \fISLURM_*\fR task environment
+variables are always exported to the environment.
+\fIsrun\fR may deviate from the above behavior if the default launch plugin,
+\fIlaunch/slurm\fR, is not used.
 
 .TP
 \fB\-\-gid\fR=<\fIgroup\fR>
@@ -777,7 +807,7 @@ The available generic consumable resources is configurable by the system
 administrator.
 A list of available generic consumable resources will be printed and the
 command will exit if the option argument is "help".
-Examples of use include "\-\-gres=gpu:2,mic=1", "\-\-gres=gpu:kepler:2", and
+Examples of use include "\-\-gres=gpu:2,mic:1", "\-\-gres=gpu:kepler:2", and
 "\-\-gres=help".
 NOTE: This option applies to job and step allocations. By default, a job step
 is allocated all of the generic resources that have allocated to the job.
@@ -787,17 +817,30 @@ resource OR set "\-\-gres=none" OR set the SLURM_STEP_GRES environment variable
 to "none".
 
 .TP
-\fB\-\-gres\-flags\fR=enforce\-binding
-If set, the only CPUs available to the job will be those bound to the selected
-GRES (i.e. the CPUs identified in the gres.conf file will be strictly enforced
-rather than advisory). This option may result in delayed initiation of a job.
+\fB\-\-gres\-flags\fR=<\fItype\fR>
+Specify generic resource task binding options.
+This option applies to job allocations.
+.RS
+.TP
+.B disable\-binding
+Disable filtering of CPUs with respect to generic resource locality.
+This option is currently required to use more CPUs than are bound to a GRES
+(i.e. if a GPU is bound to the CPUs on one socket, but resources on more than
+one socket are required to run the job).
+This option may permit a job to be allocated resources sooner than otherwise
+possible, but may result in lower job performance.
+.TP
+.B enforce\-binding
+The only CPUs available to the job will be those bound to the selected
+GRES (i.e. the CPUs identified in the gres.conf file will be strictly
+enforced). This option may result in delayed initiation of a job.
 For example a job requiring two GPUs and one CPU will be delayed until both
 GPUs on a single socket are available rather than using GPUs bound to separate
 sockets, however the application performance may be improved due to improved
 communication speed.
 Requires the node to be configured with more than one socket and resource
 filtering will be performed on a per\-socket basis.
-This option applies to job allocations.
+.RE
 
 .TP
 \fB\-H, \-\-hold\fR
@@ -1137,7 +1180,11 @@ Also see \fB\-\-mem\-per\-cpu\fR.
 \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
 
 NOTE: A memory size specification of zero is treated as a special case and
-grants the job access to all of the memory on each node.
+grants the job access to all of the memory on each node for newly submitted jobs
+and all available job memory to a new job steps.
+
+Specificing new memory limits for job steps are only advisory.
+
 If the job is allocated multiple nodes in a heterogeneous cluster, the memory
 limit on each node will be that of the node in the allocation with the smallest
 memory size (same limit will apply to every node in the job's allocation).
@@ -1662,7 +1709,7 @@ This option applies to job allocations only.
 \fB\-\-profile\fR=<all|none|[energy[,|task[,|filesystem[,|network]]]]>
 enables detailed data collection by the acct_gather_profile plugin.
 Detailed data are typically time-series that are stored in an HDF5 file for
-the job.
+the job or an InfluxDB database depending on the configured plugin.
 
 .RS
 .TP 10
@@ -1704,17 +1751,19 @@ parameter in slurm.conf. This parameter is completely independent from
 the Prolog parameter in slurm.conf. This option applies to job allocations.
 
 .TP
-\fB\-\-propagate\fR[=\fIrlimits\fR]
+\fB\-\-propagate\fR[=\fIrlimit[,rlimit...]\fR]
 Allows users to specify which of the modifiable (soft) resource limits
-to propagate to the compute nodes and apply to their jobs.  If
-\fIrlimits\fR is not specified, then all resource limits will be
-propagated.
+to propagate to the compute nodes and apply to their jobs. If no
+\fIrlimit\fR is specified, then all resource limits will be propagated.
 The following rlimit names are supported by Slurm (although some
 options may not be supported on some systems):
 .RS
 .TP 10
 \fBALL\fR
-All limits listed below
+All limits listed below (default)
+.TP
+\fBNONE\fR
+No limits listed below
 .TP
 \fBAS\fR
 The maximum address space for a process
@@ -1978,10 +2027,8 @@ Returns an estimate of when a job would be scheduled to run given the
 current job queue and all the other \fBsrun\fR arguments specifying
 the job.  This limits \fBsrun's\fR behavior to just return
 information; no job is actually submitted.
-EXCEPTION: On Bluegene/Q systems on when running within an existing job
-allocation, this disables the use of "runjob" to launch tasks. The program
-will be executed directly by the slurmd daemon. This option applies to job
-allocations.
+The program will be executed directly by the slurmd daemon. This option applies
+to job allocations.
 
 .TP
 \fB\-\-thread\-spec\fR=<\fInum\fR>
@@ -2109,85 +2156,18 @@ allocated to this job. The host list will be assumed to be a filename
 if it contains a "/"character. This option applies to job allocations.
 
 .TP
+\fB\-\-x11\fR[=<\fIall\fR|\fIfirst\fR|\fIlast\fR>]
+Sets up X11 forwarding on all, first or last node(s) of the allocation. This
+option is only enabled if Slurm was compiled with X11 support and
+PrologFlags=x11 is defined in the slurm.conf. Default is \fIall\fR.
+
+.TP
 \fB\-Z\fR, \fB\-\-no\-allocate\fR
 Run the specified tasks on a set of nodes without creating a Slurm
 "job" in the Slurm queue structure, bypassing the normal resource
 allocation step.  The list of nodes must be specified with the
 \fB\-w\fR, \fB\-\-nodelist\fR option.  This is a privileged option
 only available for the users "SlurmUser" and "root". This option applies to job
-allocations.
-
-.PP
-The following options support Blue Gene systems, but may be
-applicable to other systems as well.
-
-.TP
-\fB\-\-blrts\-image\fR=<\fIpath\fR>
-Path to blrts image for bluegene block.  BGL only.
-Default from \fIblugene.conf\fR if not set. This option applies to job
-allocations.
-
-.TP
-\fB\-\-cnload\-image\fR=<\fIpath\fR>
-Path to compute node image for bluegene block.  BGP only.
-Default from \fIblugene.conf\fR if not set. This option applies to job
-allocations.
-
-.TP
-\fB\-\-conn\-type\fR=<\fItype\fR>
-Require the block connection type to be of a certain type.
-On Blue Gene the acceptable of \fItype\fR are MESH, TORUS and NAV.
-If NAV, or if not set, then Slurm will try to fit a what the
-DefaultConnType is set to in the bluegene.conf if that isn't set the
-default is TORUS.
-You should not normally set this option.
-If running on a BGP system and wanting to run in HTC mode (only for 1
-midplane and below).  You can use HTC_S for SMP, HTC_D for Dual, HTC_V
-for virtual node mode, and HTC_L for Linux mode.
-For systems that allow a different connection type per dimension you
-can supply a comma separated list of connection types may be specified, one for
-each dimension (i.e. M,T,T,T will give you a torus connection is all
-dimensions expect the first). This option applies to job allocations.
-
-.TP
-\fB\-g\fR, \fB\-\-geometry\fR=<\fIXxYxZ\fR> | <\fIAxXxYxZ\fR>
-Specify the geometry requirements for the job. On BlueGene/L and BlueGene/P
-systems there are three numbers giving dimensions in the X, Y and Z directions,
-while on BlueGene/Q systems there are four numbers giving dimensions in the
-A, X, Y and Z directions and can not be used to allocate sub-blocks.
-For example "\-\-geometry=1x2x3x4", specifies a block of nodes having
-1 x 2 x 3 x 4 = 24 nodes (actually midplanes on BlueGene). This option applies
-to job allocations.
-
-.TP
-\fB\-\-ioload\-image\fR=<\fIpath\fR>
-Path to io image for bluegene block.  BGP only.
-Default from \fIblugene.conf\fR if not set. This option applies to job
-allocations.
-
-.TP
-\fB\-\-linux\-image\fR=<\fIpath\fR>
-Path to linux image for bluegene block.  BGL only.
-Default from \fIblugene.conf\fR if not set. This option applies to job
-allocations.
-
-.TP
-\fB\-\-mloader\-image\fR=<\fIpath\fR>
-Path to mloader image for bluegene block.
-Default from \fIblugene.conf\fR if not set. This option applies to job
-allocations.
-
-.TP
-\fB\-R\fR, \fB\-\-no\-rotate\fR
-Disables rotation of the job's requested geometry in order to fit an
-appropriate block.
-By default the specified geometry can rotate in three dimensions.
-This option applies to job allocations.
-
-.TP
-\fB\-\-ramdisk\-image\fR=<\fIpath\fR>
-Path to ramdisk image for bluegene block.  BGL only.
-Default from \fIblugene.conf\fR if not set. This option applies to job
 allocations.
 
 .PP
@@ -2405,9 +2385,6 @@ Same as \fB\-\-acctg\-freq\fR
 \fBSLURM_BCAST\fR
 Same as \fB\-\-bcast\fR
 .TP
-\fBSLURM_BLRTS_IMAGE\fR
-Same as \fB\-\-blrts\-image\fR
-.TP
 \fBSLURM_BURST_BUFFER\fR
 Same as \fB\-\-bb\fR
 .TP
@@ -2417,14 +2394,8 @@ Same as \fB\-\-checkpoint\fR
 \fBSLURM_CHECKPOINT_DIR\fR
 Same as \fB\-\-checkpoint\-dir\fR
 .TP
-\fBSLURM_CNLOAD_IMAGE\fR
-Same as \fB\-\-cnload\-image\fR
-.TP
 \fBSLURM_COMPRESS\fR
 Same as \fB\-\-compress\fR
-.TP
-\fBSLURM_CONN_TYPE\fR
-Same as \fB\-\-conn\-type\fR
 .TP
 \fBSLURM_CONSTRAINT\fR
 Same as \fB\-C\fR, \fB\-\-constraint\fR
@@ -2447,7 +2418,7 @@ Same as \fB\-v, \-\-verbose\fR
 \fBSLURM_DELAY_BOOT\fR
 Same as \fB\-\-delay\-boot\fR
 .TP
-\fBfBSLURMD_DEBUG\fR
+\fBSLURMD_DEBUG\fR
 Same as \fB\-d, \-\-slurmd\-debug\fR
 .TP
 \fBSLURM_DEPENDENCY\fR
@@ -2482,9 +2453,6 @@ This can be used by a script to distinguish application exit codes from
 various Slurm error conditions.
 Also see \fBSLURM_EXIT_ERROR\fR.
 .TP
-\fBSLURM_GEOMETRY\fR
-Same as \fB\-g, \-\-geometry\fR
-.TP
 \fBSLURM_GRES_FLAGS\fR
 Same as \-\-gres\-flags\fR
 .TP
@@ -2496,9 +2464,6 @@ Same as \fB\-\-gres\fR. Also see \fBSLURM_STEP_GRES\fR
 .TP
 \fBSLURM_IMMEDIATE\fR
 Same as \fB\-I, \-\-immediate\fR
-.TP
-\fBSLURM_IOLOAD_IMAGE\fR
-Same as \fB\-\-ioload\-image\fR
 .TP
 \fBSLURM_JOB_ID\fR (and \fBSLURM_JOBID\fR for backwards compatibility)
 Same as \fB\-\-jobid\fR
@@ -2518,9 +2483,6 @@ Same as \fB\-K, \-\-kill\-on\-bad\-exit\fR
 \fBSLURM_LABELIO\fR
 Same as \fB\-l, \-\-label\fR
 .TP
-\fBSLURM_LINUX_IMAGE\fR
-Same as \fB\-\-linux\-image\fR
-.TP
 \fBSLURM_MEM_BIND\fR
 Same as \fB\-\-mem\-bind\fR
 .TP
@@ -2530,17 +2492,11 @@ Same as \fB\-\-mem\-per\-cpu\fR
 \fBSLURM_MEM_PER_NODE\fR
 Same as \fB\-\-mem\fR
 .TP
-\fBSLURM_MLOADER_IMAGE\fR
-Same as \fB\-\-mloader\-image\fR
-.TP
 \fBSLURM_MPI_TYPE\fR
 Same as \fB\-\-mpi\fR
 .TP
 \fBSLURM_NETWORK\fR
 Same as \fB\-\-network\fR
-.TP
-\fBSLURM_NO_ROTATE\fR
-Same as \fB\-R, \-\-no\-rotate\fR
 .TP
 \fBSLURM_NTASKS\fR (and \fBSLURM_NPROCS\fR for backwards compatibility)
 Same as \fB\-n, \-\-ntasks\fR
@@ -2581,9 +2537,6 @@ Same as \fB\-\-prolog\fR
 .TP
 \fBSLURM_QOS\fR
 Same as \fB\-\-qos\fR
-.TP
-\fBSLURM_RAMDISK_IMAGE\fR
-Same as \fB\-\-ramdisk\-image\fR
 .TP
 \fBSLURM_REMOTE_CWD\fR
 Same as \fB\-D, \-\-chdir=\fR
@@ -2776,7 +2729,6 @@ Sort free cache pages (run zonesort on Intel KNL nodes).
 .TP
 \fBSLURM_MEM_BIND_VERBOSE\fR
 \-\-mem\-bind verbosity (quiet,verbose).
-
 .TP
 \fBSLURM_JOB_NODES\fR
 Total number of nodes in the job's resource allocation.
@@ -2877,17 +2829,6 @@ Set to the logging level of the \fBsrun\fR command.
 Default value is 3 (info level).
 The value is incremented or decremented based upon the \-\-verbose and
 \-\-quiet options.
-
-.TP
-\fBMPIRUN_NOALLOCATE\fR
-Do not allocate a block on Blue Gene systems only.
-.TP
-\fBMPIRUN_NOFREE\fR
-Do not free a block on Blue Gene systems only.
-.TP
-\fBMPIRUN_PARTITION\fR
-The block name on Blue Gene systems only.
-
 
 .SH "SIGNALS AND ESCAPE SEQUENCES"
 Signals sent to the \fBsrun\fR command are automatically forwarded to

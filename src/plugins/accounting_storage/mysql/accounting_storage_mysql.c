@@ -3,15 +3,15 @@
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Copyright (C) 2011 SchedMD LLC.
+ *  Copyright (C) 2011-2018 SchedMD LLC.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@schedmd.com, da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *****************************************************************************
  * Notes on as_mysql configuration
@@ -84,15 +84,15 @@ pthread_mutex_t as_mysql_cluster_list_lock = PTHREAD_MUTEX_INITIALIZER;
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "accounting_storage" for SLURM job completion
+ * the plugin (e.g., "accounting_storage" for Slurm job completion
  * logging) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "accounting_storage/".
  *
@@ -166,8 +166,6 @@ static List _get_cluster_names(mysql_conn_t *mysql_conn, bool with_deleted)
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
 	List ret_list = NULL;
-	char *cluster_name = NULL;
-	bool found = 0;
 
 	char *query = xstrdup_printf("select name from %s", cluster_table);
 
@@ -176,38 +174,18 @@ static List _get_cluster_names(mysql_conn_t *mysql_conn, bool with_deleted)
 
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
-		return ret_list;
+		return NULL;
 	}
 	xfree(query);
 
-	if (!slurmdbd_conf) {
-		/* If not running with the slurmdbd we need to make
-		   the correct tables for this cluster.  (Since it
-		   doesn't have to be added like usual.)
-		*/
-		cluster_name = slurm_get_cluster_name();
-		if (!cluster_name)
-			fatal("No cluster name defined in slurm.conf");
-	} else
-		found = 1;
-
 	ret_list = list_create(slurm_destroy_char);
 	while ((row = mysql_fetch_row(result))) {
-		if (row[0] && row[0][0]) {
-			if (cluster_name && !xstrcmp(cluster_name, row[0]))
-				found = 1;
+		if (row[0] && row[0][0])
 			list_append(ret_list, xstrdup(row[0]));
-		}
 	}
 	mysql_free_result(result);
 
-	if (cluster_name && !found)
-		list_append(ret_list, cluster_name);
-	else if (cluster_name)
-		xfree(cluster_name);
-
 	return ret_list;
-
 }
 
 static int _set_qos_cnt(mysql_conn_t *mysql_conn)
@@ -567,6 +545,9 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		{ "grace_time", "int unsigned default NULL" },
 		{ "max_jobs_pa", "int default NULL" },
 		{ "max_jobs_per_user", "int default NULL" },
+		{ "max_jobs_accrue_pa", "int default NULL" },
+		{ "max_jobs_accrue_pu", "int default NULL" },
+		{ "min_prio_thresh", "int default NULL" },
 		{ "max_submit_jobs_pa", "int default NULL" },
 		{ "max_submit_jobs_per_user", "int default NULL" },
 		{ "max_tres_pa", "text not null default ''" },
@@ -579,6 +560,7 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		{ "min_tres_pj", "text not null default ''" },
 		{ "max_wall_duration_per_job", "int default NULL" },
 		{ "grp_jobs", "int default NULL" },
+		{ "grp_jobs_accrue", "int default NULL" },
 		{ "grp_submit_jobs", "int default NULL" },
 		{ "grp_tres", "text not null default ''" },
 		{ "grp_tres_mins", "text not null default ''" },
@@ -627,6 +609,10 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		{ NULL, NULL}
 	};
 
+	/*
+	 * If more limits are added here they need to be added to
+	 * get_parent_limits_select in as_mysql_assoc.c
+	 */
 	char *get_parent_proc =
 		"drop procedure if exists get_parent_limits; "
 		"create procedure get_parent_limits("
@@ -634,6 +620,8 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		"begin "
 		"set @par_id = NULL; "
 		"set @mj = NULL; "
+		"set @mja = NULL; "
+		"set @mpt = NULL; "
 		"set @msj = NULL; "
 		"set @mwpj = NULL; "
 		"set @mtpj = ''; "
@@ -658,6 +646,12 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		"end if; "
 		"if @mj is NULL then set @s = CONCAT("
 		"@s, '@mj := max_jobs, '); "
+		"end if; "
+		"if @mja is NULL then set @s = CONCAT("
+		"@s, '@mja := max_jobs_accrue, '); "
+		"end if; "
+		"if @mpt is NULL then set @s = CONCAT("
+		"@s, '@mpt := min_prio_thresh, '); "
 		"end if; "
 		"if @msj is NULL then set @s = CONCAT("
 		"@s, '@msj := max_submit_jobs, '); "
@@ -865,16 +859,34 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 			"(%ld, %d, 0, 'energy'), "
 			"(%ld, %d, 0, 'node'), "
 			"(%ld, %d, 0, 'billing'), "
+			"(%ld, %d, 0, 'vmem'), "
+			"(%ld, %d, 0, 'pages'), "
 			"(%ld, %d, 1, 'dynamic_offset') "
-			"on duplicate key update deleted=VALUES(deleted), type=VALUES(type);",
+			"on duplicate key update deleted=VALUES(deleted), type=VALUES(type), id=VALUES(id);",
 			tres_table,
 			now, TRES_CPU,
 			now, TRES_MEM,
 			now, TRES_ENERGY,
 			now, TRES_NODE,
 			now, TRES_BILLING,
+			now, TRES_VMEM,
+			now, TRES_PAGES,
 			now, TRES_OFFSET);
-		if (debug_flags & DEBUG_FLAG_DB_QOS)
+		if (debug_flags & DEBUG_FLAG_DB_TRES)
+			DB_DEBUG(mysql_conn->conn, "%s", query);
+		rc = mysql_db_query(mysql_conn, query);
+		xfree(query);
+		if (rc != SLURM_SUCCESS)
+			fatal("problem adding static tres");
+
+		/* Now insert TRES that have a name */
+		query = xstrdup_printf(
+			"insert into %s (creation_time, id, deleted, type, name) values "
+			"(%ld, %d, 0, 'fs', 'disk') "
+			"on duplicate key update deleted=VALUES(deleted), type=VALUES(type), name=VALUES(name), id=VALUES(id);",
+			tres_table,
+			now, TRES_FS_DISK);
+		if (debug_flags & DEBUG_FLAG_DB_TRES)
 			DB_DEBUG(mysql_conn->conn, "%s", query);
 		rc = mysql_db_query(mysql_conn, query);
 		xfree(query);
@@ -1167,6 +1179,8 @@ extern int create_cluster_assoc_table(
 		{ "rgt", "int not null" },
 		{ "shares", "int default 1 not null" },
 		{ "max_jobs", "int default NULL" },
+		{ "max_jobs_accrue", "int default NULL" },
+		{ "min_prio_thresh", "int default NULL" },
 		{ "max_submit_jobs", "int default NULL" },
 		{ "max_tres_pj", "text not null default ''" },
 		{ "max_tres_pn", "text not null default ''" },
@@ -1174,6 +1188,7 @@ extern int create_cluster_assoc_table(
 		{ "max_tres_run_mins", "text not null default ''" },
 		{ "max_wall_pj", "int default NULL" },
 		{ "grp_jobs", "int default NULL" },
+		{ "grp_jobs_accrue", "int default NULL" },
 		{ "grp_submit_jobs", "int default NULL" },
 		{ "grp_tres", "text not null default ''" },
 		{ "grp_tres_mins", "text not null default ''" },
@@ -1288,6 +1303,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "gres_used", "text not null default ''" },
 		{ "wckey", "tinytext not null default ''" },
 		{ "work_dir", "text not null default ''" },
+		{ "system_comment", "text" },
 		{ "track_steps", "tinyint not null" },
 		{ "tres_alloc", "text not null default ''" },
 		{ "tres_req", "text not null default ''" },
@@ -1336,36 +1352,28 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "user_usec", "int unsigned default 0 not null" },
 		{ "sys_sec", "int unsigned default 0 not null" },
 		{ "sys_usec", "int unsigned default 0 not null" },
-		{ "max_pages", "int unsigned default 0 not null" },
-		{ "max_pages_task", "int unsigned default 0 not null" },
-		{ "max_pages_node", "int unsigned default 0 not null" },
-		{ "ave_pages", "double unsigned default 0.0 not null" },
-		{ "max_rss", "bigint unsigned default 0 not null" },
-		{ "max_rss_task", "int unsigned default 0 not null" },
-		{ "max_rss_node", "int unsigned default 0 not null" },
-		{ "ave_rss", "double unsigned default 0.0 not null" },
-		{ "max_vsize", "bigint unsigned default 0 not null" },
-		{ "max_vsize_task", "int unsigned default 0 not null" },
-		{ "max_vsize_node", "int unsigned default 0 not null" },
-		{ "ave_vsize", "double unsigned default 0.0 not null" },
-		{ "min_cpu", "int unsigned default 0xfffffffe not null" },
-		{ "min_cpu_task", "int unsigned default 0 not null" },
-		{ "min_cpu_node", "int unsigned default 0 not null" },
-		{ "ave_cpu", "double unsigned default 0.0 not null" },
 		{ "act_cpufreq", "double unsigned default 0.0 not null" },
 		{ "consumed_energy", "bigint unsigned default 0 not null" },
 		{ "req_cpufreq_min", "int unsigned default 0 not null" },
 		{ "req_cpufreq", "int unsigned default 0 not null" }, /* max */
 		{ "req_cpufreq_gov", "int unsigned default 0 not null" },
-		{ "max_disk_read", "double unsigned default 0.0 not null" },
-		{ "max_disk_read_task", "int unsigned default 0 not null" },
-		{ "max_disk_read_node", "int unsigned default 0 not null" },
-		{ "ave_disk_read", "double unsigned default 0.0 not null" },
-		{ "max_disk_write", "double unsigned default 0.0 not null" },
-		{ "max_disk_write_task", "int unsigned default 0 not null" },
-		{ "max_disk_write_node", "int unsigned default 0 not null" },
-		{ "ave_disk_write", "double unsigned default 0.0 not null" },
 		{ "tres_alloc", "text not null default ''" },
+		{ "tres_usage_in_ave", "text not null default ''" },
+		{ "tres_usage_in_max", "text not null default ''" },
+		{ "tres_usage_in_max_taskid", "text not null default ''" },
+		{ "tres_usage_in_max_nodeid", "text not null default ''" },
+		{ "tres_usage_in_min", "text not null default ''" },
+		{ "tres_usage_in_min_taskid", "text not null default ''" },
+		{ "tres_usage_in_min_nodeid", "text not null default ''" },
+		{ "tres_usage_in_tot", "text not null default ''" },
+		{ "tres_usage_out_ave", "text not null default ''" },
+		{ "tres_usage_out_max", "text not null default ''" },
+		{ "tres_usage_out_max_taskid", "text not null default ''" },
+		{ "tres_usage_out_max_nodeid", "text not null default ''" },
+		{ "tres_usage_out_min", "text not null default ''" },
+		{ "tres_usage_out_min_taskid", "text not null default ''" },
+		{ "tres_usage_out_min_nodeid", "text not null default ''" },
+		{ "tres_usage_out_tot", "text not null default ''" },
 		{ NULL, NULL}
 	};
 
@@ -1577,12 +1585,6 @@ extern int remove_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 
 	if (mysql_num_rows(result)) {
 		mysql_free_result(result);
-		/* If there were any associations removed fix it up
-		   here since the table isn't going to be deleted. */
-		xstrfmtcat(mysql_conn->pre_commit_query,
-			   "alter table \"%s_%s\" AUTO_INCREMENT=0;",
-			   cluster_name, assoc_table);
-
 		debug4("we still have associations, can't remove tables");
 		return SLURM_SUCCESS;
 	}
@@ -1627,6 +1629,8 @@ extern int setup_assoc_limits(slurmdb_assoc_rec_t *assoc,
 		TRES_STR_FLAG_SORT_ID | TRES_STR_FLAG_SIMPLE |
 		TRES_STR_FLAG_NO_NULL;
 
+	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK };
 	if (!assoc)
 		return SLURM_ERROR;
 
@@ -1638,12 +1642,18 @@ extern int setup_assoc_limits(slurmdb_assoc_rec_t *assoc,
 			assoc->shares_raw = INFINITE;
 		if (assoc->grp_jobs == NO_VAL)
 			assoc->grp_jobs = INFINITE;
+		if (assoc->grp_jobs_accrue == NO_VAL)
+			assoc->grp_jobs_accrue = INFINITE;
 		if (assoc->grp_submit_jobs == NO_VAL)
 			assoc->grp_submit_jobs = INFINITE;
 		if (assoc->grp_wall == NO_VAL)
 			assoc->grp_wall = INFINITE;
 		if (assoc->max_jobs == NO_VAL)
 			assoc->max_jobs = INFINITE;
+		if (assoc->max_jobs_accrue == NO_VAL)
+			assoc->max_jobs_accrue = INFINITE;
+		if (assoc->min_prio_thresh == NO_VAL)
+			assoc->min_prio_thresh = INFINITE;
 		if (assoc->max_submit_jobs == NO_VAL)
 			assoc->max_submit_jobs = INFINITE;
 		if (assoc->max_wall_pj == NO_VAL)
@@ -1673,6 +1683,18 @@ extern int setup_assoc_limits(slurmdb_assoc_rec_t *assoc,
 		xstrcat(*cols, ", grp_jobs");
 		xstrfmtcat(*vals, ", %u", assoc->grp_jobs);
 		xstrfmtcat(*extra, ", grp_jobs=%u", assoc->grp_jobs);
+	}
+
+	if (assoc->grp_jobs_accrue == INFINITE) {
+		xstrcat(*cols, ", grp_jobs_accrue");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", grp_jobs_accrue=NULL");
+	} else if ((assoc->grp_jobs_accrue != NO_VAL)
+		   && ((int32_t)assoc->grp_jobs_accrue >= 0)) {
+		xstrcat(*cols, ", grp_jobs_accrue");
+		xstrfmtcat(*vals, ", %u", assoc->grp_jobs_accrue);
+		xstrfmtcat(*extra, ", grp_jobs_accrue=%u",
+			   assoc->grp_jobs_accrue);
 	}
 
 	if (assoc->grp_submit_jobs == INFINITE) {
@@ -1719,6 +1741,30 @@ extern int setup_assoc_limits(slurmdb_assoc_rec_t *assoc,
 		xstrfmtcat(*extra, ", max_jobs=%u", assoc->max_jobs);
 	}
 
+	if (assoc->max_jobs_accrue == INFINITE) {
+		xstrcat(*cols, ", max_jobs_accrue");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", max_jobs_accrue=NULL");
+	} else if ((assoc->max_jobs_accrue != NO_VAL)
+		   && ((int32_t)assoc->max_jobs_accrue >= 0)) {
+		xstrcat(*cols, ", max_jobs_accrue");
+		xstrfmtcat(*vals, ", %u", assoc->max_jobs_accrue);
+		xstrfmtcat(*extra, ", max_jobs_accrue=%u",
+			   assoc->max_jobs_accrue);
+	}
+
+	if (assoc->min_prio_thresh == INFINITE) {
+		xstrcat(*cols, ", min_prio_thresh");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", min_prio_thresh=NULL");
+	} else if ((assoc->min_prio_thresh != NO_VAL)
+		   && ((int32_t)assoc->min_prio_thresh >= 0)) {
+		xstrcat(*cols, ", min_prio_thresh");
+		xstrfmtcat(*vals, ", %u", assoc->min_prio_thresh);
+		xstrfmtcat(*extra, ", min_prio_thresh=%u",
+			   assoc->min_prio_thresh);
+	}
+
 	if (assoc->max_submit_jobs == INFINITE) {
 		xstrcat(*cols, ", max_submit_jobs");
 		xstrcat(*vals, ", NULL");
@@ -1748,6 +1794,13 @@ extern int setup_assoc_limits(slurmdb_assoc_rec_t *assoc,
 		xstrcat(*extra, ", def_qos_id=NULL");
 	} else if ((assoc->def_qos_id != NO_VAL)
 		   && ((int32_t)assoc->def_qos_id > 0)) {
+		assoc_mgr_lock(&locks);
+		if (!list_find_first(assoc_mgr_qos_list,
+		    slurmdb_find_qos_in_list, &(assoc->def_qos_id))) {
+			assoc_mgr_unlock(&locks);
+			return ESLURM_INVALID_QOS;
+		}
+		assoc_mgr_unlock(&locks);
 		xstrcat(*cols, ", def_qos_id");
 		xstrfmtcat(*vals, ", %u", assoc->def_qos_id);
 		xstrfmtcat(*extra, ", def_qos_id=%u", assoc->def_qos_id);
@@ -2042,20 +2095,10 @@ extern int remove_common(mysql_conn_t *mysql_conn,
 					       "creation_time>%ld && (%s);",
 					       cluster_name, table, day_old,
 					       name_char);
-			/* Make sure the next id we get doesn't create holes
-			 * in the ids. */
-			xstrfmtcat(mysql_conn->pre_commit_query,
-				   "alter table \"%s_%s\" AUTO_INCREMENT=0;",
-				   cluster_name, table);
 		} else {
 			query = xstrdup_printf("delete from %s where "
 					       "creation_time>%ld && (%s);",
 					       table, day_old, name_char);
-			/* Make sure the next id we get doesn't create holes
-			 * in the ids. */
-			xstrfmtcat(mysql_conn->pre_commit_query,
-				   "alter table %s AUTO_INCREMENT=0;",
-				   table);
 		}
 	}
 
@@ -2080,6 +2123,9 @@ extern int remove_common(mysql_conn_t *mysql_conn,
 				   "grace_time=DEFAULT, "
 				   "max_jobs_pa=DEFAULT, "
 				   "max_jobs_per_user=DEFAULT, "
+				   "max_jobs_accrue_pa=DEFAULT, "
+				   "max_jobs_accrue_pu=DEFAULT, "
+				   "min_prio_thresh=DEFAULT, "
 				   "max_submit_jobs_pa=DEFAULT, "
 				   "max_submit_jobs_per_user=DEFAULT, "
 				   "max_tres_pa=DEFAULT, "
@@ -2092,7 +2138,7 @@ extern int remove_common(mysql_conn_t *mysql_conn,
 				   "min_tres_pj=DEFAULT, "
 				   "max_wall_duration_per_job=DEFAULT, "
 				   "grp_jobs=DEFAULT, grp_submit_jobs=DEFAULT, "
-				   "grp_tres=DEFAULT, "
+				   "grp_jobs_accrue=DEFAULT, grp_tres=DEFAULT, "
 				   "grp_tres_mins=DEFAULT, "
 				   "grp_tres_run_mins=DEFAULT, "
 				   "grp_wall=DEFAULT, "
@@ -2227,7 +2273,7 @@ extern int remove_common(mysql_conn_t *mysql_conn,
 	xfree(loc_usage_id_char);
 
 	if (debug_flags & DEBUG_FLAG_DB_ASSOC)
-		DB_DEBUG(mysql_conn->conn, "query\n%s %zd",
+		DB_DEBUG(mysql_conn->conn, "query\n%s %zu",
 			 query, strlen(query));
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
@@ -2339,6 +2385,8 @@ just_update:
 	query = xstrdup_printf("update \"%s_%s\" as t1 set "
 			       "mod_time=%ld, deleted=1, def_qos_id=DEFAULT, "
 			       "shares=DEFAULT, max_jobs=DEFAULT, "
+			       "max_jobs_accrue=DEFAULT, "
+			       "min_prio_thresh=DEFAULT, "
 			       "max_submit_jobs=DEFAULT, "
 			       "max_wall_pj=DEFAULT, "
 			       "max_tres_pj=DEFAULT, "
@@ -2346,7 +2394,7 @@ just_update:
 			       "max_tres_mins_pj=DEFAULT, "
 			       "max_tres_run_mins=DEFAULT, "
 			       "grp_jobs=DEFAULT, grp_submit_jobs=DEFAULT, "
-			       "grp_wall=DEFAULT, "
+			       "grp_jobs_accrue=DEFAULT, grp_wall=DEFAULT, "
 			       "grp_tres=DEFAULT, "
 			       "grp_tres_mins=DEFAULT, "
 			       "grp_tres_run_mins=DEFAULT, "
@@ -2355,15 +2403,6 @@ just_update:
 			       cluster_name, assoc_table, now,
 			       loc_assoc_char);
 
-	/* if we are removing a cluster table this is handled in
-	   remove_cluster_tables if table still exists. */
-	if (table != cluster_table) {
-		/* Make sure the next id we get doesn't create holes
-		 * in the ids. */
-		xstrfmtcat(mysql_conn->pre_commit_query,
-			   "alter table \"%s_%s\" AUTO_INCREMENT=0;",
-			   cluster_name, assoc_table);
-	}
 	if (table != assoc_table)
 		xfree(loc_assoc_char);
 
@@ -2429,32 +2468,110 @@ extern void mod_tres_str(char **out, char *mod, char *cur,
 		xfree(*out);
 }
 
+static int _get_database_variable(mysql_conn_t *mysql_conn,
+				  const char *variable_name, uint64_t *value)
+{
+	MYSQL_ROW row = NULL;
+	MYSQL_RES *result = NULL;
+	char *err_check = NULL;
+	char *query;
+
+	query = xstrdup_printf("show variables like \'%s\';",
+			       variable_name);
+	result = mysql_db_query_ret(mysql_conn, query, 0);
+	if (!result) {
+		error("%s: null result from query `%s`", __func__, query);
+		xfree(query);
+		return SLURM_ERROR;
+	}
+
+	if (mysql_num_rows(result) != 1) {
+		error("%s: invalid results from query `%s`", __func__, query);
+		xfree(query);
+		mysql_free_result(result);
+		return SLURM_ERROR;
+	}
+
+	xfree(query);
+
+	row = mysql_fetch_row(result);
+	*value = (uint64_t) strtoll(row[1], &err_check, 10);
+
+	if (*err_check) {
+		error("%s: error parsing string to int `%s`", __func__, row[1]);
+		mysql_free_result(result);
+		return SLURM_ERROR;
+	}
+	mysql_free_result(result);
+
+	return SLURM_SUCCESS;
+}
+
+/*
+ * Check the values of innodb global database variables, and print
+ * an error if the values are not at least half the recommendation.
+ */
+static int _check_database_variables(mysql_conn_t *mysql_conn)
+{
+	const char buffer_var[] = "innodb_buffer_pool_size";
+	const uint64_t buffer_size = 1073741824;
+	const char logfile_var[] = "innodb_log_file_size";
+	const uint64_t logfile_size = 67108864;
+	const char lockwait_var[] = "innodb_lock_wait_timeout";
+	const uint64_t lockwait_timeout = 900;
+
+	uint64_t value;
+	bool recommended_values = true;
+	char *error_msg = xstrdup("Database settings not recommended values:");
+
+	if (_get_database_variable(mysql_conn, buffer_var, &value))
+		goto error;
+	debug2("%s: %"PRIu64, buffer_var, value);
+	if (value < (buffer_size / 2)) {
+		recommended_values = false;
+		xstrfmtcat(error_msg, " %s", buffer_var);
+	}
+
+	if (_get_database_variable(mysql_conn, logfile_var, &value))
+		goto error;
+	debug2("%s: %"PRIu64, logfile_var, value);
+	if (value < (logfile_size / 2)) {
+		recommended_values = false;
+		xstrfmtcat(error_msg, " %s", logfile_var);
+	}
+
+	if (_get_database_variable(mysql_conn, lockwait_var, &value))
+		goto error;
+	debug2("%s: %"PRIu64, lockwait_var, value);
+	if (value < (lockwait_timeout / 2)) {
+		recommended_values = false;
+		xstrfmtcat(error_msg, " %s", lockwait_var);
+	}
+
+	if (!recommended_values) {
+		error("%s", error_msg);
+	}
+
+	xfree(error_msg);
+	return SLURM_SUCCESS;
+
+error:
+	xfree(error_msg);
+	return SLURM_ERROR;
+}
+
 /*
  * init() is called when the plugin is loaded, before any other functions
  * are called.  Put global initialization here.
  */
-extern int init ( void )
+extern int init(void)
 {
-	static int first = 1;
 	int rc = SLURM_SUCCESS;
 	mysql_conn_t *mysql_conn = NULL;
 
-	/* since this can be loaded from many different places
-	   only tell us once. */
-	if (!first)
-		return SLURM_SUCCESS;
-
-	first = 0;
-
 	debug_flags = slurm_get_debug_flags();
 
-	if (!slurmdbd_conf) {
-		char *cluster_name = NULL;
-		if (!(cluster_name = slurm_get_cluster_name()))
-			fatal("%s requires ClusterName in slurm.conf",
-			      plugin_name);
-		xfree(cluster_name);
-	} else if (slurmdbd_conf && slurmdbd_conf->dbd_backup) {
+	if (slurmdbd_conf->dbd_backup) {
 		char node_name_short[128];
 		char node_name_long[128];
 		if (gethostname(node_name_long, sizeof(node_name_long)))
@@ -2479,6 +2596,8 @@ extern int init ( void )
 		      "the MYSQL plugin.  Trying again in 5 seconds.");
 		sleep(5);
 	}
+
+	_check_database_variables(mysql_conn);
 
 	rc = _as_mysql_acct_check_tables(mysql_conn);
 
@@ -2543,14 +2662,12 @@ extern int fini ( void )
 	return SLURM_SUCCESS;
 }
 
-extern void *acct_storage_p_get_connection(const slurm_trigger_callbacks_t *cb,
-                                           int conn_num, bool rollback,
-                                           char *cluster_name)
+extern void *acct_storage_p_get_connection(
+	const slurm_trigger_callbacks_t *cb,
+	int conn_num, uint16_t *persist_conn_flags,
+	bool rollback, char *cluster_name)
 {
 	mysql_conn_t *mysql_conn = NULL;
-
-	if (!mysql_db_info)
-		init();
 
 	debug2("acct_storage_p_get_connection: request new connection %d",
 	       rollback);
@@ -2609,12 +2726,10 @@ extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit)
 				error("rollback failed");
 		} else {
 			int rc = SLURM_SUCCESS;
-			/* Handle anything here we were unable to do
-			   because of rollback issues.  i.e. Since any
-			   use of altering a tables
-			   AUTO_INCREMENT will make it so you can't
-			   rollback, save it until right at the end.
-			*/
+			/*
+			 * Handle anything here we were unable to do
+			 * because of rollback issues.
+			 */
 			if (mysql_conn->pre_commit_query) {
 				if (debug_flags & DEBUG_FLAG_DB_ASSOC)
 					DB_DEBUG(mysql_conn->conn, "query\n%s",
@@ -3188,7 +3303,7 @@ extern int jobacct_storage_p_step_complete(mysql_conn_t *mysql_conn,
 }
 
 /*
- * load into the storage a suspention of a job
+ * load into the storage a suspension of a job
  */
 extern int jobacct_storage_p_suspend(mysql_conn_t *mysql_conn,
 				     struct job_record *job_ptr)
@@ -3280,6 +3395,12 @@ extern int acct_storage_p_get_stats(void *db_conn, bool dbd)
 }
 
 extern int acct_storage_p_clear_stats(void *db_conn, bool dbd)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_get_data(void *db_conn, acct_storage_info_t dinfo,
+				   void *data)
 {
 	return SLURM_SUCCESS;
 }

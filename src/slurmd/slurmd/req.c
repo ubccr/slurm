@@ -9,11 +9,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,13 +29,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -63,6 +63,7 @@
 #include <unistd.h>
 #include <utime.h>
 
+#include "src/common/assoc_mgr.h"
 #include "src/common/callerid.h"
 #include "src/common/cpu_frequency.h"
 #include "src/common/env.h"
@@ -158,7 +159,7 @@ static void _job_limits_free(void *x);
 static int  _job_limits_match(void *x, void *key);
 static bool _job_still_running(uint32_t job_id);
 static int  _kill_all_active_steps(uint32_t jobid, int sig,
-				   int flags, bool batch);
+				   int flags, bool batch, uid_t req_uid);
 static void _launch_complete_add(uint32_t job_id);
 static void _launch_complete_log(char *type, uint32_t job_id);
 static void _launch_complete_rm(uint32_t job_id);
@@ -378,6 +379,7 @@ slurmd_req(slurm_msg_t *msg)
 		break;
 	case REQUEST_NODE_REGISTRATION_STATUS:
 		debug2("Processing RPC: REQUEST_NODE_REGISTRATION_STATUS");
+		get_reg_resp = 1;
 		/* Treat as ping (for slurmctld agent, just return SUCCESS) */
 		rc = _rpc_ping(msg);
 		last_slurmctld_msg = time(NULL);
@@ -479,12 +481,50 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	Buf buffer = NULL;
 	slurm_msg_t msg;
 
-	int rank, proto;
+	int rank;
 	int parent_rank, children, depth, max_depth;
 	char *parent_alias = NULL;
 	slurm_addr_t parent_addr = {0};
+	assoc_mgr_lock_t locks = { .tres = READ_LOCK };
 
 	slurm_msg_t_init(&msg);
+
+	/* send conf over to slurmstepd */
+	if (_send_slurmd_conf_lite(fd, conf) < 0)
+		goto rwfail;
+
+	/*
+	 * Wait for the regestration to come back from the slurmctld so we have
+	 * a TRES list to work with.
+	 */
+	if (!assoc_mgr_tres_list) {
+		slurm_mutex_lock(&tres_mutex);
+		slurm_cond_wait(&tres_cond, &tres_mutex);
+		slurm_mutex_unlock(&tres_mutex);
+	}
+
+	/*
+	 * Send over right after the slurmd_conf_lite! We don't care about the
+	 * assoc/qos locks assoc_mgr_post_tres_list is requesting as those lists
+	 * don't exist here.
+	 */
+	assoc_mgr_lock(&locks);
+	if (assoc_mgr_tres_list) {
+		buffer = init_buf(0);
+		slurm_pack_list(assoc_mgr_tres_list,
+				slurmdb_pack_tres_rec, buffer,
+				SLURM_PROTOCOL_VERSION);
+		len = get_buf_offset(buffer);
+		safe_write(fd, &len, sizeof(int));
+		safe_write(fd, get_buf_data(buffer), len);
+		free_buf(buffer);
+		buffer = NULL;
+	} else {
+		fatal("%s: assoc_mgr_tres_list is NULL when trying to start a slurmstepd. This should never happen.",
+		      __func__);
+	}
+	assoc_mgr_unlock(&locks);
+
 	/* send type over to slurmstepd */
 	safe_write(fd, &type, sizeof(int));
 
@@ -569,10 +609,6 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	safe_write(fd, &max_depth, sizeof(int));
 	safe_write(fd, &parent_addr, sizeof(slurm_addr_t));
 
-	/* send conf over to slurmstepd */
-	if (_send_slurmd_conf_lite(fd, conf) < 0)
-		goto rwfail;
-
 	/* send cli address over to slurmstepd */
 	buffer = init_buf(0);
 	slurm_pack_slurm_addr(cli, buffer);
@@ -623,14 +659,8 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	pack_msg(&msg, buffer);
 	len = get_buf_offset(buffer);
 
-	/*
-	 * This is the protocol version for the client srun only.
-	 * Must store into an int before writing, as the argument
-	 * is a uint16_t not an int, and will result in a corrupted
-	 * version being received by the slurmstepd.
-	 */
-	proto = protocol_version;
-	safe_write(fd, &proto, sizeof(int));
+	/* send the srun protocol_version over, which may be older */
+	safe_write(fd, &protocol_version, sizeof(uint16_t));
 
 	safe_write(fd, &len, sizeof(int));
 	safe_write(fd, get_buf_data(buffer), len);
@@ -829,8 +859,6 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 #endif
 		int i;
 		int failed = 0;
-		/* inform slurmstepd about our config */
-		setenv("SLURM_CONF", conf->conffile, 1);
 
 		/*
 		 * Child forks and exits
@@ -868,7 +896,7 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 		 */
 		if ((to_stepd[0] != conf->lfd)
 		    && (to_slurmd[1] != conf->lfd))
-			slurm_shutdown_msg_engine(conf->lfd);
+			close(conf->lfd);
 
 		if (close(to_stepd[1]) < 0)
 			error("close write to_stepd in grandchild: %m");
@@ -895,10 +923,7 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 		fd_set_noclose_on_exec(STDERR_FILENO);
 		log_fini();
 		if (!failed) {
-			if (conf->chos_loc && !access(conf->chos_loc, X_OK))
-				execvp(conf->chos_loc, argv);
-			else
-				execvp(argv[0], argv);
+			execvp(argv[0], argv);
 			error("exec of slurmstepd failed: %m");
 		}
 		exit(2);
@@ -909,6 +934,7 @@ static void _setup_x11_display(uint32_t job_id, uint32_t step_id,
 			       char ***env, uint32_t *envc)
 {
 	int display = 0, fd;
+	char *xauthority = NULL;
 	uint16_t protocol_version;
 
 	fd = stepd_connect(conf->spooldir, conf->node_name,
@@ -921,18 +947,26 @@ static void _setup_x11_display(uint32_t job_id, uint32_t step_id,
 		return;
 	}
 
-	display = stepd_get_x11_display(fd, protocol_version);
+	display = stepd_get_x11_display(fd, protocol_version, &xauthority);
 	close(fd);
 
 	if (!display) {
 		error("could not get x11 forwarding display for job %u step %u,"
 		      " x11 forwarding disabled", job_id, step_id);
+		env_array_overwrite(env, "DISPLAY", "SLURM_X11_SETUP_FAILED");
+		*envc = envcount(*env);
 		return;
 	}
 
 	debug2("%s: setting DISPLAY=localhost:%d:0 for job %u step %u",
 	       __func__, display, job_id, step_id);
 	env_array_overwrite_fmt(env, "DISPLAY", "localhost:%d.0", display);
+
+	if (xauthority) {
+		env_array_overwrite(env, "XAUTHORITY", xauthority);
+		xfree(xauthority);
+	}
+
 	*envc = envcount(*env);
 }
 
@@ -1209,19 +1243,6 @@ fail:
 	slurm_seterrno_ret(ESLURMD_INVALID_JOB_CREDENTIAL);
 }
 
-static inline int _char_to_val(int c)
-{
-	int cl;
-
-	cl = tolower(c);
-	if (c >= '0' && c <= '9')
-		return c - '0';
-	else if (cl >= 'a' && cl <= 'f')
-		return cl + (10 - 'a');
-	else
-		return -1;
-}
-
 static int _str_to_memset(bitstr_t *mask, char *str)
 {
 	int len = strlen(str);
@@ -1229,7 +1250,7 @@ static int _str_to_memset(bitstr_t *mask, char *str)
 	int base = 0;
 
 	while (ptr >= str) {
-		char val = _char_to_val(*ptr);
+		char val = slurm_char_to_hex(*ptr);
 		if (val == (char) -1)
 			return -1;
 		if ((val & 1) && (base < MAX_NUMA_CNT))
@@ -1423,8 +1444,16 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	}
 
 	slurm_get_ip_str(cli, &port, host, sizeof(host));
-	info("launch task %u.%u request from %u.%u@%s (port %hu)", req->job_id,
-	     req->job_step_id, req->uid, req->gid, host, port);
+	if (req->pack_jobid && (req->pack_jobid != NO_VAL)) {
+		info("launch task %u+%u.%u (%u.%u) request from UID:%u GID:%u HOST:%s PORT:%hu",
+		     req->pack_jobid, req->pack_offset, req->job_step_id,
+		     req->job_id, req->job_step_id, req->uid, req->gid,
+		     host, port);
+	} else {
+		info("launch task %u.%u request from UID:%u GID:%u HOST:%s PORT:%hu",
+		     req->job_id, req->job_step_id, req->uid, req->gid,
+		     host, port);
+	}
 
 	/* this could be set previously and needs to be overwritten by
 	 * this call for messages to work correctly for the new call */
@@ -1447,7 +1476,7 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	}
 
 	/* Must follow _check_job_credential(), which sets some req fields */
-	task_g_slurmd_launch_request(req->job_id, req, nodeid);
+	task_g_slurmd_launch_request(req, nodeid);
 
 #ifndef HAVE_FRONT_END
 	if (first_job_run) {
@@ -1572,7 +1601,7 @@ done:
 
 	} else if (errnum == SLURM_SUCCESS) {
 		save_cred_state(conf->vctx);
-		task_g_slurmd_reserve_resources(req->job_id, req, nodeid);
+		task_g_slurmd_reserve_resources(req, nodeid);
 	}
 
 	/*
@@ -2184,11 +2213,7 @@ static void _rpc_prolog(slurm_msg_t *msg)
 		job_env.spank_job_env_size = req->spank_job_env_size;
 		job_env.uid = req->uid;
 		job_env.user_name = req->user_name;
-#if defined(HAVE_BG)
-		select_g_select_jobinfo_get(req->select_jobinfo,
-					    SELECT_JOBDATA_BLOCK_ID,
-					    &job_env.resv_id);
-#elif defined(HAVE_ALPS_CRAY)
+#if defined(HAVE_ALPS_CRAY)
 		job_env.resv_id = select_g_select_jobinfo_xstrdup(
 			req->select_jobinfo, SELECT_PRINT_RESV_ID);
 #endif
@@ -2289,7 +2314,7 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 		req->ngids = group_cache_lookup(req->uid, req->gid,
 						req->user_name, &req->gids);
 
-	task_g_slurmd_batch_request(req->job_id, req);	/* determine task affinity */
+	task_g_slurmd_batch_request(req);	/* determine task affinity */
 
 	slurm_mutex_lock(&prolog_mutex);
 	first_job_run = !slurm_cred_jobid_cached(conf->vctx, req->job_id);
@@ -2333,6 +2358,8 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 			if (retry_cnt > 50) {
 				rc = ESLURMD_PROLOG_FAILED;
 				slurm_mutex_unlock(&prolog_mutex);
+				error("Waiting for JobId=%u prolog has failed, giving up after 50 sec",
+				      req->job_id);
 				goto done;
 			}
 
@@ -2358,7 +2385,6 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 		slurm_mutex_unlock(&prolog_mutex);
 
 		memset(&job_env, 0, sizeof(job_env_t));
-
 		job_env.jobid = req->job_id;
 		job_env.step_id = req->step_id;
 		job_env.node_list = req->nodes;
@@ -2370,11 +2396,7 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 		/*
 	 	 * Run job prolog on this node
 	 	 */
-#if defined(HAVE_BG)
-		select_g_select_jobinfo_get(req->select_jobinfo,
-					    SELECT_JOBDATA_BLOCK_ID,
-					    &job_env.resv_id);
-#elif defined(HAVE_ALPS_CRAY)
+#if defined(HAVE_ALPS_CRAY)
 		job_env.resv_id = select_g_select_jobinfo_xstrdup(
 			req->select_jobinfo, SELECT_PRINT_RESV_ID);
 #endif
@@ -2511,7 +2533,7 @@ _rpc_job_notify(slurm_msg_t *msg)
 		goto no_job;
 
 	/*
-	 * check that requesting user ID is the SLURM UID or root
+	 * check that requesting user ID is the Slurm UID or root
 	 */
 	if ((req_uid != job_uid) && (!_slurm_authorized_user(req_uid))) {
 		error("Security violation: job_notify(%u) from uid %d",
@@ -2733,6 +2755,16 @@ _rpc_reboot(slurm_msg_t *msg)
 				      exit_code);
 			xfree(sp);
 			xfree(cmd);
+
+			/*
+			 * Explicitly shutdown the slurmd. This is usually
+			 * taken care of by calling reboot_program, but in
+			 * case that fails to shut things down this will at
+			 * least offline this node until someone intervenes.
+			 */
+			if (xstrcasestr(cfg->slurmd_params,
+					"shutdown_on_reboot"))
+				slurmd_shutdown(SIGTERM);
 		} else
 			error("RebootProgram isn't defined in config");
 		slurm_conf_unlock();
@@ -2879,9 +2911,6 @@ _enforce_job_mem_limit(void)
 	};
 	struct job_mem_info *job_mem_info_ptr = NULL;
 
-	/* If users have configured MemLimitEnforce=no
-	 * in their slurm.conf keep going.
-	 */
 	if (conf->mem_limit_enforce == false)
 		return;
 
@@ -2961,16 +2990,21 @@ _enforce_job_mem_limit(void)
 					    &step_vsize,
 					    stepd->protocol_version);
 #if _LIMIT_INFO
-			info("Step:%u.%u RSS:%"PRIu64" KB VSIZE:%"PRIu64" KB",
+			info("Step:%u.%u RSS:%"PRIu64" B VSIZE:%"PRIu64" B",
 			     stepd->jobid, stepd->stepid,
 			     step_rss, step_vsize);
 #endif
-			step_rss /= 1024;	/* KB to MB */
-			step_rss = MAX(step_rss, 1);
-			job_mem_info_ptr[job_inx].mem_used += step_rss;
-			step_vsize /= 1024;	/* KB to MB */
-			step_vsize = MAX(step_vsize, 1);
-			job_mem_info_ptr[job_inx].vsize_used += step_vsize;
+			if (step_rss != INFINITE64) {
+				step_rss /= 1048576;	/* B to MB */
+				step_rss = MAX(step_rss, 1);
+				job_mem_info_ptr[job_inx].mem_used += step_rss;
+			}
+			if (step_vsize != INFINITE64) {
+				step_vsize /= 1048576;	/* B to MB */
+				step_vsize = MAX(step_vsize, 1);
+				job_mem_info_ptr[job_inx].vsize_used +=
+					step_vsize;
+			}
 		}
 		slurm_free_job_step_stat(resp);
 		close(fd);
@@ -3218,7 +3252,7 @@ _rpc_acct_gather_energy(slurm_msg_t *msg)
 
 static int
 _signal_jobstep(uint32_t jobid, uint32_t stepid, uint16_t signal,
-		uint16_t flags)
+		uint16_t flags, uid_t req_uid)
 {
 	int fd, rc = SLURM_SUCCESS;
 	uint16_t protocol_version;
@@ -3242,7 +3276,8 @@ _signal_jobstep(uint32_t jobid, uint32_t stepid, uint16_t signal,
 	}
 
 	debug2("container signal %d to job %u.%u", signal, jobid, stepid);
-	rc = stepd_signal_container(fd, protocol_version, signal, flags);
+	rc = stepd_signal_container(fd, protocol_version, signal, flags,
+				    req_uid);
 	if (rc == -1)
 		rc = ESLURMD_JOB_NOTRUNNING;
 
@@ -3258,8 +3293,9 @@ _rpc_signal_tasks(slurm_msg_t *msg)
 	uid_t job_uid, req_uid;
 
 	job_uid = _get_job_uid(req->job_id);
-
 	if ((int)job_uid < 0) {
+		debug("%s: failed to get job_uid for job %u",
+		      __func__, req->job_id);
 		rc = ESLURM_INVALID_JOB_ID;
 		goto done;
 	}
@@ -3277,17 +3313,17 @@ _rpc_signal_tasks(slurm_msg_t *msg)
 		debug("%s: sending signal %u to entire job %u flag %u",
 		      __func__, req->signal, req->job_id, req->flags);
 		_kill_all_active_steps(req->job_id, req->signal,
-				       req->flags, true);
+				       req->flags, true, req_uid);
 	} else if (req->flags & KILL_STEPS_ONLY) {
 		debug("%s: sending signal %u to all steps job %u flag %u",
 		      __func__, req->signal, req->job_id, req->flags);
 		_kill_all_active_steps(req->job_id, req->signal,
-				       req->flags, false);
+				       req->flags, false, req_uid);
 	} else {
 		debug("%s: sending signal %u to step %u.%u flag %u", __func__,
 		      req->signal, req->job_id, req->job_step_id, req->flags);
 		rc = _signal_jobstep(req->job_id, req->job_step_id,
-				     req->signal, req->flags);
+				     req->signal, req->flags, req_uid);
 	}
 done:
 	slurm_send_rc_msg(msg, rc);
@@ -3591,7 +3627,7 @@ _rpc_stat_jobacct(slurm_msg_t *msg)
 	}
 
 	/*
-	 * check that requesting user ID is the SLURM UID or root
+	 * check that requesting user ID is the Slurm UID or root
 	 */
 	if ((req_uid != uid) && (!_slurm_authorized_user(req_uid))) {
 		error("stat_jobacct from uid %ld for job %u "
@@ -3756,7 +3792,7 @@ _rpc_list_pids(slurm_msg_t *msg)
 	}
 
 	/*
-	 * check that requesting user ID is the SLURM UID or root
+	 * check that requesting user ID is the Slurm UID or root
 	 */
 	if ((req_uid != job_uid)
 	    && (!_slurm_authorized_user(req_uid))) {
@@ -3841,32 +3877,36 @@ _rpc_timelimit(slurm_msg_t *msg)
 		 */
 		if (msg->msg_type == REQUEST_KILL_TIMELIMIT) {
 			rc = _signal_jobstep(req->job_id, req->step_id,
-					     SIG_TIME_LIMIT, 0);
+					     SIG_TIME_LIMIT, 0, uid);
 		} else {
 			rc = _signal_jobstep(req->job_id, req->step_id,
-					     SIG_PREEMPTED, 0);
+					     SIG_PREEMPTED, 0, uid);
 		}
 		if (rc != SLURM_SUCCESS)
 			return;
-		rc = _signal_jobstep(req->job_id, req->step_id, SIGCONT, 0);
+		rc = _signal_jobstep(req->job_id, req->step_id, SIGCONT, 0,
+				     uid);
 		if (rc != SLURM_SUCCESS)
 			return;
-		rc = _signal_jobstep(req->job_id, req->step_id, SIGTERM, 0);
+		rc = _signal_jobstep(req->job_id, req->step_id, SIGTERM, 0,
+				     uid);
 		if (rc != SLURM_SUCCESS)
 			return;
 		cf = slurm_conf_lock();
 		delay = MAX(cf->kill_wait, 5);
 		slurm_conf_unlock();
 		sleep(delay);
-		_signal_jobstep(req->job_id, req->step_id, SIGKILL, 0);
+		_signal_jobstep(req->job_id, req->step_id, SIGKILL, 0, uid);
 		return;
 	}
 
 	if (msg->msg_type == REQUEST_KILL_TIMELIMIT)
-		_kill_all_active_steps(req->job_id, SIG_TIME_LIMIT, 0, true);
+		_kill_all_active_steps(req->job_id, SIG_TIME_LIMIT, 0, true,
+				       uid);
 	else /* (msg->type == REQUEST_KILL_PREEMPTED) */
-		_kill_all_active_steps(req->job_id, SIG_PREEMPTED, 0, true);
-	nsteps = _kill_all_active_steps(req->job_id, SIGTERM, 0, false);
+		_kill_all_active_steps(req->job_id, SIG_PREEMPTED, 0, true,
+				       uid);
+	nsteps = _kill_all_active_steps(req->job_id, SIGTERM, 0, false, uid);
 	verbose("Job %u: timeout: sent SIGTERM to %d active steps",
 		req->job_id, nsteps);
 
@@ -4255,7 +4295,12 @@ static int _receive_fd(int socket)
 	}
 
 	cmsg = CMSG_FIRSTHDR(&msg);
+	if (!cmsg) {
+		error("%s: CMSG_FIRSTHDR error: %m", __func__);
+		return -1;
+	}
 	memmove(&fd, CMSG_DATA(cmsg), sizeof(fd));
+
 	return fd;
 }
 
@@ -4462,7 +4507,8 @@ static uid_t _get_job_uid(uint32_t jobid)
  * RET count of signaled job steps (plus batch script, if applicable)
  */
 static int
-_kill_all_active_steps(uint32_t jobid, int sig, int flags, bool batch)
+_kill_all_active_steps(uint32_t jobid, int sig, int flags, bool batch,
+		       uid_t req_uid)
 {
 	List steps;
 	ListIterator i;
@@ -4475,15 +4521,16 @@ _kill_all_active_steps(uint32_t jobid, int sig, int flags, bool batch)
 	while ((stepd = list_next(i))) {
 		if (stepd->jobid != jobid) {
 			/* multiple jobs expected on shared nodes */
-			debug3("Step from other job: jobid=%u (this jobid=%u)",
-			       stepd->jobid, jobid);
+			debug3("%s: Looking for job %u, found step from job %u",
+			       __func__, jobid, stepd->jobid);
 			continue;
 		}
 
 		if ((stepd->stepid == SLURM_BATCH_SCRIPT) && !batch)
 			continue;
 
-		if (_signal_jobstep(stepd->jobid, stepd->stepid, sig, flags)
+		if (_signal_jobstep(stepd->jobid, stepd->stepid, sig, flags,
+				    req_uid)
 		    != SLURM_SUCCESS) {
 			rc = SLURM_ERROR;
 			continue;
@@ -4534,7 +4581,8 @@ extern int ume_notify(void)
 		debug2("container SIG_UME to job %u.%u",
 		       stepd->jobid, stepd->stepid);
 		if (stepd_signal_container(
-			    fd, stepd->protocol_version, SIG_UME, 0) < 0)
+			    fd, stepd->protocol_version, SIG_UME, 0,
+			    getuid()) < 0)
 			debug("kill jobid=%u failed: %m", stepd->jobid);
 		close(fd);
 	}
@@ -4834,7 +4882,7 @@ _rpc_suspend_job(slurm_msg_t *msg)
 	}
 
 	/*
-	 * check that requesting user ID is the SLURM UID or root
+	 * check that requesting user ID is the Slurm UID or root
 	 */
 	if (!_slurm_authorized_user(req_uid)) {
 		error("Security violation: suspend_job(%u) from uid %d",
@@ -5022,7 +5070,7 @@ _rpc_abort_job(slurm_msg_t *msg)
 
 	debug("_rpc_abort_job, uid = %d", uid);
 	/*
-	 * check that requesting user ID is the SLURM UID
+	 * check that requesting user ID is the Slurm UID
 	 */
 	if (!_slurm_authorized_user(uid)) {
 		error("Security violation: abort_job(%u) from uid %d",
@@ -5056,7 +5104,7 @@ _rpc_abort_job(slurm_msg_t *msg)
 		msg->conn_fd = -1;
 	}
 
-	if (_kill_all_active_steps(req->job_id, SIG_ABORT, 0, true)) {
+	if (_kill_all_active_steps(req->job_id, SIG_ABORT, 0, true, uid)) {
 		/*
 		 *  Block until all user processes are complete.
 		 */
@@ -5084,11 +5132,7 @@ _rpc_abort_job(slurm_msg_t *msg)
 	job_env.spank_job_env_size = req->spank_job_env_size;
 	job_env.uid = req->job_uid;
 
-#if defined(HAVE_BG)
-	select_g_select_jobinfo_get(req->select_jobinfo,
-				    SELECT_JOBDATA_BLOCK_ID,
-				    &job_env.resv_id);
-#elif defined(HAVE_ALPS_CRAY)
+#if defined(HAVE_ALPS_CRAY)
 	job_env.resv_id = select_g_select_jobinfo_xstrdup(req->select_jobinfo,
 							  SELECT_PRINT_RESV_ID);
 #endif
@@ -5133,7 +5177,7 @@ _rpc_terminate_batch_job(uint32_t job_id, uint32_t user_id, char *node_name)
 	 * Tasks might be stopped (possibly by a debugger)
 	 * so send SIGCONT first.
 	 */
-	_kill_all_active_steps(job_id, SIGCONT, 0, true);
+	_kill_all_active_steps(job_id, SIGCONT, 0, true, user_id);
 	if (errno == ESLURMD_STEP_SUSPENDED) {
 		/*
 		 * If the job step is currently suspended, we don't
@@ -5142,7 +5186,8 @@ _rpc_terminate_batch_job(uint32_t job_id, uint32_t user_id, char *node_name)
 		debug2("Job is currently suspended, terminating");
 		nsteps = _terminate_all_steps(job_id, true);
 	} else {
-		nsteps = _kill_all_active_steps(job_id, SIGTERM, 0, true);
+		nsteps = _kill_all_active_steps(job_id, SIGTERM, 0, true,
+						user_id);
 	}
 
 	if ((nsteps == 0) && !conf->epilog) {
@@ -5326,7 +5371,7 @@ _rpc_terminate_job(slurm_msg_t *msg)
 
 	debug("_rpc_terminate_job, uid = %d", uid);
 	/*
-	 * check that requesting user ID is the SLURM UID
+	 * check that requesting user ID is the Slurm UID
 	 */
 	if (!_slurm_authorized_user(uid)) {
 		error("Security violation: kill_job(%u) from uid %d",
@@ -5420,17 +5465,18 @@ _rpc_terminate_job(slurm_msg_t *msg)
 	}
 
 	if (IS_JOB_NODE_FAILED(req))
-		_kill_all_active_steps(req->job_id, SIG_NODE_FAIL, 0, true);
+		_kill_all_active_steps(req->job_id, SIG_NODE_FAIL, 0, true,
+				       uid);
 	if (IS_JOB_PENDING(req))
-		_kill_all_active_steps(req->job_id, SIG_REQUEUED, 0, true);
+		_kill_all_active_steps(req->job_id, SIG_REQUEUED, 0, true, uid);
 	else if (IS_JOB_FAILED(req))
-		_kill_all_active_steps(req->job_id, SIG_FAILURE, 0, true);
+		_kill_all_active_steps(req->job_id, SIG_FAILURE, 0, true, uid);
 
 	/*
 	 * Tasks might be stopped (possibly by a debugger)
 	 * so send SIGCONT first.
 	 */
-	_kill_all_active_steps(req->job_id, SIGCONT, 0, true);
+	_kill_all_active_steps(req->job_id, SIGCONT, 0, true, uid);
 	if (errno == ESLURMD_STEP_SUSPENDED) {
 		/*
 		 * If the job step is currently suspended, we don't
@@ -5439,7 +5485,8 @@ _rpc_terminate_job(slurm_msg_t *msg)
 		debug2("Job is currently suspended, terminating");
 		nsteps = _terminate_all_steps(req->job_id, true);
 	} else {
-		nsteps = _kill_all_active_steps(req->job_id, SIGTERM, 0, true);
+		nsteps = _kill_all_active_steps(req->job_id, SIGTERM, 0, true,
+						uid);
 	}
 
 	if ((nsteps == 0) && !conf->epilog) {
@@ -5528,11 +5575,7 @@ _rpc_terminate_job(slurm_msg_t *msg)
 	job_env.spank_job_env_size = req->spank_job_env_size;
 	job_env.uid = req->job_uid;
 
-#if defined(HAVE_BG)
-	select_g_select_jobinfo_get(req->select_jobinfo,
-				    SELECT_JOBDATA_BLOCK_ID,
-				    &job_env.resv_id);
-#elif defined(HAVE_ALPS_CRAY)
+#if defined(HAVE_ALPS_CRAY)
 	job_env.resv_id = select_g_select_jobinfo_xstrdup(
 		req->select_jobinfo, SELECT_PRINT_RESV_ID);
 #endif
@@ -5703,6 +5746,7 @@ _pause_for_job_completion (uint32_t job_id, char *nodes, int max_time)
 	int sec = 0;
 	int pause = 1;
 	bool rc = false;
+	int count = 0;
 
 	while ((sec < max_time) || (max_time == 0)) {
 		rc = _job_still_running (job_id);
@@ -5718,8 +5762,28 @@ _pause_for_job_completion (uint32_t job_id, char *nodes, int max_time)
 			else
 				pause = 10;
 		}
-		sleep(pause);
-		sec += pause;
+
+		/*
+		 * The job will usually finish up within the first .02 sec.  If
+		 * not gradually increase the sleep until we get to a second.
+		 */
+		if (count == 0) {
+			usleep(20000);
+			count++;
+		} else if (count == 1) {
+			usleep(50000);
+			count++;
+		} else if (count == 2) {
+			usleep(100000);
+			count++;
+		} else if (count == 3) {
+			usleep(500000);
+			count++;
+			sec = 1;
+		} else {
+			sleep(pause);
+			sec += pause;
+		}
 	}
 
 	/*
@@ -5811,9 +5875,7 @@ _build_env(job_env_t *job_env)
 		setenvf(&env, "SLURM_JOB_PARTITION", "%s", job_env->partition);
 
 	if (job_env->resv_id) {
-#if defined(HAVE_BG)
-		setenvf(&env, "MPIRUN_PARTITION", "%s", job_env->resv_id);
-#elif defined(HAVE_ALPS_CRAY)
+#if defined(HAVE_ALPS_CRAY)
 		setenvf(&env, "BASIL_RESERVATION_ID", "%s", job_env->resv_id);
 #endif
 	}
@@ -5823,10 +5885,10 @@ _build_env(job_env_t *job_env)
 static void
 _destroy_env(char **env)
 {
-	int i=0;
+	int i = 0;
 
 	if (env) {
-		for(i=0; env[i]; i++) {
+		for (i = 0; env[i]; i++) {
 			xfree(env[i]);
 		}
 		xfree(env);
@@ -5876,10 +5938,7 @@ _run_spank_job_script (const char *mode, char **env, uint32_t job_id, uid_t uid)
 		if (dup2 (pfds[0], STDIN_FILENO) < 0)
 			fatal ("dup2: %m");
 		setpgid(0, 0);
-		if (conf->chos_loc && !access(conf->chos_loc, X_OK))
-			execve(conf->chos_loc, argv, env);
-		else
-			execve(argv[0], argv, env);
+		execve(argv[0], argv, env);
 		error ("execve(%s): %m", argv[0]);
 		exit (127);
 	}
@@ -5926,32 +5985,6 @@ static int _run_job_script(const char *name, const char *path,
 	return (status);
 }
 
-#ifdef HAVE_BG
-/* a slow prolog is expected on bluegene systems */
-static int
-_run_prolog(job_env_t *job_env, slurm_cred_t *cred, bool remove_running)
-{
-	int rc;
-	char *my_prolog;
-	char **my_env;
-
-	my_env = _build_env(job_env);
-	setenvf(&my_env, "SLURM_STEP_ID", "%u", job_env->step_id);
-
-	slurm_mutex_lock(&conf->config_mutex);
-	my_prolog = xstrdup(conf->prolog);
-	slurm_mutex_unlock(&conf->config_mutex);
-
-	rc = _run_job_script("prolog", my_prolog, job_env->jobid,
-			     -1, my_env, job_env->uid);
-	if (remove_running)
-		_remove_job_running_prolog(job_env->jobid);
-	xfree(my_prolog);
-	_destroy_env(my_env);
-
-	return rc;
-}
-#else
 static void *_prolog_timer(void *x)
 {
 	int delay_time, rc = SLURM_SUCCESS;
@@ -6100,7 +6133,6 @@ _run_prolog(job_env_t *job_env, slurm_cred_t *cred, bool remove_running)
 
 	return rc;
 }
-#endif
 
 static int
 _run_epilog(job_env_t *job_env)

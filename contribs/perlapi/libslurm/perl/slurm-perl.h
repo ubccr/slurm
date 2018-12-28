@@ -37,9 +37,7 @@ extern void  slurm_private_data_string(uint16_t private_data,
 				       char *str, int str_len);
 extern void  slurm_accounting_enforce_string(uint16_t enforce,
 					     char *str, int str_len);
-extern char *slurm_conn_type_string(enum connection_type conn_type);
 extern char *slurm_node_use_string(enum node_use_type node_use);
-extern char *slurm_bg_block_state_string(uint16_t state);
 
 
 /********** resource allocation related conversion functions **********/
@@ -80,19 +78,11 @@ extern int job_step_stat_response_msg_to_hv(job_step_stat_response_msg_t
 		*stat_msg, HV *hv);
 
 /********** node info conversion functions **********/
-extern int node_info_to_hv(node_info_t *node_info, uint16_t node_scaling, HV *hv);
+extern int node_info_to_hv(node_info_t *node_info, HV *hv);
 extern int hv_to_node_info(HV *hv, node_info_t *node_info);
 extern int node_info_msg_to_hv(node_info_msg_t *node_info_msg, HV *hv);
 extern int hv_to_node_info_msg(HV *hv, node_info_msg_t *node_info_msg);
 extern int hv_to_update_node_msg(HV *hv, update_node_msg_t *update_msg);
-
-/********** block info conversion functions **********/
-extern int block_info_to_hv(block_info_t *block_info, HV *hv);
-extern int hv_to_block_info(HV *hv, block_info_t *block_info);
-extern int block_info_msg_to_hv(block_info_msg_t *block_info_msg, HV *hv);
-extern int hv_to_block_info_msg(HV *hv, block_info_msg_t *block_info_msg);
-extern int hv_to_update_block_msg(HV *hv, update_block_msg_t *update_msg);
-
 
 /********** partition info conversion functions **********/
 extern int partition_info_to_hv(partition_info_t *part_info, HV *hv);

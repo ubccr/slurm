@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -87,9 +87,8 @@ static void _rebuild_port_array(struct step_record *step_ptr)
 	hl = hostlist_create(tmp_char);
 	xfree(tmp_char);
 	if (!hl) {
-		error("Step %u.%u has invalid reserved ports: %s",
-		      step_ptr->job_ptr->job_id, step_ptr->step_id,
-		      step_ptr->resv_ports);
+		error("%pS has invalid reserved ports: %s",
+		      step_ptr, step_ptr->resv_ports);
 		xfree(step_ptr->resv_ports);
 		return;
 	}
@@ -105,9 +104,8 @@ static void _rebuild_port_array(struct step_record *step_ptr)
 	}
 	hostlist_destroy(hl);
 	if (step_ptr->resv_port_cnt == 0) {
-		error("Problem recovering resv_port_array for step %u.%u: %s",
-		      step_ptr->job_ptr->job_id, step_ptr->step_id,
-		      step_ptr->resv_ports);
+		error("Problem recovering resv_port_array for %pS: %s",
+		      step_ptr, step_ptr->resv_ports);
 		xfree(step_ptr->resv_ports);
 	}
 }
@@ -230,9 +228,8 @@ extern int resv_port_alloc(struct step_record *step_ptr)
 		dims = slurmdb_setup_cluster_name_dims();
 
 	if (step_ptr->resv_port_cnt > port_resv_cnt) {
-		info("step %u.%u needs %u reserved ports, but only %d exist",
-		     step_ptr->job_ptr->job_id, step_ptr->step_id,
-		     step_ptr->resv_port_cnt, port_resv_cnt);
+		info("%pS needs %u reserved ports, but only %d exist",
+		     step_ptr, step_ptr->resv_port_cnt, port_resv_cnt);
 		return ESLURM_PORTS_INVALID;
 	}
 
@@ -250,9 +247,8 @@ extern int resv_port_alloc(struct step_record *step_ptr)
 			break;
 	}
 	if (port_inx < step_ptr->resv_port_cnt) {
-		info("insufficient ports for step %u.%u to reserve (%d of %u)",
-		     step_ptr->job_ptr->job_id, step_ptr->step_id,
-		     port_inx, step_ptr->resv_port_cnt);
+		info("insufficient ports for %pS to reserve (%d of %u)",
+		     step_ptr, port_inx, step_ptr->resv_port_cnt);
 		xfree(port_array);
 		return ESLURM_PORTS_BUSY;
 	}
@@ -272,9 +268,8 @@ extern int resv_port_alloc(struct step_record *step_ptr)
 	hostlist_destroy(hl);
 	step_ptr->resv_port_array = port_array;
 
-	debug("reserved ports %s for step %u.%u",
-	      step_ptr->resv_ports,
-	      step_ptr->job_ptr->job_id, step_ptr->step_id);
+	debug("reserved ports %s for %pS",
+	      step_ptr->resv_ports, step_ptr);
 
 	return SLURM_SUCCESS;
 }
@@ -298,7 +293,6 @@ extern void resv_port_free(struct step_record *step_ptr)
 	}
 	xfree(step_ptr->resv_port_array);
 
-	debug("freed ports %s for step %u.%u",
-	      step_ptr->resv_ports,
-	      step_ptr->job_ptr->job_id, step_ptr->step_id);
+	debug("freed ports %s for %pS",
+	      step_ptr->resv_ports, step_ptr);
 }

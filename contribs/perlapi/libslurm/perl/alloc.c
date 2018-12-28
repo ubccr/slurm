@@ -69,8 +69,8 @@ hv_to_job_desc_msg(HV *hv, job_desc_msg_t *job_desc)
 	FETCH_FIELD(hv, job_desc, end_time, time_t, FALSE);
 
 	/* environment, env_size */
-	if((svp = hv_fetch(hv, "environment", 11, FALSE))) {
-		if(SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVHV) {
+	if ((svp = hv_fetch(hv, "environment", 11, FALSE))) {
+		if (SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVHV) {
 			environ_hv = (HV*)SvRV(*svp);
 			num_keys = HvKEYS(environ_hv);
 			job_desc->env_size = num_keys;
@@ -78,21 +78,23 @@ hv_to_job_desc_msg(HV *hv, job_desc_msg_t *job_desc)
 
 			hv_iterinit(environ_hv);
 			i = 0;
-			while((val = hv_iternextsv(environ_hv, &env_key, &klen))) {
+			while ((val = hv_iternextsv(environ_hv, &env_key, &klen))) {
 				env_val = SvPV(val, vlen);
 				Newz(0, (*(job_desc->environment + i)), klen + vlen + 2, char);
 				sprintf(*(job_desc->environment + i), "%s=%s", env_key, env_val);
 				i ++;
 			}
-		}
-		else {
+		} else {
 			Perl_warn(aTHX_ "`environment' of job descriptor is not a hash reference, ignored");
 		}
 	}
 
 	FETCH_FIELD(hv, job_desc, exc_nodes, charp, FALSE);
 	FETCH_FIELD(hv, job_desc, features, charp, FALSE);
-	FETCH_FIELD(hv, job_desc, gres, charp, FALSE);
+	FETCH_FIELD(hv, job_desc, tres_per_job, charp, FALSE);
+	FETCH_FIELD(hv, job_desc, tres_per_node, charp, FALSE);
+	FETCH_FIELD(hv, job_desc, tres_per_socket, charp, FALSE);
+	FETCH_FIELD(hv, job_desc, tres_per_task, charp, FALSE);
 	FETCH_FIELD(hv, job_desc, group_id, uint32_t, FALSE);
 	FETCH_FIELD(hv, job_desc, immediate, uint16_t, FALSE);
 	FETCH_FIELD(hv, job_desc, job_id, uint32_t, FALSE);
@@ -168,48 +170,7 @@ hv_to_job_desc_msg(HV *hv, job_desc_msg_t *job_desc)
 	FETCH_FIELD(hv, job_desc, pn_min_cpus, uint16_t, FALSE);
 	FETCH_FIELD(hv, job_desc, pn_min_memory, uint64_t, FALSE);
 	FETCH_FIELD(hv, job_desc, pn_min_tmp_disk, uint32_t, FALSE);
-
-	/* geometry */
-	if((svp = hv_fetch(hv, "geometry", 8, FALSE))) {
-		AV *av;
-		if (!SvROK(*svp) || SvTYPE(SvRV(*svp)) != SVt_PVAV) {
-			Perl_warn(aTHX_ "`geometry' is not an array reference in job descriptor");
-			free_job_desc_msg_memory(job_desc);
-			return -1;
-		}
-		av = (AV*)SvRV(*svp);
-		for(i = 0; i < HIGHEST_DIMENSIONS; i ++) {
-			if(! (svp = av_fetch(av, i, FALSE))) {
-				Perl_warn(aTHX_ "geometry of dimension %d missing in job descriptor", i);
-				free_job_desc_msg_memory(job_desc);
-				return -1;
-			}
-			job_desc->geometry[i] = SvUV(*svp);
-		}
-	}
-	if((svp = hv_fetch(hv, "conn_type", 9, FALSE))) {
-		AV *av;
-		if (!SvROK(*svp) || SvTYPE(SvRV(*svp)) != SVt_PVAV) {
-			Perl_warn(aTHX_ "`conn_type' is not an array reference in job descriptor");
-			free_job_desc_msg_memory(job_desc);
-			return -1;
-		}
-		av = (AV*)SvRV(*svp);
-		for(i = 0; i < HIGHEST_DIMENSIONS; i ++) {
-			if(! (svp = av_fetch(av, i, FALSE))) {
-				Perl_warn(aTHX_ "conn_type of dimension %d missing in job descriptor", i);
-				free_job_desc_msg_memory(job_desc);
-				return -1;
-			}
-			job_desc->conn_type[i] = SvUV(*svp);
-		}
-	}
 	FETCH_FIELD(hv, job_desc, reboot, uint16_t, FALSE);
-	FETCH_FIELD(hv, job_desc, rotate, uint16_t, FALSE);
-	FETCH_FIELD(hv, job_desc, blrtsimage, charp, FALSE);
-	FETCH_FIELD(hv, job_desc, linuximage, charp, FALSE);
-	FETCH_FIELD(hv, job_desc, mloaderimage, charp, FALSE);
-	FETCH_FIELD(hv, job_desc, ramdiskimage, charp, FALSE);
 	FETCH_PTR_FIELD(hv, job_desc, select_jobinfo, "Slurm::dynamic_plugin_data_t",  FALSE);
 
 	FETCH_FIELD(hv, job_desc, std_err, charp, FALSE);

@@ -2,14 +2,14 @@
  **  pmix_server.h - PMIx server side functionality
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2018 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
@@ -47,8 +47,9 @@ typedef enum {
 	PMIXP_MSG_DMDX,
 	PMIXP_MSG_INIT_DIRECT,
 #ifndef NDEBUG
-	PMIXP_MSG_PINGPONG
+	PMIXP_MSG_PINGPONG,
 #endif
+	PMIXP_MSG_RING
 } pmixp_srv_cmd_t;
 
 typedef enum {
@@ -79,6 +80,7 @@ void pmixp_server_cleanup(void);
 int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
 void pmixp_server_slurm_conn(int fd);
 void pmixp_server_direct_conn(int fd);
+int pmixp_server_direct_conn_early(void);
 int pmixp_server_send_nb(pmixp_ep_t *ep, pmixp_srv_cmd_t type,
 			 uint32_t seq, Buf buf,
 			 pmixp_server_sent_cb_t complete_cb,
@@ -100,8 +102,8 @@ int pmixp_server_pp_same_thread(void);
 bool pmixp_server_pp_check_fini(int size);
 
 void pmixp_server_init_cperf(char ***env);
-bool pmixp_server_want_cperf();
-void pmixp_server_run_cperf();
+bool pmixp_server_want_cperf(void);
+void pmixp_server_run_cperf(void);
 
 #else
 /* Stubs for the initialization code */

@@ -7,11 +7,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #ifndef _SLURMD_H
@@ -54,6 +54,7 @@ extern pid_t getpgid(pid_t pid);
 #endif
 
 extern int devnull;
+extern bool get_reg_resp;
 
 /*
  * Message aggregation types
@@ -71,7 +72,6 @@ typedef struct slurmd_config {
 	char         ***argv;           /* pointer to argument vector      */
 	int          *argc;             /* pointer to argument count       */
 	char         *auth_info;	/* AuthInfo for msg authentication */ 
-	char         *chos_loc;		/* Chroot OS wrapper path          */
 	char         *cluster_name; 	/* conf ClusterName		   */
 	char         *hostname;	 	/* local hostname		   */
 	uint16_t     cpus;              /* lowest-level logical processors */
@@ -101,6 +101,7 @@ typedef struct slurmd_config {
 	uint16_t      cr_type;		/* Consumable Resource Type:       *
 					 * CR_SOCKET, CR_CORE, CR_MEMORY,  *
 					 * CR_DEFAULT, etc.                */
+	char         *hwloc_xml;	/* path of hwloc xml file if using */
 	time_t        last_update;	/* last update time of the
 					 * build parameters */
 	uint16_t      mem_limit_enforce; /* enforce mem limit on running job */
@@ -135,6 +136,7 @@ typedef struct slurmd_config {
 	uint64_t      debug_flags;	/* DebugFlags configured           */
 	int	      boot_time:1;      /* Report node boot time now (-b)  */
 	int           daemonize:1;	/* daemonize flag (-D)		   */
+	bool          def_config;       /* We haven't read in the config yet */
 	int	      cleanstart:1;     /* clean start requested (-c)      */
 	int           mlock_pages:1;	/* mlock() slurmd  */
 
@@ -167,12 +169,15 @@ typedef struct slurmd_config {
 	char         *plugstack;	/* path to SPANK config file	*/
 	uint16_t      kill_wait;	/* seconds between SIGXCPU to SIGKILL
 					 * on job termination */
+	char           *x11_params;	/* X11Parameters */
 } slurmd_conf_t;
 
 extern slurmd_conf_t * conf;
 extern int fini_job_cnt;
 extern uint32_t *fini_job_id;
 extern pthread_mutex_t fini_job_mutex;
+extern pthread_mutex_t tres_mutex;
+extern pthread_cond_t  tres_cond;
 
 /* Send node registration message with status to controller
  * IN status - same values slurm error codes (for node shutdown)
@@ -189,5 +194,8 @@ int save_cred_state(slurm_cred_ctx_t vctx);
 
 /* Run the health check program if configured */
 int run_script_health_check(void);
+
+/* Handler for SIGTERM; can also be called to shutdown the slurmd. */
+void slurmd_shutdown(int signum);
 
 #endif /* !_SLURMD_H */

@@ -4,11 +4,11 @@
  *  Copyright (C) 2009 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,17 +24,17 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#define _GNU_SOURCE		/* For POLLRDHUP */
+#define _GNU_SOURCE		/* For POLLRDHUP, O_CLOEXEC on older glibc */
 #include <limits.h>
 #include <poll.h>
 #include <signal.h>
@@ -291,7 +291,7 @@ extern int task_cgroup_memory_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 static uint64_t mem_limit_in_bytes (uint64_t mem, bool with_allowed)
 {
 	/*
-	 *  If mem == 0 then assume there was no SLURM limit imposed
+	 *  If mem == 0 then assume there was no Slurm limit imposed
 	 *   on the amount of memory for job or step. Use the total
 	 *   amount of available RAM instead.
 	 */
@@ -572,7 +572,7 @@ static int _register_oom_notifications(char * cgpath)
 		goto fini;
 	}
 
-	if ((cfd = open(control_file, O_RDONLY)) == -1) {
+	if ((cfd = open(control_file, O_RDONLY | O_CLOEXEC)) == -1) {
 		error("%s: Cannot open %s: %m", __func__, control_file);
 		rc = SLURM_ERROR;
 		goto fini;
@@ -586,13 +586,13 @@ static int _register_oom_notifications(char * cgpath)
 		goto fini;
 	}
 
-	if ((efd = open(event_file, O_WRONLY)) == -1) {
+	if ((efd = open(event_file, O_WRONLY | O_CLOEXEC)) == -1) {
 		error("%s: Cannot open %s: %m", __func__, event_file);
 		rc = SLURM_ERROR;
 		goto fini;
 	}
 
-	if ((event_fd = eventfd(0, 0)) == -1) {
+	if ((event_fd = eventfd(0, EFD_CLOEXEC)) == -1) {
 		error("%s: eventfd: %m", __func__);
 		rc = SLURM_ERROR;
 		goto fini;
@@ -614,7 +614,7 @@ static int _register_oom_notifications(char * cgpath)
 		goto fini;
 	}
 
-	if (pipe(oom_pipe) == -1) {
+	if (pipe2(oom_pipe, O_CLOEXEC) == -1) {
 		error("%s: pipe(): %m", __func__);
 		rc = SLURM_ERROR;
 		goto fini;
@@ -685,7 +685,7 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 	/* build job cgroup relative path if no set (should not be) */
 	if (*job_cgroup_path == '\0') {
 		if (snprintf(job_cgroup_path,PATH_MAX,"%s/job_%u",
-			      user_cgroup_path,jobid) >= PATH_MAX) {
+			      user_cgroup_path, jobid) >= PATH_MAX) {
 			error("task/cgroup: unable to build job %u memory "
 			      "cg relative path : %m", jobid);
 			return SLURM_ERROR;
@@ -721,7 +721,7 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 	 * setting it up. As soon as the step cgroup is created, we can release
 	 * the lock.
 	 * Indeed, consecutive slurm steps could result in cg being removed
-	 * between the next EEXIST instanciation and the first addition of
+	 * between the next EEXIST instantiation and the first addition of
 	 * a task. The release_agent will have to lock the root memory cgroup
 	 * to avoid this scenario.
 	 */
@@ -912,7 +912,7 @@ extern int task_cgroup_memory_check_oom(stepd_step_rec_t *job)
 
 	slurm_mutex_lock(&oom_mutex);
 	if (oom_kill_count) {
-		error("Detected %"PRIu64" oom-kill event(s) in step %s cgroup.",
+		error("Detected %"PRIu64" oom-kill event(s) in step %s cgroup. Some of your processes may have been killed by the cgroup out-of-memory handler.",
 		      oom_kill_count, step_str);
 		rc = ENOMEM;
 	}

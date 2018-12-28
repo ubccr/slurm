@@ -8,11 +8,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -339,6 +339,11 @@ static int _set_rec(int *start, int argc, char **argv,
 			if (get_uint(argv[i]+end, &qos->grp_jobs,
 			    "GrpJobs") == SLURM_SUCCESS)
 				set = 1;
+		} else if (!xstrncasecmp(argv[i], "GrpJobsAccrue",
+					 MAX(command_len, 8))) {
+			if (get_uint(argv[i]+end, &qos->grp_jobs_accrue,
+			    "GrpJobsAccrue") == SLURM_SUCCESS)
+				set = 1;
 		} else if (!xstrncasecmp(argv[i], "GrpMemory",
 					 MAX(command_len, 4))) {
 			if (get_uint64(argv[i]+end, &tmp64,
@@ -455,6 +460,20 @@ static int _set_rec(int *start, int argc, char **argv,
 					tres_flags);
 				xfree(tmp_char);
 			}
+		} else if (!xstrncasecmp(argv[i], "MaxJobsAccruePerAccount",
+					 MAX(command_len, 17)) ||
+			   !xstrncasecmp(argv[i], "MaxJobsAccruePA",
+					 MAX(command_len, 15))) {
+			if (get_uint(argv[i]+end, &qos->max_jobs_accrue_pa,
+			    "MaxJobsAccruePA") == SLURM_SUCCESS)
+				set = 1;
+		} else if (!xstrncasecmp(argv[i], "MaxJobsAccruePerUser",
+					 MAX(command_len, 17)) ||
+			   !xstrncasecmp(argv[i], "MaxJobsAccruePU",
+					 MAX(command_len, 15))) {
+			if (get_uint(argv[i]+end, &qos->max_jobs_accrue_pu,
+			    "MaxJobsAccruePU") == SLURM_SUCCESS)
+				set = 1;
 		} else if (!xstrncasecmp(argv[i], "MaxJobsPerAccount",
 					 MAX(command_len, 11)) ||
 			   !xstrncasecmp(argv[i], "MaxJobsPA",
@@ -621,6 +640,11 @@ static int _set_rec(int *start, int argc, char **argv,
 					tres_flags);
 				xfree(tmp_char);
 			}
+		} else if (!xstrncasecmp(argv[i], "MinPrioThresh",
+					 MAX(command_len, 4))) {
+			if (get_uint(argv[i]+end, &qos->min_prio_thresh,
+				     "MinPrioThresh") == SLURM_SUCCESS)
+				set = 1;
 		} else if (!xstrncasecmp(argv[i], "MinTRESPerJob",
 					 MAX(command_len, 7))) {
 			sacctmgr_initialize_g_tres_list();
@@ -1028,6 +1052,11 @@ extern int sacctmgr_list_qos(int argc, char **argv)
 						     qos->grp_jobs,
 						     (curr_inx == field_count));
 				break;
+			case PRINT_GRPJA:
+				field->print_routine(field,
+						     qos->grp_jobs_accrue,
+						     (curr_inx == field_count));
+				break;
 			case PRINT_GRPMEM:
 				field->print_routine(
 					field,
@@ -1088,6 +1117,11 @@ extern int sacctmgr_list_qos(int argc, char **argv)
 						qos->max_tres_pu, TRES_CPU),
 					(curr_inx == field_count));
 				break;
+			case PRINT_MINPT:
+				field->print_routine(
+					field, qos->min_prio_thresh,
+					(curr_inx == field_count));
+				break;
 			case PRINT_MAXTM:
 				field->print_routine(
 					field, qos->max_tres_mins_pj,
@@ -1128,9 +1162,19 @@ extern int sacctmgr_list_qos(int argc, char **argv)
 						     qos->max_jobs_pu,
 						     (curr_inx == field_count));
 				break;
-			case PRINT_MAXJA:
+			case PRINT_MAXJPA:
 				field->print_routine(field,
 						     qos->max_jobs_pa,
+						     (curr_inx == field_count));
+				break;
+			case PRINT_MAXJAA:
+				field->print_routine(field,
+						     qos->max_jobs_accrue_pa,
+						     (curr_inx == field_count));
+				break;
+			case PRINT_MAXJAU:
+				field->print_routine(field,
+						     qos->max_jobs_accrue_pu,
 						     (curr_inx == field_count));
 				break;
 			case PRINT_MAXN:

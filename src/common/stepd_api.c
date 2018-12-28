@@ -8,11 +8,11 @@
  *  Written by Christopher Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,19 +28,17 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef   _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
+#define _GNU_SOURCE
 
 #include <dirent.h>
 #include <inttypes.h>
@@ -137,13 +135,16 @@ _handle_stray_socket(const char *socket_name)
 
 static void _handle_stray_script(const char *directory, uint32_t job_id)
 {
-	char dir_path[MAXPATHLEN], file_path[MAXPATHLEN];
+	char *dir_path = NULL, *file_path = NULL;
 
-	snprintf(dir_path, sizeof(dir_path), "%s/job%05u", directory, job_id);
-	snprintf(file_path, sizeof(file_path), "%s/slurm_script", dir_path);
+	xstrfmtcat(dir_path, "%s/job%05u", directory, job_id);
+	xstrfmtcat(file_path, "%s/slurm_script", dir_path);
 	info("%s: Purging vestigial job script %s", __func__, file_path);
 	(void) unlink(file_path);
 	(void) rmdir(dir_path);
+
+	xfree(dir_path);
+	xfree(file_path);
 }
 
 static int
@@ -285,15 +286,6 @@ stepd_connect(const char *directory, const char *nodename,
 		goto rwfail;
 	} else if (rc) {
 		*protocol_version = rc;
-	} else {
-		/* 0n older versions of Slurm < 14.11 SLURM_SUCCESS
-		 * was returned here instead of the protocol version.
-		 * This can be removed when we are 2 versions past
-		 * 14.11.
-		 */
-		slurmstepd_info_t *stepd_info = stepd_get_info(fd);
-		*protocol_version = stepd_info->protocol_version;
-		xfree(stepd_info);
 	}
 
 	free_buf(buffer);
@@ -343,17 +335,10 @@ stepd_get_info(int fd)
 	safe_read(fd, &step_info->stepid, sizeof(uint32_t));
 
 	safe_read(fd, &step_info->protocol_version, sizeof(uint16_t));
-	if (step_info->protocol_version >= SLURM_17_02_PROTOCOL_VERSION) {
+	if (step_info->protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		safe_read(fd, &step_info->nodeid, sizeof(uint32_t));
 		safe_read(fd, &step_info->job_mem_limit, sizeof(uint64_t));
 		safe_read(fd, &step_info->step_mem_limit, sizeof(uint64_t));
-	} else if (step_info->protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		uint32_t tmp_mem;
-		safe_read(fd, &step_info->nodeid, sizeof(uint32_t));
-		safe_read(fd, &tmp_mem, sizeof(uint32_t));
-		step_info->job_mem_limit = xlate_mem_old2new(tmp_mem);
-		safe_read(fd, &tmp_mem, sizeof(uint32_t));
-		step_info->step_mem_limit = xlate_mem_old2new(tmp_mem);
 	} else {
 		error("stepd_get_info: protocol_version "
 		      "%hu not supported", step_info->protocol_version);
@@ -421,39 +406,22 @@ stepd_checkpoint(int fd, uint16_t protocol_version,
 }
 
 /*
- * Send a signal to a single task in a job step.
- */
-int
-stepd_signal_task_local(int fd, uint16_t protocol_version,
-			int signal, int ltaskid)
-{
-	int req = REQUEST_SIGNAL_TASK_LOCAL;
-	int rc;
-
-	safe_write(fd, &req, sizeof(int));
-	safe_write(fd, &signal, sizeof(int));
-	safe_write(fd, &ltaskid, sizeof(int));
-
-	/* Receive the return code */
-	safe_read(fd, &rc, sizeof(int));
-
-	return rc;
-rwfail:
-	return -1;
-}
-
-/*
  * Send a signal to the proctrack container of a job step.
  */
 int
-stepd_signal_container(int fd, uint16_t protocol_version, int signal, int flags)
+stepd_signal_container(int fd, uint16_t protocol_version, int signal, int flags,
+		       uid_t req_uid)
 {
 	int req = REQUEST_SIGNAL_CONTAINER;
 	int rc;
 	int errnum = 0;
 
 	safe_write(fd, &req, sizeof(int));
-	if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_18_08_PROTOCOL_VERSION) {
+		safe_write(fd, &signal, sizeof(int));
+		safe_write(fd, &flags, sizeof(int));
+		safe_write(fd, &req_uid, sizeof(uid_t));
+	} else if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
 		safe_write(fd, &signal, sizeof(int));
 		safe_write(fd, &flags, sizeof(int));
 	} else {
@@ -486,14 +454,21 @@ stepd_attach(int fd, uint16_t protocol_version,
 {
 	int req = REQUEST_ATTACH;
 	int rc = SLURM_SUCCESS;
-	int proto = protocol_version;
 
-	safe_write(fd, &req, sizeof(int));
-	safe_write(fd, ioaddr, sizeof(slurm_addr_t));
-	safe_write(fd, respaddr, sizeof(slurm_addr_t));
-	safe_write(fd, job_cred_sig, SLURM_IO_KEY_SIZE);
-	safe_write(fd, &proto, sizeof(int));
-
+	if (protocol_version >= SLURM_18_08_PROTOCOL_VERSION) {
+		safe_write(fd, &req, sizeof(int));
+		safe_write(fd, ioaddr, sizeof(slurm_addr_t));
+		safe_write(fd, respaddr, sizeof(slurm_addr_t));
+		safe_write(fd, job_cred_sig, SLURM_IO_KEY_SIZE);
+		safe_write(fd, &protocol_version, sizeof(uint16_t));
+	} else {
+		int proto = protocol_version;
+		safe_write(fd, &req, sizeof(int));
+		safe_write(fd, ioaddr, sizeof(slurm_addr_t));
+		safe_write(fd, respaddr, sizeof(slurm_addr_t));
+		safe_write(fd, job_cred_sig, SLURM_IO_KEY_SIZE);
+		safe_write(fd, &proto, sizeof(int));
+	}
 	/* Receive the return code */
 	safe_read(fd, &rc, sizeof(int));
 
@@ -602,8 +577,10 @@ stepd_available(const char *directory, const char *nodename)
 	struct stat stat_buf;
 
 	if (nodename == NULL) {
-		if (!(nodename = _guess_nodename()))
+		if (!(nodename = _guess_nodename())) {
+			error("%s: Couldn't find nodename", __func__);
 			return NULL;
+		}
 	}
 	if (directory == NULL) {
 		slurm_ctl_conf_t *cf;
@@ -707,7 +684,8 @@ stepd_cleanup_sockets(const char *directory, const char *nodename)
 				debug("Unable to connect to socket %s", path);
 			} else {
 				if (stepd_signal_container(
-					    fd, protocol_version, SIGKILL, 0)
+					    fd, protocol_version, SIGKILL, 0,
+					    getuid())
 				    == -1) {
 					debug("Error sending SIGKILL to job step %u.%u",
 					      jobid, stepid);
@@ -774,10 +752,13 @@ rwfail:
 	return SLURM_ERROR;
 }
 
-extern int stepd_get_x11_display(int fd, uint16_t protocol_version)
+extern int stepd_get_x11_display(int fd, uint16_t protocol_version,
+				 char **xauthority)
 {
 	int req = REQUEST_X11_DISPLAY;
-	int display = 0;
+	int display = 0, len = 0;
+
+	*xauthority = NULL;
 
 	safe_write(fd, &req, sizeof(int));
 
@@ -787,10 +768,19 @@ extern int stepd_get_x11_display(int fd, uint16_t protocol_version)
 	 */
 	safe_read(fd, &display, sizeof(int));
 
+	if (protocol_version >= SLURM_18_08_PROTOCOL_VERSION) {
+		safe_read(fd, &len, sizeof(int));
+		if (len) {
+			*xauthority = xmalloc(len);
+			safe_read(fd, *xauthority, len);
+		}
+	}
+
 	debug("Leaving stepd_get_x11_display");
 	return display;
+
 rwfail:
-	return SLURM_ERROR;
+	return 0;
 }
 
 /*
@@ -1026,7 +1016,7 @@ rwfail:
 }
 
 /*
- * List all of task process IDs and their local and global SLURM IDs.
+ * List all of task process IDs and their local and global Slurm IDs.
  *
  * Returns SLURM_SUCCESS on success.  On error returns SLURM_ERROR
  * and sets errno.
@@ -1176,4 +1166,3 @@ extern uint32_t stepd_get_nodeid(int fd, uint16_t protocol_version)
 rwfail:
 	return NO_VAL;
 }
-

@@ -10,22 +10,22 @@
  *
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -40,7 +40,6 @@ static GtkListStore *_create_model_part2(int type);
 typedef struct {
 	uint32_t cpu_cnt;
 	uint32_t cpu_alloc_cnt;
-	uint32_t cpu_error_cnt;
 	uint32_t cpu_idle_cnt;
 	uint32_t disk_total;
 	char *features;
@@ -97,18 +96,13 @@ enum {
 	SORTID_FEATURES_ACT,
 	SORTID_GRACE_TIME,
 	SORTID_HIDDEN,
+	SORTID_JOB_DEFAULTS,
 	SORTID_JOB_SIZE,
 	SORTID_MAX_CPUS_PER_NODE,
 	SORTID_MEM,
-#ifdef HAVE_BG
-	SORTID_NODELIST,
-	SORTID_NODES_ALLOWED,
-#endif
 	SORTID_NAME,
-#ifndef HAVE_BG
 	SORTID_NODELIST,
 	SORTID_NODES_ALLOWED,
-#endif
 	SORTID_NODE_INX,
 	SORTID_NODE_STATE,
 	SORTID_NODE_STATE_NUM,
@@ -131,8 +125,10 @@ enum {
 	SORTID_CNT
 };
 
-/*these are the settings to apply for the user
- * on the first startup after a fresh slurm install.*/
+/*
+ * These are the settings to apply for the user
+ * on the first startup after a fresh slurm install.
+ */
 static char *_initial_page_opts = "Partition,Default,Part_State,Time_Limit,"
 	"Node_Count,Node_State,NodeList";
 
@@ -165,6 +161,8 @@ static display_data_t display_data_part[] = {
 	{G_TYPE_STRING, SORTID_NODE_STATE, "Node State", false,
 	 EDIT_MODEL, refresh_part,
 	 create_model_part, admin_edit_part},
+	{G_TYPE_STRING, SORTID_JOB_DEFAULTS, "Job Defaults", false,
+	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_JOB_SIZE, "Job Size", false,
 	 EDIT_NONE, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_PREEMPT_MODE, "PreemptMode", false,
@@ -173,7 +171,7 @@ static display_data_t display_data_part[] = {
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_PRIORITY_TIER, "PriorityTier", false,
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
-	{G_TYPE_STRING, SORTID_NODES_MIN, "Nodes Min", false,
+	{G_TYPE_STRING, SORTID_NODES_MIN, "Nodes (minimum)", false,
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_NODES_MAX, "Nodes Max", false,
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
@@ -209,13 +207,8 @@ static display_data_t display_data_part[] = {
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_REASON, "Reason", false,
 	 EDIT_NONE, refresh_part, create_model_part, admin_edit_part},
-#ifdef HAVE_BG
-	{G_TYPE_STRING, SORTID_NODELIST, "MidplaneList", false,
-	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
-#else
 	{G_TYPE_STRING, SORTID_NODELIST, "NodeList", false,
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
-#endif
 	{G_TYPE_INT, SORTID_NODE_STATE_NUM, NULL, false,
 	 EDIT_NONE, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_INT, SORTID_ONLY_LINE, NULL, false, EDIT_NONE, refresh_part,
@@ -245,6 +238,8 @@ static display_data_t create_data_part[] = {
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
 	{G_TYPE_STRING, SORTID_HIDDEN, "Hidden", false,
 	 EDIT_MODEL, refresh_part, _create_model_part2, admin_edit_part},
+	{G_TYPE_STRING, SORTID_JOB_DEFAULTS, "Job Defaults", false,
+	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_PART_STATE, "State", false,
 	 EDIT_MODEL, refresh_part, _create_model_part2, admin_edit_part},
 	{G_TYPE_STRING, SORTID_TIMELIMIT, "Time Limit", false,
@@ -255,7 +250,7 @@ static display_data_t create_data_part[] = {
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
 	{G_TYPE_STRING, SORTID_PRIORITY_TIER, "PriorityTier", false,
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
-	{G_TYPE_STRING, SORTID_NODES_MIN, "Nodes Min", false,
+	{G_TYPE_STRING, SORTID_NODES_MIN, "Nodes (minimum)", false,
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
 	{G_TYPE_STRING, SORTID_NODES_MAX, "Nodes Max", false,
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
@@ -285,13 +280,8 @@ static display_data_t create_data_part[] = {
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
 	{G_TYPE_NONE, SORTID_REASON, "Reason", false,
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
-#ifdef HAVE_BG
-	{G_TYPE_STRING, SORTID_NODELIST, "MidplaneList", false,
-	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
-#else
 	{G_TYPE_STRING, SORTID_NODELIST, "NodeList", false,
 	 EDIT_TEXTBOX, refresh_part, _create_model_part2, admin_edit_part},
-#endif
 	{G_TYPE_NONE, -1, NULL, false, EDIT_NONE}
 };
 
@@ -300,18 +290,6 @@ static display_data_t options_data_part[] = {
 	{G_TYPE_STRING, INFO_PAGE, "Full Info", true, PART_PAGE},
 	{G_TYPE_STRING, PART_PAGE, "Edit Partition", true, ADMIN_PAGE},
 	{G_TYPE_STRING, PART_PAGE, "Remove Partition", true, ADMIN_PAGE},
-#ifdef HAVE_BG
-	{G_TYPE_STRING, PART_PAGE, "Drain Midplanes",
-	 true, ADMIN_PAGE | EXTRA_NODES},
-	{G_TYPE_STRING, PART_PAGE, "Resume Midplanes",
-	 true, ADMIN_PAGE | EXTRA_NODES},
-	{G_TYPE_STRING, PART_PAGE, "Put Midplanes Down",
-	 true, ADMIN_PAGE | EXTRA_NODES},
-	{G_TYPE_STRING, PART_PAGE, "Make Midplanes Idle",
-	 true, ADMIN_PAGE | EXTRA_NODES},
-	{G_TYPE_STRING, PART_PAGE, "Update Midplane Features",
-	 true, ADMIN_PAGE | EXTRA_NODES},
-#else
 	{G_TYPE_STRING, PART_PAGE, "Drain Nodes",
 	 true, ADMIN_PAGE | EXTRA_NODES},
 	{G_TYPE_STRING, PART_PAGE, "Resume Nodes",
@@ -322,17 +300,10 @@ static display_data_t options_data_part[] = {
 	 true, ADMIN_PAGE | EXTRA_NODES},
 	{G_TYPE_STRING, PART_PAGE, "Update Node Features",
 	 true, ADMIN_PAGE | EXTRA_NODES},
-#endif
 	{G_TYPE_STRING, PART_PAGE, "Change Partition State",
 	 true, ADMIN_PAGE},
 	{G_TYPE_STRING, JOB_PAGE, "Jobs", true, PART_PAGE},
-#ifdef HAVE_BG
-	{G_TYPE_STRING, BLOCK_PAGE, "Blocks", true, PART_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Midplanes", true, PART_PAGE},
-#else
-	{G_TYPE_STRING, BLOCK_PAGE, NULL, true, PART_PAGE},
 	{G_TYPE_STRING, NODE_PAGE, "Nodes", true, PART_PAGE},
-#endif
 	//{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", false, PART_PAGE},
 	{G_TYPE_STRING, RESV_PAGE, "Reservations", true, PART_PAGE},
 	{G_TYPE_NONE, -1, NULL, false, EDIT_NONE}
@@ -363,7 +334,7 @@ static int _build_min_max_32_string(char *buffer, int buf_size,
 	if (max == min)
 		return snprintf(buffer, buf_size, "%s", tmp_max);
 	else if (range) {
-		if (max == (uint32_t) INFINITE)
+		if (max == INFINITE)
 			return snprintf(buffer, buf_size, "%s-infinite",
 					tmp_min);
 		else
@@ -569,6 +540,10 @@ static const char *_set_part_msg(update_part_msg_t *part_msg,
 			part_msg->flags |= PART_FLAG_HIDDEN_CLR;
 		}
 		type = "hidden";
+		break;
+	case SORTID_JOB_DEFAULTS:
+		type = "job_defaults";
+		part_msg->job_defaults_str = xstrdup(new_text);
 		break;
 	case SORTID_TIMELIMIT:
 		if ((xstrcasecmp(new_text, "infinite") == 0))
@@ -960,7 +935,7 @@ static void _layout_part_record(GtkTreeView *treeview,
 	partition_info_t *part_ptr = sview_part_info->part_ptr;
 	sview_part_sub_t *sview_part_sub = NULL;
 	char ind_cnt[1024];
-	const char *temp_char = NULL;
+	const char *job_def_str = NULL, *temp_char = NULL;
 	uint16_t temp_uint16 = 0;
 	int i;
 	int yes_no = -1;
@@ -1075,6 +1050,11 @@ static void _layout_part_record(GtkTreeView *treeview,
 			else
 				yes_no = 0;
 			break;
+		case SORTID_JOB_DEFAULTS:
+			job_def_str =
+				job_defaults_str(part_ptr->job_defaults_list);
+			temp_char = job_def_str;
+			break;
 		case SORTID_JOB_SIZE:
 			_build_min_max_32_string(time_buf, sizeof(time_buf),
 						 part_ptr->min_nodes,
@@ -1096,14 +1076,7 @@ static void _layout_part_record(GtkTreeView *treeview,
 			temp_char = part_ptr->allow_alloc_nodes;
 			break;
 		case SORTID_NODES:
-			if (cluster_flags & CLUSTER_FLAG_BG)
-				convert_num_unit((float)part_ptr->total_nodes,
-						 tmp_cnt, sizeof(tmp_cnt),
-						 UNIT_NONE, NO_VAL,
-						 working_sview_config.
-						 convert_flags);
-			else
-				sprintf(tmp_cnt, "%u", part_ptr->total_nodes);
+			sprintf(tmp_cnt, "%u", part_ptr->total_nodes);
 			temp_char = tmp_cnt;
 			break;
 		case SORTID_NODES_MAX:
@@ -1206,7 +1179,7 @@ static void _layout_part_record(GtkTreeView *treeview,
 				temp_char = "no";
 			yes_no = -1;
 		} else if (limit_set != NO_VAL) {
-			if (limit_set == (uint32_t) INFINITE)
+			if (limit_set == INFINITE)
 				temp_char = "infinite";
 			else {
 				convert_num_unit(
@@ -1232,6 +1205,7 @@ static void _layout_part_record(GtkTreeView *treeview,
 			}
 			temp_char = NULL;
 		}
+		xfree(job_def_str);
 	}
 }
 
@@ -1245,7 +1219,7 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 	char tmp_cpu_cnt[40], tmp_node_cnt[40], tmp_max_cpus_per_node[40];
 	char *tmp_alt, *tmp_default, *tmp_accounts, *tmp_groups, *tmp_hidden;
 	char *tmp_deny_accounts, *tmp_qos_char, *tmp_exc_user;
-	char *tmp_qos, *tmp_deny_qos;
+	char *tmp_qos, *tmp_deny_qos, *job_def_str = NULL;
 	char *tmp_root, *tmp_over_subscribe, *tmp_over_time_limit, *tmp_state;
 	uint16_t tmp_preempt;
 	partition_info_t *part_ptr = sview_part_info->part_ptr;
@@ -1256,12 +1230,7 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 	else
 		tmp_alt = "";
 
-	if (cluster_flags & CLUSTER_FLAG_BG)
-		convert_num_unit((float)part_ptr->total_cpus, tmp_cpu_cnt,
-				 sizeof(tmp_cpu_cnt), UNIT_NONE, NO_VAL,
-				 working_sview_config.convert_flags);
-	else
-		sprintf(tmp_cpu_cnt, "%u", part_ptr->total_cpus);
+	sprintf(tmp_cpu_cnt, "%u", part_ptr->total_cpus);
 
 	if (part_ptr->flags & PART_FLAG_DEFAULT)
 		tmp_default = "yes";
@@ -1310,7 +1279,9 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 			      tmp_grace, sizeof(tmp_grace));
 	}
 
-	if (part_ptr->max_nodes == (uint32_t) INFINITE)
+	job_def_str = job_defaults_str(part_ptr->job_defaults_list);
+
+	if (part_ptr->max_nodes == INFINITE)
 		snprintf(tmp_max_nodes, sizeof(tmp_max_nodes), "infinite");
 	else {
 		convert_num_unit((float)part_ptr->max_nodes, tmp_max_nodes,
@@ -1318,7 +1289,7 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 				 working_sview_config.convert_flags);
 	}
 
-	if (part_ptr->min_nodes == (uint32_t) INFINITE)
+	if (part_ptr->min_nodes == INFINITE)
 		snprintf(tmp_min_nodes, sizeof(tmp_min_nodes), "infinite");
 	else {
 		convert_num_unit((float)part_ptr->min_nodes, tmp_min_nodes,
@@ -1333,12 +1304,7 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 			part_ptr->max_cpus_per_node);
 	}
 
-	if (cluster_flags & CLUSTER_FLAG_BG)
-		convert_num_unit((float)part_ptr->total_nodes, tmp_node_cnt,
-				 sizeof(tmp_node_cnt), UNIT_NONE, NO_VAL,
-				 working_sview_config.convert_flags);
-	else
-		sprintf(tmp_node_cnt, "%u", part_ptr->total_nodes);
+	sprintf(tmp_node_cnt, "%u", part_ptr->total_nodes);
 
 	if (part_ptr->flags & PART_FLAG_ROOT_ONLY)
 		tmp_root = "yes";
@@ -1431,6 +1397,7 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 			   SORTID_DENY_QOS,   tmp_deny_qos,
 			   SORTID_EXCLUSIVE_USER, tmp_exc_user,
 			   SORTID_HIDDEN,     tmp_hidden,
+			   SORTID_JOB_DEFAULTS, job_def_str,
 			   SORTID_JOB_SIZE,   tmp_size,
 			   SORTID_MAX_CPUS_PER_NODE, tmp_max_cpus_per_node,
 			   SORTID_MEM,        "",
@@ -1456,6 +1423,7 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 			   SORTID_TMP_DISK,   "",
 			   SORTID_UPDATED,    1,
 			   -1);
+	xfree(job_def_str);
 
 	if (gtk_tree_model_iter_children(GTK_TREE_MODEL(treestore),
 					 &sub_iter,
@@ -1490,35 +1458,6 @@ static void _update_part_sub_record(sview_part_sub_t *sview_part_sub,
 					 sizeof(tmp_cnt), UNIT_NONE, NO_VAL,
 					 working_sview_config.convert_flags);
 			xstrfmtcat(tmp_cpus, "Alloc:%s", tmp_cnt);
-			if (cluster_flags & CLUSTER_FLAG_BG) {
-				convert_num_unit(
-					(float)(sview_part_sub->cpu_alloc_cnt
-						/ cpus_per_node),
-					tmp_cnt,
-					sizeof(tmp_cnt), UNIT_NONE, NO_VAL,
-					working_sview_config.convert_flags);
-				xstrfmtcat(tmp_nodes, "Alloc:%s", tmp_cnt);
-			}
-		}
-		if (sview_part_sub->cpu_error_cnt) {
-			convert_num_unit((float)sview_part_sub->cpu_error_cnt,
-					 tmp_cnt,
-					 sizeof(tmp_cnt), UNIT_NONE, NO_VAL,
-					 working_sview_config.convert_flags);
-			if (tmp_cpus)
-				xstrcat(tmp_cpus, " ");
-			xstrfmtcat(tmp_cpus, "Err:%s", tmp_cnt);
-			if (cluster_flags & CLUSTER_FLAG_BG) {
-				convert_num_unit(
-					(float)(sview_part_sub->cpu_error_cnt
-						/ cpus_per_node),
-					tmp_cnt,
-					sizeof(tmp_cnt), UNIT_NONE, NO_VAL,
-					working_sview_config.convert_flags);
-				if (tmp_nodes)
-					xstrcat(tmp_nodes, " ");
-				xstrfmtcat(tmp_nodes, "Err:%s", tmp_cnt);
-			}
 		}
 		if (sview_part_sub->cpu_idle_cnt) {
 			convert_num_unit((float)sview_part_sub->cpu_idle_cnt,
@@ -1528,17 +1467,6 @@ static void _update_part_sub_record(sview_part_sub_t *sview_part_sub,
 			if (tmp_cpus)
 				xstrcat(tmp_cpus, " ");
 			xstrfmtcat(tmp_cpus, "Idle:%s", tmp_cnt);
-			if (cluster_flags & CLUSTER_FLAG_BG) {
-				convert_num_unit(
-					(float)(sview_part_sub->cpu_idle_cnt
-						/ cpus_per_node),
-					tmp_cnt,
-					sizeof(tmp_cnt), UNIT_NONE, NO_VAL,
-					working_sview_config.convert_flags);
-				if (tmp_nodes)
-					xstrcat(tmp_nodes, " ");
-				xstrfmtcat(tmp_nodes, "Idle:%s", tmp_cnt);
-			}
 		}
 	} else {
 		tmp_cpus = xmalloc(20);
@@ -1685,15 +1613,10 @@ static void _destroy_part_sub(void *object)
 }
 
 static void _update_sview_part_sub(sview_part_sub_t *sview_part_sub,
-				   node_info_t *node_ptr,
-				   int node_scaling)
+				   node_info_t *node_ptr)
 {
-	int cpus_per_node = 1;
 	int idle_cpus = node_ptr->cpus;
-	uint16_t err_cpus = 0, alloc_cpus = 0;
-
-	if (node_scaling)
-		cpus_per_node = node_ptr->cpus / node_scaling;
+	uint16_t alloc_cpus = 0;
 
 	xassert(sview_part_sub);
 	xassert(sview_part_sub->node_ptr_list);
@@ -1717,39 +1640,18 @@ static void _update_sview_part_sub(sview_part_sub_t *sview_part_sub,
 					  SELECT_NODEDATA_SUBCNT,
 					  NODE_STATE_ALLOCATED,
 					  &alloc_cpus);
-		if (cluster_flags & CLUSTER_FLAG_BG) {
-			if (!alloc_cpus
-			    && (IS_NODE_ALLOCATED(node_ptr)
-				|| IS_NODE_COMPLETING(node_ptr)))
-				alloc_cpus = node_ptr->cpus;
-			else
-				alloc_cpus *= cpus_per_node;
-		}
 		idle_cpus -= alloc_cpus;
-
-		slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
-					  SELECT_NODEDATA_SUBCNT,
-					  NODE_STATE_ERROR,
-					  &err_cpus);
-		if (cluster_flags & CLUSTER_FLAG_BG)
-			err_cpus *= cpus_per_node;
-
-		idle_cpus -= err_cpus;
 	} else if (sview_part_sub->node_state == NODE_STATE_ALLOCATED) {
 		alloc_cpus = idle_cpus;
 		idle_cpus = 0;
-	} else if (sview_part_sub->node_state != NODE_STATE_IDLE) {
-		err_cpus = idle_cpus;
-		idle_cpus = 0;
 	}
 
-	sview_part_sub->cpu_cnt    += alloc_cpus + err_cpus + idle_cpus;
+	sview_part_sub->cpu_cnt += alloc_cpus + idle_cpus;
 	sview_part_sub->cpu_alloc_cnt += alloc_cpus;
-	sview_part_sub->cpu_error_cnt += err_cpus;
 	sview_part_sub->cpu_idle_cnt += idle_cpus;
 	sview_part_sub->disk_total += node_ptr->tmp_disk;
 	sview_part_sub->mem_total  += node_ptr->real_memory;
-	sview_part_sub->node_cnt   += node_scaling;
+	sview_part_sub->node_cnt++;
 
 	list_append(sview_part_sub->node_ptr_list, node_ptr);
 	hostlist_push_host(sview_part_sub->hl, node_ptr->name);
@@ -1761,8 +1663,7 @@ static void _update_sview_part_sub(sview_part_sub_t *sview_part_sub,
  * sview_part_sub OUT     - ptr to an inited sview_part_sub_t
  */
 static sview_part_sub_t *_create_sview_part_sub(partition_info_t *part_ptr,
-						node_info_t *node_ptr,
-						int node_scaling)
+						node_info_t *node_ptr)
 {
 	sview_part_sub_t *sview_part_sub_ptr =
 		xmalloc(sizeof(sview_part_sub_t));
@@ -1780,15 +1681,14 @@ static sview_part_sub_t *_create_sview_part_sub(partition_info_t *part_ptr,
 	sview_part_sub_ptr->part_ptr = part_ptr;
 	sview_part_sub_ptr->hl = hostlist_create(NULL);
 	sview_part_sub_ptr->node_ptr_list = list_create(NULL);
-	_update_sview_part_sub(sview_part_sub_ptr, node_ptr, node_scaling);
+	_update_sview_part_sub(sview_part_sub_ptr, node_ptr);
 
 	return sview_part_sub_ptr;
 }
 
 static int _insert_sview_part_sub(sview_part_info_t *sview_part_info,
 				  partition_info_t *part_ptr,
-				  node_info_t *node_ptr,
-				  int node_scaling)
+				  node_info_t *node_ptr)
 {
 	sview_part_sub_t *sview_part_sub = NULL;
 	ListIterator itr = list_iterator_create(sview_part_info->sub_list);
@@ -1797,8 +1697,7 @@ static int _insert_sview_part_sub(sview_part_info_t *sview_part_info,
 		if (sview_part_sub->node_state
 		    == node_ptr->node_state) {
 			_update_sview_part_sub(sview_part_sub,
-					       node_ptr,
-					       node_scaling);
+					       node_ptr);
 			break;
 		}
 	}
@@ -1806,7 +1705,7 @@ static int _insert_sview_part_sub(sview_part_info_t *sview_part_info,
 
 	if (!sview_part_sub) {
 		if ((sview_part_sub = _create_sview_part_sub(
-			     part_ptr, node_ptr, node_scaling)))
+			     part_ptr, node_ptr)))
 			list_push(sview_part_info->sub_list,
 				  sview_part_sub);
 	}
@@ -1940,8 +1839,7 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 
 				_insert_sview_part_sub(sview_part_info,
 						       part_ptr,
-						       node_ptr,
-						       g_node_scaling);
+						       node_ptr);
 			}
 			j2 += 2;
 		}
@@ -1959,14 +1857,7 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 			sview_part_info->sub_part_total.cpu_cnt +=
 				sview_part_sub->cpu_cnt;
 
-			if (cluster_flags & CLUSTER_FLAG_BG) {
-				sview_part_info->sub_part_total.node_alloc_cnt
-					+= sview_part_sub->cpu_alloc_cnt;
-				sview_part_info->sub_part_total.node_idle_cnt
-					+= sview_part_sub->cpu_idle_cnt;
-				sview_part_info->sub_part_total.node_error_cnt
-					+= sview_part_sub->cpu_error_cnt;
-			} else if (((sview_part_sub->node_state
+			if (((sview_part_sub->node_state
 				     & NODE_STATE_BASE) == NODE_STATE_MIXED) ||
 				   (sview_part_sub->node_state
 				    == NODE_STATE_ALLOCATED))
@@ -1982,8 +1873,6 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 
 			sview_part_info->sub_part_total.cpu_alloc_cnt +=
 				sview_part_sub->cpu_alloc_cnt;
-			sview_part_info->sub_part_total.cpu_error_cnt +=
-				sview_part_sub->cpu_error_cnt;
 			sview_part_info->sub_part_total.cpu_idle_cnt +=
 				sview_part_sub->cpu_idle_cnt;
 			sview_part_info->sub_part_total.disk_total +=
@@ -2003,15 +1892,6 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 			hostlist_sort(sview_part_sub->hl);
 		}
 		list_iterator_destroy(itr);
-		if (cluster_flags & CLUSTER_FLAG_BG) {
-			sview_part_info->sub_part_total.node_alloc_cnt /=
-				cpus_per_node;
-			sview_part_info->sub_part_total.node_idle_cnt /=
-				cpus_per_node;
-			sview_part_info->sub_part_total.node_error_cnt /=
-				cpus_per_node;
-		}
-
 	}
 	list_sort(info_list, (ListCmpF)_sview_part_sort_aval_dec);
 
@@ -2408,6 +2288,7 @@ extern GtkListStore *create_model_part(int type)
 				   0, "suspend", 1, SORTID_PREEMPT_MODE, -1);
 		break;
 	case SORTID_GRACE_TIME:
+	case SORTID_JOB_DEFAULTS:
 	case SORTID_PRIORITY_JOB_FACTOR:
 	case SORTID_PRIORITY_TIER:
 	case SORTID_TIMELIMIT:
@@ -2466,7 +2347,7 @@ extern GtkListStore *create_model_part(int type)
 		gtk_list_store_append(model, &iter);
 		gtk_list_store_set(model, &iter,
 				   0, "resume", 1, SORTID_NODE_STATE, -1);
-		for(i = 0; i < NODE_STATE_END; i++) {
+		for (i = 0; i < NODE_STATE_END; i++) {
 			upper = node_state_string(i);
 			if (!xstrcmp(upper, "UNKNOWN"))
 				continue;
@@ -2540,7 +2421,7 @@ extern void admin_edit_part(GtkCellRendererText *cell,
 		goto no_input;
 	}
 
-	if (column != SORTID_NODE_STATE && column != SORTID_FEATURES) {
+	if ((column != SORTID_NODE_STATE) && (column != SORTID_FEATURES)) {
 		if (old_text && !xstrcmp(old_text, new_text)) {
 			temp = g_strdup_printf("No change in value.");
 		} else if (slurm_update_partition(part_msg)
@@ -2900,7 +2781,6 @@ display_it:
 				break;
 			}
 			break;
-		case BLOCK_PAGE:
 		case JOB_PAGE:
 			if (!spec_info->search_info->gchar_data)
 				continue;
@@ -3011,29 +2891,14 @@ extern void popup_all_part(GtkTreeModel *model, GtkTreeIter *iter, int id)
 		if (!only_line)
 			gtk_tree_model_get(model, iter,
 					   SORTID_NODE_STATE, &state, -1);
-		if (cluster_flags & CLUSTER_FLAG_BG) {
-			if (!state || !strlen(state))
-				snprintf(title, 100,
-					 "Midplane(s) in partition %s",
-					 name);
-			else
-				snprintf(title, 100,
-					 "Midplane(s) in partition %s "
-					 "that are in '%s' state",
-					 name, state);
-		} else {
-			if (!state || !strlen(state))
-				snprintf(title, 100, "Node(s) in partition %s ",
-					 name);
-			else
-				snprintf(title, 100,
-					 "Node(s) in partition %s that are in "
-					 "'%s' state",
-					 name, state);
-		}
-		break;
-	case BLOCK_PAGE:
-		snprintf(title, 100, "Block(s) in partition %s", name);
+		if (!state || !strlen(state))
+			snprintf(title, 100, "Node(s) in partition %s ",
+				 name);
+		else
+			snprintf(title, 100,
+				 "Node(s) in partition %s that are in "
+				 "'%s' state",
+				 name, state);
 		break;
 	case SUBMIT_PAGE:
 		snprintf(title, 100, "Submit job in partition %s", name);
@@ -3090,7 +2955,6 @@ extern void popup_all_part(GtkTreeModel *model, GtkTreeIter *iter, int id)
 
 	switch (id) {
 	case JOB_PAGE:
-	case BLOCK_PAGE:
 	case INFO_PAGE:
 		popup_win->spec_info->search_info->gchar_data = name;
 		//specific_info_job(popup_win);
@@ -3325,22 +3189,13 @@ end_it:
 	return;
 }
 
-
 extern void cluster_change_part(void)
 {
 	display_data_t *display_data = display_data_part;
 	while (display_data++) {
 		if (display_data->id == -1)
 			break;
-		if (cluster_flags & CLUSTER_FLAG_BG) {
-			switch (display_data->id) {
-			case SORTID_NODELIST:
-				display_data->name = "MidplaneList";
-				break;
-			default:
-				break;
-			}
-		} else if (cluster_flags & CLUSTER_FLAG_FED) {
+		if (cluster_flags & CLUSTER_FLAG_FED) {
 			switch(display_data->id) {
 			case SORTID_CLUSTER_NAME:
 				display_data->show = true;
@@ -3348,74 +3203,12 @@ extern void cluster_change_part(void)
 			}
 		} else {
 			switch (display_data->id) {
-			case SORTID_NODELIST:
-				display_data->name = "NodeList";
-				break;
 			case SORTID_CLUSTER_NAME:
 				display_data->show = false;
 				break;
-			default:
-				break;
 			}
 		}
 	}
-	display_data = options_data_part;
-	while (display_data++) {
-		if (display_data->id == -1)
-			break;
 
-		if (cluster_flags & CLUSTER_FLAG_BG) {
-			switch(display_data->id) {
-			case BLOCK_PAGE:
-				display_data->name = "Blocks";
-				break;
-			case NODE_PAGE:
-				display_data->name = "Midplanes";
-				break;
-			}
-
-			if (!display_data->name) {
-			} else if (!xstrcmp(display_data->name, "Drain Nodes"))
-				display_data->name = "Drain Midplanes";
-			else if (!xstrcmp(display_data->name, "Resume Nodes"))
-				display_data->name = "Resume Midplanes";
-			else if (!xstrcmp(display_data->name, "Put Nodes Down"))
-				display_data->name = "Put Midplanes Down";
-			else if (!xstrcmp(display_data->name,"Make Nodes Idle"))
-				display_data->name =
-					"Make Midplanes Idle";
-			else if (!xstrcmp(display_data->name,
-					  "Update Node Features"))
-				display_data->name =
-					"Update Midplanes Features";
-		} else {
-			switch(display_data->id) {
-			case BLOCK_PAGE:
-				display_data->name = NULL;
-				break;
-			case NODE_PAGE:
-				display_data->name = "Nodes";
-				break;
-			}
-
-			if (!display_data->name) {
-			} else if (!xstrcmp(display_data->name,
-					   "Drain Midplanes"))
-				display_data->name = "Drain Nodes";
-			else if (!xstrcmp(display_data->name,
-					 "Resume Midplanes"))
-				display_data->name = "Resume Nodes";
-			else if (!xstrcmp(display_data->name,
-					 "Put Midplanes Down"))
-				display_data->name = "Put Nodes Down";
-			else if (!xstrcmp(display_data->name,
-					 "Make Midplanes Idle"))
-				display_data->name = "Make Nodes Idle";
-			else if (!xstrcmp(display_data->name,
-					 "Update Node Features"))
-				display_data->name =
-					"Update Midplanes Features";
-		}
-	}
 	get_info_part(NULL, NULL);
 }

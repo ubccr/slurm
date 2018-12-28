@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
+ *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #include <arpa/inet.h>
@@ -45,7 +45,6 @@
 #include "src/common/bitstring.h"
 #include "src/common/slurm_time.h"
 #include "src/common/stepd_api.h"
-#include "src/plugins/select/bluegene/bg_enums.h"
 
 #define POLL_SLEEP	3	/* retry interval in seconds  */
 
@@ -643,7 +642,7 @@ _list_pids_all_steps(const char *node_name, uint32_t jobid)
 	}
 
 	itr = list_iterator_create(steps);
-	while((stepd = list_next(itr))) {
+	while ((stepd = list_next(itr))) {
 		if (jobid == stepd->jobid) {
 			_list_pids_one_step(stepd->nodename, stepd->jobid,
 					    stepd->stepid);
@@ -820,100 +819,6 @@ scontrol_encode_hostlist(char *hostlist, bool sorted)
 	return SLURM_SUCCESS;
 }
 
-/*
- * Test if any BG blocks are in deallocating state since they are
- * probably related to this job we will want to sleep longer
- * RET	1:  deallocate in progress
- *	0:  no deallocate in progress
- *     -1: error occurred
- */
-static int _blocks_dealloc(void)
-{
-	static block_info_msg_t *bg_info_ptr = NULL, *new_bg_ptr = NULL;
-	int rc = 0, error_code = 0, i;
-	uint16_t show_flags = 0;
-
-	if (all_flag)
-		show_flags |= SHOW_ALL;
-	if (bg_info_ptr) {
-		error_code = slurm_load_block_info(bg_info_ptr->last_update,
-						   &new_bg_ptr, show_flags);
-		if (error_code == SLURM_SUCCESS)
-			slurm_free_block_info_msg(bg_info_ptr);
-		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
-			error_code = SLURM_SUCCESS;
-			new_bg_ptr = bg_info_ptr;
-		}
-	} else {
-		error_code = slurm_load_block_info((time_t) NULL,
-						   &new_bg_ptr, show_flags);
-	}
-
-	if (error_code) {
-		error("slurm_load_block_info: %s",
-		      slurm_strerror(slurm_get_errno()));
-		return -1;
-	}
-	for (i=0; i<new_bg_ptr->record_count; i++) {
-		if (new_bg_ptr->block_array[i].state == BG_BLOCK_TERM) {
-			rc = 1;
-			break;
-		}
-	}
-	bg_info_ptr = new_bg_ptr;
-	return rc;
-}
-
-static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
-{
-	int is_ready = SLURM_ERROR, i, rc = 0;
-	char *block_id = NULL;
-	int cur_delay = 0;
-	int max_delay = BG_FREE_PREVIOUS_BLOCK + BG_MIN_BLOCK_BOOT +
-		(BG_INCR_BLOCK_BOOT * alloc->node_cnt);
-
-	select_g_select_jobinfo_get(alloc->select_jobinfo,
-				    SELECT_JOBDATA_BLOCK_ID,
-				    &block_id);
-
-	for (i=0; (cur_delay < max_delay); i++) {
-		if (i) {
-			if (i == 1) {
-				info("Waiting for block %s to become ready for "
-				     "job", block_id);
-			} else
-				debug("still waiting");
-			sleep(POLL_SLEEP);
-			rc = _blocks_dealloc();
-			if ((rc == 0) || (rc == -1))
-				cur_delay += POLL_SLEEP;
-		}
-
-		rc = slurm_job_node_ready(alloc->job_id);
-
-		if (rc == READY_JOB_FATAL)
-			break;				/* fatal error */
-		if ((rc == READY_JOB_ERROR) || (rc == EAGAIN))
-			continue;			/* retry */
-		if ((rc & READY_JOB_STATE) == 0)	/* job killed */
-			break;
-		if (rc & READY_NODE_STATE) {		/* job and node ready */
-			is_ready = SLURM_SUCCESS;
-			break;
-		}
-	}
-
-	if (is_ready == SLURM_SUCCESS)
-     		info("Block %s is ready for job %u", block_id, alloc->job_id);
-	else if ((rc & READY_JOB_STATE) == 0)
-		info("Job %u no longer running", alloc->job_id);
-	else
-		info("Problem running job %u", alloc->job_id);
-	xfree(block_id);
-
-	return is_ready;
-}
-
 static int _wait_nodes_ready(uint32_t job_id)
 {
 	int is_ready = SLURM_ERROR, i, rc = 0;
@@ -965,7 +870,6 @@ static int _wait_nodes_ready(uint32_t job_id)
  */
 extern int scontrol_job_ready(char *job_id_str)
 {
-	int rc;
 	uint32_t job_id;
 
 	job_id = atoi(job_id_str);
@@ -974,20 +878,7 @@ extern int scontrol_job_ready(char *job_id_str)
 		return SLURM_ERROR;
 	}
 
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		resource_allocation_response_msg_t *alloc;
-		rc = slurm_allocation_lookup(job_id, &alloc);
-		if (rc == SLURM_SUCCESS) {
-			rc = _wait_bluegene_block_ready(alloc);
-			slurm_free_resource_allocation_response_msg(alloc);
-		} else {
-			error("slurm_allocation_lookup: %m");
-			rc = SLURM_ERROR;
-		}
-	} else
-		rc = _wait_nodes_ready(job_id);
-
-	return rc;
+	return _wait_nodes_ready(job_id);
 }
 
 extern int scontrol_callerid(int argc, char **argv)
@@ -1073,22 +964,31 @@ extern int scontrol_batch_script(int argc, char **argv)
 	else
 		filename = xstrdup_printf("slurm-%u.sh", jobid);
 
-	if (!(out = fopen(filename, "w"))) {
-		fprintf(stderr, "failed to open file `%s`: %m\n", filename);
-		xfree(filename);
-		return errno;
+	if (!xstrcmp(filename, "-")) {
+		out = stdout;
+	} else {
+		if (!(out = fopen(filename, "w"))) {
+			fprintf(stderr, "failed to open file `%s`: %m\n",
+				filename);
+			xfree(filename);
+			return errno;
+		}
 	}
 
 	exit_code = slurm_job_batch_script(out, jobid);
-	fclose(out);
+
+	if (out != stdout)
+		fclose(out);
+
 	if (exit_code != SLURM_SUCCESS) {
-		unlink(filename);
+		if (out != stdout)
+			unlink(filename);
 		slurm_perror("job script retrieval failed");
-	} else if (quiet_flag != 1) {
+	} else if ((out != stdout) && (quiet_flag != 1)) {
 		printf("batch script for job %u written to %s\n",
 		       jobid, filename);
 	}
-	xfree(filename);
 
+	xfree(filename);
 	return exit_code;
 }

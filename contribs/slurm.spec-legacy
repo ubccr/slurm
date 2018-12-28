@@ -2,8 +2,8 @@
 # DEPRECATED, NOT MAINTAINED, WILL BE REMOVED IN A FUTURE RELEASE.
 
 Name:		slurm
-Version:	17.11.7
-%global rel	1
+Version:	18.08.4
+%define rel	1
 Release:	%{rel}%{?dist}
 Summary:	Slurm Workload Manager
 
@@ -367,6 +367,17 @@ running on the node, or any user who has allocated resources on the node
 according to the Slurm
 %endif
 
+%if %{with cray}
+%package slurmsmwd
+Summary: support daemons and software for the Cray SMW
+Group: System Environment/Base
+Requires: %{name}%{?_isa} = %{version}-%{release}
+Obsoletes: craysmw
+%description slurmsmwd
+support daeamons and software for the Cray SMW.  Includes slurmsmwd which
+notifies slurm about failed nodes.
+%endif
+
 #############################################################################
 
 %prep
@@ -401,6 +412,9 @@ according to the Slurm
 
 %install
 
+# Ignore redundant standard rpaths and insecure relative rpaths,
+# for RHEL based distros which use "check-rpaths" tool.
+export QA_RPATHS=0x5
 
 # Strip out some dependencies
 
@@ -420,6 +434,9 @@ if [ -d /usr/lib/systemd/system ]; then
    install -D -m644 etc/slurmctld.service $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmctld.service
    install -D -m644 etc/slurmd.service    $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmd.service
    install -D -m644 etc/slurmdbd.service  $RPM_BUILD_ROOT/usr/lib/systemd/system/slurmdbd.service
+   %if %{slurm_with cray}
+      install -D -m644 contribs/cray/slurmsmwd/slurmsmwd.service %{buildroot}/%{_unitdir}/slurmsmwd.service
+   %endif
 elif [ -d /etc/init.d ]; then
    install -D -m755 etc/init.d.slurm    $RPM_BUILD_ROOT/etc/init.d/slurm
    install -D -m755 etc/init.d.slurmdbd $RPM_BUILD_ROOT/etc/init.d/slurmdbd
@@ -440,20 +457,20 @@ fi
    echo -e '#%Module\nset ModulesVersion "%{version}-%{rel}"' > $RPM_BUILD_ROOT/opt/modulefiles/slurm/.version
 %else
    rm -f contribs/cray/opt_modulefiles_slurm
+   rm -f contribs/cray/slurmsmwd/slurmsmwd.service
    rm -f $RPM_BUILD_ROOT/%{_sysconfdir}/plugstack.conf.template
    rm -f $RPM_BUILD_ROOT/%{_sysconfdir}/slurm.conf.template
    rm -f $RPM_BUILD_ROOT/%{_sbindir}/capmc_suspend
    rm -f $RPM_BUILD_ROOT/%{_sbindir}/capmc_resume
    rm -f $RPM_BUILD_ROOT/%{_sbindir}/slurmconfgen.py
+   rm -f %{buildroot}/%{_sbindir}/slurmsmwd
 %endif
 
 install -D -m644 etc/cgroup.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup.conf.example
-install -D -m644 etc/cgroup_allowed_devices_file.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup_allowed_devices_file.conf.example
 install -D -m644 etc/layouts.d.power.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/layouts.d/power.conf.example
 install -D -m644 etc/layouts.d.power_cpufreq.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/layouts.d/power_cpufreq.conf.example
 install -D -m644 etc/layouts.d.unit.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/layouts.d/unit.conf.example
 install -D -m644 etc/slurm.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf.example
-install -D -m755 etc/slurm.epilog.clean ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.epilog.clean
 install -D -m644 etc/slurmdbd.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurmdbd.conf.example
 install -D -m755 contribs/sjstat ${RPM_BUILD_ROOT}%{_bindir}/sjstat
 
@@ -759,12 +776,10 @@ rm -rf $RPM_BUILD_ROOT
 %{_sbindir}/slurmconfgen.py
 %endif
 %config %{_sysconfdir}/cgroup.conf.example
-%config %{_sysconfdir}/cgroup_allowed_devices_file.conf.example
 %config %{_sysconfdir}/layouts.d/power.conf.example
 %config %{_sysconfdir}/layouts.d/power_cpufreq.conf.example
 %config %{_sysconfdir}/layouts.d/unit.conf.example
 %config %{_sysconfdir}/slurm.conf.example
-%config %{_sysconfdir}/slurm.epilog.clean
 %exclude %{_mandir}/man1/sjobexit*
 %exclude %{_mandir}/man1/sjstat*
 #############################################################################
@@ -877,7 +892,6 @@ rm -rf $RPM_BUILD_ROOT
 %endif
 %{_libdir}/slurm/mpi_none.so
 %{_libdir}/slurm/power_none.so
-%{_libdir}/slurm/preempt_job_prio.so
 %{_libdir}/slurm/preempt_none.so
 %{_libdir}/slurm/preempt_partition_prio.so
 %{_libdir}/slurm/preempt_qos.so
@@ -965,6 +979,13 @@ rm -rf $RPM_BUILD_ROOT
 %if %{slurm_with pam}
 %files -f pam.files pam_slurm
 %defattr(-,root,root)
+%endif
+#############################################################################
+
+%if %{with cray}
+%files slurmsmwd
+%{_sbindir}/slurmsmwd
+%{_unitdir}/slurmsmwd.service
 %endif
 #############################################################################
 

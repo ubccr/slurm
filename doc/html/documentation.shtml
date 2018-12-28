@@ -26,14 +26,13 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 <li><a href="nonstop.html">Failure Management Support</a></li>
 <li><a href="checkpoint_blcr.html">Slurm Checkpoint/Restart with BLCR</a></li>
 <li><a href="job_exit_code.html">Job Exit Codes</a></li>
-<li>Specific Systems</li>
+<li><a href="resource_binding.html">Resource Binding</a></li>
+<li>Specific Systems
 <ul>
-<li><a href="bluegene.html">BlueGene/Q User and Administrator Guide</a></li>
 <li><a href="cray.html">Cray User and Administrator Guide with Native Slurm</a></li>
-<li><a href="cray_alps.html">Cray User and Administrator Guide with ALPS</a></li>
-<li><a href="ibm-pe.html">IBM Parallel Environment User and Administrator Guide</a></li>
 <li><a href="intel_knl.html">Intel Knights Landing (KNL) User and Administrator Guide</a></li>
 </ul>
+</li>
 </ul>
 
 <h2>Slurm Administrators</h2>
@@ -45,7 +44,9 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 <li><a href="cgroups.html">Cgroups Guide</a></li>
 <li><a href="configurator.html">Configuration Tool (Full version)</a></li>
 <li><a href="configurator.easy.html">Configuration Tool (Simplified version)</a></li>
+<li><a href="containers.html">Containers</a></li>
 <li><a href="cpu_management.html">CPU Management User and Administrator Guide</a></li>
+<li><a href="elasticsearch.html">Elasticsearch Guide</a></li>
 <li><a href="nonstop.html">Failure Management Support</a></li>
 <li><a href="federation.html">Federated Scheduling Guide</a></li>
 <li><a href="pam_slurm_adopt.html">Job Containment with pam_slurm_adopt</a></li>
@@ -58,18 +59,19 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 <li><a href="troubleshoot.html">Troubleshooting Guide</a></li>
 <li><a href="user_permissions.html">User Permissions</a></li>
 <li><a href="wckey.html">WCKey Management</a></li>
-<li>Workload Prioritization</li>
+<li>Workload Prioritization
 <ul>
 <li><a href="priority_multifactor.html">Multifactor Job Priority</a></li>
 <li><a href="priority_multifactor3.html">Depth-Oblivious Fair-share Factor</a></li>
 <li><a href="fair_tree.html">Fair Tree Fairshare Algorithm</a></li>
 </ul>
-<li>Slurm Scheduling</li>
+</li>
+<li>Slurm Scheduling
 <ul>
 <li><a href="sched_config.html">Scheduling Configuration Guide</a></li>
 <li><a href="cons_res.html">Consumable Resources Guide</a></li>
 <li><a href="core_spec.html">Core Specialization</a></li>
-<li><a href="elastic_computing.html">Elastic Computing</a></li>
+<li><a href="elastic_computing.html">Elastic Computing (Cloud Bursting)</a></li>
 <li><a href="gang_scheduling.html">Gang Scheduling</a></li>
 <li><a href="gres.html">Generic Resource (GRES) Scheduling</a></li>
 <li><a href="high_throughput.html">High Throughput Computing Guide</a></li>
@@ -81,17 +83,12 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 <li><a href="topology.html">Topology</a></li>
 <li><a href="tres.html">Trackable Resources (TRES)</a></li>
 </ul>
-<li>External Schedulers</li>
+</li>
+<li>Specific Systems
 <ul>
-<li><a href="http://docs.hp.com/en/5991-4847/ch09s02.html">Submitting Jobs through LSF</a></li>
-</ul>
-<li>Specific Systems</li>
-<ul>
-<li><a href="bluegene.html">Blue Gene User and Administrator Guide</a></li>
 <li><a href="cray.html">Cray User and Administrator Guide with Native Slurm</a></li>
-<li><a href="cray_alps.html">Cray User and Administrator Guide with ALPS</a></li>
-<li><a href="ibm-pe.html">IBM Parallel Environment User and Administrator Guide</a></li>
 </ul>
+</li>
 </ul>
 
 <h2>Slurm Developers</h2>
@@ -101,14 +98,15 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 <li><a href="api.html">Application Programmer Interface (API) Guide</a></li>
 <li><a href="rpc.html">Remote Procedure Call (RPC) Update Guide</a></li>
 <li><a href="add.html">Adding Files or Plugins to Slurm</a></li>
-<li>Design Information</li>
+<li>Design Information
 <ul>
 <li><a href="gres_design.html">Generic Resource (GRES) Design Guide</a></li>
 <li><a href="job_launch.html">Job Launch Design Guide</a></li>
 <li><a href="select_design.html">Select Plugin Design Guide</a></li>
 </ul>
+</li>
 <li><a href="plugins.html">Plugin Programmer Guide</a></li>
-<li>Plugin Interface Details</li>
+<li>Plugin Interface Details
 <ul>
 <li><a href="accounting_storageplugins.html">Accounting Storage Plugin Programmer Guide</a></li>
 <li><a href="authplugins.html">Authentication Plugin Programmer Guide</a></li>
@@ -138,9 +136,10 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 <li><a href="switchplugins.html">Switch (Interconnect) Plugin Programmer Guide</a></li>
 <li><a href="taskplugins.html">Task Plugin Programmer Guide</a></li>
 <li><a href="topology_plugin.html">Topology Plugin Programmer Guide</a></li>
+</ul>
 </li>
 </ul>
 
-<p style="text-align:center;">Last modified 12 December 2017</p>
+<p style="text-align:center;">Last modified 21 November 2018</p>
 
 <!--#include virtual="footer.txt"-->
