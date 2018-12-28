@@ -437,8 +437,8 @@ libdir=%{_libdir}
 Cflags: -I\${includedir}
 Libs: -L\${libdir} -lslurm
 Description: Slurm API
-Name: %{name}
-Version: %{version}
+Name: slurm
+Version: 15.08.4
 EOF
 
 LIST=./pam.files
