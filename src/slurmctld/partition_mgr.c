@@ -53,6 +53,7 @@
 #include <unistd.h>
 
 #include "src/common/assoc_mgr.h"
+#include "src/common/fd.h"
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/node_select.h"
@@ -105,7 +106,7 @@ static int _calc_part_tres(void *x, void *arg)
 
 	xfree(part_ptr->tres_cnt);
 	xfree(part_ptr->tres_fmt_str);
-	part_ptr->tres_cnt = xmalloc(sizeof(uint64_t) * slurmctld_tres_cnt);
+	part_ptr->tres_cnt = xcalloc(slurmctld_tres_cnt, sizeof(uint64_t));
 	tres_cnt = part_ptr->tres_cnt;
 
 	/* sum up nodes' tres in the partition. */
@@ -297,11 +298,9 @@ static void _unlink_free_nodes(bitstr_t *old_bitmap,
  */
 struct part_record *create_part_record(void)
 {
-	struct part_record *part_ptr;
+	struct part_record *part_ptr = xmalloc(sizeof(*part_ptr));
 
 	last_part_update = time(NULL);
-
-	part_ptr = (struct part_record *) xmalloc(sizeof(struct part_record));
 
 	xassert (part_ptr->magic = PART_MAGIC);  /* set value */
 	part_ptr->name              = xstrdup("DEFAULT");
@@ -390,6 +389,7 @@ struct part_record *create_part_record(void)
 		part_ptr->nodes = xstrdup(default_part.nodes);
 	else
 		part_ptr->nodes = NULL;
+	part_ptr->bf_data = NULL;
 
 	(void) list_append(part_list, part_ptr);
 
@@ -1006,6 +1006,26 @@ int init_part_conf(void)
 }
 
 /*
+ * Free memory for cached backfill data in partition record
+ */
+static void _bf_data_free(bf_part_data_t **datap)
+{
+	bf_part_data_t *data;
+	if (!datap || !*datap)
+		return;
+
+	data = *datap;
+
+	slurmdb_destroy_bf_usage(data->job_usage);
+        slurmdb_destroy_bf_usage(data->resv_usage);
+	xhash_free(data->user_usage);
+	xfree(data);
+
+	*datap = NULL;
+	return;
+}
+
+/*
  * _list_delete_part - delete an entry from the global partition list,
  *	see common/list.h for documentation
  * global: node_record_count - count of nodes in the system
@@ -1053,6 +1073,8 @@ static void _list_delete_part(void *part_entry)
 	xfree(part_ptr->qos_char);
 	xfree(part_ptr->tres_cnt);
 	xfree(part_ptr->tres_fmt_str);
+	_bf_data_free(&part_ptr->bf_data);
+
 	xfree(part_entry);
 }
 
@@ -1527,19 +1549,37 @@ extern int update_part(update_part_msg_t * part_desc, bool create_flag)
 	}
 
 	if (part_desc->priority_job_factor != NO_VAL16) {
+		int redo_prio = 0;
 		info("%s: setting PriorityJobFactor to %u for partition %s",
 		     __func__, part_desc->priority_job_factor, part_desc->name);
+
+		if ((part_ptr->priority_job_factor == part_max_priority) &&
+		    (part_desc->priority_job_factor < part_max_priority))
+			redo_prio = 2;
+		else if (part_desc->priority_job_factor > part_max_priority)
+			redo_prio = 1;
+
 		part_ptr->priority_job_factor = part_desc->priority_job_factor;
 
 		/* If the max_priority changes we need to change all
 		 * the normalized priorities of all the other
 		 * partitions. If not then just set this partition.
 		 */
-		if (part_ptr->priority_job_factor > part_max_priority) {
+		if (redo_prio) {
 			ListIterator itr = list_iterator_create(part_list);
 			struct part_record *part2 = NULL;
 
-			part_max_priority = part_ptr->priority_job_factor;
+			if (redo_prio == 2) {
+				part_max_priority = 1;
+				while ((part2 = list_next(itr))) {
+					if (part2->priority_job_factor >
+					    part_max_priority)
+						part_max_priority =
+							part2->priority_job_factor;
+				}
+				list_iterator_reset(itr);
+			} else
+				part_max_priority = part_ptr->priority_job_factor;
 
 			while ((part2 = list_next(itr))) {
 				part2->norm_priority =
@@ -2095,7 +2135,7 @@ _remove_duplicate_uids(uid_t *u)
 	for (i = 0; u[i]; i++)
 		++num;
 
-	v = xmalloc(num * sizeof(uid_t));
+	v = xcalloc(num, sizeof(uid_t));
 	qsort(u, num, sizeof(uid_t), _uid_cmp);
 
 	j = 0;

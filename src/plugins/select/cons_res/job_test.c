@@ -23,7 +23,7 @@
  *  job allocation and scheduling:
  *
  *  The output of squeue shows that we have 3 out of the 4 jobs allocated
- *  and running. This is a 2 running job increase over the default SLURM
+ *  and running. This is a 2 running job increase over the default Slurm
  *  approach.
  *
  *  Job 2, Job 3, and Job 4 are now running concurrently on the cluster.
@@ -98,6 +98,16 @@
 #include "dist_tasks.h"
 #include "job_test.h"
 #include "select_cons_res.h"
+
+/* These are defined here so when we link with something other than
+ * the slurmctld we will have these symbols defined.  They will get
+ * overwritten when linking with the slurmctld.
+ */
+#if defined (__APPLE__)
+extern bitstr_t *idle_node_bitmap __attribute__((weak_import));
+#else
+bitstr_t *idle_node_bitmap;
+#endif
 
 /* Enables module specific debugging */
 #define _DEBUG 0
@@ -469,7 +479,7 @@ static uint16_t _allocate_sc(struct job_record *job_ptr, bitstr_t *core_map,
 		int task_cpus  = task_cores * threads_per_core;
 		/* find out how many tasks can fit on a node */
 		int tasks = avail_cpus / task_cpus;
-		/* how many cpus the the job would use on the node */
+		/* how many cpus the job would use on the node */
 		avail_cpus = tasks * task_cpus;
 		/* subtract out the extra cpus. */
 		avail_cpus -= (tasks * (task_cpus - cpus_per_task));
@@ -492,12 +502,16 @@ static uint16_t _allocate_sc(struct job_record *job_ptr, bitstr_t *core_map,
 	/* Step 4 - make sure that ntasks_per_socket is enforced when
 	 *          allocating cores
 	 */
-	cps = num_tasks;
-	if (ntasks_per_socket >= 1) {
+
+	if ((ntasks_per_socket != NO_VAL16) &&
+	    (ntasks_per_socket != INFINITE16) &&
+	    (ntasks_per_socket >= 1)) {
 		cps = ntasks_per_socket;
 		if (cpus_per_task > 1)
 			cps = ntasks_per_socket * cpus_per_task;
-	}
+	} else
+		cps = cores_per_socket * threads_per_core;
+
 	si = 9999;
 	tmp_cpt = cpus_per_task;
 	for (c = core_begin; c < core_end && avail_cpus > 0; c++) {
@@ -687,11 +701,13 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 			    job_ptr->details->mc_ptr &&
 			    job_ptr->details->mc_ptr->ntasks_per_core == 1 &&
 			    job_ptr->details->cpus_per_task == 1) {
-				/* In this scenario, cpus represents cores and
+				/*
+				 * In this scenario, CPUs represents cores and
 				 * the cpu/core count will be inflated later on
 				 * to include all of the threads on a core. So
 				 * we need to compare apples to apples and only
-				 * remove 1 cpu/core at a time. */
+				 * remove 1 cpu/core at a time.
+				 */
 				while ((cpus > 0) &&
 				       ((req_mem *
 					 ((int) cpus *
@@ -733,8 +749,8 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 
 	while (gres_cpus < cpus) {
 		if ((int) cpus < cpu_alloc_size) {
-			debug3("cons_res: cpu_alloc_size > cpus, cannot "
-			       "continue (node: %s)", node_ptr->name);
+			debug3("cons_res: cpu_alloc_size > cpus, cannot continue (node: %s)",
+			       node_ptr->name);
 			cpus = 0;
 			break;
 		} else {
@@ -1385,6 +1401,15 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 					/* first required node in set */
 					consec_req[consec_index] = i;
 				}
+				/*
+				 * This could result in 0, but if the user
+				 * requested nodes here we will still give
+				 * them and then the step layout will sort
+				 * things out.
+				 */
+				_cpus_to_use(&avail_cpus, rem_cpus,
+					     min_rem_nodes, details_ptr,
+					     &cpu_cnt[i], i, cr_type);
 				total_cpus += avail_cpus;
 				rem_cpus   -= avail_cpus;
 				rem_nodes--;
@@ -3175,8 +3200,8 @@ extern int cr_job_test(struct job_record *job_ptr, bitstr_t *node_bitmap,
 	bitstr_t *free_cores_tmp = NULL,  *node_bitmap_tmp = NULL;
 	bitstr_t *free_cores_tmp2 = NULL, *node_bitmap_tmp2 = NULL;
 	bool test_only;
-	uint32_t c, j, k, n, csize, total_cpus;
-	uint64_t save_mem = 0;
+	uint32_t c, j, k, n, c_alloc = 0, c_size, total_cpus;
+	uint64_t save_mem = 0, avail_mem = 0, lowest_mem = 0, needed_mem = 0;
 	int32_t build_cnt;
 	job_resources_t *job_res;
 	struct job_details *details_ptr;
@@ -3755,8 +3780,10 @@ alloc_job:
 	/* total up all cpus and load the core_bitmap */
 	total_cpus = 0;
 	c = 0;
-	csize = bit_size(job_res->core_bitmap);
-
+	if (job_res->core_bitmap)
+		c_size = bit_size(job_res->core_bitmap);
+	else
+		c_size = 0;
 	for (i = 0, n = 0; n < cr_node_cnt; n++) {
 		if (bit_test(node_bitmap, n) == 0)
 			continue;
@@ -3764,7 +3791,7 @@ alloc_job:
 		k = cr_get_coremap_offset(n + 1);
 		for (; j < k; j++, c++) {
 			if (bit_test(free_cores, j)) {
-				if (c >= csize)	{
+				if (c >= c_size) {
 					error("cons_res: cr_job_test "
 					      "core_bitmap index error on "
 					      "node %s",
@@ -3779,6 +3806,7 @@ alloc_job:
 					return SLURM_ERROR;
 				}
 				bit_set(job_res->core_bitmap, c);
+				c_alloc++;
 			}
 		}
 
@@ -3798,7 +3826,7 @@ alloc_job:
 	if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
 		info("cons_res: cr_job_test: %pJ ncpus %u cbits %u/%u nbits %u",
 		     job_ptr, job_res->ncpus, bit_set_count(free_cores),
-		     bit_set_count(job_res->core_bitmap), job_res->nhosts);
+		     c_alloc, job_res->nhosts);
 	}
 	FREE_NULL_BITMAP(free_cores);
 
@@ -3880,35 +3908,67 @@ alloc_job:
 
 	/* load memory allocated array */
 	save_mem = details_ptr->pn_min_memory;
-	if (save_mem & MEM_PER_CPU) {
-		/* memory is per-cpu */
-		save_mem &= (~MEM_PER_CPU);
-		for (i = 0; i < job_res->nhosts; i++) {
-			job_res->memory_allocated[i] = job_res->cpus[i] *
-						       save_mem;
-		}
-	} else if (save_mem) {
-		/* memory is per-node */
-		for (i = 0; i < job_res->nhosts; i++) {
-			job_res->memory_allocated[i] = save_mem;
-		}
-	} else {	/* --mem=0, allocate job all memory on node */
-		uint64_t avail_mem, lowest_mem = 0;
-		first = bit_ffs(job_res->node_bitmap);
-		if (first != -1)
-			last  = bit_fls(job_res->node_bitmap);
-		else
-			last = first - 1;
-		for (i = first, j = 0; i <= last; i++) {
-			if (!bit_test(job_res->node_bitmap, i))
-				continue;
-			avail_mem = select_node_record[i].real_memory -
-				    select_node_record[i].mem_spec_limit;
+
+	first = bit_ffs(job_res->node_bitmap);
+	if (first != -1)
+		last = bit_fls(job_res->node_bitmap);
+	else
+		last = first - 1;
+	for (i = first, j = 0; i <= last; i++) {
+		if (!bit_test(job_res->node_bitmap, i))
+			continue;
+		avail_mem = select_node_record[i].real_memory -
+				select_node_record[i].mem_spec_limit;
+		if (save_mem & MEM_PER_CPU) {	/* Memory per CPU */
+			needed_mem = job_res->cpus[j] *
+					(save_mem & (~MEM_PER_CPU));
+		} else if (save_mem)		/* Memory per node */
+			needed_mem = save_mem;
+		else {				/* Allocate all node memory */
+			needed_mem = avail_mem;
+			if (!test_only && (node_usage[i].alloc_memory > 0)) {
+				if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE)
+					info("%s: node %s has already alloc_memory=%"PRIu64". %pJ can't allocate all node memory",
+					     __func__,
+					     select_node_record[i].
+					     node_ptr->name,
+					     node_usage[i].alloc_memory,
+					     job_ptr);
+				error_code = SLURM_ERROR;
+				break;
+			}
 			if ((j == 0) || (lowest_mem > avail_mem))
 				lowest_mem = avail_mem;
-			job_res->memory_allocated[j++] = avail_mem;
 		}
-		details_ptr->pn_min_memory = lowest_mem;
+		if (!test_only && save_mem) {
+			if (node_usage[i].alloc_memory > avail_mem) {
+				error("%s: node %s memory is already overallocated (%"PRIu64" > %"PRIu64"). %pJ can't allocate any node memory",
+				      __func__,
+				      select_node_record[i].node_ptr->name,
+				      node_usage[i].alloc_memory, avail_mem,
+				      job_ptr);
+				error_code = SLURM_ERROR;
+				break;
+			}
+			avail_mem -= node_usage[i].alloc_memory;
+		}
+		if (needed_mem > avail_mem) {
+			if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE)
+				info("%s: %pJ would overallocate node %s memory (%"PRIu64" > %"PRIu64")",
+				     __func__, job_ptr,
+				     select_node_record[i].node_ptr->name,
+				     needed_mem,
+				     avail_mem);
+			error_code = SLURM_ERROR;
+			break;
+		}
+		job_res->memory_allocated[j] = needed_mem;
+		j++;
 	}
+	if (error_code == SLURM_ERROR)
+		free_job_resources(&job_ptr->job_resrcs);
+	else if (save_mem == 0)
+		details_ptr->pn_min_memory = lowest_mem;
+
 	return error_code;
 }

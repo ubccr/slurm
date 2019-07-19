@@ -53,6 +53,7 @@
 #include <unistd.h>
 
 #include "src/common/bitstring.h"
+#include "src/common/cli_filter.h"
 #include "src/common/cbuf.h"
 #include "src/common/fd.h"
 #include "src/common/forward.h"
@@ -63,6 +64,7 @@
 #include "src/common/plugstack.h"
 #include "src/common/proc_args.h"
 #include "src/common/read_config.h"
+#include "src/common/slurm_opt.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/uid.h"
@@ -113,6 +115,8 @@ static int shepherd_fd = -1;
 static pthread_t signal_thread = (pthread_t) 0;
 static int pty_sigarray[] = { SIGWINCH, 0 };
 
+extern char **environ;
+
 /*
  * Prototypes:
  */
@@ -144,6 +148,7 @@ static void _shepherd_notify(int shepherd_fd);
 static int  _shepherd_spawn(srun_job_t *job, List srun_job_list,
 			     bool got_alloc);
 static void *_srun_signal_mgr(void *no_data);
+static void _srun_cli_filter_post_submit(uint32_t jobid, uint32_t stepid);
 static void _step_opt_exclusive(slurm_opt_t *opt_local);
 static int  _validate_relative(resource_allocation_response_msg_t *resp,
 			       slurm_opt_t *opt_local);
@@ -229,8 +234,8 @@ extern srun_job_t *job_step_create_allocation(
 	ai->nnodes = alloc_count;
 	hostlist_destroy(hl);
 
-	if (opt_local->exc_nodes) {
-		hostlist_t exc_hl = hostlist_create(opt_local->exc_nodes);
+	if (opt_local->exclude) {
+		hostlist_t exc_hl = hostlist_create(opt_local->exclude);
 		hostlist_t inc_hl = NULL;
 		char *node_name = NULL;
 
@@ -671,18 +676,18 @@ extern void init_srun(int argc, char **argv,
 	/*
 	 * reinit log with new verbosity (if changed by command line)
 	 */
-	if (logopt && (_verbose || opt.quiet)) {
+	if (logopt && (opt.verbose || opt.quiet)) {
 		/*
 		 * If log level is already increased, only increment the
-		 * level to the difference of _verbose an LOG_LEVEL_INFO
+		 * level to the difference of opt.verbose an LOG_LEVEL_INFO
 		 */
-		if ((_verbose -= (logopt->stderr_level - LOG_LEVEL_INFO)) > 0)
-			logopt->stderr_level += _verbose;
+		if ((opt.verbose -= (logopt->stderr_level - LOG_LEVEL_INFO)) > 0)
+			logopt->stderr_level += opt.verbose;
 		logopt->stderr_level -= opt.quiet;
 		logopt->prefix_level = 1;
 		log_alter(*logopt, 0, NULL);
 	} else
-		_verbose = debug_level;
+		opt.verbose = debug_level;
 
 	(void) _set_rlimit_env();
 	_set_prio_process_env();
@@ -709,11 +714,7 @@ static void _set_step_opts(slurm_opt_t *opt_local)
 	xassert(srun_opt);
 
 	opt_local->time_limit = NO_VAL;/* not applicable for step, only job */
-	xfree(opt_local->constraints);	/* not applicable for this step */
-	if (!srun_opt->job_name_set_cmd && srun_opt->job_name_set_env) {
-		/* use SLURM_JOB_NAME env var */
-		sropt.job_name_set_cmd = true;
-	}
+	xfree(opt_local->constraint);	/* not applicable for this step */
 	if ((srun_opt->core_spec_set || srun_opt->exclusive)
 	    && opt_local->cpus_set) {
 		/* Step gets specified CPU count, which may only part
@@ -747,7 +748,7 @@ static int _create_job_step(srun_job_t *job, bool use_all_cpus,
 		if (opt_list)
 			opt_iter = list_iterator_create(opt_list);
 		job_iter = list_iterator_create(srun_job_list);
-		while ((job = (srun_job_t *) list_next(job_iter))) {
+		while ((job = list_next(job_iter))) {
 			if (pack_jobid)
 				job->pack_jobid = pack_jobid;
 			job->stepid = NO_VAL;
@@ -756,7 +757,7 @@ static int _create_job_step(srun_job_t *job, bool use_all_cpus,
 		}
 
 		list_iterator_reset(job_iter);
-		while ((job = (srun_job_t *) list_next(job_iter))) {
+		while ((job = list_next(job_iter))) {
 			if (opt_list)
 				opt_local = list_next(opt_iter);
 			if (!opt_local)
@@ -805,7 +806,7 @@ static int _create_job_step(srun_job_t *job, bool use_all_cpus,
 			hostset_destroy(hs);
 
 			list_iterator_reset(job_iter);
-			while ((job = (srun_job_t *) list_next(job_iter))) {
+			while ((job = list_next(job_iter))) {
 				if (slurm_step_ctx_get(job->step_ctx,
 						SLURM_STEP_CTX_RESP,
 						&step_resp) == SLURM_SUCCESS) {
@@ -821,6 +822,12 @@ static int _create_job_step(srun_job_t *job, bool use_all_cpus,
 			list_iterator_destroy(opt_iter);
 		return rc;
 	} else if (job) {
+		if (pack_jobid) {
+			job->pack_jobid  = pack_jobid;
+			job->pack_nnodes = job->nhosts;
+			job->pack_ntasks = job->ntasks;
+			job->pack_task_offset = 0;
+		}
 		return create_job_step(job, use_all_cpus, &opt);
 	} else {
 		return -1;
@@ -845,7 +852,7 @@ static void _cancel_steps(List srun_job_list)
 	msg.step_rc = 0;
 
 	job_iter = list_iterator_create(srun_job_list);
-	while ((job = (srun_job_t *) list_next(job_iter))) {
+	while ((job = list_next(job_iter))) {
 		if (job->stepid == NO_VAL)
 			continue;
 		msg.job_id	= job->jobid;
@@ -895,8 +902,7 @@ static char *_compress_pack_nodelist(List used_resp_list)
 	pack_resp_list = list_create(_pack_struct_del);
 	hs = hostset_create("");
 	resp_iter = list_iterator_create(used_resp_list);
-	while ((resp = (resource_allocation_response_msg_t *)
-			list_next(resp_iter))) {
+	while ((resp = list_next(resp_iter))) {
 		if (!resp->node_list)
 			continue;
 		len += strlen(resp->node_list);
@@ -952,8 +958,7 @@ static char *_compress_pack_nodelist(List used_resp_list)
 	for (i = 0; i < cnt; i++) {
 		node_name = hostset_nth(hs, i);
 		resp_iter = list_iterator_create(pack_resp_list);
-		while ((pack_resp = (pack_resp_struct_t *)
-				    list_next(resp_iter))) {
+		while ((pack_resp = list_next(resp_iter))) {
 			j = hostlist_find(pack_resp->host_list, node_name);
 			if ((j == -1) || !pack_resp->cpu_cnt)
 				continue;	/* node not in this pack job */
@@ -1079,25 +1084,23 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 		if (max_pack_offset > 0)
 			pack_offset = 0;
 		resp_iter = list_iterator_create(job_resp_list);
-		while ((resp = (resource_allocation_response_msg_t *)
-				list_next(resp_iter))) {
+		while ((resp = list_next(resp_iter))) {
 			bool merge_nodelist = true;
+			if (my_job_id == 0) {
+				my_job_id = resp->job_id;
+				if (resp->working_cluster_rec)
+					slurm_setup_remote_working_cluster(resp);
+			}
 			_print_job_information(resp);
 			(void) get_next_opt(-2);
 			while ((opt_local = get_next_opt(pack_offset))) {
 				srun_opt_t *srun_opt = opt_local->srun_opt;
 				xassert(srun_opt);
-				if (my_job_id == 0) {
-					my_job_id = resp->job_id;
-					if (resp->working_cluster_rec)
-						slurm_setup_remote_working_cluster(resp);
-				}
 				if (merge_nodelist) {
 					merge_nodelist = false;
 					list_append(used_resp_list, resp);
 				}
-				if (srun_opt->nodes_set_env  &&
-				    !srun_opt->nodes_set_opt &&
+				if (slurm_option_set_by_env('N') &&
 				    (opt_local->min_nodes > resp->node_cnt)) {
 					/*
 					 * This signifies the job used the
@@ -1108,9 +1111,7 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 					 * size
 					 */
 					if (!node_cnt_error_logged) {
-						error("SLURM_NNODES environment variable "
-						      "conflicts with allocated "
-						      "node count (%u != %u).",
+						error("SLURM_JOB_NUM_NODES environment variable conflicts with allocated node count (%u != %u).",
 						      opt_local->min_nodes,
 						      resp->node_cnt);
 						node_cnt_error_logged = true;
@@ -1142,7 +1143,7 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 #ifdef HAVE_NATIVE_CRAY
 				if (opt_local->network &&
 				    !network_error_logged) {
-					if (srun_opt->network_set_env) {
+					if (slurm_option_set_by_env(LONG_OPT_NETWORK)) {
 						debug2("Ignoring SLURM_NETWORK value for a "
 						       "job step within an existing job. "
 						       "Using what was set at job "
@@ -1197,12 +1198,11 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 		}
 		if (i == 1)
 			FREE_NULL_LIST(srun_job_list);	/* Just use "job" */
-		if (srun_job_list && (list_count(srun_job_list) > 1) &&
-		    opt_list && (list_count(opt_list) > 1) && my_job_id) {
-			pack_jobid = my_job_id;
-		}
-		if (list_count(job_resp_list) > 1)
+		if (list_count(job_resp_list) > 1) {
+			if (my_job_id)
+				pack_jobid = my_job_id;
 			pack_nodelist = _compress_pack_nodelist(used_resp_list);
+		}
 		list_destroy(used_resp_list);
 		if (_create_job_step(job, false, srun_job_list, pack_jobid,
 				     pack_nodelist) < 0) {
@@ -1215,7 +1215,7 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 		xfree(pack_nodelist);
 	} else {
 		/* Combined job allocation and job step launch */
-#if defined HAVE_FRONT_END && (!defined HAVE_REAL_CRAY)
+#if defined HAVE_FRONT_END
 		uid_t my_uid = getuid();
 		if ((my_uid != 0) &&
 		    (my_uid != slurm_get_slurm_user_id())) {
@@ -1223,9 +1223,9 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 			exit(error_exit);
 		}
 #endif
-		if (!sropt.job_name_set_env && sropt.job_name_set_cmd)
+		if (slurm_option_set_by_cli('J'))
 			setenvfs("SLURM_JOB_NAME=%s", opt.job_name);
-		else if (!sropt.job_name_set_env && sropt.argc)
+		else if (!slurm_option_set_by_env('J') && sropt.argc)
 			setenvfs("SLURM_JOB_NAME=%s", sropt.argv[0]);
 
 		if (opt_list) {
@@ -1235,8 +1235,7 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 			srun_job_list = list_create(NULL);
 			opt_iter  = list_iterator_create(opt_list);
 			resp_iter = list_iterator_create(job_resp_list);
-			while ((resp = (resource_allocation_response_msg_t *)
-				       list_next(resp_iter))) {
+			while ((resp = list_next(resp_iter))) {
 				if (my_job_id == 0) {
 					my_job_id = resp->job_id;
 					*got_alloc = true;
@@ -1244,8 +1243,6 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 				opt_local = list_next(opt_iter);
 				if (!opt_local)
 					break;
-				if (!global_resp)	/* Used by Cray/ALPS */
-					global_resp = resp;
 				_print_job_information(resp);
 				_set_env_vars(resp, ++pack_offset);
 				_set_env_vars2(resp, pack_offset);
@@ -1264,7 +1261,6 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 		} else {
 			if (!(resp = allocate_nodes(handle_signals, &opt)))
 				exit(error_exit);
-			global_resp = resp;
 			*got_alloc = true;
 			my_job_id = resp->job_id;
 			_print_job_information(resp);
@@ -1294,11 +1290,9 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 		}
 		xfree(pack_nodelist);
 
-		global_resp = NULL;
 		if (opt_list) {
 			resp_iter = list_iterator_create(job_resp_list);
-			while ((resp = (resource_allocation_response_msg_t *)
-				       list_next(resp_iter))) {
+			while ((resp = list_next(resp_iter))) {
 				slurm_free_resource_allocation_response_msg(
 									resp);
 			}
@@ -1326,6 +1320,9 @@ extern void create_srun_job(void **p_job, bool *got_alloc,
 		*p_job = (void *) srun_job_list;
 	else
 		*p_job = (void *) job;
+
+	if (job)
+	        _srun_cli_filter_post_submit(my_job_id, job->stepid);
 }
 
 extern void pre_launch_srun_job(srun_job_t *job, bool slurm_started,
@@ -1346,7 +1343,7 @@ extern void pre_launch_srun_job(srun_job_t *job, bool slurm_started,
 		exit(error_exit);
 	}
 
-	env_array_merge(&job->env, (const char **)__environ);
+	env_array_merge(&job->env, (const char **)environ);
 }
 
 extern void fini_srun(srun_job_t *job, bool got_alloc, uint32_t *global_rc,
@@ -1483,20 +1480,16 @@ static srun_job_t *_job_create_structure(allocation_info_t *ainfo,
 	job->pack_ntasks = NO_VAL;
  	job->pack_offset = NO_VAL;
 	job->pack_task_offset = NO_VAL;
+	job->nhosts   = ainfo->nnodes;
 
-#if defined HAVE_FRONT_END && !defined HAVE_ALPS_CRAY
+#if defined HAVE_FRONT_END
 	/* Limited job step support */
 	opt_local->overcommit = true;
-	job->nhosts = 1;
 #else
-	job->nhosts   = ainfo->nnodes;
-#endif
-
-#if !defined HAVE_FRONT_END
 	if (opt_local->min_nodes > job->nhosts) {
 		error("Only allocated %d nodes asked for %d",
 		      job->nhosts, opt_local->min_nodes);
-		if (opt_local->exc_nodes) {
+		if (opt_local->exclude) {
 			/* When resources are pre-allocated and some nodes
 			 * are explicitly excluded, this error can occur. */
 			error("Are required nodes explicitly excluded?");
@@ -1542,12 +1535,10 @@ static srun_job_t *_job_create_structure(allocation_info_t *ainfo,
 
 extern void job_update_io_fnames(srun_job_t *job, slurm_opt_t *opt_local)
 {
-	srun_opt_t *srun_opt = opt_local->srun_opt;
-	xassert(srun_opt);
-	job->ifname = fname_create(job, srun_opt->ifname, opt_local->ntasks);
-	job->ofname = fname_create(job, srun_opt->ofname, opt_local->ntasks);
-	job->efname = srun_opt->efname ?
-		      fname_create(job, srun_opt->efname, opt_local->ntasks) :
+	job->ifname = fname_create(job, opt_local->ifname, opt_local->ntasks);
+	job->ofname = fname_create(job, opt_local->ofname, opt_local->ntasks);
+	job->efname = opt_local->efname ?
+		      fname_create(job, opt_local->efname, opt_local->ntasks) :
 		      job->ofname;
 }
 
@@ -1582,7 +1573,7 @@ static int _become_user (void)
 		return (0);
 	}
 
-	if ((opt.egid != (gid_t) -1) && (setgid (opt.egid) < 0)) {
+	if ((opt.gid != getgid()) && (setgid(opt.gid) < 0)) {
 		xfree(user);
 		return (error ("setgid: %m"));
 	}
@@ -1698,7 +1689,7 @@ static void _print_job_information(resource_allocation_response_msg_t *resp)
 	char *str = NULL;
 	char *sep = "";
 
-	if (!_verbose)
+	if (!opt.verbose)
 		return;
 
 	xstrfmtcat(str, "jobid %u: nodes(%u):`%s', cpu counts: ",
@@ -1720,6 +1711,8 @@ static void _run_srun_epilog (srun_job_t *job)
 	int rc;
 
 	if (sropt.epilog && xstrcasecmp(sropt.epilog, "none") != 0) {
+		if (setenvf(NULL, "SLURM_SCRIPT_CONTEXT", "epilog_srun") < 0)
+			error("unable to set SLURM_SCRIPT_CONTEXT in environment");
 		rc = _run_srun_script(job, sropt.epilog);
 		debug("srun epilog rc = %d", rc);
 	}
@@ -1730,6 +1723,8 @@ static void _run_srun_prolog (srun_job_t *job)
 	int rc;
 
 	if (sropt.prolog && xstrcasecmp(sropt.prolog, "none") != 0) {
+		if (setenvf(NULL, "SLURM_SCRIPT_CONTEXT", "prolog_srun") < 0)
+			error("unable to set SLURM_SCRIPT_CONTEXT in environment");
 		rc = _run_srun_script(job, sropt.prolog);
 		debug("srun prolog rc = %d", rc);
 	}
@@ -1850,7 +1845,7 @@ static void _set_env_vars2(resource_allocation_response_msg_t *resp,
 	if (resp->account) {
 		key = _build_key("SLURM_JOB_ACCOUNT", pack_offset);
 		if (!getenv(key) &&
-		    (setenvf(NULL, key, "%u", resp->account) < 0)) {
+		    (setenvf(NULL, key, "%s", resp->account) < 0)) {
 			error("unable to set %s in environment", key);
 		}
 		xfree(key);
@@ -1957,7 +1952,7 @@ static int _set_rlimit_env(void)
 
 		if (getrlimit (rli->resource, rlim) < 0) {
 			error ("getrlimit (RLIMIT_%s): %m", rli->name);
-			rc = SLURM_FAILURE;
+			rc = SLURM_ERROR;
 			continue;
 		}
 
@@ -1973,7 +1968,7 @@ static int _set_rlimit_env(void)
 
 		if (setenvf (NULL, name, format, cur) < 0) {
 			error ("unable to set %s in environment", name);
-			rc = SLURM_FAILURE;
+			rc = SLURM_ERROR;
 			continue;
 		}
 
@@ -1983,14 +1978,7 @@ static int _set_rlimit_env(void)
 	/*
 	 *  Now increase NOFILE to the max available for this srun
 	 */
-	if (getrlimit (RLIMIT_NOFILE, rlim) < 0)
-		return (error ("getrlimit (RLIMIT_NOFILE): %m"));
-
-	if (rlim->rlim_cur < rlim->rlim_max) {
-		rlim->rlim_cur = rlim->rlim_max;
-		if (setrlimit (RLIMIT_NOFILE, rlim) < 0)
-			return (error ("Unable to increase max no. files: %m"));
-	}
+	rlimits_maximize_nofile();
 
 	return rc;
 }
@@ -2025,7 +2013,7 @@ static int _set_umask_env(void)
 {
 	if (!getenv("SRUN_DEBUG")) {	/* do not change current value */
 		/* NOTE: Default debug level is 3 (info) */
-		int log_level = LOG_LEVEL_INFO + _verbose - opt.quiet;
+		int log_level = LOG_LEVEL_INFO + opt.verbose - opt.quiet;
 
 		if (setenvf(NULL, "SRUN_DEBUG", "%d", log_level) < 0)
 			error ("unable to set SRUN_DEBUG in environment");
@@ -2042,7 +2030,7 @@ static int _set_umask_env(void)
 			((mask>>6)&07), ((mask>>3)&07), mask&07);
 		if (setenvf(NULL, "SLURM_UMASK", "%s", mask_char) < 0) {
 			error ("unable to set SLURM_UMASK in environment");
-			return SLURM_FAILURE;
+			return SLURM_ERROR;
 		}
 		debug ("propagating UMASK=%s", mask_char);
 	}
@@ -2105,7 +2093,7 @@ static int _shepherd_spawn(srun_job_t *job, List srun_job_list, bool got_alloc)
 	if (srun_job_list) {
 		ListIterator job_iter;
 		job_iter  = list_iterator_create(srun_job_list);
-		while ((job = (srun_job_t *) list_next(job_iter))) {
+		while ((job = list_next(job_iter))) {
 			(void) slurm_kill_job_step(job->jobid, job->stepid,
 						   SIGKILL);
 			if (got_alloc)
@@ -2185,11 +2173,11 @@ static void _step_opt_exclusive(slurm_opt_t *opt_local)
 		error("--ntasks must be set with --exclusive");
 		exit(error_exit);
 	}
-	if (srun_opt->relative_set) {
+	if (srun_opt->relative != NO_VAL) {
 		error("--relative disabled, incompatible with --exclusive");
 		exit(error_exit);
 	}
-	if (opt_local->exc_nodes) {
+	if (opt_local->exclude) {
 		error("--exclude is incompatible with --exclusive");
 		exit(error_exit);
 	}
@@ -2201,19 +2189,18 @@ static int _validate_relative(resource_allocation_response_msg_t *resp,
 	srun_opt_t *srun_opt = opt_local->srun_opt;
 	xassert(srun_opt);
 
-	if (srun_opt->relative_set &&
+	if ((srun_opt->relative != NO_VAL) &&
 	    ((srun_opt->relative + opt_local->min_nodes)
 	     > resp->node_cnt)) {
-		if (srun_opt->nodes_set_opt) {
+		if (slurm_option_set_by_cli('N')) {
 			/* -N command line option used */
 			error("--relative and --nodes option incompatible "
 			      "with count of allocated nodes (%d+%d>%d)",
 			      srun_opt->relative,
 			      opt_local->min_nodes,
 			      resp->node_cnt);
-		} else {		/* SLURM_NNODES option used */
-			error("--relative and SLURM_NNODES option incompatible "
-			      "with count of allocated nodes (%d+%d>%d)",
+		} else {		/* SLURM_JOB_NUM_NODES option used */
+			error("--relative and SLURM_JOB_NUM_NODES option incompatible with count of allocated nodes (%d+%d>%d)",
 			      srun_opt->relative,
 			      opt_local->min_nodes,
 			      resp->node_cnt);
@@ -2227,4 +2214,25 @@ static void _call_spank_fini(void)
 {
 	if (-1 != shepherd_fd)
 		spank_fini(NULL);
+}
+
+/*
+ * Run cli_filter_post_submit on all opt structures
+ * Convenience function since this might need to run in two spots
+ */
+static void _srun_cli_filter_post_submit(uint32_t jobid, uint32_t stepid)
+{
+	static bool post_submit_ran = false;
+	int idx = 0, components = 1;
+
+	if (post_submit_ran)
+		return;
+
+	if (opt_list)
+		components = list_count(opt_list);
+
+	for (idx = 0; idx < components; idx++)
+		cli_filter_plugin_post_submit(idx, jobid, stepid);
+
+	post_submit_ran = true;
 }

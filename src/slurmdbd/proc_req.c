@@ -183,7 +183,6 @@ static int   _modify_reservation(slurmdbd_conn_t *slurmdbd_conn,
 				 uint32_t *uid);
 static int   _node_state(slurmdbd_conn_t *slurmdbd_conn,
 			 persist_msg_t *msg, Buf *out_buffer, uint32_t *uid);
-static char *_node_state_string(uint16_t node_state);
 static void  _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 				dbd_job_start_msg_t *job_start_msg,
 				dbd_id_rc_msg_t *id_rc_msg);
@@ -741,8 +740,7 @@ static int _unpack_persist_init(slurmdbd_conn_t *slurmdbd_conn,
 		drop_priv = true;
 #endif
 
-	req_msg->uid = g_slurm_auth_get_uid(
-		slurmdbd_conn->conn->auth_cred, slurmdbd_conf->auth_info);
+	req_msg->uid = g_slurm_auth_get_uid(slurmdbd_conn->conn->auth_cred);
 
 	/* If the client happens to be a newer version than we are make it so
 	 * they talk language I understand.
@@ -2567,9 +2565,8 @@ static int _node_state(slurmdbd_conn_t *slurmdbd_conn,
 		node_state_msg->new_state = DBD_NODE_STATE_UP;
 
 	if (node_state_msg->new_state == DBD_NODE_STATE_UP) {
-		debug2("DBD_NODE_STATE: NODE:%s STATE:%s REASON:%s TIME:%ld",
+		debug2("DBD_NODE_STATE_UP: NODE:%s REASON:%s TIME:%ld",
 		       node_state_msg->hostlist,
-		       _node_state_string(node_state_msg->new_state),
 		       node_state_msg->reason,
 		       (long)node_state_msg->event_time);
 
@@ -2583,10 +2580,9 @@ static int _node_state(slurmdbd_conn_t *slurmdbd_conn,
 			node_state_msg->event_time);
 		xfree(node_ptr.reason);
 	} else {
-		debug2("DBD_NODE_STATE: NODE:%s STATE:%s "
-		       "REASON:%s UID:%u TIME:%ld",
+		debug2("DBD_NODE_STATE_DOWN: NODE:%s STATE:%s REASON:%s UID:%u TIME:%ld",
 		       node_state_msg->hostlist,
-		       _node_state_string(node_state_msg->new_state),
+		       node_state_string(node_state_msg->state),
 		       node_state_msg->reason,
 		       node_ptr.reason_uid,
 		       (long)node_state_msg->event_time);
@@ -2601,17 +2597,6 @@ end_it:
 	*out_buffer = slurm_persist_make_rc_msg(slurmdbd_conn->conn,
 						rc, comment, DBD_NODE_STATE);
 	return SLURM_SUCCESS;
-}
-
-static char *_node_state_string(uint16_t node_state)
-{
-	switch(node_state) {
-	case DBD_NODE_STATE_DOWN:
-		return "DOWN";
-	case DBD_NODE_STATE_UP:
-		return "UP";
-	}
-	return "UNKNOWN";
 }
 
 static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
@@ -2635,7 +2620,6 @@ static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 	array_recs.max_run_tasks = job_start_msg->array_max_tasks;
 	array_recs.task_cnt = job_start_msg->array_task_pending;
 	job.assoc_id = job_start_msg->assoc_id;
-	job.comment = job_start_msg->block_id;
 	if (job_start_msg->db_index != NO_VAL64)
 		job.db_index = job_start_msg->db_index;
 	details.begin_time = job_start_msg->eligible_time;
@@ -2666,6 +2650,9 @@ static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 	job.wckey = _replace_double_quotes(job_start_msg->wckey);
 	details.work_dir = _replace_double_quotes(job_start_msg->work_dir);
 	details.submit_time = job_start_msg->submit_time;
+	job.db_flags = job_start_msg->db_flags;
+	details.features = _replace_double_quotes(job_start_msg->constraints);
+	job.state_reason_prev_db = job_start_msg->state_reason_prev;
 
 	job.array_recs = &array_recs;
 	job.details = &details;

@@ -113,23 +113,12 @@ const uint32_t plugin_version = SLURM_VERSION_NUMBER;
  * overwritten when linking with the slurmctld.
  */
 #if defined (__APPLE__)
-int accounting_enforce __attribute__((weak_import)) = 0;
-void *acct_db_conn __attribute__((weak_import)) = NULL;
+extern int accounting_enforce __attribute__((weak_import));
+extern void *acct_db_conn __attribute__((weak_import));
 #else
 int accounting_enforce = 0;
 void *acct_db_conn = NULL;
 #endif
-
-/* Type for error string table entries */
-typedef struct {
-	int xe_number;
-	char *xe_message;
-} slurm_errtab_t;
-
-static slurm_errtab_t slurm_errtab[] = {
-	{0, "No error"},
-	{-1, "Unspecified error"}
-};
 
 /* Type for handling HTTP responses */
 struct http_response {
@@ -146,14 +135,13 @@ char *save_state_file = "elasticsearch_state";
 char *index_type = "/slurm/jobcomp";
 char *log_url = NULL;
 
+static pthread_cond_t location_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t location_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t save_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t pend_jobs_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t job_handler_thread;
 static List jobslist = NULL;
 static bool thread_shutdown = false;
-
-/* A plugin-global errno. */
-static int plugin_errno = SLURM_SUCCESS;
 
 /* Get the user name for the give user_id */
 static void _get_user_name(uint32_t user_id, char *user_name, int buf_size)
@@ -183,24 +171,6 @@ static void _get_group_name(uint32_t group_id, char *group_name, int buf_size)
 		cache_gid = group_id;
 	}
 	snprintf(group_name, buf_size, "%s", cache_name);
-}
-
-/*
- * Linear search through table of errno values and strings,
- * returns NULL on error, string on success.
- */
-static char *_lookup_slurm_api_errtab(int errnum)
-{
-	char *res = NULL;
-	int i;
-
-	for (i = 0; i < sizeof(slurm_errtab) / sizeof(slurm_errtab_t); i++) {
-		if (slurm_errtab[i].xe_number == errnum) {
-			res = slurm_errtab[i].xe_message;
-			break;
-		}
-	}
-	return res;
 }
 
 /* Read file to data variable */
@@ -596,7 +566,7 @@ static void _make_time_str(time_t * time, char *string, int size)
 #if USE_ISO8601
 		/* Format YYYY-MM-DDTHH:MM:SS, ISO8601 standard format,
 		 * NOTE: This is expected to break Maui, Moab and LSF
-		 * schedulers management of SLURM. */
+		 * schedulers management of Slurm. */
 		snprintf(string, size,
 			 "%4.4u-%2.2u-%2.2uT%2.2u:%2.2u:%2.2u",
 			 (time_tm.tm_year + 1900), (time_tm.tm_mon + 1),
@@ -892,7 +862,14 @@ extern void *_process_jobs(void *x)
 {
 	ListIterator iter;
 	struct job_node *jnode = NULL;
+	struct timespec ts = {0, 0};
 	time_t now;
+
+	/* Wait for slurm_jobcomp_set_location log_url setup. */
+	slurm_mutex_lock(&location_mutex);
+	ts.tv_sec = time(NULL) + INDEX_RETRY_INTERVAL;
+	slurm_cond_timedwait(&location_cond, &location_mutex, &ts);
+	slurm_mutex_unlock(&location_mutex);
 
 	while (!thread_shutdown) {
 		int success_cnt = 0, fail_cnt = 0, wait_retry_cnt = 0;
@@ -995,18 +972,11 @@ extern int slurm_jobcomp_set_location(char *location)
 	}
 	curl_global_cleanup();
 
+	slurm_mutex_lock(&location_mutex);
+	slurm_cond_broadcast(&location_cond);
+	slurm_mutex_unlock(&location_mutex);
+
 	return rc;
-}
-
-extern int slurm_jobcomp_get_errno(void)
-{
-	return plugin_errno;
-}
-
-extern char *slurm_jobcomp_strerror(int errnum)
-{
-	char *res = _lookup_slurm_api_errtab(errnum);
-	return (res ? res : strerror(errnum));
 }
 
 /*

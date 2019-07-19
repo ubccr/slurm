@@ -58,6 +58,7 @@ typedef struct job_format {
 
 int print_jobs_array(List factors, List format);
 int print_job_from_format(priority_factors_object_t * job, List list);
+double get_priority_from_factors(priority_factors_object_t *prio_factors);
 
 /*****************************************************************************
  * Job Line Format Options
@@ -75,6 +76,10 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_age_priority_normalized)
 #define job_format_add_age_priority_weighted(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_age_priority_weighted)
+#define job_format_add_assoc_priority_normalized(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_assoc_priority_normalized)
+#define job_format_add_assoc_priority_weighted(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_assoc_priority_weighted)
 #define job_format_add_cluster_name(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_cluster_name)
 #define job_format_add_fs_priority_normalized(list,wid,right,suffix) \
@@ -99,6 +104,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_qos_priority_normalized)
 #define job_format_add_qos_priority_weighted(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_qos_priority_weighted)
+#define job_format_add_site_priority(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_site_priority)
 #define job_format_add_job_nice(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_nice)
 #define job_format_add_user_name(list,wid,right,suffix) \
@@ -119,6 +126,10 @@ int _print_age_priority_normalized(priority_factors_object_t * job, int width,
 				   bool right_justify, char* suffix);
 int _print_age_priority_weighted(priority_factors_object_t * job, int width,
 				 bool right_justify, char* suffix);
+int _print_assoc_priority_normalized(priority_factors_object_t * job, int width,
+				     bool right_justify, char* suffix);
+int _print_assoc_priority_weighted(priority_factors_object_t * job, int width,
+				   bool right_justify, char* suffix);
 int _print_cluster_name(priority_factors_object_t *job, int width,
 			bool right, char *suffix);
 int _print_fs_priority_normalized(priority_factors_object_t * job, int width,
@@ -143,6 +154,8 @@ int _print_qos_priority_normalized(priority_factors_object_t * job, int width,
 				   bool right_justify, char* suffix);
 int _print_qos_priority_weighted(priority_factors_object_t * job, int width,
 				 bool right_justify, char* suffix);
+int _print_site_priority(priority_factors_object_t * job, int width,
+			 bool right, char* suffix);
 int _print_job_nice(priority_factors_object_t * job, int width,
 		    bool right_justify, char* suffix);
 int _print_job_user_name(priority_factors_object_t * job, int width,

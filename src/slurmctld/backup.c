@@ -62,6 +62,7 @@
 
 #include "src/slurmctld/heartbeat.h"
 #include "src/slurmctld/locks.h"
+#include "src/slurmctld/proc_req.h"
 #include "src/slurmctld/read_config.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/trigger_mgr.h"
@@ -362,7 +363,7 @@ static void *_background_rpc_mgr(void *no_data)
 						 control_machine[backup_inx],
 						 slurmctld_conf.
 						 slurmctld_port))
-	    == SLURM_SOCKET_ERROR)
+	    == SLURM_ERROR)
 		fatal("slurm_init_msg_engine_addrname_port error %m");
 	unlock_slurmctld(config_read_lock);
 
@@ -384,7 +385,7 @@ static void *_background_rpc_mgr(void *no_data)
 		 * message implementation that just passes sockfd to newsockfd
 		 */
 		if ((newsockfd = slurm_accept_msg_conn(sockfd, &cli_addr))
-		    == SLURM_SOCKET_ERROR) {
+		    == SLURM_ERROR) {
 			if (errno != EINTR)
 				error("slurm_accept_msg_conn: %m");
 			continue;
@@ -419,13 +420,11 @@ inline static void _slurm_rpc_control_status(slurm_msg_t * msg)
 	slurm_msg_t response_msg;
 	control_status_msg_t data;
 
-	slurm_msg_t_init(&response_msg);
-	response_msg.protocol_version = msg->protocol_version;
-	response_msg.address = msg->address;
-	response_msg.conn = msg->conn;
+	response_init(&response_msg, msg);
 	response_msg.msg_type = RESPONSE_CONTROL_STATUS;
 	response_msg.data = &data;
 	response_msg.data_size = sizeof(control_status_msg_t);
+	memset(&data, 0, sizeof(data));
 	data.backup_inx = backup_inx;
 	data.control_time = (time_t) 0;
 	slurm_send_node_msg(msg->conn_fd, &response_msg);
@@ -441,10 +440,8 @@ static int _background_process_msg(slurm_msg_t *msg)
 
 	if (msg->msg_type != REQUEST_PING) {
 		bool super_user = false;
-		char *auth_info = slurm_get_auth_info();
-		uid_t uid = g_slurm_auth_get_uid(msg->auth_cred, auth_info);
+		uid_t uid = g_slurm_auth_get_uid(msg->auth_cred);
 
-		xfree(auth_info);
 		if (validate_slurm_user(uid))
 			super_user = true;
 
@@ -546,8 +543,8 @@ extern int ping_controllers(bool active_controller)
 	else
 		ping_target_cnt = backup_inx;
 
-	ctld_ping = xmalloc(sizeof(ctld_ping_t) * ping_target_cnt);
-	ping_tids = xmalloc(sizeof(pthread_t) * ping_target_cnt);
+	ctld_ping = xcalloc(ping_target_cnt, sizeof(ctld_ping_t));
+	ping_tids = xcalloc(ping_target_cnt, sizeof(pthread_t));
 
 	for (i = 0; i < ping_target_cnt; i++) {
 		ctld_ping[i].control_time  = (time_t) 0;
@@ -714,7 +711,7 @@ static void *_trigger_slurmctld_event(void *arg)
 {
 	trigger_info_t ti;
 
-	memset(&ti, 0, sizeof(trigger_info_t));
+	memset(&ti, 0, sizeof(ti));
 	ti.res_id = "*";
 	ti.res_type = TRIGGER_RES_TYPE_SLURMCTLD;
 	ti.trig_type = TRIGGER_TYPE_BU_CTLD_RES_OP;

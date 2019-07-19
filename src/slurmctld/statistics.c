@@ -81,9 +81,11 @@ extern void pack_all_stat(int resp, char **buffer_ptr, int *buffer_size,
 			       (uint32_t) last_proc_req_start);
 			pack_time(last_proc_req_start, buffer);
 
+			slurm_mutex_lock(&slurmctld_config.thread_count_lock);
 			debug3("pack_all_stat: server_thread_count = %u",
 			       slurmctld_config.server_thread_count);
 			pack32(slurmctld_config.server_thread_count, buffer);
+			slurm_mutex_unlock(&slurmctld_config.thread_count_lock);
 
 			agent_queue_size = retry_list_size();
 			pack32(agent_queue_size, buffer);
@@ -135,7 +137,7 @@ extern void pack_all_stat(int resp, char **buffer_ptr, int *buffer_size,
 			pack32(slurmctld_diag_stats.backfilled_pack_jobs,
 			       buffer);
 		}
-	} else if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		parts_packed = resp;
 		pack32(parts_packed, buffer);
 
@@ -145,9 +147,11 @@ extern void pack_all_stat(int resp, char **buffer_ptr, int *buffer_size,
 			       (uint32_t) last_proc_req_start);
 			pack_time(last_proc_req_start, buffer);
 
+			slurm_mutex_lock(&slurmctld_config.thread_count_lock);
 			debug3("pack_all_stat: server_thread_count = %u",
 			       slurmctld_config.server_thread_count);
 			pack32(slurmctld_config.server_thread_count, buffer);
+			slurm_mutex_unlock(&slurmctld_config.thread_count_lock);
 
 			agent_queue_size = retry_list_size();
 			pack32(agent_queue_size, buffer);
@@ -196,59 +200,6 @@ extern void pack_all_stat(int resp, char **buffer_ptr, int *buffer_size,
 			if (slurmctld_diag_stats.bf_active)
 				uint32_tmp |= 0x80000000;
 			pack32(uint32_tmp,	 buffer);
-		}
-	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		parts_packed = resp;
-		pack32(parts_packed, buffer);
-
-		if (resp) {
-			pack_time(now, buffer);
-			debug3("pack_all_stat: time = %u",
-			       (uint32_t) last_proc_req_start);
-			pack_time(last_proc_req_start, buffer);
-
-			debug3("pack_all_stat: server_thread_count = %u",
-			       slurmctld_config.server_thread_count);
-			pack32(slurmctld_config.server_thread_count, buffer);
-
-			agent_queue_size = retry_list_size();
-			pack32(agent_queue_size, buffer);
-
-			pack32(slurmctld_diag_stats.jobs_submitted, buffer);
-			pack32(slurmctld_diag_stats.jobs_started, buffer);
-			pack32(slurmctld_diag_stats.jobs_completed, buffer);
-			pack32(slurmctld_diag_stats.jobs_canceled, buffer);
-			pack32(slurmctld_diag_stats.jobs_failed, buffer);
-
-			pack32(slurmctld_diag_stats.schedule_cycle_max,
-			       buffer);
-			pack32(slurmctld_diag_stats.schedule_cycle_last,
-			       buffer);
-			pack32(slurmctld_diag_stats.schedule_cycle_sum,
-			       buffer);
-			pack32(slurmctld_diag_stats.schedule_cycle_counter,
-			       buffer);
-			pack32(slurmctld_diag_stats.schedule_cycle_depth,
-			       buffer);
-			pack32(slurmctld_diag_stats.schedule_queue_len, buffer);
-
-			pack32(slurmctld_diag_stats.backfilled_jobs, buffer);
-			pack32(slurmctld_diag_stats.last_backfilled_jobs,
-			       buffer);
-			pack32(slurmctld_diag_stats.bf_cycle_counter, buffer);
-			pack64(slurmctld_diag_stats.bf_cycle_sum, buffer);
-			pack32(slurmctld_diag_stats.bf_cycle_last, buffer);
-			pack32(slurmctld_diag_stats.bf_last_depth, buffer);
-			pack32(slurmctld_diag_stats.bf_last_depth_try, buffer);
-
-			pack32(slurmctld_diag_stats.bf_queue_len, buffer);
-			pack32(slurmctld_diag_stats.bf_cycle_max, buffer);
-			pack_time(slurmctld_diag_stats.bf_when_last_cycle,
-				  buffer);
-			pack32(slurmctld_diag_stats.bf_depth_sum, buffer);
-			pack32(slurmctld_diag_stats.bf_depth_try_sum, buffer);
-			pack32(slurmctld_diag_stats.bf_queue_len_sum, buffer);
-			pack32(slurmctld_diag_stats.bf_active,	 buffer);
 		}
 	}
 

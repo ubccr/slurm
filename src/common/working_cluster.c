@@ -65,27 +65,19 @@ extern int *slurmdb_setup_cluster_dim_size(void)
 	if (working_cluster_rec)
 		return working_cluster_rec->dim_size;
 
-	return select_g_ba_get_dims();
+	return NULL;
 }
 
 extern bool is_cray_system(void)
 {
 	if (working_cluster_rec)
 		return working_cluster_rec->flags & CLUSTER_FLAG_CRAY;
-#if defined HAVE_ALPS_CRAY || defined HAVE_NATIVE_CRAY
-	return true;
-#endif
-	return false;
-}
 
-extern bool is_alps_cray_system(void)
-{
-	if (working_cluster_rec)
-		return working_cluster_rec->flags & CLUSTER_FLAG_CRAY_A;
-#ifdef HAVE_ALPS_CRAY
+#ifdef HAVE_NATIVE_CRAY
 	return true;
-#endif
+#else
 	return false;
+#endif
 }
 
 extern uint16_t slurmdb_setup_cluster_name_dims(void)
@@ -108,9 +100,6 @@ extern uint32_t slurmdb_setup_cluster_flags(void)
 	cluster_flags = 0;
 #ifdef MULTIPLE_SLURMD
 	cluster_flags |= CLUSTER_FLAG_MULTSD;
-#endif
-#ifdef HAVE_ALPS_CRAY
-	cluster_flags |= CLUSTER_FLAG_CRAY_A;
 #endif
 #ifdef HAVE_FRONT_END
 	cluster_flags |= CLUSTER_FLAG_FE;
@@ -209,6 +198,9 @@ slurm_setup_remote_working_cluster(resource_allocation_response_msg_t *msg)
 
 	working_cluster_rec = (slurmdb_cluster_rec_t *)msg->working_cluster_rec;
 	msg->working_cluster_rec = NULL;
+
+	working_cluster_rec->plugin_id_select =
+		select_get_plugin_id_pos(working_cluster_rec->plugin_id_select);
 
 	slurm_set_addr(&working_cluster_rec->control_addr,
 		       working_cluster_rec->control_port,

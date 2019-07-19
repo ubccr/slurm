@@ -976,7 +976,7 @@ static void _validate_mask(uint32_t task_id, hwloc_obj_t obj, cpu_set_t *ts)
 
 #endif
 
-extern int task_cgroup_cpuset_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
+extern int task_cgroup_cpuset_init(void)
 {
 	/* initialize user/job/jobstep cgroup relative paths */
 	user_cgroup_path[0]='\0';
@@ -984,7 +984,7 @@ extern int task_cgroup_cpuset_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	jobstep_cgroup_path[0]='\0';
 
 	/* initialize cpuset cgroup namespace */
-	if (xcgroup_ns_create(slurm_cgroup_conf, &cpuset_ns, "", "cpuset")
+	if (xcgroup_ns_create(&cpuset_ns, "", "cpuset")
 	    != XCGROUP_SUCCESS) {
 		error("task/cgroup: unable to create cpuset namespace");
 		return SLURM_ERROR;
@@ -993,7 +993,7 @@ extern int task_cgroup_cpuset_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	return SLURM_SUCCESS;
 }
 
-extern int task_cgroup_cpuset_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
+extern int task_cgroup_cpuset_fini(void)
 {
 	xcgroup_t cpuset_cg;
 
@@ -1046,7 +1046,7 @@ extern int task_cgroup_cpuset_create(stepd_step_rec_t *job)
 	int rc;
 	int fstatus = SLURM_ERROR;
 	xcgroup_t cpuset_cg;
-	uint32_t jobid = job->jobid;
+	uint32_t jobid;
 	uint32_t stepid = job->stepid;
 	uid_t uid = job->uid;
 	uid_t gid = job->gid;
@@ -1108,6 +1108,10 @@ again:
 	xfree(slurm_cgpath);
 
 	/* build job cgroup relative path if no set (should not be) */
+	if (job->pack_jobid && (job->pack_jobid != NO_VAL))
+		jobid = job->pack_jobid;
+	else
+		jobid = job->jobid;
 	if (*job_cgroup_path == '\0') {
 		if (snprintf(job_cgroup_path,PATH_MAX,"%s/job_%u",
 			     user_cgroup_path, jobid) >= PATH_MAX) {
@@ -1236,7 +1240,6 @@ again:
 		goto error;
 	}
 	xcgroup_set_param(&job_cpuset_cg, cpuset_meta, job_alloc_cores);
-
 	/*
 	 * create step cgroup in the cpuset ns (it should not exists)
 	 * use job's user uid/gid to enable tasks cgroups creation by
@@ -1289,7 +1292,6 @@ again:
 
 	/* validate the requested cpu frequency and set it */
 	cpu_freq_cgroup_validate(job, step_alloc_cores);
-
 error:
 	xcgroup_unlock(&cpuset_cg);
 	xcgroup_destroy(&cpuset_cg);

@@ -99,6 +99,7 @@ typedef struct {
 	char *features;
 	char *features_act;
 	char *gres;
+	char *gres_used;
 	char *cluster_name;
 	char *reason;
 	time_t reason_time;
@@ -108,7 +109,6 @@ typedef struct {
 	hostlist_t hostnames;
 	hostlist_t node_addr;
 	hostlist_t nodes;
-	hostlist_t ionodes;
 
 	/* part_info contains partition, avail, max_time, job_size,
 	 * root, share/oversubscribe, groups, priority */
@@ -131,6 +131,7 @@ struct sinfo_match_flags {
 	bool features_act_flag;
 	bool groups_flag;
 	bool gres_flag;
+	bool gres_used_flag;
 	bool hostnames_flag;
 	bool job_size_flag;
 	bool default_time_flag;

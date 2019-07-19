@@ -79,7 +79,6 @@ typedef struct env_options {
 	uint16_t pty_port;	/* used to communicate window size changes */
 	uint16_t ws_col;	/* window size, columns */
 	uint16_t ws_row;	/* window size, row count */
-	char *ckpt_dir;		/* --ckpt-dir=                 */
 	uint16_t restart_cnt;	/* count of job restarts	*/
 	uint16_t batch_flag;	/* 1 if batch: queued job with script */
 	uint32_t uid;		/* user ID */
@@ -94,7 +93,8 @@ typedef struct env_options {
  * if env is NULL, otherwise they operate on the argument array */
 int	envcount (char **env);
 char *	getenvp(char **env, const char *name);
-int	setenvf(char ***envp, const char *name, const char *fmt, ...);
+int	setenvf(char ***envp, const char *name, const char *fmt, ...)
+		__attribute__ ((format (printf, 3, 4)));
 int	setenvfs(const char *fmt, ...);
 void	unsetenvp(char **env, const char *name);
 

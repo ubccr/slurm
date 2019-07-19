@@ -36,7 +36,7 @@ system-auth or sshd (you may use either the "required" or "sufficient" PAM
 control flag):</p>
 
 <pre>
-account    sufficient    pam_slurm_adopt.so
+account    required      pam_slurm_adopt.so
 </pre>
 
 <p> The order of plugins is very important. pam_slurm_adopt.so should be the
@@ -49,10 +49,16 @@ You might have the following account stack in sshd:</p>
 account    required      pam_nologin.so
 account    include       password-auth
 ...
-account    sufficient    pam_slurm_adopt.so
+-account    required      pam_slurm_adopt.so
 </pre>
 
-<p>pam_slurm_adopt must be used with the task/cgroup plugin.
+<p>Note the "-" before the account entry for pam_slurm_adopt. It allows
+PAM to fail gracefully if the pam_slurm_adopt.so file is not found. If Slurm
+is on a shared filesystem, such as NFS, then this is suggested to avoid being
+locked out of a node while the shared filesystem is mounting or down.</p>
+
+<p>pam_slurm_adopt must be used with the task/cgroup task plugin and either the
+proctrack/cgroup or the proctrack/cray_aries proctrack plugin.
 The pam_systemd module will conflict with pam_slurm_adopt, so you need to
 disable it in all files that are included in sshd or system-auth (e.g.
 password-auth, common-session, etc.). You should also stop and mask
@@ -87,6 +93,16 @@ account    required      pam_access.so
 +:wheel:ALL
 -:ALL:ALL
 </pre>
+
+<p>An alternative to pam_access is to place pam_listfile.so before
+pam_slurm_adopt.so. For example:</p>
+
+<pre>
+account    sufficient    pam_listfile.so item=user sense=allow onerr=fail file=/path/to/allowed_users_file
+account    required      pam_slurm_adopt.so
+</pre>
+
+<p>List the usernames of the allowed users in allowed_users_file.</p>
 
 <p>When access is denied, the user will receive a relevant error message.</p>
 
@@ -237,6 +253,19 @@ NodeName in <b>slurm.conf</b> that this host operates as.
 </dd>
 </dl>
 
+<dl compact>
+<dt><b>service</b></dt>
+<dd>The pam service name for which this module should run. By default
+it only runs for sshd for which it was designed for. A
+different service name can be specified like "login" or "*" to
+allow the module to in any service context. For local pam logins
+this module could cause unexpected behaviour or even security
+issues. Therefore if the service name does not match then this
+module will not perform the adoption logic and returns
+PAM_IGNORE immediately.
+</dd>
+</dl>
+
 </dl>
 
 <h2><a name="SLURM_CONFIG">Slurm Configuration</a></h2>
@@ -277,6 +306,9 @@ the RPC initiator.</p>
 <p>Alternate authentication methods such as multi-factor authentication may
 break process adoption with pam_slurm_adopt.</p>
 
-<p style="text-align:center;">Last modified 11 December 2018</p>
+<p>SELinux may conflict with pam_slurm_adopt, so it might need to be
+disabled.</p>
+
+<p style="text-align:center;">Last modified 29 April 2019</p>
 
 <!--#include virtual="footer.txt"-->

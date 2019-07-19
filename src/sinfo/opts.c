@@ -294,6 +294,9 @@ extern void parse_command_line(int argc, char **argv)
 		}
 	}
 
+	if (params.long_output && params.format)
+		fatal("Options -o(--format) and -l(--long) are mutually exclusive. Please remove one and retry.");
+
 	if (opt_a_set && opt_p_set) {
 		error("Conflicting options, -a and -p, specified. "
 		      "Please choose one or the other.");
@@ -498,6 +501,8 @@ _node_state_list (void)
 	xstrcat(all_states, ",");
 	xstrcat(all_states, node_state_string(NODE_STATE_COMPLETING));
 	xstrcat(all_states, ",");
+	xstrcat(all_states, node_state_string(NODE_STATE_POWERING_DOWN));
+	xstrcat(all_states, ",");
 	xstrcat(all_states, node_state_string(NODE_STATE_POWER_SAVE));
 	xstrcat(all_states, ",");
 	xstrcat(all_states, node_state_string(NODE_STATE_POWER_UP));
@@ -560,6 +565,8 @@ _node_state_id (char *str)
 		return NODE_STATE_COMPLETING;
 	if (xstrncasecmp("NO_RESPOND", str, len) == 0)
 		return NODE_STATE_NO_RESPOND;
+	if (_node_state_equal (NODE_STATE_POWERING_DOWN, str))
+		return NODE_STATE_POWERING_DOWN;
 	if (_node_state_equal (NODE_STATE_POWER_SAVE, str))
 		return NODE_STATE_POWER_SAVE;
 	if (_node_state_equal (NODE_STATE_POWER_UP, str))
@@ -859,7 +866,7 @@ _parse_format( char* format )
 					right_justify,
 					suffix );
 		} else if (format_all) {
-			;	/* ignore */
+			xfree(suffix);	/* ignore */
 		} else {
 			prefix = xstrdup("%");
 			xstrcat(prefix, token);
@@ -987,6 +994,12 @@ static int _parse_long_format (char* format_long)
 		} else if (!xstrcasecmp(token, "gres")) {
 			params.match_flags.gres_flag = true;
 			format_add_gres( params.format_list,
+					 field_size,
+					 right_justify,
+					 suffix );
+		} else if (!xstrcasecmp(token, "gresused")) {
+			params.match_flags.gres_used_flag = true;
+			format_add_gres_used( params.format_list,
 					 field_size,
 					 right_justify,
 					 suffix );
@@ -1299,6 +1312,8 @@ void _print_options( void )
 	printf("groups_flag     = %s\n", params.match_flags.groups_flag ?
 					"true" : "false");
 	printf("gres_flag       = %s\n", params.match_flags.gres_flag ?
+			"true" : "false");
+	printf("gres_used_flag  = %s\n", params.match_flags.gres_used_flag ?
 			"true" : "false");
 	printf("job_size_flag   = %s\n", params.match_flags.job_size_flag ?
 					"true" : "false");

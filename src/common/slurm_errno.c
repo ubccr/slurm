@@ -53,7 +53,6 @@
 
 #include "slurm/slurm_errno.h"
 
-#include "src/common/slurm_jobcomp.h"
 #include "src/common/switch.h"
 
 /* Type for error string table entries */
@@ -181,8 +180,8 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_INVALID_CHECKPOINT_TYPE_CHANGE,
 	  "CheckpointType change requires restart of all Slurm daemons "
 	  "to take effect"					},
-	{ ESLURM_INVALID_CRYPTO_TYPE_CHANGE,
-	  "CryptoType change requires restart of all Slurm daemons "
+	{ ESLURM_INVALID_CRED_TYPE_CHANGE,
+	  "CredType change requires restart of all Slurm daemons "
 	  "to take effect"					},
 	{ ESLURM_INVALID_SCHEDTYPE_CHANGE,
 	  "SchedulerType change requires restart of the slurmctld daemon "
@@ -367,9 +366,15 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Reboot already in progress" },
 	{ ESLURM_MULTI_KNL_CONSTRAINT,
 	  "Multiple KNL NUMA and/or MCDRAM constraints require use of a heterogeneous job" },
+	{ ESLURM_UNSUPPORTED_GRES,
+	  "Requested GRES option unsupported by configured SelectType plugin" },
+	{ ESLURM_INVALID_NICE,
+	  "Invalid --nice value"				},
+	{ ESLURM_INVALID_TIME_MIN_LIMIT,
+	  "Invalid time-min specification (exceeds job's time or other limits)"},
 
 	/* slurmd error codes */
-	{ ESLRUMD_PIPE_ERROR_ON_TASK_SPAWN,
+	{ ESLURMD_PIPE_ERROR_ON_TASK_SPAWN,
 	  "Pipe error on task spawn"				},
 	{ ESLURMD_KILL_TASK_FAILED,
 	  "Kill task failed"					},
@@ -427,6 +432,8 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Job step is suspended"                               },
  	{ ESLURMD_STEP_NOTSUSPENDED,
 	  "Job step is not currently suspended"                 },
+	{ ESLURMD_INVALID_SOCKET_NAME_LEN,
+	  "Unix socket name exceeded maximum length"		},
 
 	/* slurmd errors in user batch job */
 	{ ESCRIPT_CHDIR_FAILED,
@@ -460,6 +467,14 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Failed to open authentication public key"		},
 	{ ESLURM_AUTH_NET_ERROR,
 	  "Failed to connect to authentication agent"		},
+	{ ESLURM_AUTH_BADARG,
+	  "Bad argument to plugin function"			},
+	{ ESLURM_AUTH_MEMORY,
+	  "Memory management error"				},
+	{ ESLURM_AUTH_INVALID,
+	  "Authentication credential invalid"			},
+	{ ESLURM_AUTH_UNPACK,
+	  "Cannot unpack credential"				},
 
 	/* accounting errors */
 	{ ESLURM_DB_CONNECTION,
@@ -518,24 +533,6 @@ static char *_lookup_slurm_api_errtab(int errnum)
 		}
 	}
 
-	if ((res == NULL) &&
-	    (errnum >= ESLURM_JOBCOMP_MIN) &&
-	    (errnum <= ESLURM_JOBCOMP_MAX))
-		res = g_slurm_jobcomp_strerror(errnum);
-
-#if 0
-	/* If needed, re-locate slurmctld/sched_plugin.[ch] into common */
-	if ((res == NULL) &&
-	    (errnum >= ESLURM_SCHED_MIN) &&
-	    (errnum <= ESLURM_SCHED_MAX))
-		res = sched_strerror(errnum);
-#endif
-
-	if ((res == NULL) &&
-	    (errnum >= ESLURM_SWITCH_MIN) &&
-	    (errnum <= ESLURM_SWITCH_MAX))
-		res = switch_g_strerror(errnum);
-
 	return res;
 }
 
@@ -577,7 +574,7 @@ void slurm_seterrno(int errnum)
 /*
  * Print "message: error description" on stderr for current errno value.
  */
-void slurm_perror(char *msg)
+void slurm_perror(const char *msg)
 {
 	fprintf(stderr, "%s: %s\n", msg, slurm_strerror(errno));
 }

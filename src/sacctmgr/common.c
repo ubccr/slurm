@@ -654,6 +654,12 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("Preempt");
 		field->len = 10;
 		field->print_routine = sacctmgr_print_qos_bitstr;
+	} else if (!xstrncasecmp("PreemptExemptTime", object,
+				 MAX(command_len, 8))) {
+		field->type = PRINT_PRXMPT;
+		field->name = xstrdup("PreemptExemptTime");
+		field->len = 19;
+		field->print_routine = print_fields_time_from_secs;
 	} else if (!xstrncasecmp("Priority", object, MAX(command_len, 3))) {
 		field->type = PRINT_PRIO;
 		field->name = xstrdup("Priority");
@@ -717,16 +723,28 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("Time");
 		field->len = 19;
 		field->print_routine = print_fields_date;
+	} else if (!xstrncasecmp("TimeEligible", object, MAX(command_len, 6)) ||
+		   !xstrncasecmp("Eligible", object, MAX(command_len, 2))) {
+		field->type = PRINT_TIMEELIGIBLE;
+		field->name = xstrdup("TimeEligible");
+		field->len = 19;
+		field->print_routine = print_fields_date;
+	} else if (!xstrncasecmp("TimeEnd", object, MAX(command_len, 6)) ||
+		   !xstrncasecmp("End", object, MAX(command_len, 2))) {
+		field->type = PRINT_TIMEEND;
+		field->name = xstrdup("TimeEnd");
+		field->len = 19;
+		field->print_routine = print_fields_date;
 	} else if (!xstrncasecmp("TimeStart", object, MAX(command_len, 7)) ||
 		   !xstrncasecmp("Start", object, MAX(command_len, 3))) {
 		field->type = PRINT_TIMESTART;
 		field->name = xstrdup("TimeStart");
 		field->len = 19;
 		field->print_routine = print_fields_date;
-	} else if (!xstrncasecmp("TimeEnd", object, MAX(command_len, 5)) ||
-		   !xstrncasecmp("End", object, MAX(command_len, 2))) {
-		field->type = PRINT_TIMEEND;
-		field->name = xstrdup("TimeEnd");
+	} else if (!xstrncasecmp("TimeSubmit", object, MAX(command_len, 6)) ||
+		   !xstrncasecmp("Submit", object, MAX(command_len, 2))) {
+		field->type = PRINT_TIMESUBMIT;
+		field->name = xstrdup("TimeSubmit");
 		field->len = 19;
 		field->print_routine = print_fields_date;
 	} else if (!xstrncasecmp("TRES", object,
@@ -1851,6 +1869,11 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 	if (assoc->parent_acct)
 		printf("  Parent        = %s\n", assoc->parent_acct);
 
+	if (assoc->priority == INFINITE)
+		printf("  Priority      = NONE\n");
+	else if (assoc->priority != NO_VAL)
+		printf("  Priority      = %d\n", assoc->priority);
+
 	if (assoc->qos_list) {
 		if (!g_qos_list)
 			g_qos_list =
@@ -2141,7 +2164,7 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		char *temp_char = get_qos_complete_str(g_qos_list,
 						       qos->preempt_list);
 		if (temp_char) {
-			printf("  Preempt          = %s\n", temp_char);
+			printf("  Preempt                  = %s\n", temp_char);
 			xfree(temp_char);
 		}
 	}
@@ -2149,6 +2172,16 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 	if (qos->preempt_mode && (qos->preempt_mode != NO_VAL16)) {
 		printf("  PreemptMode              = %s\n",
 		       preempt_mode_string(qos->preempt_mode));
+	}
+
+	if (qos->preempt_exempt_time == INFINITE) {
+		printf("  PreemptExemptTime        = NONE\n");
+	} else if (qos->preempt_exempt_time != NO_VAL) {
+		char time_buf[32];
+		secs2time_str((time_t) qos->preempt_exempt_time, time_buf,
+			      sizeof(time_buf));
+		printf("  PreemptExemptTime        = %s\n",
+	       		time_buf);
 	}
 
 	if (qos->priority == INFINITE)

@@ -225,7 +225,7 @@ extern int topo_build_config(void)
 
 /*
  * topo_generate_node_ranking  - Reads in topology.conf file and the switch 
- * connection infomation for the Hypercube network topology. Use Hilbert Curves
+ * connection information for the Hypercube network topology. Use Hilbert Curves
  * to sort switches into multiple 1 dimensional tables which are used in the 
  * select plugin to find the best-fit cluster of nodes for a job. 
  */
@@ -993,7 +993,7 @@ static void _build_hypercube_switch_table(int num_curves)
 		hypercube_switch_table[i].switch_index =
 			switch_data_table[i].index;
 		hypercube_switch_table[i].switch_name = xmalloc(
-			sizeof(char) * (strlen(switch_data_table[i].name) + 1));
+			strlen(switch_data_table[i].name) + 1);
 			
 		strcpy(hypercube_switch_table[i].switch_name, 
 			switch_data_table[i].name);
@@ -1316,14 +1316,14 @@ static void _print_sorted_hilbert_curves( int num_curves )
 /* returns a string of a switch's name coordinates and connections */
 static char *_print_switch_str(switch_data *switch_ptr, int print, char *offset)
 {
-//XXX overrun possibility
-	char *str = xmalloc(sizeof(char) * 1024);
+	char *str = NULL;
 	char *coordinates = _create_coordinate_str(switch_ptr);
 	char *connections = _create_connection_str(switch_ptr);
 	char *conn_nodes = _create_conn_node_str(switch_ptr);
 
-	sprintf(str, "%s%s -- coordinates: %s -- connections:%s -- nodes:%s",
-		offset, switch_ptr->name, coordinates, connections, conn_nodes);
+	xstrfmtcat(str, "%s%s -- coordinates: %s -- connections:%s -- nodes:%s",
+		   offset, switch_ptr->name, coordinates, connections,
+		   conn_nodes);
 	xfree(coordinates);
 	xfree(connections);
 	xfree(conn_nodes);
@@ -1341,13 +1341,9 @@ static char *_print_switch_str(switch_data *switch_ptr, int print, char *offset)
 static char *_create_coordinate_str(switch_data *switch_ptr)
 {
 	int i;
-	char *str = xmalloc( sizeof(char) * 1024);
-
-	strcpy(str,"(");
+	char *str = xstrdup("(");
 	for (i = 0; i < hypercube_dimensions; i++) {
-		char buf[5];
-		sprintf(buf, "%d,",switch_ptr->coordinates[i]);
-		strcat(str, buf);
+		xstrfmtcat(str, "%d,", switch_ptr->coordinates[i]);
 	}
 	str[strlen(str)-1] = ')';
 	return str;
@@ -1358,17 +1354,13 @@ static char *_create_coordinate_str(switch_data *switch_ptr)
 static char *_create_connection_str(switch_data *switch_ptr)
 {
 	int i;
-	char *str = xmalloc(sizeof(char) * 1024);
-
-	strcpy(str,"");
+	char *str = NULL;
 	for (i = 0; i < switch_ptr->sw_conn_cnt; i++) {
-		char buf[64];
-		sprintf(buf, "%s-%d,", switch_ptr->sw_conns[i]->name,
-			switch_ptr->sw_conn_speed[i] );
-		strcat(str, buf);
+		xstrfmtcat(str, "%s-%d,", switch_ptr->sw_conns[i]->name,
+			   switch_ptr->sw_conn_speed[i]);
 	}
-
-	str[strlen(str)-1] = '\0';
+	if (str)
+		str[strlen(str)-1] = '\0';
 	return str;
 }
 
@@ -1377,15 +1369,12 @@ static char *_create_connection_str(switch_data *switch_ptr)
 static char *_create_conn_node_str(switch_data *switch_ptr)
 {
 	int i;
-	char *str = xmalloc( sizeof(char) * 1024);
-
-	strcpy(str,"");
+	char *str = NULL;
 	for (i = 0; i < switch_ptr->node_conn_cnt; i++) {
-		char buf[64];
-		sprintf(buf, "%s,",switch_ptr->node_conns[i]->name);
-		strcat(str, buf);
+		xstrfmtcat(str, "%s,", switch_ptr->node_conns[i]->name);
 	}
-	str[strlen(str)-1] = '\0';
+	if (str)
+		str[strlen(str)-1] = '\0';
 	return str;
 }
 

@@ -73,7 +73,7 @@ slurm_reconfigure (void)
 	if (rc)
 		slurm_seterrno_ret(rc);
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -144,7 +144,7 @@ extern int slurm_takeover(int backup_inx)
 
 static int _send_message_controller(int dest, slurm_msg_t *req)
 {
-	int rc = SLURM_PROTOCOL_SUCCESS;
+	int rc = SLURM_SUCCESS;
 	int fd = -1;
 	slurm_msg_t resp_msg;
 
@@ -189,7 +189,7 @@ static int _send_message_controller(int dest, slurm_msg_t *req)
  * IN debug_flags_plus  - debug flags to be added
  * IN debug_flags_minus - debug flags to be removed
  * IN debug_flags_set   - new debug flags value
- * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ * RET SLURM_SUCCESS on success, otherwise return SLURM_ERROR with errno set
  */
 extern int
 slurm_set_debugflags (uint64_t debug_flags_plus, uint64_t debug_flags_minus)
@@ -202,6 +202,7 @@ slurm_set_debugflags (uint64_t debug_flags_plus, uint64_t debug_flags_minus)
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
 
+	memset(&req, 0, sizeof(req));
 	req.debug_flags_minus = debug_flags_minus;
 	req.debug_flags_plus  = debug_flags_plus;
 	req_msg.msg_type = REQUEST_SET_DEBUG_FLAGS;
@@ -222,13 +223,13 @@ slurm_set_debugflags (uint64_t debug_flags_plus, uint64_t debug_flags_minus)
 		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
 		break;
 	}
-        return SLURM_PROTOCOL_SUCCESS;
+        return SLURM_SUCCESS;
 }
 
 /*
  * slurm_set_debug_level - issue RPC to set slurm controller debug level
  * IN debug_level - requested debug level
- * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ * RET SLURM_SUCCESS on success, otherwise return SLURM_ERROR with errno set
  */
 extern int
 slurm_set_debug_level (uint32_t debug_level)
@@ -241,6 +242,7 @@ slurm_set_debug_level (uint32_t debug_level)
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
 
+	memset(&req, 0, sizeof(req));
 	req.debug_level  = debug_level;
 	req_msg.msg_type = REQUEST_SET_DEBUG_LEVEL;
 	req_msg.data     = &req;
@@ -260,13 +262,13 @@ slurm_set_debug_level (uint32_t debug_level)
 		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
 		break;
 	}
-        return SLURM_PROTOCOL_SUCCESS;
+        return SLURM_SUCCESS;
 }
 
 /*
  * slurm_set_schedlog_level - issue RPC to set slurm scheduler log level
  * IN schedlog_level - requested scheduler log level
- * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ * RET SLURM_SUCCESS on success, otherwise return SLURM_ERROR with errno set
  */
 int
 slurm_set_schedlog_level (uint32_t schedlog_level)
@@ -279,6 +281,7 @@ slurm_set_schedlog_level (uint32_t schedlog_level)
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
 
+	memset(&req, 0, sizeof(req));
 	req.debug_level  = schedlog_level;
 	req_msg.msg_type = REQUEST_SET_SCHEDLOG_LEVEL;
 	req_msg.data     = &req;
@@ -298,13 +301,13 @@ slurm_set_schedlog_level (uint32_t schedlog_level)
 		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
 		break;
 	}
-        return SLURM_PROTOCOL_SUCCESS;
+        return SLURM_SUCCESS;
 }
 
 /*
  * slurm_set_fs_dampeningfactor - issue RPC to set fs dampening factor
  * IN factor  - requested fs dampening factor
- * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ * RET SLURM_SUCCESS on success, otherwise return SLURM_ERROR with errno set
  */
 extern int slurm_set_fs_dampeningfactor (uint16_t factor)
 {
@@ -316,6 +319,7 @@ extern int slurm_set_fs_dampeningfactor (uint16_t factor)
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
 
+	memset(&req, 0, sizeof(req));
 	req.dampening_factor  = factor;
 	req_msg.msg_type = REQUEST_SET_FS_DAMPENING_FACTOR;
 	req_msg.data     = &req;
@@ -335,5 +339,5 @@ extern int slurm_set_fs_dampeningfactor (uint16_t factor)
 		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
 		break;
 	}
-        return SLURM_PROTOCOL_SUCCESS;
+        return SLURM_SUCCESS;
 }

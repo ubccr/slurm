@@ -85,7 +85,7 @@ typedef enum {
 	DBD_MODIFY_CLUSTERS,    /* #1430, Modify existing cluster       */
 	DBD_MODIFY_USERS,       /* Modify existing user                 */
 	DBD_NODE_STATE,		/* Record node state transition		*/
-	DBD_RC, 		/* DEFUNCT, use PERSIST_RC instead.	*/
+	DBD_DEFUNCT_RPC_1433,	/* Free for reuse			*/
 	DBD_REGISTER_CTLD,	/* Register a slurmctld's comm port	*/
 	DBD_REMOVE_ACCOUNTS,    /* Remove existing account              */
 	DBD_REMOVE_ACCOUNT_COORDS,/* Remove existing coordinator from
@@ -96,9 +96,7 @@ typedef enum {
 	DBD_ROLL_USAGE,         /* #1440 Roll up usage                  */
 	DBD_STEP_COMPLETE,	/* Record step completion		*/
 	DBD_STEP_START,		/* Record step starting			*/
-	DBD_UPDATE_SHARES_USED,	/* Doesn't do anything but
-				 * needs to be here for
-				 * history sake		*/
+	DBD_DEFUNCT_RPC_1443,	/* Free for reuse			*/
 	DBD_GET_JOBS_COND, 	/* Get job information with a condition */
 	DBD_GET_TXN,		/* Get transaction information		*/
 	DBD_GOT_TXN,		/* Got transaction information		*/
@@ -259,7 +257,8 @@ typedef struct dbd_job_start_msg {
 	char *   array_task_str;/* hex string of unstarted tasks */
 	uint32_t array_task_pending;/* number of tasks still pending */
 	uint32_t assoc_id;	/* accounting association id */
-	char *   block_id;      /* Bluegene block id */
+	char *   constraints;   /* features/constraints requested by job */
+	uint32_t db_flags;      /* flags about job */
 	uint64_t db_index;	/* index into the db for this job */
 	time_t   eligible_time;	/* time job becomes eligible to run */
 	uint32_t gid;	        /* group ID */
@@ -279,6 +278,8 @@ typedef struct dbd_job_start_msg {
 	uint64_t req_mem;       /* requested minimum memory */
 	uint32_t resv_id;	/* reservation id */
 	time_t   start_time;	/* job start time */
+	uint32_t state_reason_prev; /* Last reason of blocking before job
+				     * started */
 	time_t   submit_time;	/* job submit time */
 	uint32_t timelimit;	/* job timelimit */
 	uint32_t uid;	        /* user ID if associations are being used */

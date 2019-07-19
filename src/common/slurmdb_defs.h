@@ -55,7 +55,9 @@
 /* This is used to point out constants that exist in the
  * TRES records.  This should be the same order as
  * the enum pointing out the order in the array that is defined in
- * src/slurmctld/slurmctld.h
+ * src/slurmctld/slurmctld.h.  If this changes please also update
+ * src/plugins/accounting_storage/filetxt/accounting_storage_filetxt.c
+ * acct_storage_p_get_tres() to reflect things as it is static.
  */
 typedef enum {
 	TRES_CPU = 1,
@@ -122,6 +124,8 @@ extern char *slurmdb_cluster_fed_states_str(uint32_t states);
 extern uint32_t str_2_cluster_fed_states(char *states);
 extern char *slurmdb_federation_flags_str(uint32_t flags);
 extern uint32_t str_2_federation_flags(char *flags, int option);
+extern char *slurmdb_job_flags_str(uint32_t flags);
+extern uint32_t str_2_job_flags(char *flags);
 extern char *slurmdb_qos_str(List qos_list, uint32_t level);
 extern uint32_t str_2_slurmdb_qos(List qos_list, char *level);
 extern char *slurmdb_qos_flags_str(uint32_t flags);
@@ -288,5 +292,8 @@ extern char *slurmdb_ave_tres_usage(char *tres_string, int tasks);
 
 /* Setup cluster rec with plugin_id that indexes into select list */
 extern int slurmdb_setup_cluster_rec(slurmdb_cluster_rec_t *cluster_rec);
+
+extern void slurmdb_job_cond_def_start_end(slurmdb_job_cond_t *job_cond);
+extern int slurmdb_job_sort_by_submit_time(void *v1, void *v2);
 
 #endif

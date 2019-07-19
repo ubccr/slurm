@@ -589,40 +589,6 @@ This package export constants for use with Slurm. This includes enumerations and
 
 =back
 
-=head3 Connection type
-
-=over 2
-
-=item * SELECT_MESH         0
-
-=item * SELECT_TORUS        1
-
-=item * SELECT_NAV          2
-
-=item * SELECT_SMALL        3
-
-=item * SELECT_HTC_S        4
-
-=item * SELECT_HTC_D        5
-
-=item * SELECT_HTC_V        6
-
-=item * SELECT_HTC_L        7
-
-=back
-
-=head3 Node use type
-
-=over 2
-
-=item * SELECT_COPROCESSOR_MODE         0
-
-=item * SELECT_VIRTUAL_NODE_MODE        1
-
-=item * SELECT_NAV_MODE                 2
-
-=back
-
 =head3 Select jobdata type
 
 =over 2
@@ -663,15 +629,7 @@ This package export constants for use with Slurm. This includes enumerations and
 
 =over 2
 
-=item * SELECT_NODEDATA_BITMAP_SIZE       0
-
-=item * SELECT_NODEDATA_SUBGRP_SIZE       1
-
 =item * SELECT_NODEDATA_SUBCNT            2
-
-=item * SELECT_NODEDATA_BITMAP            3
-
-=item * SELECT_NODEDATA_STR               4
 
 =item * SELECT_NODEDATA_PTR               5
 
@@ -782,6 +740,14 @@ This package export constants for use with Slurm. This includes enumerations and
 =item * TRES_ENERGY                     3
 
 =item * TRES_NODE                       4
+
+=item * TRES_BILLING                    5
+
+=item * TRES_FS_DISK                    6
+
+=item * TRES_VMEM                       7
+
+=item * TRES_PAGES                      8
 
 =back
 
@@ -919,14 +885,6 @@ head2 SLURM ERRNO
 =item * SLURM_SUCCESS           0
 
 =item * SLURM_ERROR             -1
-
-=item * SLURM_FAILURE           -1
-
-=item * SLURM_SOCKET_ERROR      -1
-
-=item * SLURM_PROTOCOL_SUCCESS  0
-
-=item * SLURM_PROTOCOL_ERROR    -1
 
 =back
 
@@ -1074,7 +1032,7 @@ head2 SLURM ERRNO
 
 =item * ESLURM_JOB_HELD                                 2042
 
-=item * ESLURM_INVALID_CRYPTO_TYPE_CHANGE               2043
+=item * ESLURM_INVALID_CRED_TYPE_CHANGE                 2043
 
 =item * ESLURM_INVALID_TASK_MEMORY                      2044
 
@@ -1160,7 +1118,7 @@ head2 SLURM ERRNO
 
 =over 2
 
-=item * ESLRUMD_PIPE_ERROR_ON_TASK_SPAWN        4000
+=item * ESLURMD_PIPE_ERROR_ON_TASK_SPAWN        4000
 
 =item * ESLURMD_KILL_TASK_FAILED                4001
 
@@ -1220,6 +1178,8 @@ head2 SLURM ERRNO
 
 =item * ESLURMD_STEP_NOTSUSPENDED               4029
 
+=item * ESLURMD_INVALID_SOCKET_NAME_LEN         4030
+
 =back
 
 =head3 slurmd errors in user batch job
@@ -1234,7 +1194,7 @@ head2 SLURM ERRNO
 
 =back
 
-=head3 socket specific SLURM communications error
+=head3 socket specific Slurm communications error
 
 =over 2
 
@@ -1288,7 +1248,7 @@ Slurm
 
 =head1 AUTHOR
 
-This library is created by Hongjia Cao, E<lt>hjcao(AT)nudt.edu.cnE<gt> and Danny Auble, E<lt>da(AT)llnl.govE<gt>. It is distributed with SLURM.
+This library is created by Hongjia Cao, E<lt>hjcao(AT)nudt.edu.cnE<gt> and Danny Auble, E<lt>da(AT)llnl.govE<gt>. It is distributed with Slurm.
 
 =head1 COPYRIGHT AND LICENSE
 

@@ -50,8 +50,10 @@
 
 #include "slurm/slurm.h"
 
+#include "src/common/cli_filter.h"
 #include "src/common/cpu_frequency.h"
 #include "src/common/env.h"
+#include "src/common/pack.h"
 #include "src/common/plugstack.h"
 #include "src/common/proc_args.h"
 #include "src/common/read_config.h"
@@ -66,7 +68,6 @@
 #define MAX_RETRIES 15
 
 static void  _add_bb_to_script(char **script_body, char *burst_buffer_file);
-static int   _check_cluster_specific_settings(job_desc_msg_t *desc);
 static void  _env_merge_filter(job_desc_msg_t *desc);
 static int   _fill_job_desc_from_opts(job_desc_msg_t *desc);
 static void *_get_script_buffer(const char *filename, int *size);
@@ -88,10 +89,11 @@ int main(int argc, char **argv)
 	char *script_body;
 	char **pack_argv;
 	int script_size = 0, pack_argc, pack_argc_off = 0, pack_inx;
-	int i, rc = SLURM_SUCCESS, retries = 0;
+	int i, rc = SLURM_SUCCESS, retries = 0, pack_limit = 0;
 	bool pack_fini = false;
 	List job_env_list = NULL, job_req_list = NULL;
 	sbatch_env_t *local_env = NULL;
+	bool quiet = false;
 
 	/* force line-buffered output on non-tty outputs */
 	if (!isatty(STDOUT_FILENO))
@@ -114,6 +116,9 @@ int main(int argc, char **argv)
 		error("Failed to register atexit handler for plugins: %m");
 
 	script_name = process_options_first_pass(argc, argv);
+
+	/* Preserve quiet request which is lost in second pass */
+	quiet = opt.quiet;
 
 	/* reinit log with new verbosity (if changed by command line) */
 	if (opt.verbose || opt.quiet) {
@@ -150,8 +155,21 @@ int main(int argc, char **argv)
 			pack_fini = true;
 		}
 
-		if (sbopt.burst_buffer_file)
-			_add_bb_to_script(&script_body, sbopt.burst_buffer_file);
+		/*
+		 * Note that this handling here is different than in
+		 * salloc/srun. Instead of sending the file contents as the
+		 * burst_buffer field in job_desc_msg_t, it will be spliced
+		 * in to the job script.
+		 */
+		if (opt.burst_buffer_file) {
+			Buf buf = create_mmap_buf(opt.burst_buffer_file);
+			if (!buf) {
+				error("Invalid --bbf specification");
+				exit(error_exit);
+			}
+			_add_bb_to_script(&script_body, get_buf_data(buf));
+			free_buf(buf);
+		}
 
 		if (spank_init_post_opt() < 0) {
 			error("Plugin stack post-option processing failed");
@@ -202,6 +220,7 @@ int main(int argc, char **argv)
 			list_append(job_req_list, desc);
 		}
 	}
+	pack_limit = pack_inx;
 	if (!desc) {	/* For CLANG false positive */
 		error("Internal parsing error");
 		exit(1);
@@ -246,13 +265,6 @@ int main(int argc, char **argv)
 			exit(error_exit);
 		}
 	}
-
-	if (job_req_list && is_alps_cray_system()) {
-		info("Heterogeneous jobs not supported on Cray/ALPS systems");
-		exit(1);
-	}
-	if (_check_cluster_specific_settings(desc) != SLURM_SUCCESS)
-		exit(error_exit);
 
 	if (sbopt.test_only) {
 		if (job_req_list)
@@ -304,19 +316,27 @@ int main(int argc, char **argv)
 		exit(error_exit);
 	}
 
-	print_multi_line_string(resp->job_submit_user_msg, -1);
+	print_multi_line_string(resp->job_submit_user_msg, -1, LOG_LEVEL_INFO);
 
-	if (!sbopt.parsable) {
-		printf("Submitted batch job %u", resp->job_id);
-		if (working_cluster_rec)
-			printf(" on cluster %s", working_cluster_rec->name);
-		printf("\n");
-	} else {
-		printf("%u", resp->job_id);
-		if (working_cluster_rec)
-			printf(";%s", working_cluster_rec->name);
-		printf("\n");
+	/* run cli_filter post_submit */
+	for (i = 0; i < pack_limit; i++)
+		cli_filter_plugin_post_submit(i, resp->job_id, NO_VAL);
+
+	if (!quiet) {
+		if (!sbopt.parsable) {
+			printf("Submitted batch job %u", resp->job_id);
+			if (working_cluster_rec)
+				printf(" on cluster %s",
+				       working_cluster_rec->name);
+			printf("\n");
+		} else {
+			printf("%u", resp->job_id);
+			if (working_cluster_rec)
+				printf(";%s", working_cluster_rec->name);
+			printf("\n");
+		}
 	}
+
 	if (sbopt.wait)
 		rc = _job_wait(resp->job_id);
 
@@ -508,62 +528,27 @@ static void _env_merge_filter(job_desc_msg_t *desc)
 	}
 }
 
-/* Returns SLURM_ERROR if settings are invalid for chosen cluster */
-static int _check_cluster_specific_settings(job_desc_msg_t *req)
-{
-	int rc = SLURM_SUCCESS;
-
-	if (is_alps_cray_system()) {
-		/*
-		 * Fix options and inform user, but do not abort submission.
-		 */
-		if (req->shared && (req->shared != NO_VAL16)) {
-			info("--share is not supported on Cray/ALPS systems.");
-			req->shared = NO_VAL16;
-		}
-		if (req->overcommit && (req->overcommit != NO_VAL8)) {
-			info("--overcommit is not supported on Cray/ALPS "
-			     "systems.");
-			req->overcommit = false;
-		}
-		if (req->wait_all_nodes &&
-		    (req->wait_all_nodes != NO_VAL16)) {
-			info("--wait-all-nodes is handled automatically on "
-			     "Cray/ALPS systems.");
-			req->wait_all_nodes = NO_VAL16;
-		}
-	}
-	return rc;
-}
-
 /* Returns 0 on success, -1 on failure */
 static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 {
 	int i;
 	extern char **environ;
 
-	if (opt.jobid_set)
-		desc->job_id = opt.jobid;
 	desc->contiguous = opt.contiguous ? 1 : 0;
 	if (opt.core_spec != NO_VAL16)
 		desc->core_spec = opt.core_spec;
-	desc->features = xstrdup(opt.constraints);
-	desc->cluster_features = xstrdup(opt.c_constraints);
+	desc->features = xstrdup(opt.constraint);
+	desc->cluster_features = xstrdup(opt.c_constraint);
 	if (opt.job_name)
 		desc->name = xstrdup(opt.job_name);
 	else
 		desc->name = xstrdup("sbatch");
 	desc->reservation  = xstrdup(opt.reservation);
 	desc->wckey  = xstrdup(opt.wckey);
-	desc->x11 = opt.x11;
-	if (desc->x11) {
-		desc->x11_magic_cookie = xstrdup(opt.x11_magic_cookie);
-		desc->x11_target_port = opt.x11_target_port;
-	}
 
 	desc->req_nodes = xstrdup(opt.nodelist);
 	desc->extra = xstrdup(opt.extra);
-	desc->exc_nodes = xstrdup(opt.exc_nodes);
+	desc->exc_nodes = xstrdup(opt.exclude);
 	desc->partition = xstrdup(opt.partition);
 	desc->profile = opt.profile;
 	if (opt.licenses)
@@ -625,11 +610,11 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	/* job constraints */
 	if (opt.pn_min_cpus > -1)
 		desc->pn_min_cpus = opt.pn_min_cpus;
-	if (opt.pn_min_memory > -1)
+	if (opt.pn_min_memory != NO_VAL64)
 		desc->pn_min_memory = opt.pn_min_memory;
-	else if (opt.mem_per_cpu > -1)
+	else if (opt.mem_per_cpu != NO_VAL64)
 		desc->pn_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
-	if (opt.pn_min_tmp_disk > -1)
+	if (opt.pn_min_tmp_disk != NO_VAL64)
 		desc->pn_min_tmp_disk = opt.pn_min_tmp_disk;
 	if (opt.overcommit) {
 		desc->min_cpus = MAX(opt.min_nodes, 1);
@@ -711,10 +696,10 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->argv     = xmalloc(sizeof(char *) * sbopt.script_argc);
 	for (i = 0; i < sbopt.script_argc; i++)
 		desc->argv[i] = xstrdup(sbopt.script_argv[i]);
-	desc->std_err  = xstrdup(sbopt.efname);
-	desc->std_in   = xstrdup(sbopt.ifname);
-	desc->std_out  = xstrdup(sbopt.ofname);
-	desc->work_dir = xstrdup(opt.cwd);
+	desc->std_err  = xstrdup(opt.efname);
+	desc->std_in   = xstrdup(opt.ifname);
+	desc->std_out  = xstrdup(opt.ofname);
+	desc->work_dir = xstrdup(opt.chdir);
 	if (sbopt.requeue != NO_VAL)
 		desc->requeue = sbopt.requeue;
 	if (sbopt.open_mode)
@@ -722,7 +707,6 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.acctg_freq)
 		desc->acctg_freq = xstrdup(opt.acctg_freq);
 
-	desc->ckpt_dir = sbopt.ckpt_dir;
 	desc->ckpt_interval = (uint16_t) sbopt.ckpt_interval;
 
 	if (opt.spank_job_env_size) {
@@ -742,8 +726,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.wait4switch >= 0)
 		desc->wait4switch = opt.wait4switch;
 
-	if (opt.power_flags)
-		desc->power_flags = opt.power_flags;
+	desc->power_flags = opt.power;
 	if (opt.job_flags)
 		desc->bitflags = opt.job_flags;
 	if (opt.mcs_label)
@@ -759,7 +742,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		xfree(opt.tres_bind);
 	}
 	desc->tres_bind = xstrdup(opt.tres_bind);
-	xfmt_tres(&opt.tres_freq, "gpu", opt.gpu_freq);
+	xfmt_tres_freq(&opt.tres_freq, "gpu", opt.gpu_freq);
 	if (tres_freq_verify_cmdline(opt.tres_freq)) {
 		error("Invalid --tres-freq argument: %s. Ignored",
 		      opt.tres_freq);
@@ -776,8 +759,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	}
 	xfmt_tres(&desc->tres_per_socket, "gpu", opt.gpus_per_socket);
 	xfmt_tres(&desc->tres_per_task,   "gpu", opt.gpus_per_task);
-	if (opt.mem_per_gpu)
-		xstrfmtcat(desc->mem_per_tres, "gpu:%"PRIi64, opt.mem_per_gpu);
+	if (opt.mem_per_gpu != NO_VAL64)
+		xstrfmtcat(desc->mem_per_tres, "gpu:%"PRIu64, opt.mem_per_gpu);
 
 	desc->clusters = xstrdup(opt.clusters);
 
@@ -848,7 +831,7 @@ static int _set_umask_env(void)
 		((mask>>6)&07), ((mask>>3)&07), mask&07);
 	if (setenvf(NULL, "SLURM_UMASK", "%s", mask_char) < 0) {
 		error ("unable to set SLURM_UMASK in environment");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 	debug ("propagating UMASK=%s", mask_char);
 	return SLURM_SUCCESS;
@@ -1050,7 +1033,7 @@ static int _set_rlimit_env(void)
 
 		if (getrlimit (rli->resource, rlim) < 0) {
 			error ("getrlimit (RLIMIT_%s): %m", rli->name);
-			rc = SLURM_FAILURE;
+			rc = SLURM_ERROR;
 			continue;
 		}
 
@@ -1066,7 +1049,7 @@ static int _set_rlimit_env(void)
 
 		if (setenvf (NULL, name, format, cur) < 0) {
 			error ("unable to set %s in environment", name);
-			rc = SLURM_FAILURE;
+			rc = SLURM_ERROR;
 			continue;
 		}
 
@@ -1076,14 +1059,7 @@ static int _set_rlimit_env(void)
 	/*
 	 *  Now increase NOFILE to the max available for this srun
 	 */
-	if (getrlimit (RLIMIT_NOFILE, rlim) < 0)
-		return (error ("getrlimit (RLIMIT_NOFILE): %m"));
-
-	if (rlim->rlim_cur < rlim->rlim_max) {
-		rlim->rlim_cur = rlim->rlim_max;
-		if (setrlimit (RLIMIT_NOFILE, rlim) < 0)
-			return (error("Unable to increase max no. files: %m"));
-	}
+	rlimits_maximize_nofile();
 
 	return rc;
 }

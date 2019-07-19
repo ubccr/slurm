@@ -41,7 +41,7 @@ submission parameters and available partitions.</li>
 If specified, identifies the version of Slurm used to build this plugin and
 any attempt to load the plugin from a different version of Slurm will result
 in an error.
-If not specified, then the plugin may be loadeed by Slurm commands and
+If not specified, then the plugin may be loaded by Slurm commands and
 daemons from any version, however this may result in difficult to diagnose
 failures due to changes in the arguments to plugin functions or changes
 in other Slurm functions used by the plugin.</p>
@@ -148,11 +148,27 @@ to examine the available partitions, reservations, etc.
 (input) List of pointer to partitions which this user is authorized to use.<br>
 <span class="commandline">submit_uid</span>
 (input) user ID initiating the request.<br>
-<p style="margin-left:.2in"><b>Returns</b>: <br>
-<span class="commandline">0</span> on success, or an
-errno on failure. Slurm specific error numbers from <i>slurm/slurm_errno.h</i>
-may be used. On failure, the request will be rejected and the user will have an
-appropriate error message printed for that errno. 
+<a name="job_modify_returns"></a><p style="margin-left:.2in"><b>Returns</b>: <br>
+<span class="commandline">slurm.SUCCESS</span> &mdash;
+Job submission accepted by plugin.<br>
+<span class="commandline">slurm.FAILURE</span> &mdash;
+Job submission rejected due to error (Deprecated in 19.05).<br>
+<span class="commandline">slurm.ERROR</span> &mdash;
+Job submission rejected due to error.<br>
+<span class="commandline">slurm.ESLURM_ACCESS_DENIED</span> &mdash;
+Job submission rejected due to access denied.<br>
+<span class="commandline">slurm.ESLURM_ACCOUNTING_POLICY</span> &mdash;
+Job submission rejected due to accounting policy.<br>
+<span class="commandline">slurm.ESLURM_INVALID_ACCOUNT</span> &mdash;
+Job submission rejected due to invalid account.<br>
+<span class="commandline">slurm.ESLURM_INVALID_LICENSES</span> &mdash;
+Job submission rejected due to access licenses.<br>
+<span class="commandline">slurm.ESLURM_INVALID_TIME_LIMIT</span> &mdash;
+Job submission rejected due to invalid time limit.<br>
+<span class="commandline">slurm.ESLURM_JOB_MISSING_SIZE_SPECIFICATION</span> &mdash;
+Job submission rejected due to missing size specification.<br>
+<span class="commandline">slurm.ESLURM_MISSING_TIME_LIMIT</span> &mdash;
+Job submission rejected due to missing time limit.<br>
 
 <p class="commandline">
 int job_modify(struct job_descriptor *job_desc, struct job_record *job_ptr,
@@ -173,11 +189,8 @@ be modified.<br>
 (input) List of pointer to partitions which this user is authorized to use.<br>
 <span class="commandline">modify_uid</span>
 (input) user ID initiating the request.<br>
-<span class="commandline">0</span> on success, or an
-errno on failure. Slurm specific error numbers from <i>slurm/slurm_errno.h</i>
-may be used. On failure, the request will be rejected and the user will have an
-appropriate error message printed for that errno. 
-
+<p style="margin-left:.2in"><b>Returns</b>: <br>
+<a href="#job_modify_returns">Returns from job_modify() are the same as the returns from job_submit().</a>
 
 <h2>Building</h2>
 <p>Generally using a LUA interface for a job submit plugin is best:
@@ -193,8 +206,9 @@ Then just build and install Slurm with that new code.
 Building a new plugin outside of the Slurm distribution is possible, but
 far more complex.
 It also requires access to a multitude of Slurm header files as shown in the
-proceedure below.</p>
+procedure below.</p>
 
+<a name="job_modify_manualbuild">
 <ol>
 <li>You will need to at least partly build Slurm first. The "configure" command
 must be executed in order to build the "config.h" file in the build directory.</li>
@@ -220,7 +234,7 @@ other job_submit plugins and modify the example below as required.</li>
 # The Slurm build directory is ~/SLURM/slurm.build
 # The plugin build is to take place in the directory
 #   "~/SLURM/my_submit"
-# The installation locaiton is "/usr/local"
+# The installation location is "/usr/local"
 
 # Build Slurm from ~/SLURM/slurm.build
 # (or at least run "~/SLURM/slurm.git/configure")

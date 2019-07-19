@@ -165,7 +165,7 @@ int main(int argc, char **argv)
 			all_flag = 1;
 			break;
 		case (int)'d':
-			detail_flag++;
+			detail_flag = 1;
 			break;
 		case (int)'F':
 			future_flag = 1;
@@ -304,7 +304,7 @@ static char *_getline(const char *prompt)
 		buf[len-1] = '\0';
 	else
 		len++;
-	line = malloc(len * sizeof(char));
+	line = malloc(len);
 	if (!line)
 		return NULL;
 	strlcpy(line, buf, len);
@@ -588,7 +588,7 @@ _print_daemons (void)
 	char node_name_long[MAX_SLURM_NAME];
 	char *c, *n, *token, *save_ptr = NULL;
 	int actld = 0, ctld = 0, d = 0, i;
-	char daemon_list[] = "slurmctld slurmd";
+	char *daemon_list = NULL;
 
 	slurm_conf_init(NULL);
 	conf = slurm_conf_lock();
@@ -627,12 +627,12 @@ _print_daemons (void)
 		xfree(n);
 	}
 
-	strcpy(daemon_list, "");
 	if (actld && ctld)
-		strcat(daemon_list, "slurmctld ");
+		xstrcat(daemon_list, "slurmctld ");
 	if (actld && d)
-		strcat(daemon_list, "slurmd");
+		xstrcat(daemon_list, "slurmd");
 	fprintf (stdout, "%s\n", daemon_list) ;
+	xfree(daemon_list);
 }
 
 /*
@@ -741,8 +741,8 @@ void _process_reboot_command(const char *tag, int argc, char **argv)
 			 "too many arguments for keyword:%s\n",
 			 tag);
 	} else if ((argc - argc_offset) < 1) {
-		error_code = scontrol_reboot_nodes("ALL", asap, next_state,
-						   reason);
+		exit_code = 1;
+		fprintf(stderr, "Missing node list. Specify ALL|<NodeList>\n");
 	} else {
 		error_code = scontrol_reboot_nodes(argv[argc_offset], asap,
 						   next_state, reason);
@@ -1023,8 +1023,14 @@ static int _process_command (int argc, char **argv)
 					"too few arguments for keyword:%s\n",
 					tag);
 		} else {
+			uint32_t i, flags = 0, start_pos = 1;
 			for (i = 1; i < argc; i++) {
-				scontrol_requeue(argv[i]);
+				if (parse_requeue_flags(argv[i], &flags))
+					break;
+				start_pos++;
+			}
+			for (i = start_pos; i < argc; i++) {
+				scontrol_requeue(flags, argv[i]);
 			}
 		}
 	}
@@ -1036,13 +1042,14 @@ static int _process_command (int argc, char **argv)
 					"too few arguments for keyword:%s\n",
 					tag);
 		} else {
-			uint32_t state_flag = 0, start_pos = 1;
-			if ((argc > 2) &&
-			    (parse_requeue_flags(argv[1], &state_flag) == 0)) {
-				start_pos = 2;
+			uint32_t i, flags = 0, start_pos = 1;
+			for (i = 1; i < argc; i++) {
+				if (parse_requeue_flags(argv[i], &flags))
+					break;
+				start_pos++;
 			}
 			for (i = start_pos; i < argc; i++) {
-				scontrol_requeue_hold(state_flag, argv[i]);
+				scontrol_requeue_hold(flags, argv[i]);
 			}
 		}
 
@@ -1469,6 +1476,8 @@ static int _process_command (int argc, char **argv)
 			scontrol_list_pids (argc == 1 ? NULL : argv[1],
 					    argc <= 2 ? NULL : argv[2]);
 		}
+	} else if (!xstrncasecmp(tag, "getent", MAX(tag_len, 6))) {
+		scontrol_getent(argc == 1 ? NULL : argv[1]);
 	}
 	else if (xstrncasecmp(tag, "notify", MAX(tag_len, 1)) == 0) {
 		if (argc < 3) {
@@ -1576,6 +1585,7 @@ static void _delete_it(int argc, char **argv)
 	/* First identify the entity type to delete */
 	if (xstrncasecmp(tag, "PartitionName", MAX(tag_len, 3)) == 0) {
 		delete_part_msg_t part_msg;
+		memset(&part_msg, 0, sizeof(part_msg));
 		part_msg.name = val;
 		if (slurm_delete_partition(&part_msg)) {
 			char errmsg[64];
@@ -1584,6 +1594,7 @@ static void _delete_it(int argc, char **argv)
 		}
 	} else if (xstrncasecmp(tag, "ReservationName", MAX(tag_len, 3)) == 0) {
 		reservation_name_msg_t   res_msg;
+		memset(&res_msg, 0, sizeof(res_msg));
 		res_msg.name = val;
 		if (slurm_delete_reservation(&res_msg)) {
 			char errmsg[64];
@@ -1922,8 +1933,8 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      ping                     print status of slurmctld daemons.           \n\
      quiet                    print no messages other than error messages. \n\
      quit                     terminate this command.                      \n\
-     reboot [ASAP] [<nodelist>]  reboot the nodes when they become idle.   \n\
-                              By default all nodes are rebooted.           \n\
+     reboot [ASAP] [nextstate=] [reason=] <ALL|nodelist>		   \n\
+			      reboot the nodes when they become idle.      \n\
      reconfigure              re-read configuration files.                 \n\
      release <job_list>       permit specified job to start (see hold)     \n\
      requeue <job_id>         re-queue a batch job                         \n\

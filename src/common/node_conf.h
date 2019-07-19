@@ -51,7 +51,6 @@
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/slurm_protocol_defs.h"
-#include "src/common/slurm_protocol_socket_common.h"
 #include "src/common/xhash.h"
 
 #define CONFIG_MAGIC	0xc065eded
@@ -151,11 +150,6 @@ struct node_record {
 					 * or other sequence number used to
 					 * order nodes by location,
 					 * no need to save/restore */
-#ifdef HAVE_ALPS_CRAY
-	uint32_t basil_node_id;		/* Cray-XT BASIL node ID,
-					 * no need to save/restore */
-	time_t down_time;		/* When first set to DOWN state */
-#endif	/* HAVE_ALPS_CRAY */
 	acct_gather_energy_t *energy;	/* power consumption data */
 	ext_sensors_data_t *ext_sensors; /* external sensor data */
 	power_mgmt_data_t *power;	/* power management data */
@@ -218,11 +212,12 @@ hostlist_t bitmap2hostlist (bitstr_t *bitmap);
 /*
  * build_all_nodeline_info - get a array of slurm_conf_node_t structures
  *	from the slurm.conf reader, build table, and set values
- * IN set_bitmap - if true, set node_bitmap in config record (used by slurmd)
+ * IN set_bitmap - if true then set node_bitmap in config record (used by
+ *		    slurmd), false is used by slurmctld and testsuite
  * IN tres_cnt - number of TRES configured on system (used on controller side)
  * RET 0 if no error, error code otherwise
  */
-extern int build_all_nodeline_info (bool set_bitmap, int tres_cnt);
+extern int build_all_nodeline_info(bool set_bitmap, int tres_cnt);
 
 /*
  * build_all_frontend_info - get a array of slurm_conf_frontend_t structures
@@ -336,11 +331,16 @@ extern uint32_t cr_get_coremap_offset(uint32_t node_index);
  * system it will return a bitmap in cnodes. */
 extern bitstr_t *cr_create_cluster_core_bitmap(int core_mult);
 
-/* Given the number of tasks per core and the actual number of hw threads,
- * compute how many CPUs are "visible" and, hence, usable on the node.
+/*
+ * Determine maximum number of CPUs on this node usable by a job
+ * ntasks_per_core IN - tasks-per-core to be launched by this job
+ * cpus_per_task IN - number of required  CPUs per task for this job
+ * total_cores IN - total number of cores on this node
+ * total_cpus IN - total number of CPUs on this node
+ * RET count of usable CPUs on this node usable by this job
  */
-extern int adjust_cpus_nppcu(uint16_t ntasks_per_core, uint16_t threads,
-			     int cpus);
+extern int adjust_cpus_nppcu(uint16_t ntasks_per_core, int cpus_per_task,
+			     int total_cores, int total_cpus);
 
 /*
  * find_hostname - Given a position and a string of hosts, return the hostname

@@ -7,9 +7,11 @@ SUBDIRS = \
 	auth			\
 	burst_buffer		\
 	checkpoint		\
+	cli_filter		\
 	core_spec		\
-	crypto			\
+	cred			\
 	ext_sensors		\
+	gpu			\
 	gres			\
 	jobacct_gather		\
 	jobcomp			\
@@ -26,6 +28,7 @@ SUBDIRS = \
 	route			\
 	sched			\
 	select			\
+	site_factor		\
 	slurmctld		\
 	switch			\
 	task			\

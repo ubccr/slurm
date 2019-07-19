@@ -49,15 +49,6 @@ exec $bin_rm -f $hostfile
 if { [test_front_end] } {
 	send_user "\nWARNING: This test incompatible with front-end systems\n"
 	exit $exit_code
-} elseif {[test_serial]} {
-	send_user "\nWARNING: This test is incompatible with a serial system\n"
-	exit 0
-}
-
-if {[test_launch_poe]} {
-	set node_name_env MP_I_UPMD_HOSTNAME
-} else {
-	set node_name_env SLURMD_NODENAME
 }
 
 # find out if we have enough nodes to test functionality
@@ -174,7 +165,7 @@ for {set i 0} {$i<4} {incr i} {
 	#
 	# execute srun with a specific node count
 	#
-	send "$srun -l $extra -O $bin_printenv $node_name_env\r"
+	send "$srun -l $extra -O $bin_printenv SLURMD_NODENAME\r"
 	expect {
 		-re "($number): *($alpha_numeric_under)" {
 			set task_id $expect_out(1,string)
@@ -326,7 +317,7 @@ for {set i 0} {$i<5} {incr i} {
 	# execute srun with a specific node count
 	#
 
-	send "$srun -l $extra -O $bin_printenv $node_name_env\r"
+	send "$srun -l $extra -O $bin_printenv SLURMD_NODENAME\r"
 
 	expect {
 		-re "($number): *($alpha_numeric_under)" {

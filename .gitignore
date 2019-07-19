@@ -9,6 +9,7 @@ Makefile
 autom4te.cache
 /api/full_version.map
 /config.h
+/config.h.in~
 /config.log
 /config.status
 /contribs/cray/opt_modulefiles_slurm
@@ -56,5 +57,6 @@ autom4te.cache
 /src/sstat/sstat
 /src/strigger/strigger
 /src/sview/sview
-testsuite/expect/globals.local
+/testsuite/expect/globals.*
+/testsuite/expect/*.log*
 TAGS

@@ -37,6 +37,8 @@
 #ifndef __RUN_COMMAND_H__
 #define __RUN_COMMAND_H__
 
+#include "src/common/track_script.h"
+
 /* used to terminate any outstanding commands */
 extern void run_command_shutdown(void);
 
@@ -49,10 +51,13 @@ extern int run_command_count(void);
  * script_args IN - Arguments to the script
  * max_wait IN - Maximum time to wait in milliseconds,
  *		 -1 for no limit (asynchronous)
+ * tid IN - Thread we are calling from.
  * status OUT - Job exit code
  * Return stdout+stderr of spawned program, value must be xfreed. */
 extern char *run_command(char *script_type, char *script_path,
-			 char **script_argv, int max_wait, int *status);
+			 char **script_argv, int max_wait,
+			 pthread_t tid,
+			 int *status);
 
 /* Free an array of xmalloced records. The array must be NULL terminated. */
 extern void free_command_argv(char **script_argv);

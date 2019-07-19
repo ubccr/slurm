@@ -181,14 +181,13 @@ static int _read_ofed_values(void)
 	ofed_sens.update_time = time(NULL);
 
 	if (first) {
-		char *ibd_ca = NULL;
 		int mgmt_classes[4] = {IB_SMI_CLASS, IB_SMI_DIRECT_CLASS,
 				       IB_SA_CLASS, IB_PERFORMANCE_CLASS};
-		srcport = mad_rpc_open_port(ibd_ca, ofed_conf.port,
+		srcport = mad_rpc_open_port(NULL, ofed_conf.port,
 					    mgmt_classes, 4);
 		if (!srcport) {
-			debug("Failed to open '%s' port '%d'", ibd_ca,
-			      ofed_conf.port);
+			debug("%s: Failed to open port '%d'",
+			      __func__, ofed_conf.port);
 			debug("OFED: failed");
 			return SLURM_ERROR;
 		}
@@ -457,7 +456,7 @@ extern int acct_gather_interconnect_p_get_data(acct_gather_data_t *data)
 	if (_read_ofed_values() != SLURM_SUCCESS) {
 		debug2("%s: Cannot retrieve ofed counters", __func__);
 		slurm_mutex_unlock(&ofed_lock);
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 
 	data[tres_pos].num_reads = ofed_sens.total_rcvpkts;

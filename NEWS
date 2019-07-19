@@ -1,6 +1,561 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 19.05.1-2
+============================
+ -- Fix mistake in QOS time limit calculations for UsageFactor != 0 with any
+    combination of flags set.
+
+* Changes in Slurm 19.05.1
+==========================
+ -- accounting_storage/mysql - fix incorrect function names in error messages.
+ -- accounting_storage/slurmdbd - trigger an fsync() on the dbd.messages state
+    file to ensure it is committed to disk properly.
+ -- Avoid JobHeldUser state reason from being updated at allocation time.
+ -- Fix dump/load of rejected heterogeneous jobs.
+ -- For heterogeneous jobs, do not count the each component against the QOS or
+    association job limit multiple times.
+ -- Comment out documentation for the incomplete and currently unusable
+    burst_buffer/generic plugin.
+ -- Add new error ESLURM_INVALID_TIME_MIN_LIMIT to make note when a time_min
+    limit is invalid based on timelimit.
+ -- Correct slurmdb cluster record pack with NULL pointer input.
+ -- Clearer error message for ESLURM_INVALID_TIME_MIN_LIMIT.
+ -- Fix SchedulerParameter bf_min_prio_reserve error when not the last parameter
+ -- When fixing runaway jobs, change to reroll from earliest submit time, and
+    never reroll from Unix epoch.
+ -- Display submit time when running sacctmgr show runawayjobs and add format
+    option to display eligible time.
+ -- jobcomp/elasticsearch - fix minor race related to JobCompLoc setup.
+ -- For HetJobs, ensure SLURM_PACK_JOB_ID is set regardless of whether
+    PrologFlags=Alloc is enabled.
+ -- Fix PriorityFlags regression with the mutation of FAIR_TREE to NO_FAIR_TREE.
+ -- select/cons_res - fix debug flag SelectType handling in select_p_job_test.
+ -- Fix sacctmgr archive dump commit confirmation.
+ -- Prevent extra resources from being allocated when combining certain flags.
+ -- Cray - fix template generator with update cray_aries plugin names.
+ -- accounting_storage/slurmdbd - provide additional detail in several error
+    messages.
+ -- Backfill - If a job has a time_limit guess the end time of a job better
+    if OverTimeLimit is Unlimited.
+ -- Remove premature call to get system gpus before querying fake gpus that
+    should override the real.
+ -- Fix segfault in epilog_set_env() when gres_devices is NULL.
+ -- Fix (un)supported states in sacct.
+ -- Adjust build system to no longer use the AC_FUNC_MALLOC autoconf macro.
+ -- srun - restore the --cpu_bind option to srun.
+ -- Add UsageFactorSafe QOS flag to control applying UsageFactor at
+    submission/scheduling time.
+ -- Create missing reservations on DBD_MODIFY_RESV.
+ -- Add error message when attempting to update association manager and object
+    doesn't exist.
+ -- Fix security issue in accounting_storage/mysql plugin on archive file loads
+    by always escaping strings within the slurmdbd. CVE-2019-12838.
+
+* Changes in Slurm 19.05.0
+==========================
+ -- Fix deprecated group by clause to use order by.
+ -- NVML - Git rid of unneeded * when passing nvmlDevice_t to functions.
+ -- NVML - Fix clang warning about unneeded variable initialization.
+ -- NVML - remove unneeded {}.
+ -- Add timers to new site_factor plugin APIs to warn of slow-running plugins,
+    which can lead to issues with throughput and responsiveness.
+ -- X11 forwarding - ignore screen value for local DISPLAY.
+ -- Add missing locks protecting slurmctld_config.server_thread_count access.
+ -- Fix jobs stuck from FedJobLock when requeueing in a federation
+ -- Fix requeueing job in a federation of clusters with differing associations
+ -- sacctmgr - free memory before exiting in 'sacctmgr show runaway'.
+ -- Fix seff showing memory overflow when steps tres mem usage is 0.
+ -- Fix memory leaks in 'sacctmgr show runawayjobs'.
+ -- Fix potential deadlock in nss_slurm.
+ -- Fix memory leaks due to incomplete slurmdb_cluster_cond_t destructor.
+ -- Alter reservation flags column in slurmdbd to use uint64_t instead of
+    uint16_t to ensure all current flags are saved correctly. Older releases
+    unfortunately could not store details for newer flags (using bits 17-32)
+    due to this field being silently truncated.
+ -- Modify task layout with --overcommit option plus a heterogeneous job
+    allocation so that a cyclic task distribution can start happening before
+    all CPUs on all nodes are fully allocated. The number of tasks per node
+    will be unchanged from the previous algorithm, but tasks will be distributed
+    in a cyclic fashion first and then extra tasks placed on nodes with more
+    CPUs. Previously all CPUs would be fully allocated in a cyclic fashion,
+    then excess tasks distributed evenly across all allocated nodes.
+ -- In select/cons_tres: Only allocate 1 CPU per node with the --overcommit
+    option.
+ -- In select/cons_res: Only allocate 1 CPU per node with the --overcommit and
+    --nodelist options.
+ -- Fix DefMemPer[CPU|Node] assignment on multi-partition job requests.
+ -- Fix wrongly setting start_time to 0 for multi-part jobs.
+ -- Upon archive file name collision, create new archive file instead of
+    overwriting the old one to prevent lost records.
+ -- Limit archive files to 50000 records per file so that archiving large
+    databases will succeed.
+ -- Remove stray newlines in SPANK plugin error messages.
+ -- Fix archive loading events.
+ -- In select/cons_res: Only allocate 1 CPU per node with the --overcommit and
+    --nodelist options.
+ -- Fix main scheduler from potentially not running through whole queue.
+ -- Fix variable initiation to avoid slurmctld abort.
+ -- In partition preemption, sort preemptor jobs only if they overlap a
+    preemtable partition.
+ -- cons_tres/dist_tasks - fix variable usage in cyclic distribution.
+ -- cons_res/job_test - prevent a job from overallocating a node memory.
+ -- cons_res/job_test - fix to consider a node's current allocated memory when
+    testing a job's memory request.
+ -- Fix issue where multi-node job steps on cloud nodes wouldn't finish cleaning
+    up until the end of the job (rather than the end of the step).
+ -- Fix packing pack_jobid in an sbcast.
+ -- Fix GCC 9 compiler warnings.
+ -- Add new job bit_flags of JOB_DEPENDENT.
+ -- Make it so dependent jobs reset the AccrueTime and do not count against any
+    AccrueTime limits.
+ -- Fix sacctmgr --parsable2 output for reservations and tres.
+ -- In multi-node systems make sure GRES are found on node when not bound to
+    specific sockets.
+ -- Fix gres-per-task logic for gres not bound to sockets.
+ -- Fix issue when --gpus plus --cpus-per-gres was forcing socket binding
+    unnecessarily.
+ -- Change event table's state column to handle 32bits.
+ -- Prevent slurmctld from potential segfault after job_start_data() called
+    for completing job.
+ -- Fix jobs getting on nodes with "scontrol reboot asap".
+ -- Record node reboot events to database.
+ -- Fix node reboot failure message getting to event table.
+ -- Don't write "(null)" to event table when no event reason exists.
+ -- Fix invalid memory read in cons_tres.
+ -- Fix minor memory leak when clearing runaway jobs.
+ -- Avoid flooding slurmctld and logging when prolog complete RPC errors occur.
+ -- Fix slurmctld node_scheduler's feature_bitmap memory leak.
+ -- Fatal when reading config if Alloc flag configured on FrontEnd mode.
+ -- Modifications needed to run Federations with clusters running
+    different select/switch plugins.
+ -- Fix Clang errors for zero initializing struct with nested arrays.
+ -- Fix minor memory leak in pmi2.
+ -- MySQL - Fix minor memory leak when quering suspended jobs fails.
+ -- Fix seff human readable memory string for values below a megabyte.
+ -- Avoid slurmctld abort if GRES defined in gres.conf, but not in the node
+    configuration of slurm.conf.
+ -- Calculate task count for job with --gpus-per-task option, but no explicit
+    task count.
+
+* Changes in Slurm 19.05.0rc1
+=============================
+ -- Set CUDA_VISIBLE_DEVICES environment variable in Prolog and Epilog for jobs
+    requesting gres/gpu.
+ -- Remove '-U' argument - which was deprecated when '-A' was made the single
+    character option before the Slurm 2.1 release - as an alternative to
+    '--account' for salloc/sbatch/srun.
+ -- Remove direct BLCR support and srun_cr.
+ -- Make slurm_print_node_table only print a node's slurmd version if it is
+    different to the one reported by slurm_load_ctl_conf.
+ -- Call gres plugin environment setup even if gres not requested in job.
+ -- Do not set CUDA_VISIBLE_DEVICES=NoDevFiles when no gres requested.
+ -- If GRES configuration data is unavailable from gres.conf, then use the
+    node's "Gres=" information slurm.conf. This will eliminate or minimize the
+    gres.conf file in many situations.
+ -- Fix checking IPMI XCC raw command response length.
+ -- jobacct_gather/common - improve lightweight process identification.
+ -- Cloud/PowerSave Improvements:
+    - Better repsonsiveness to resuming and suspending.
+    - Powering down nodes not eligible to be allocated until after
+      SuspendTimeout.
+    - Powering down nodes put in "Powering Down / %" state until after
+      SuspendTimeout.
+ -- Add idle_on_node_suspend SlurmctldParameter to make nodes idle regardless
+    of state when suspended.
+ -- Add PowerSave DebugFlag for Suspend/Resume debugging.
+ -- Changed "scontrol reboot" to not default to ALL nodes.
+ -- Changed "scontrol completing" to include two new fields - EndTime and
+    CompletingTime.
+ -- select/cons_tres - prevent job from overallocating a node memory.
+ -- Refactor CLI option parsing for salloc/sbatch/srun into a central set of
+    functions in src/common/slurm_opt.c. Note that this new option parsing can
+    be stricter in a few specific situations - places that used to ignore
+    invalid options and still submit/launch a job or job step may return an
+    error() and refuse to proceed instead.
+ -- Add preempt_send_user_signal SlurmctldParameter option to send user
+    signal (e.g. --signal=<SIG_NUM>) at preemption if it hasn't already been
+    sent.
+ -- Add PreemptExemptTime parameter to slurm.conf and QOS to guarantee a
+    minimum runtime before preemption.
+ -- Set job's preempt time for non-grace time preemptions.
+ -- Add sinfo format option to show used gres.
+ -- Add reboot_from_controller SlurmctldParameter to allow RebootProgram to be
+    run from the controller instead of the slurmds.
+ -- Fix increasing of job size when extern steps exist.
+ -- Reset GPU-related arguments to salloc/sbatch/srun for each separate
+    heterogeneous job component.
+ -- Do not set "(null)" for SLURM_JOB_CONSTRAINTS when no constraints are set
+    in PrologSlurmctld/EpilogSlurmctld.
+ -- Add SRUN_EXPORT_ENV as an input environment variable to srun.
+ -- Return an error for invalid #SBATCH directives, and do not submit the job.
+ -- Add S_JOB_ARRAY_ID and S_JOB_ARRAY_TASK_ID to spank_get_item().
+ -- Change container_{g,p}_add_pid() to container_{g,p}_join() and remove the
+    'pid_t pid' argument.
+ -- Add new site_factor plugin type to permit sites to build plugins to set
+    and modify the site priority factor value both initially on job submission,
+    and periodically every PriorityCalcPeriod.
+ -- Rename Cray plugins cray_aries in preperation for Cray/Shasta.
+ -- Allow Het Jobs to work on a Cray.
+ -- Add new cli_filter plugin type to permit sites to build plugins to log,
+    modify, or reject CLI options within the salloc/sbatch/srun commands
+    themselves.
+ -- Allocate nodes that are booting. Previously, nodes that were being booted
+    were off limits for allocation. This caused more nodes to be booted than
+    needed in a cloud environment.
+ -- pam_slurm_adopt - inject SLURM_JOB_ID environment variable into adopted
+    processes.
+ -- PMIx - use the Tree-based collective for empty fence operations.
+ -- PMIx - replace use of the non-standard PMIX_VAL_SET macro with the
+    standardized PMIX_VALUE_LOAD macro.
+ -- slurm.spec - change --without cray option to set configure option of
+    --enable-really-no-cray.
+ -- slurm.spec - add new --with slurmsmwd option.
+ -- pmi2: add mutex locking to all API calls to ensure thread-safety.
+ -- Fix QOS usage factor to apply to TRES time limits and usage.
+ -- Fix multi-cluster srun's with Select/Cray and other_cons_res.
+
+* Changes in Slurm 19.05.0pre3
+==============================
+ -- Fix RPM packaging for accounting_storage/mysql.
+
+* Changes in Slurm 19.05.0pre2
+==============================
+ -- Removed select/serial plugin.
+ -- Remove 512-character line length limit in slurm_print_topo_record().
+    (Used by "scontrol show topology".)
+ -- Removed crypto/openssl plugin.
+ -- Tweak the sdiag gettimeofday() line format for greater clarity.
+ -- Add support for SALLOC/SBATCH/SLURM_NO_KILL environment variables.
+    Add salloc/sbatch/srun support for optional "--no-kill=off" option to
+    disable the environment variables.
+ -- Fix salloc and missing SLURM_NTASKS.
+ -- Alter the backfill scheduler behavior to prevent it from scheduling lower
+    priority jobs on resources that become available during the backfill
+    scheduling cycle when bf_continue is enabled. This behavior was available
+    as the bf_ignore_newly_avail_nodes option in 18.08.4+, but is now enabled
+    by default. (The SchedulerParameters option of bf_ignore_newly_avail_nodes
+    is also now removed, although harmless if still set.)
+ -- Make LaunchParameters=send_gids the default introducing the reverse option
+    "disable_send_gids to go back to the original behavior.
+ -- Limit pam_slurm_adopt to run only in the sshd context by default, for
+    security reasons. A new module option 'service=<name>' can be used to
+    allow a different PAM applications to work. The option 'service=*' can be
+    used to restore the old behavior of always performing the adopt logic
+    regardless of the PAM application context.
+ -- pam_slurm_adopt: Use uid to determine whether root is logging.
+ -- Remove sbatch --x11 option. Slurm's internal X11 forwarding is now only
+    supported from salloc, or an allocating srun command.
+ -- Suppressed printing of job id in sbatch when quiet flag is set.
+ -- Changed sreport 'SizesByAccount' and 'SizesByAccountAndWckey' default
+    behavior and added new 'AcctAsParent' option.
+ -- Add ave watts to api and sview.
+ -- Added printf attribute to setenvf() and corrected related warnings.
+ -- Kill running/pending job is allocated GRES and that GRES has a "File"
+    configuration, and the GRES count changes.
+ -- Add new DebugFlag=Accrue for accrue accounting debugging purposes.
+ -- Change CryptoType option to CredType, and rename crypto/munge plugin to
+    cred/munge.
+ -- Add slurmd -G option to print GRES configuration and exit. This is useful
+    for testing and debugging.
+ -- Support GRES types that include numbers (e.g. "--gres=gpu:123g:2").
+ -- Remove MemLimitEnforce parameter and move functionality into
+    JobAcctGatherParam=OverMemoryKill.
+ -- sview - disable admin mode option (which would not work anyways) if the
+    user is not an admin in SlurmDBD.
+ -- Remove joules reporting from sview and scontrol.
+ -- Change the default fair share algorithm to "fair tree". The new
+    PriorityFlags option of NO_FAIR_TREE can be used to revert to "classic"
+    fair share scheduling instead.
+ -- libslurmdb has been merged into libslurm.
+ -- Added -b as a short option for --begin and removed the -b option which
+    was a left over artifact from the Moab compatibility work.
+ -- Add ArrayTaskThrottle to "scontrol show job" output.
+ -- Added SPRIO_FORMAT env variable to the sprio command.
+ -- Add batch step at the beginning of a batch job so that squeue, sstat, and
+    sacct will show the batch step.
+ -- Deprecated 32-bit builds.
+ -- Make -l and -o mutually exclusive in saccct, squeue, sinfo, and sprio
+ -- Disable running job expansion by default. A new SchedulerParameter of
+    permit_job_expansion has been added for sites that wish to re-enable it.
+ -- Permit changing a job array's ArrayTaskThrottle value even if the job is
+    terminated (for job requeue).
+ -- Add scontrol requeue option of "Incomplete" which will requeue jobs only if
+    they failed to complete with an exit code of zero.
+ -- Modify GrpNodes limit to apply to unique nodes allocated (avoid double
+    counting nodes allocated to multiple jobs in the same QOS or association).
+ -- If a job submit does NOT include --cpus-per-task option, then report the
+    value as "N/A" rather than always mapping the value to 1.
+ -- X11 forwarding - use the raw value from gethostname() with xauth to avoid
+    authentication issues when Slurm has internally stripped off the domain
+    portion.
+ -- Change how slurmd fills in the registration message version string from
+    PACKAGE_VERSION to SLURM_VERSION_STRING, affecting how the version is
+    displayed with sview, sinfo, scontrol and through the API.
+ -- Remove autogen.sh script. Please use the autoreconf command instead.
+ -- Disable a configuration of SelectTypeParameters=CR_ONE_TASK_PER_CORE with
+    SelectType=select/cons_tres. This will be addressed later.
+ -- job_submit/lua - expose more fields off the partition record.
+ -- task/cgroup - prevent setting a memory.soft_limit_in_bytes higher than the
+    memory.limit_in_bytes since the hard limit will take precedence anyway.
+ -- If a GrpNodes limit is configurated in an association, partition QOS or
+    job QOS then favor use of nodes already allocated to that entity. This
+    will result in the configured node "Weight" being incremented by one for
+    nodes which are not prefered. Consider adjusting configured node "Weight"
+    values to achieve the desired node preferences.
+ -- Add full node state debug2 output to slurmdbd node up/down update
+ -- Set CUDA_VISIBLE_DEVICES and CUDA_MPS_ACTIVE_THREAD_PERCENTAGE environment
+    variables in Prolog and Epilog for jobs requesting gres/mps.
+ -- Added thresholds for backfill parameters.
+ -- Fix for backfill sleep overflow when large values are set.
+ -- Execute Epilog on nodes reliquished from job (i.e. job resized).
+ -- Rename burst_buffer/cray plugin to burst_buffer/datawarp.
+ -- X11 Forwarding - reimplement using new internal network forwarding RPCs.
+ -- Remove slurm_jobcomp_get_errno and slurm_jobcomp_strerror from jobcomp
+    plugin API.
+ -- Optimize backfill for checking max jobs per assoc, partition, user, etc.
+
+* Changes in Slurm 19.05.0pre1
+==============================
+ -- Run epilog and clean up allocation when a job is resized to zero and its
+    resources transferred to another job (--depend=expand).
+ -- If GRES are associated with specific sockets, identify those sockets in the
+    output of "scontrol show node". For example if all 4 GPUs on a node are
+    all associated with socket zero, then "Gres=gpu:4(S:0)". If associated
+    with sockets 0 and 1 then "Gres=gpu:4(S:0-1)". The information of which
+    specific GPUs are associated with specific GPUs is not reported, but only
+    available by parsing the gres.conf file.
+ -- Add configuration parameter "GpuFreqDef" to control a job's default GPU
+    frequency.
+ -- Add job flags to the database.  Currently used to determine which scheduler
+    scheduled the job.
+ -- Add constraints/features to the database.
+ -- Add last reason job didn't run before resources/priority to the database.
+ -- Make it so we set the alloc_node in a resource allocation based on the auth
+    plugin instead of the rpc call.
+
+* Changes in Slurm 18.08.9
+==========================
+
+* Changes in Slurm 18.08.8
+==========================
+ -- Update "xauth list" to use the same 10000ms timeout as the other xauth
+    commands.
+ -- Fix issue in gres code to handle a gres cnt of 0.
+ -- Don't purge jobs if backfill is running.
+ -- Verify job is pending add/removing accrual time.
+ -- Don't abort when the job doesn't have an association that was removed
+    before the job was able to make it to the database.
+ -- Set state_reason if select_nodes() fails job for QOS or Account.
+ -- Avoid seg_fault on referencing association without a valid_qos bitmap.
+ -- If Association/QOS is removed on a pending job set that job as ineligible.
+ -- When changing a jobs account/qos always make sure you remove the old limits.
+ -- Don't reset a FAIL_QOS or FAIL_ACCOUNT job reason until the qos or
+    account changed.
+ -- Restore "sreport -T ALL" functionality.
+ -- Correctly typecast signals being sent through the api.
+ -- Properly initialize structures throughout Slurm.
+ -- Sync "numtask" squeue format option for jobs and steps to "numtasks".
+ -- Fix sacct -PD to avoid CA before start jobs.
+ -- Fix potential deadlock with backup slurmctld.
+ -- Fixed issue with jobs not appearing in sacct after dependency satisfied.
+ -- Fix showing non-eligible jobs when asking with -j and not -s.
+ -- Fix issue with backfill scheduler scheduling tasks of an array
+    when not the head job.
+ -- accounting_storage/mysql - fix SIGABRT in the archive load logic.
+ -- accounting_storage/mysql - fix memory leak in the archive load logic.
+ -- Limit records per single SQL statement when loading archived data.
+ -- Fix unnecessary reloading of job submit plugins.
+ -- Allow job submit plugins to be turned on/off with a reconfigure.
+ -- Fix segfault when loading/unloading Lua job submit plugin multiple times.
+ -- Fix printing duplicate error messages of jobs rejected by job submit plugin.
+ -- Fix printing of job submit plugin messages of het jobs without pack id.
+ -- Fix memory leak in group_cache.c
+ -- Fix jobs stuck from FedJobLock when requeueing in a federation
+ -- Fix requeueing job in a federation of clusters with differing associations
+ -- sacctmgr - free memory before exiting in 'sacctmgr show runaway'.
+ -- Fix seff showing memory overflow when steps tres mem usage is 0.
+ -- Upon archive file name collision, create new archive file instead of
+    overwriting the old one to prevent lost records.
+ -- Limit archive files to 50000 records per file so that archiving large
+    databases will succeed.
+ -- Remove stray newlines in SPANK plugin error messages.
+ -- Fix archive loading events.
+ -- In select/cons_res: Only allocate 1 CPU per node with the --overcommit and
+    --nodelist options.
+ -- Fix main scheduler from potentially not running through whole queue.
+ -- cons_res/job_test - prevent a job from overallocating a node memory.
+ -- cons_res/job_test - fix to consider a node's current allocated memory when
+    testing a job's memory request.
+ -- Fix issue where multi-node job steps on cloud nodes wouldn't finish cleaning
+    up until the end of the job (rather than the end of the step).
+ -- Fix issue with a 17.11 sbcast call to a 18.08 daemon.
+ -- Add new job bit_flags of JOB_DEPENDENT.
+ -- Make it so dependent jobs reset the AccrueTime and do not count against any
+    AccrueTime limits.
+ -- Fix sacctmgr --parsable2 output for reservations and tres.
+ -- Prevent slurmctld from potential segfault after job_start_data() called
+    for completing job.
+ -- Fix jobs getting on nodes with "scontrol reboot asap".
+ -- Record node reboot events to database.
+ -- Fix node reboot failure message getting to event table.
+ -- Don't write "(null)" to event table when no event reason exists.
+ -- Fix minor memory leak when clearing runaway jobs.
+ -- Avoid flooding slurmctld and logging when prolog complete RPC errors occur.
+ -- Fix GCC 9 compiler warnings.
+ -- Fix seff human readable memory string for values below a megabyte.
+ -- Fix dump/load of rejected heterogeneous jobs.
+ -- For heterogeneous jobs, do not count the each component against the QOS or
+    association job limit multiple times.
+ -- slurmdbd - avoid reservation flag column corruption with the use of newer
+    flags, instead preserve the older flag fields that we can still fit in the
+    smallint field, and discard the rest.
+ -- Fix security issue in accounting_storage/mysql plugin on archive file loads
+    by always escaping strings within the slurmdbd. CVE-2019-12838.
+
+* Changes in Slurm 18.08.7
+==========================
+ -- Set debug statement to debug2 to avoid benign error messages.
+ -- Add SchedulerParameters option of bf_hetjob_immediate to attempt to start
+    a heterogeneous job as soon as all of its components are determined able to
+    do so.
+ -- Fix underflow causing decay thread to exit.
+ -- Fix main scheduler not considering hetjobs when building the job queue.
+ -- Fix regression for sacct to display old jobs without a start time.
+ -- Fix setting correct number of gres topology bits.
+ -- Update hetjobs pending state reason when appropriate.
+ -- Fix accounting_storage/filetxt's understanding of TRES.
+ -- Set Accrue time when not enforcing limits.
+ -- Fix srun segfault when requesting a hetjob with test_exec or bcast options.
+ -- Hide multipart priorities log message behind Priority debug flag.
+ -- sched/backfill - Make hetjobs sensitive to bf_max_job_start.
+ -- Fix slurmctld segfault due to job's partition pointer NULL dereference.
+ -- Fix issue with OR'ed job dependencies.
+ -- Add new job's bit_flags of INVALID_DEPEND to prevent rebuilding a job's
+    dependency string when it has at least one invalid and purged dependency.
+ -- Promote federation unsynced siblings log message from debug to info.
+ -- burst_buffer/cray - fix slurmctld SIGABRT due to illegal read/writes.
+ -- burst_buffer/cray - fix memory leak due to unfreed job script content.
+ -- node_features/knl_cray - fix script_argv use-after-free.
+ -- burst_buffer/cray - fix script_argv use-after-free.
+ -- Fix invalid reads of size 1 due to non null-terminated string reads.
+ -- Add extra debug2 logs to identify why BadConstraints reason is set.
+
+* Changes in Slurm 18.08.6-2
+============================
+ -- Remove deadlock situation when logging and --enable-debug is used.
+ -- Fix RPM packaging for accounting_storage/mysql.
+
+* Changes in Slurm 18.08.6
+==========================
+ -- Added parsing of -H flag with scancel.
+ -- Fix slurmsmwd build on 32-bit systems.
+ -- acct_gather_filesystem/lustre - add support for Lustre 2.12 client.
+ -- Fix per-partition TRES factors/priority
+ -- Fix per-partition NICE priority
+ -- Fix partition access check validation for multi-partition job submissions.
+ -- Prevent segfault on empty response in 'scontrol show dwstat'.
+ -- node_features/knl_cray plugin - Preserve node's active features if it has
+    already booted when slurmctld daemon is reconfigured.
+ -- Detect missing burst buffer script and reject job.
+ -- GRES: Properly reset the topo_gres_cnt_alloc counter on slurmctld restart
+    to prevent underflow.
+ -- Avoid errors from packing accounting_storage_mysql.so when RPM is built
+    with out mysql support.
+ -- Remove deprecated -t option from slurmctld --help.
+ -- acct_gather_filesystem/lustre - fix stats gathering.
+ -- Enforce documented default usage start and end times when querying jobs from
+    the database.
+ -- Fix issues when querying running jobs from the database.
+ -- Deny sacct request where start time is later than the end time requested.
+ -- Fix sacct verbose about time and states queried.
+ -- burst_buffer/cray - allow 'scancel --hurry <jobid>' to tear down a burst
+    buffer that is currently staging data out.
+ -- X11 forwarding - allow setup if the DISPLAY environment variable lacks
+    a screen number. (Permit both "localhost:10.0" and "localhost:10".)
+ -- docs - change HTML title to include the page title or man page name.
+ -- X11 forwarding - fix an unnecessary error message when using the
+    local_xauthority X11Parameters option.
+ -- Add use_raw_hostname to X11Parameters.
+ -- Fix smail so it passes job arrays to seff correctly.
+ -- Don't check InactiveLimit for salloc --no-shell jobs.
+ -- Add SALLOC_GRES and SBATCH_GRES as input to salloc/sbatch.
+ -- Remove drain state when node doesn't reboot by ResumeTimeout.
+ -- Fix considering "resuming" nodes in scheduling.
+ -- Do not kill suspended jobs due to exceeding time limit.
+ -- Add NoAddrCache CommunicationParameter.
+ -- Don't ping powering up cloud nodes.
+ -- Add cloud_dns SlurmctldParameter.
+ -- Consider --sbindir configure option as the default path to find slurmstepd.
+ -- Fix node state printing of DRAINED$
+ -- Fix spamming dbd of down/drained nodes in maintenance reservation.
+ -- Avoid buffer overflow in time_str2secs.
+ -- Calculate suspended time for suspended steps.
+ -- Add null check for step_ptr->step_node_bitmap in _pick_step_nodes.
+ -- Fix multi-cluster srun issue after 'scontrol reconfigure' was called.
+ -- Fix accessing response_cluster_rec outside of write locks.
+ -- Fix Lua user messages not showing up on rejected submissions.
+ -- Fix printing multi-line error messages on rejected submissions.
+
+* Changes in Slurm 18.08.5-2
+============================
+ -- Fix Perl build for 32-bit systems.
+
+* Changes in Slurm 18.08.5
+==========================
+ -- Backfill - If a job has a time_limit guess the end time of a job better
+    if OverTimeLimit is Unlimited.
+ -- Fix "sacctmgr show events event=cluster"
+ -- Fix sacctmgr show runawayjobs from sibling cluster
+ -- Avoid bit offset of -1 in call to bit_nclear().
+ -- Insure that "hbm" is a configured GresType on knl systems.
+ -- Fix NodeFeaturesPlugins=node_features/knl_generic to allow other gres
+    other than knl.
+ -- cons_res: Prevent overflow on multiply.
+ -- Better debug for bad values in gres.conf.
+ -- Fix double accounting of energy at end of job.
+ -- Read gres.conf for cloud nodes on slurmctld.
+ -- Don't assume the first node of a job is the batch host when purging jobs
+    from a node.
+ -- Better debugging when a job doesn't have a job_resrcs ptr.
+ -- Store ave watts in energy plugins.
+ -- Add XCC plugin for reading Lenovo Power.
+ -- Fix minor memory leak when scheduling rebootable nodes.
+ -- Fix debug2 prefix for sched log.
+ -- Fix printing correct SLURM_JOB_ACCOUNT_PACK_GROUP_* in env for a Het Job.
+ -- sbatch - search current working directory first for job script.
+ -- Make it so held jobs reset the AccrueTime and do not count against any
+    AccrueTime limits.
+ -- Add SchedulerParameters option of bf_hetjob_prio=[min|avg|max] to alter the
+    job sorting algorithm for scheduling heterogeneous jobs.
+ -- Fix initialization of assoc_mgr_locks and slurmctld_locks lock structures.
+ -- Fix segfault with job arrays using X11 forwarding.
+ -- Revert regression caused by e0ee1c7054 which caused negative values and
+    values starting with a decimal to be invalid for PriorityWeightTRES and
+    TRESBillingWeight.
+ -- Fix possibility to update a job's reservation to none.
+ -- Suppress connection errors to primary slurmdbd when backup dbd is active.
+ -- Suppress connection errors to primary db when backup db kicks in
+ -- Add missing fields for sacct --completion when using jobcomp/filetxt.
+ -- Fix incorrect values set for UserCPU, SystemCPU, and TotalCPU sacct fields
+    when JobAcctGatherType=jobacct_gather/cgroup.
+ -- Fixed srun from double printing invalid option msg twice.
+ -- Remove unused -b flag from getopt call in sbatch.
+ -- Disable reporting of node TRES in sreport.
+ -- Re-enabling features combined by OR within parenthesis for non-knl setups.
+ -- Prevent sending duplicate requests to reboot a node before ResumeTimeout.
+ -- Down nodes that don't reboot by ResumeTimeout.
+ -- Update seff to reflect API change from rss_max to tres_usage_in_max.
+ -- Add missing TRES constants from perl API.
+ -- Fix issue where sacct would return incorrect array tasks when querying
+    specific tasks.
+ -- Add missing variables to slurmdb_stats_t in the perlapi.
+ -- Fix nodes not getting reboot RPC when job requires reboot of nodes.
+ -- Fix failing update the partition list of a job.
+ -- Use slurm.conf gres ids instead of gres.conf names to get a gres type name.
+ -- Add mitigation for a potential heap overflow on 32-bit systems in xmalloc.
+    CVE-2019-6438.
+
 * Changes in Slurm 18.08.4
 ==========================
  -- burst_buffer/cray - avoid launching a job that would be immediately
@@ -187,6 +742,7 @@ documents those changes that are of interest to users and administrators.
     distribution.
  -- Fix hostlists to be able to handle nodenames with '-' in them surrounded
     by integers.
+ -- Added sort option to sprio output.
  -- Fix correct job CPU count allocated.
  -- Fix sacctmgr setting GrpJobs limit when setting GrpJobsAccrue limit.
  -- Change the defaults to MemLimitEnforce=no and NoOverMemoryKill
@@ -473,8 +1029,17 @@ documents those changes that are of interest to users and administrators.
     node_features_p_changeable_feature in node_features plugin.
  -- Add Slurm configuration file check logic using "slurmctld -t" command.
 
+* Changes in Slurm 17.11.14
+===========================
+
+* Changes in Slurm 17.11.13-2
+=============================
+ -- Fix Perl build for 32-bit systems.
+
 * Changes in Slurm 17.11.13
 ===========================
+ -- Add mitigation for a potential heap overflow on 32-bit systems in xmalloc.
+    CVE-2019-6438.
 
 * Changes in Slurm 17.11.12
 ===========================
@@ -6861,7 +7426,7 @@ documents those changes that are of interest to users and administrators.
     run more than 256 jobs per node.
  -- sched/backfill: Improve accuracy of expected job start with respect to
     reservations.
- -- sinfo partition field size will be set the the length of the longest
+ -- sinfo partition field size will be set the length of the longest
     partition name by default.
  -- Make it so the parse_time will return a valid 0 if given epoch time and
     set errno == ESLURM_INVALID_TIME_VALUE on error instead.
@@ -7565,7 +8130,7 @@ documents those changes that are of interest to users and administrators.
     is set in slurm.conf. Patch from Don Albert, Bull.
  -- Added new sbatch option "--export-file" as needed for latest version of
     Moab. Patch from Phil Eckert, LLNL.
- -- Fix for sacct printing CPUTime(RAW) where the the is greater than a 32 bit
+ -- Fix for sacct printing CPUTime(RAW) where the is greater than a 32 bit
     number.
  -- Fix bug in --switch option with topology resulting in bad switch count use.
     Patch from Alejandro Lucero Palau (Barcelona Supercomputer Center).

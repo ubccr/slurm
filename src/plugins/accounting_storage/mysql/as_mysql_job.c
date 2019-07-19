@@ -262,70 +262,6 @@ no_wckeyid:
 	return wckeyid;
 }
 
-static char *_set_energy_tres(mysql_conn_t *mysql_conn,
-			      struct job_record *job_ptr)
-{
-	int row_cnt = 0;
-	uint64_t *tres_alloc_cnt = NULL;
-	char *tres_alloc_str = NULL;
-	MYSQL_RES *result = NULL;
-	MYSQL_ROW row;
-	char * query = xstrdup_printf(
-		"select job.tres_alloc, SUM(consumed_energy) from "
-		"\"%s_%s\" as job left outer join \"%s_%s\" "
-		"as step on job.job_db_inx=step.job_db_inx "
-		"and (step.id_step>=0) and step.consumed_energy != %"PRIu64
-		" where job.job_db_inx=%"PRIu64";",
-		mysql_conn->cluster_name, job_table,
-		mysql_conn->cluster_name, step_table,
-		NO_VAL64, job_ptr->db_index);
-	if (debug_flags & DEBUG_FLAG_DB_USAGE)
-		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-	result = mysql_db_query_ret(mysql_conn, query, 0);
-	xfree(query);
-	if (!result)
-		return NULL;
-
-	row_cnt = mysql_num_rows(result);
-
-	if (!row_cnt) {
-		DB_DEBUG(mysql_conn->conn,
-			 "Nothing for job inx %"PRIu64" from cluster %s, this should never happen",
-			 job_ptr->db_index,
-			 mysql_conn->cluster_name);
-	} else {
-		if (row_cnt > 1)
-			error("Some how with job inx %"PRIu64" from cluster %s we got %d rows for consumed energy.  This should never happen, only taking the first one.",
-			      job_ptr->db_index,
-			      mysql_conn->cluster_name,
-			      row_cnt);
-		row = mysql_fetch_row(result);
-
-		if (job_ptr->tres_alloc_str)
-			tres_alloc_str = xstrdup(job_ptr->tres_alloc_str);
-		else if (row[0] && row[0][0])
-			tres_alloc_str = xstrdup(row[0]);
-
-		assoc_mgr_set_tres_cnt_array(
-			&tres_alloc_cnt, tres_alloc_str, 0, false);
-		xfree(tres_alloc_str);
-		if (row[1] && row[1][0]) {
-			if (tres_alloc_cnt[TRES_ARRAY_ENERGY] &&
-			    tres_alloc_cnt[TRES_ARRAY_ENERGY] != NO_VAL64)
-				debug("we had %"PRIu64" for energy, but we are over writing it with %s",
-				      tres_alloc_cnt[TRES_ARRAY_ENERGY],
-				      row[1]);
-			tres_alloc_cnt[TRES_ARRAY_ENERGY] =
-				slurm_atoull(row[1]);
-		} else if (!tres_alloc_cnt[TRES_ARRAY_ENERGY] ||
-			   tres_alloc_cnt[TRES_ARRAY_ENERGY] != NO_VAL64)
-			tres_alloc_cnt[TRES_ARRAY_ENERGY] = NO_VAL64;
-	}
-	mysql_free_result(result);
-
-	return assoc_mgr_make_tres_str_from_array(
-		tres_alloc_cnt, TRES_STR_FLAG_SIMPLE, true);
-}
 /* extern functions */
 
 extern int as_mysql_job_start(mysql_conn_t *mysql_conn,
@@ -356,7 +292,7 @@ extern int as_mysql_job_start(mysql_conn_t *mysql_conn,
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return ESLURM_DB_CONNECTION;
 
-	debug2("as_mysql_slurmdb_job_start() called");
+	debug2("%s: called", __func__);
 
 	job_state = job_ptr->job_state;
 
@@ -518,24 +454,6 @@ no_rollup_change:
 		partition = job_ptr->partition;
 
 	if (!job_ptr->db_index) {
-		if (start_time && (job_state >= JOB_COMPLETE) &&
-		    (!job_ptr->tres_alloc_str &&
-		     (slurmdbd_conf &&
-		      (job_ptr->start_protocol_ver <=
-		       SLURM_17_02_PROTOCOL_VERSION)))) {
-			/* Since we now rollup from only the job table we need
-			 * to grab all the consumed_energy from the steps
-			 * running while we were on the old version of Slurm.
-			 * This only has to happen here if we have already
-			 * started the job otherwise we will just have to do it
-			 * again.  This can be removed when 17.02 is 2 versions
-			 * old.
-			 */
-			if (!(tres_alloc_str = _set_energy_tres(
-				      mysql_conn, job_ptr)))
-				goto end_it;
-		}
-
 		query = xstrdup_printf(
 			"insert into \"%s_%s\" "
 			"(id_job, mod_time, id_array_job, id_array_task, "
@@ -544,7 +462,7 @@ no_rollup_change:
 			"id_group, nodelist, id_resv, timelimit, "
 			"time_eligible, time_submit, time_start, "
 			"job_name, track_steps, state, priority, cpus_req, "
-			"nodes_alloc, mem_req",
+			"nodes_alloc, mem_req, flags, state_reason_prev",
 			mysql_conn->cluster_name, job_table);
 
 		if (wckeyid)
@@ -555,8 +473,6 @@ no_rollup_change:
 			xstrcat(query, ", account");
 		if (partition)
 			xstrcat(query, ", `partition`");
-		if (job_ptr->comment)
-			xstrcat(query, ", id_block");
 		if (job_ptr->wckey)
 			xstrcat(query, ", wckey");
 		if (job_ptr->network)
@@ -577,12 +493,14 @@ no_rollup_change:
 			xstrcat(query, ", tres_req");
 		if (job_ptr->details->work_dir)
 			xstrcat(query, ", work_dir");
+		if (job_ptr->details->features)
+			xstrcat(query, ", constraints");
 
 		xstrfmtcat(query,
 			   ") values (%u, UNIX_TIMESTAMP(), "
 			   "%u, %u, %u, %u, %u, %u, %u, %u, "
 			   "'%s', %u, %u, %ld, %ld, %ld, "
-			   "'%s', %u, %u, %u, %u, %u, %"PRIu64"",
+			   "'%s', %u, %u, %u, %u, %u, %"PRIu64", %u, %u",
 			   job_ptr->job_id,
 			   job_ptr->array_job_id, array_task_id,
 			   job_ptr->pack_job_id, job_ptr->pack_job_offset,
@@ -593,7 +511,9 @@ no_rollup_change:
 			   jname, track_steps, job_state,
 			   job_ptr->priority, job_ptr->details->min_cpus,
 			   job_ptr->total_nodes,
-			   job_ptr->details->pn_min_memory);
+			   job_ptr->details->pn_min_memory,
+			   job_ptr->db_flags,
+			   job_ptr->state_reason_prev_db);
 
 		if (wckeyid)
 			xstrfmtcat(query, ", %u", wckeyid);
@@ -603,8 +523,6 @@ no_rollup_change:
 			xstrfmtcat(query, ", '%s'", job_ptr->account);
 		if (partition)
 			xstrfmtcat(query, ", '%s'", partition);
-		if (job_ptr->comment) /* overloaded with block_id */
-			xstrfmtcat(query, ", '%s'", job_ptr->comment);
 		if (job_ptr->wckey)
 			xstrfmtcat(query, ", '%s'", job_ptr->wckey);
 		if (job_ptr->network)
@@ -630,6 +548,9 @@ no_rollup_change:
 		if (job_ptr->details->work_dir)
 			xstrfmtcat(query, ", '%s'",
 				   job_ptr->details->work_dir);
+		if (job_ptr->details->features)
+			xstrfmtcat(query, ", '%s'",
+				   job_ptr->details->features);
 
 		xstrfmtcat(query,
 			   ") on duplicate key update "
@@ -642,7 +563,8 @@ no_rollup_change:
 			   "state=greatest(state, %u), priority=%u, "
 			   "cpus_req=%u, nodes_alloc=%u, "
 			   "mem_req=%"PRIu64", id_array_job=%u, id_array_task=%u, "
-			   "pack_job_id=%u, pack_job_offset=%u",
+			   "pack_job_id=%u, pack_job_offset=%u, flags=%u, "
+			   "state_reason_prev=%u",
 			   job_ptr->assoc_id, job_ptr->user_id,
 			   job_ptr->group_id, nodes,
 			   job_ptr->resv_id, job_ptr->time_limit,
@@ -652,7 +574,9 @@ no_rollup_change:
 			   job_ptr->total_nodes,
 			   job_ptr->details->pn_min_memory,
 			   job_ptr->array_job_id, array_task_id,
-			   job_ptr->pack_job_id, job_ptr->pack_job_offset);
+			   job_ptr->pack_job_id, job_ptr->pack_job_offset,
+			   job_ptr->db_flags,
+			   job_ptr->state_reason_prev_db);
 
 		if (wckeyid)
 			xstrfmtcat(query, ", id_wckey=%u", wckeyid);
@@ -663,8 +587,6 @@ no_rollup_change:
 			xstrfmtcat(query, ", account='%s'", job_ptr->account);
 		if (partition)
 			xstrfmtcat(query, ", `partition`='%s'", partition);
-		if (job_ptr->comment) /* overloaded with block_id */
-			xstrfmtcat(query, ", id_block='%s'", job_ptr->comment);
 		if (job_ptr->wckey)
 			xstrfmtcat(query, ", wckey='%s'", job_ptr->wckey);
 		if (job_ptr->network)
@@ -695,6 +617,9 @@ no_rollup_change:
 		if (job_ptr->details->work_dir)
 			xstrfmtcat(query, ", work_dir='%s'",
 				   job_ptr->details->work_dir);
+		if (job_ptr->details->features)
+			xstrfmtcat(query, ", constraints='%s'",
+				   job_ptr->details->features);
 
 		if (debug_flags & DEBUG_FLAG_DB_JOB)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
@@ -725,8 +650,6 @@ no_rollup_change:
 			xstrfmtcat(query, "account='%s', ", job_ptr->account);
 		if (partition)
 			xstrfmtcat(query, "`partition`='%s', ", partition);
-		if (job_ptr->comment)
-			xstrfmtcat(query, "id_block='%s', ", job_ptr->comment);
 		if (job_ptr->wckey)
 			xstrfmtcat(query, "wckey='%s', ", job_ptr->wckey);
 		if (job_ptr->network)
@@ -759,6 +682,9 @@ no_rollup_change:
 		if (job_ptr->details->work_dir)
 			xstrfmtcat(query, "work_dir='%s', ",
 				   job_ptr->details->work_dir);
+		if (job_ptr->details->features)
+			xstrfmtcat(query, "constraints='%s', ",
+				   job_ptr->details->features);
 
 		xstrfmtcat(query, "time_start=%ld, job_name='%s', "
 			   "state=greatest(state, %u), "
@@ -767,6 +693,7 @@ no_rollup_change:
 			   "timelimit=%u, mem_req=%"PRIu64", "
 			   "id_array_job=%u, id_array_task=%u, "
 			   "pack_job_id=%u, pack_job_offset=%u, "
+			   "flags=%u, state_reason_prev=%u, "
 			   "time_eligible=%ld, mod_time=UNIX_TIMESTAMP() "
 			   "where job_db_inx=%"PRIu64,
 			   start_time, jname, job_state,
@@ -776,6 +703,7 @@ no_rollup_change:
 			   job_ptr->details->pn_min_memory,
 			   job_ptr->array_job_id, array_task_id,
 			   job_ptr->pack_job_id, job_ptr->pack_job_offset,
+			   job_ptr->db_flags, job_ptr->state_reason_prev_db,
 			   begin_time, job_ptr->db_index);
 
 		if (debug_flags & DEBUG_FLAG_DB_JOB)
@@ -789,7 +717,7 @@ no_rollup_change:
 		if (IS_JOB_SUSPENDED(job_ptr))
 			as_mysql_suspend(mysql_conn, job_db_inx, job_ptr);
 	}
-end_it:
+
 	xfree(tres_alloc_str);
 	xfree(query);
 
@@ -931,7 +859,7 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return ESLURM_DB_CONNECTION;
 
-	debug2("as_mysql_slurmdb_job_complete() called");
+	debug2("%s() called", __func__);
 
 	if (job_ptr->resize_time)
 		submit_time = job_ptr->resize_time;
@@ -1008,19 +936,6 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 			}
 			job_ptr->comment = comment;
 		}
-	} else if (!job_ptr->tres_alloc_str &&
-		   (slurmdbd_conf &&
-		    (job_ptr->start_protocol_ver <=
-		     SLURM_17_02_PROTOCOL_VERSION))) {
-		/* Since we now rollup from only the job table we need to grab
-		 * all the consumed_energy from the steps running while we were
-		 * on the old version of Slurm.
-		 * This only has to happen here if we have already started the
-		 * job otherwise we will just have to do it again.
-		 * This can be removed when 17.02 is 2 versions old.
-		 */
-		if (!(tres_alloc_str = _set_energy_tres(mysql_conn, job_ptr)))
-			goto end_it;
 	}
 
 	/*
@@ -1048,12 +963,9 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 		xstrfmtcat(query, ", admin_comment='%s'",
 			   job_ptr->admin_comment);
 
-	if (job_ptr->system_comment) {
-		char *comment = slurm_add_slash_to_quotes(
-			job_ptr->system_comment);
-		xstrfmtcat(query, ", system_comment='%s'", comment);
-		xfree(comment);
-	}
+	if (job_ptr->system_comment)
+		xstrfmtcat(query, ", system_comment='%s'",
+			   job_ptr->system_comment);
 
 	exit_code = job_ptr->exit_code;
 	if (exit_code == 1) {
@@ -1072,7 +984,7 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
-end_it:
+
 	xfree(tres_alloc_str);
 	return rc;
 }

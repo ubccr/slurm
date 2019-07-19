@@ -140,8 +140,8 @@ _alloc_libstate(void)
 	libstate->magic = SW_GEN_LIBSTATE_MAGIC;
 	libstate->node_count = 0;
 	libstate->hash_max = SW_GEN_HASH_MAX;
-	libstate->hash_table = xmalloc(sizeof(sw_gen_node_info_t *) *
-				       libstate->hash_max);
+	libstate->hash_table = xcalloc(libstate->hash_max,
+				       sizeof(sw_gen_node_info_t *));
 }
 
 static void
@@ -384,8 +384,8 @@ int switch_p_build_jobinfo(switch_jobinfo_t *switch_job,
 	if (!hl)
 		fatal("hostlist_create(%s): %m", step_layout->node_list);
 	gen_step_info->node_cnt = hostlist_count(hl);
-	gen_step_info->node_array = xmalloc(sizeof(sw_gen_node_t *) *
-					    gen_step_info->node_cnt);
+	gen_step_info->node_array = xcalloc(gen_step_info->node_cnt,
+					    sizeof(sw_gen_node_t *));
 	hi = hostlist_iterator_create(hl);
 	for (i = 0; (host = hostlist_next(hi)); i++) {
 		node_ptr = xmalloc(sizeof(sw_gen_node_t));
@@ -394,8 +394,8 @@ int switch_p_build_jobinfo(switch_jobinfo_t *switch_job,
 		gen_node_info = _find_node(host);
 		if (gen_node_info) {	/* Copy node info to this step */
 			node_ptr->ifa_cnt = gen_node_info->ifa_cnt;
-			node_ptr->ifa_array = xmalloc(sizeof(sw_gen_node_t *) *
-						      node_ptr->ifa_cnt);
+			node_ptr->ifa_array = xcalloc(node_ptr->ifa_cnt,
+						      sizeof(sw_gen_node_t *));
 			for (j = 0; j < node_ptr->ifa_cnt; j++) {
 				node_ptr->ifa_array[j] =
 					xmalloc(sizeof(sw_gen_node_t));
@@ -411,6 +411,23 @@ int switch_p_build_jobinfo(switch_jobinfo_t *switch_job,
 	}
 	hostlist_iterator_destroy(hi);
 	hostlist_destroy(hl);
+
+	return SLURM_SUCCESS;
+}
+
+int switch_p_duplicate_jobinfo(switch_jobinfo_t *source,
+			       switch_jobinfo_t **dest)
+{
+	sw_gen_step_info_t *gen_step_info;
+
+	if (debug_flags & DEBUG_FLAG_SWITCH)
+		info("switch_p_alloc_jobinfo() starting");
+	/* FIXME: If this is ever needed please flesh this out! */
+
+	xassert(source);
+	switch_p_alloc_jobinfo((switch_jobinfo_t **)&gen_step_info,
+			       NO_VAL, NO_VAL);
+	*dest = (switch_jobinfo_t *) gen_step_info;
 
 	return SLURM_SUCCESS;
 }
@@ -493,16 +510,16 @@ int switch_p_unpack_jobinfo(switch_jobinfo_t **switch_job, Buf buffer,
 	if (debug_flags & DEBUG_FLAG_SWITCH)
 		info("switch_p_unpack_jobinfo() starting");
 	safe_unpack32(&gen_step_info->node_cnt, buffer);
-	gen_step_info->node_array = xmalloc(sizeof(sw_gen_node_t *) *
-					    gen_step_info->node_cnt);
+	safe_xcalloc(gen_step_info->node_array, gen_step_info->node_cnt,
+		     sizeof(sw_gen_node_t *));
 	for (i = 0; i < gen_step_info->node_cnt; i++) {
 		node_ptr = xmalloc(sizeof(sw_gen_node_t));
 		gen_step_info->node_array[i] = node_ptr;
 		safe_unpackstr_xmalloc(&node_ptr->node_name, &uint32_tmp,
 				       buffer);
 		safe_unpack16(&node_ptr->ifa_cnt, buffer);
-		node_ptr->ifa_array = xmalloc(sizeof(sw_gen_ifa_t *) *
-					      node_ptr->ifa_cnt);
+		safe_xcalloc(node_ptr->ifa_array, node_ptr->ifa_cnt,
+			     sizeof(sw_gen_ifa_t *));
 		for (j = 0; j < node_ptr->ifa_cnt; j++) {
 			ifa_ptr = xmalloc(sizeof(sw_gen_ifa_t));
 			node_ptr->ifa_array[j] = ifa_ptr;
@@ -740,23 +757,6 @@ extern int switch_p_get_jobinfo(switch_jobinfo_t *switch_job,
 }
 
 /*
- * switch functions for other purposes
- */
-extern int switch_p_get_errno(void)
-{
-	if (debug_flags & DEBUG_FLAG_SWITCH)
-		info("switch_p_get_errno() starting");
-	return SLURM_SUCCESS;
-}
-
-extern char *switch_p_strerror(int errnum)
-{
-	if (debug_flags & DEBUG_FLAG_SWITCH)
-		info("switch_p_strerror() starting");
-	return NULL;
-}
-
-/*
  * node switch state monitoring functions
  * required for IBM Federation switch
  */
@@ -902,8 +902,8 @@ extern int switch_p_unpack_node_info(switch_node_info_t **switch_node,
 	gen_node_info = (sw_gen_node_info_t *) *switch_node;
 
 	safe_unpack16(&gen_node_info->ifa_cnt, buffer);
-	gen_node_info->ifa_array = xmalloc(sizeof(sw_gen_ifa_t *) *
-					   gen_node_info->ifa_cnt);
+	safe_xcalloc(gen_node_info->ifa_array, gen_node_info->ifa_cnt,
+		     sizeof(sw_gen_ifa_t *));
 	safe_unpackstr_xmalloc(&gen_node_info->node_name, &uint32_tmp,
 			       buffer);
 	for (i = 0; i < gen_node_info->ifa_cnt; i++) {

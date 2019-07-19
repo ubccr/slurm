@@ -65,7 +65,7 @@ extern int slurm_getpwuid_r (uid_t uid, struct passwd *pwd, char *buf,
  * Returns uid int uidp after verifying presence in /etc/passwd, or
  *  -1 on failure.
  */
-int uid_from_string (char *name, uid_t *uidp);
+int uid_from_string(const char *name, uid_t *uidp);
 
 /*
  * Return the primary group id for a given user id, or
@@ -76,7 +76,7 @@ gid_t gid_from_uid (uid_t uid);
 /*
  * Same as uid_from_name(), but for group name/id.
  */
-int gid_from_string (char *name, gid_t *gidp);
+int gid_from_string(const char *name, gid_t *gidp);
 
 /*
  * Translate uid to user name.
@@ -105,14 +105,5 @@ extern char *uid_to_string_cached(uid_t uid);
  * NOTE: xfree the return value
  */
 char *gid_to_string (gid_t gid);
-
-/* slurm_find_group_user()
- *
- * Find the user entry in the group gid. As groups could
- * be split across multiple lines in /etc/group we
- * have to iterate on them.
- */
-int
-slurm_find_group_user(struct passwd *pwd, gid_t gid);
 
 #endif /*__SLURM_UID_UTILITY_H__*/

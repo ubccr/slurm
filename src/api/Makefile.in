@@ -109,7 +109,8 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_compile_flag.m4 \
 	$(top_srcdir)/auxdir/slurm.m4 \
 	$(top_srcdir)/auxdir/x_ac__system_configuration.m4 \
 	$(top_srcdir)/auxdir/x_ac_affinity.m4 \
-	$(top_srcdir)/auxdir/x_ac_blcr.m4 \
+	$(top_srcdir)/auxdir/x_ac_c99.m4 \
+	$(top_srcdir)/auxdir/x_ac_cgroup.m4 \
 	$(top_srcdir)/auxdir/x_ac_cray.m4 \
 	$(top_srcdir)/auxdir/x_ac_curl.m4 \
 	$(top_srcdir)/auxdir/x_ac_databases.m4 \
@@ -127,7 +128,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_compile_flag.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
 	$(top_srcdir)/auxdir/x_ac_ncurses.m4 \
 	$(top_srcdir)/auxdir/x_ac_netloc.m4 \
-	$(top_srcdir)/auxdir/x_ac_nrt.m4 \
+	$(top_srcdir)/auxdir/x_ac_nvml.m4 \
 	$(top_srcdir)/auxdir/x_ac_ofed.m4 \
 	$(top_srcdir)/auxdir/x_ac_pam.m4 \
 	$(top_srcdir)/auxdir/x_ac_pmix.m4 \
@@ -136,13 +137,10 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_compile_flag.m4 \
 	$(top_srcdir)/auxdir/x_ac_readline.m4 \
 	$(top_srcdir)/auxdir/x_ac_rrdtool.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
-	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
-	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
-	$(top_srcdir)/auxdir/x_ac_ssh2.m4 \
 	$(top_srcdir)/auxdir/x_ac_systemd.m4 \
 	$(top_srcdir)/auxdir/x_ac_ucx.m4 \
 	$(top_srcdir)/auxdir/x_ac_uid_gid_size.m4 \
-	$(top_srcdir)/configure.ac
+	$(top_srcdir)/auxdir/x_ac_x11.m4 $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 DIST_COMMON = $(srcdir)/Makefile.am $(am__DIST_COMMON)
@@ -201,16 +199,24 @@ libslurmfull_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
 am__DEPENDENCIES_1 = $(common_dir)/libcommon.la \
 	$(common_dir)/libspank.la $(common_dir)/libeio.la
 libslurmhelper_la_DEPENDENCIES = $(am__DEPENDENCIES_1)
-am__objects_1 = allocate.lo allocate_msg.lo block_info.lo \
+am__objects_1 = account_functions.lo archive_functions.lo \
+	assoc_functions.lo cluster_functions.lo \
+	cluster_report_functions.lo coord_functions.lo \
+	connection_functions.lo extra_get_functions.lo \
+	federation_functions.lo job_functions.lo \
+	job_report_functions.lo qos_functions.lo resource_functions.lo \
+	tres_functions.lo usage_functions.lo user_functions.lo \
+	user_report_functions.lo wckey_functions.lo
+am__objects_2 = allocate.lo allocate_msg.lo block_info.lo \
 	burst_buffer_info.lo assoc_mgr_info.lo cancel.lo checkpoint.lo \
 	complete.lo config_info.lo federation_info.lo \
 	front_end_info.lo init_msg.lo job_info.lo job_step_info.lo \
 	layout_info.lo license_info.lo node_info.lo partition_info.lo \
 	pmi_server.lo powercap_info.lo reservation_info.lo signal.lo \
-	slurm_get_statistics.lo slurm_hostlist.lo slurm_pmi.lo \
-	step_ctx.lo step_io.lo step_launch.lo submit.lo suspend.lo \
-	topo_info.lo triggers.lo reconfigure.lo update_config.lo
-am_libslurmhelper_la_OBJECTS = $(am__objects_1)
+	slurm_get_statistics.lo slurm_pmi.lo step_ctx.lo step_io.lo \
+	step_launch.lo submit.lo suspend.lo topo_info.lo triggers.lo \
+	reconfigure.lo update_config.lo $(am__objects_1)
+am_libslurmhelper_la_OBJECTS = $(am__objects_2)
 libslurmhelper_la_OBJECTS = $(am_libslurmhelper_la_OBJECTS)
 libslurmhelper_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
 	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CCLD) \
@@ -236,24 +242,37 @@ am__v_at_1 =
 DEFAULT_INCLUDES = -I.@am__isrc@ -I$(top_builddir) -I$(top_builddir)/slurm
 depcomp = $(SHELL) $(top_srcdir)/auxdir/depcomp
 am__maybe_remake_depfiles = depfiles
-am__depfiles_remade = ./$(DEPDIR)/allocate.Plo \
-	./$(DEPDIR)/allocate_msg.Plo ./$(DEPDIR)/assoc_mgr_info.Plo \
+am__depfiles_remade = ./$(DEPDIR)/account_functions.Plo \
+	./$(DEPDIR)/allocate.Plo ./$(DEPDIR)/allocate_msg.Plo \
+	./$(DEPDIR)/archive_functions.Plo \
+	./$(DEPDIR)/assoc_functions.Plo ./$(DEPDIR)/assoc_mgr_info.Plo \
 	./$(DEPDIR)/block_info.Plo ./$(DEPDIR)/burst_buffer_info.Plo \
 	./$(DEPDIR)/cancel.Plo ./$(DEPDIR)/checkpoint.Plo \
+	./$(DEPDIR)/cluster_functions.Plo \
+	./$(DEPDIR)/cluster_report_functions.Plo \
 	./$(DEPDIR)/complete.Plo ./$(DEPDIR)/config_info.Plo \
+	./$(DEPDIR)/connection_functions.Plo \
+	./$(DEPDIR)/coord_functions.Plo \
+	./$(DEPDIR)/extra_get_functions.Plo \
+	./$(DEPDIR)/federation_functions.Plo \
 	./$(DEPDIR)/federation_info.Plo ./$(DEPDIR)/front_end_info.Plo \
-	./$(DEPDIR)/init_msg.Plo ./$(DEPDIR)/job_info.Plo \
+	./$(DEPDIR)/init_msg.Plo ./$(DEPDIR)/job_functions.Plo \
+	./$(DEPDIR)/job_info.Plo ./$(DEPDIR)/job_report_functions.Plo \
 	./$(DEPDIR)/job_step_info.Plo ./$(DEPDIR)/layout_info.Plo \
 	./$(DEPDIR)/license_info.Plo ./$(DEPDIR)/node_info.Plo \
 	./$(DEPDIR)/partition_info.Plo ./$(DEPDIR)/pmi_server.Plo \
-	./$(DEPDIR)/powercap_info.Plo ./$(DEPDIR)/reconfigure.Plo \
-	./$(DEPDIR)/reservation_info.Plo ./$(DEPDIR)/signal.Plo \
-	./$(DEPDIR)/slurm_get_statistics.Plo \
-	./$(DEPDIR)/slurm_hostlist.Plo ./$(DEPDIR)/slurm_pmi.Plo \
+	./$(DEPDIR)/powercap_info.Plo ./$(DEPDIR)/qos_functions.Plo \
+	./$(DEPDIR)/reconfigure.Plo ./$(DEPDIR)/reservation_info.Plo \
+	./$(DEPDIR)/resource_functions.Plo ./$(DEPDIR)/signal.Plo \
+	./$(DEPDIR)/slurm_get_statistics.Plo ./$(DEPDIR)/slurm_pmi.Plo \
 	./$(DEPDIR)/step_ctx.Plo ./$(DEPDIR)/step_io.Plo \
 	./$(DEPDIR)/step_launch.Plo ./$(DEPDIR)/submit.Plo \
 	./$(DEPDIR)/suspend.Plo ./$(DEPDIR)/topo_info.Plo \
-	./$(DEPDIR)/triggers.Plo ./$(DEPDIR)/update_config.Plo
+	./$(DEPDIR)/tres_functions.Plo ./$(DEPDIR)/triggers.Plo \
+	./$(DEPDIR)/update_config.Plo ./$(DEPDIR)/usage_functions.Plo \
+	./$(DEPDIR)/user_functions.Plo \
+	./$(DEPDIR)/user_report_functions.Plo \
+	./$(DEPDIR)/wckey_functions.Plo
 am__mv = mv -f
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
@@ -307,14 +326,11 @@ ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AR = @AR@
+AR_FLAGS = @AR_FLAGS@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
 AWK = @AWK@
-BLCR_CPPFLAGS = @BLCR_CPPFLAGS@
-BLCR_HOME = @BLCR_HOME@
-BLCR_LDFLAGS = @BLCR_LDFLAGS@
-BLCR_LIBS = @BLCR_LIBS@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
@@ -366,8 +382,6 @@ H5CC = @H5CC@
 H5FC = @H5FC@
 HAVEMYSQLCONFIG = @HAVEMYSQLCONFIG@
 HAVE_MAN2HTML = @HAVE_MAN2HTML@
-HAVE_NRT = @HAVE_NRT@
-HAVE_OPENSSL = @HAVE_OPENSSL@
 HAVE_SOME_CURSES = @HAVE_SOME_CURSES@
 HDF5_CC = @HDF5_CC@
 HDF5_CFLAGS = @HDF5_CFLAGS@
@@ -397,8 +411,6 @@ LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LIBTOOL = @LIBTOOL@
 LIB_SLURM = @LIB_SLURM@
-LIB_SLURMDB = @LIB_SLURMDB@
-LIB_SLURMDB_BUILD = @LIB_SLURMDB_BUILD@
 LIB_SLURM_BUILD = @LIB_SLURM_BUILD@
 LIPO = @LIPO@
 LN_S = @LN_S@
@@ -423,8 +435,9 @@ NETLOC_LDFLAGS = @NETLOC_LDFLAGS@
 NETLOC_LIBS = @NETLOC_LIBS@
 NM = @NM@
 NMEDIT = @NMEDIT@
-NRT_CPPFLAGS = @NRT_CPPFLAGS@
 NUMA_LIBS = @NUMA_LIBS@
+NVML_CPPFLAGS = @NVML_CPPFLAGS@
+NVML_LIBS = @NVML_LIBS@
 OBJDUMP = @OBJDUMP@
 OBJEXT = @OBJEXT@
 OFED_CPPFLAGS = @OFED_CPPFLAGS@
@@ -480,12 +493,6 @@ SLURM_MINOR = @SLURM_MINOR@
 SLURM_PREFIX = @SLURM_PREFIX@
 SLURM_VERSION_NUMBER = @SLURM_VERSION_NUMBER@
 SLURM_VERSION_STRING = @SLURM_VERSION_STRING@
-SSH2_CPPFLAGS = @SSH2_CPPFLAGS@
-SSH2_LDFLAGS = @SSH2_LDFLAGS@
-SSH2_LIBS = @SSH2_LIBS@
-SSL_CPPFLAGS = @SSL_CPPFLAGS@
-SSL_LDFLAGS = @SSL_LDFLAGS@
-SSL_LIBS = @SSL_LIBS@
 STRIP = @STRIP@
 SUCMD = @SUCMD@
 SYSTEMD_TASKSMAX_OPTION = @SYSTEMD_TASKSMAX_OPTION@
@@ -622,6 +629,26 @@ BUILT_SOURCES = $(VERSION_SCRIPT) $(FULL_VERSION_SCRIPT) libslurm.la
 # them to plugins that are loaded.
 # Also, libslurmhelper, libslurm.o are for convenience, they are not installed.
 noinst_LTLIBRARIES = libslurmhelper.la
+slurmdbapi_src = \
+	account_functions.c \
+	archive_functions.c \
+	assoc_functions.c \
+	cluster_functions.c \
+	cluster_report_functions.c \
+	coord_functions.c \
+	connection_functions.c \
+	extra_get_functions.c \
+	federation_functions.c \
+	job_functions.c \
+	job_report_functions.c \
+	qos_functions.c \
+	resource_functions.c \
+	tres_functions.c \
+	usage_functions.c \
+	user_functions.c \
+	user_report_functions.c \
+	wckey_functions.c
+
 slurmapi_src = \
 	allocate.c       \
 	allocate_msg.c   \
@@ -647,7 +674,6 @@ slurmapi_src = \
 	reservation_info.c \
 	signal.c         \
 	slurm_get_statistics.c \
-	slurm_hostlist.c \
 	slurm_pmi.c      \
 	slurm_pmi.h	 \
 	step_ctx.c       \
@@ -661,7 +687,8 @@ slurmapi_src = \
 	topo_info.c      \
 	triggers.c       \
 	reconfigure.c    \
-	update_config.c
+	update_config.c \
+	$(slurmdbapi_src)
 
 common_dir = $(top_builddir)/src/common
 slurmapi_add = \
@@ -847,19 +874,30 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/account_functions.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/allocate.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/allocate_msg.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/archive_functions.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/assoc_functions.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/assoc_mgr_info.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/block_info.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/burst_buffer_info.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cancel.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/checkpoint.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cluster_functions.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cluster_report_functions.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/complete.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/config_info.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/connection_functions.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/coord_functions.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/extra_get_functions.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/federation_functions.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/federation_info.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/front_end_info.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/init_msg.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/job_functions.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/job_info.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/job_report_functions.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/job_step_info.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/layout_info.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/license_info.Plo@am__quote@ # am--include-marker
@@ -867,11 +905,12 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/partition_info.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pmi_server.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/powercap_info.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/qos_functions.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/reconfigure.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/reservation_info.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/resource_functions.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/signal.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_get_statistics.Plo@am__quote@ # am--include-marker
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_hostlist.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_pmi.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/step_ctx.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/step_io.Plo@am__quote@ # am--include-marker
@@ -879,8 +918,13 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/submit.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/suspend.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/topo_info.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/tres_functions.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/triggers.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/update_config.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/usage_functions.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/user_functions.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/user_report_functions.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/wckey_functions.Plo@am__quote@ # am--include-marker
 
 $(am__depfiles_remade):
 	@$(MKDIR_P) $(@D)
@@ -1049,19 +1093,30 @@ clean-am: clean-generic clean-libLTLIBRARIES clean-libtool \
 	clean-pkglibLTLIBRARIES mostlyclean-am
 
 distclean: distclean-am
-		-rm -f ./$(DEPDIR)/allocate.Plo
+		-rm -f ./$(DEPDIR)/account_functions.Plo
+	-rm -f ./$(DEPDIR)/allocate.Plo
 	-rm -f ./$(DEPDIR)/allocate_msg.Plo
+	-rm -f ./$(DEPDIR)/archive_functions.Plo
+	-rm -f ./$(DEPDIR)/assoc_functions.Plo
 	-rm -f ./$(DEPDIR)/assoc_mgr_info.Plo
 	-rm -f ./$(DEPDIR)/block_info.Plo
 	-rm -f ./$(DEPDIR)/burst_buffer_info.Plo
 	-rm -f ./$(DEPDIR)/cancel.Plo
 	-rm -f ./$(DEPDIR)/checkpoint.Plo
+	-rm -f ./$(DEPDIR)/cluster_functions.Plo
+	-rm -f ./$(DEPDIR)/cluster_report_functions.Plo
 	-rm -f ./$(DEPDIR)/complete.Plo
 	-rm -f ./$(DEPDIR)/config_info.Plo
+	-rm -f ./$(DEPDIR)/connection_functions.Plo
+	-rm -f ./$(DEPDIR)/coord_functions.Plo
+	-rm -f ./$(DEPDIR)/extra_get_functions.Plo
+	-rm -f ./$(DEPDIR)/federation_functions.Plo
 	-rm -f ./$(DEPDIR)/federation_info.Plo
 	-rm -f ./$(DEPDIR)/front_end_info.Plo
 	-rm -f ./$(DEPDIR)/init_msg.Plo
+	-rm -f ./$(DEPDIR)/job_functions.Plo
 	-rm -f ./$(DEPDIR)/job_info.Plo
+	-rm -f ./$(DEPDIR)/job_report_functions.Plo
 	-rm -f ./$(DEPDIR)/job_step_info.Plo
 	-rm -f ./$(DEPDIR)/layout_info.Plo
 	-rm -f ./$(DEPDIR)/license_info.Plo
@@ -1069,11 +1124,12 @@ distclean: distclean-am
 	-rm -f ./$(DEPDIR)/partition_info.Plo
 	-rm -f ./$(DEPDIR)/pmi_server.Plo
 	-rm -f ./$(DEPDIR)/powercap_info.Plo
+	-rm -f ./$(DEPDIR)/qos_functions.Plo
 	-rm -f ./$(DEPDIR)/reconfigure.Plo
 	-rm -f ./$(DEPDIR)/reservation_info.Plo
+	-rm -f ./$(DEPDIR)/resource_functions.Plo
 	-rm -f ./$(DEPDIR)/signal.Plo
 	-rm -f ./$(DEPDIR)/slurm_get_statistics.Plo
-	-rm -f ./$(DEPDIR)/slurm_hostlist.Plo
 	-rm -f ./$(DEPDIR)/slurm_pmi.Plo
 	-rm -f ./$(DEPDIR)/step_ctx.Plo
 	-rm -f ./$(DEPDIR)/step_io.Plo
@@ -1081,8 +1137,13 @@ distclean: distclean-am
 	-rm -f ./$(DEPDIR)/submit.Plo
 	-rm -f ./$(DEPDIR)/suspend.Plo
 	-rm -f ./$(DEPDIR)/topo_info.Plo
+	-rm -f ./$(DEPDIR)/tres_functions.Plo
 	-rm -f ./$(DEPDIR)/triggers.Plo
 	-rm -f ./$(DEPDIR)/update_config.Plo
+	-rm -f ./$(DEPDIR)/usage_functions.Plo
+	-rm -f ./$(DEPDIR)/user_functions.Plo
+	-rm -f ./$(DEPDIR)/user_report_functions.Plo
+	-rm -f ./$(DEPDIR)/wckey_functions.Plo
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-tags
@@ -1128,19 +1189,30 @@ install-ps-am:
 installcheck-am:
 
 maintainer-clean: maintainer-clean-am
-		-rm -f ./$(DEPDIR)/allocate.Plo
+		-rm -f ./$(DEPDIR)/account_functions.Plo
+	-rm -f ./$(DEPDIR)/allocate.Plo
 	-rm -f ./$(DEPDIR)/allocate_msg.Plo
+	-rm -f ./$(DEPDIR)/archive_functions.Plo
+	-rm -f ./$(DEPDIR)/assoc_functions.Plo
 	-rm -f ./$(DEPDIR)/assoc_mgr_info.Plo
 	-rm -f ./$(DEPDIR)/block_info.Plo
 	-rm -f ./$(DEPDIR)/burst_buffer_info.Plo
 	-rm -f ./$(DEPDIR)/cancel.Plo
 	-rm -f ./$(DEPDIR)/checkpoint.Plo
+	-rm -f ./$(DEPDIR)/cluster_functions.Plo
+	-rm -f ./$(DEPDIR)/cluster_report_functions.Plo
 	-rm -f ./$(DEPDIR)/complete.Plo
 	-rm -f ./$(DEPDIR)/config_info.Plo
+	-rm -f ./$(DEPDIR)/connection_functions.Plo
+	-rm -f ./$(DEPDIR)/coord_functions.Plo
+	-rm -f ./$(DEPDIR)/extra_get_functions.Plo
+	-rm -f ./$(DEPDIR)/federation_functions.Plo
 	-rm -f ./$(DEPDIR)/federation_info.Plo
 	-rm -f ./$(DEPDIR)/front_end_info.Plo
 	-rm -f ./$(DEPDIR)/init_msg.Plo
+	-rm -f ./$(DEPDIR)/job_functions.Plo
 	-rm -f ./$(DEPDIR)/job_info.Plo
+	-rm -f ./$(DEPDIR)/job_report_functions.Plo
 	-rm -f ./$(DEPDIR)/job_step_info.Plo
 	-rm -f ./$(DEPDIR)/layout_info.Plo
 	-rm -f ./$(DEPDIR)/license_info.Plo
@@ -1148,11 +1220,12 @@ maintainer-clean: maintainer-clean-am
 	-rm -f ./$(DEPDIR)/partition_info.Plo
 	-rm -f ./$(DEPDIR)/pmi_server.Plo
 	-rm -f ./$(DEPDIR)/powercap_info.Plo
+	-rm -f ./$(DEPDIR)/qos_functions.Plo
 	-rm -f ./$(DEPDIR)/reconfigure.Plo
 	-rm -f ./$(DEPDIR)/reservation_info.Plo
+	-rm -f ./$(DEPDIR)/resource_functions.Plo
 	-rm -f ./$(DEPDIR)/signal.Plo
 	-rm -f ./$(DEPDIR)/slurm_get_statistics.Plo
-	-rm -f ./$(DEPDIR)/slurm_hostlist.Plo
 	-rm -f ./$(DEPDIR)/slurm_pmi.Plo
 	-rm -f ./$(DEPDIR)/step_ctx.Plo
 	-rm -f ./$(DEPDIR)/step_io.Plo
@@ -1160,8 +1233,13 @@ maintainer-clean: maintainer-clean-am
 	-rm -f ./$(DEPDIR)/submit.Plo
 	-rm -f ./$(DEPDIR)/suspend.Plo
 	-rm -f ./$(DEPDIR)/topo_info.Plo
+	-rm -f ./$(DEPDIR)/tres_functions.Plo
 	-rm -f ./$(DEPDIR)/triggers.Plo
 	-rm -f ./$(DEPDIR)/update_config.Plo
+	-rm -f ./$(DEPDIR)/usage_functions.Plo
+	-rm -f ./$(DEPDIR)/user_functions.Plo
+	-rm -f ./$(DEPDIR)/user_report_functions.Plo
+	-rm -f ./$(DEPDIR)/wckey_functions.Plo
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
@@ -1216,6 +1294,7 @@ $(VERSION_SCRIPT) :
 	 echo "   slurm_*;"; \
 	 echo "   slurmdb_*;"; \
 	 echo "   plugin_context_*;"; \
+	 echo "   working_cluster_rec;"; \
 	 echo "  local: *;"; \
 	 echo "};") > $(VERSION_SCRIPT)
 

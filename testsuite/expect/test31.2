@@ -82,41 +82,18 @@ sleep 20
 "
 
 # Get the location of the slurm.conf file
-set got_config 0
-spawn $scontrol show config
-expect {
-	-re "SLURM_CONF.*= (/.*)/($alpha).*SLURM_VERSION" {
-		set config_dir $expect_out(1,string)
-		set got_config 1
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: scontrol is not responding\n"
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
-if {$got_config == 0} {
-	send_user "\nFAILURE: Could not identify slurm.conf location\n"
-	exit 1
+set config_dir [get_conf_path]
+if { $exit_code != 0 } {
+	exit $exit_code
 }
 
 #
 # Copy slurm.conf file
 #
 set cwd [$bin_pwd]
-exec $bin_rm -fr $cwd/slurm.conf.orig
-spawn $bin_cp -v $config_dir/slurm.conf $cwd/slurm.conf.orig
-expect {
-	timeout {
-		send_user "\nFAILURE: slurm.conf was not copied\n"
-		exit 1
-	}
-	eof {
-		wait
-	}
+copy_conf $config_dir $cwd
+if { $exit_code != 0 } {
+	exit $exit_code
 }
 
 exec $bin_sed -i {s/^\(Prolog=\)/#\1/gI} $config_dir/slurm.conf
@@ -149,7 +126,10 @@ if {$exit_code} {
 	exit $exit_code
 }
 
-wait_for_job $job_id "RUNNING"
+if {[wait_for_job $job_id "RUNNING"] != 0} {
+	send_user "\nFAILURE: error waiting for job $job_id to start\n"
+	set exit_code 1
+}
 
 # Check that the job was submitted with no error
 set match 0
@@ -217,9 +197,14 @@ sleep 10
 
 # Check that the job is held due to the failed prolog or JobHeldAdmin
 # Either state is possible due to race conditions
+set cleaning 0
 set match 0
 spawn $squeue -h -j$job_id -o%t|%r
 expect {
+	-re "PD.Cleaning" {
+		set cleaning 1
+		exp_continue
+	}
 	-re "PD.launch failed requeued held" {
 		set match 1
 		exp_continue
@@ -236,7 +221,29 @@ expect {
 		wait
 	}
 }
-
+if {$cleaning == 1} {
+	send_user "\nWARNING: Waiting longer for job cleanup\n"
+	sleep 30
+	set match 0
+	spawn $squeue -h -j$job_id -o%t|%r
+	expect {
+		-re "PD.launch failed requeued held" {
+			set match 1
+			exp_continue
+		}
+		-re "PD.JobHeldAdmin" {
+			set match 1
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: squeue is not responding\n"
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+}
 if {$match == 0} {
 	send_user "\nFAILURE: job $job_id is not in the correct state. "
 	send_user "Job $job_id should be Pending and have reason: "

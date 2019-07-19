@@ -68,6 +68,26 @@ noinst_PROGRAMS = libslurm.o
 # This is needed if compiling on windows
 EXEEXT=
 
+slurmdbapi_src =	\
+	account_functions.c \
+	archive_functions.c \
+	assoc_functions.c \
+	cluster_functions.c \
+	cluster_report_functions.c \
+	coord_functions.c \
+	connection_functions.c \
+	extra_get_functions.c \
+	federation_functions.c \
+	job_functions.c \
+	job_report_functions.c \
+	qos_functions.c \
+	resource_functions.c \
+	tres_functions.c \
+	usage_functions.c \
+	user_functions.c \
+	user_report_functions.c \
+	wckey_functions.c
+
 slurmapi_src =           \
 	allocate.c       \
 	allocate_msg.c   \
@@ -93,7 +113,6 @@ slurmapi_src =           \
 	reservation_info.c \
 	signal.c         \
 	slurm_get_statistics.c \
-	slurm_hostlist.c \
 	slurm_pmi.c      \
 	slurm_pmi.h	 \
 	step_ctx.c       \
@@ -107,7 +126,8 @@ slurmapi_src =           \
 	topo_info.c      \
 	triggers.c       \
 	reconfigure.c    \
-	update_config.c
+	update_config.c \
+	$(slurmdbapi_src)
 
 common_dir = $(top_builddir)/src/common
 
@@ -162,6 +182,7 @@ $(VERSION_SCRIPT) :
 	 echo "   slurm_*;"; \
 	 echo "   slurmdb_*;"; \
 	 echo "   plugin_context_*;"; \
+	 echo "   working_cluster_rec;"; \
 	 echo "  local: *;"; \
 	 echo "};") > $(VERSION_SCRIPT)
 

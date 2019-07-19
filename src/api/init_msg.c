@@ -87,6 +87,7 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 	job_desc_msg->requeue		= NO_VAL16;
 	job_desc_msg->req_switch	= NO_VAL;
 	job_desc_msg->shared		= NO_VAL16;
+	job_desc_msg->site_factor	= NO_VAL;
 	job_desc_msg->sockets_per_node	= NO_VAL16;
 	job_desc_msg->task_dist		= NO_VAL;
 	job_desc_msg->threads_per_core	= NO_VAL16;

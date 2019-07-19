@@ -141,6 +141,7 @@ hv_to_job_cond(HV* hv, slurmdb_job_cond_t* job_cond)
 
     job_cond->cpus_max = 0;
     job_cond->cpus_min = 0;
+    job_cond->db_flags = SLURMDB_JOB_FLAG_NOTSET;
     job_cond->flags = 0;
     job_cond->nodes_max = 0;
     job_cond->nodes_min = 0;
@@ -148,6 +149,7 @@ hv_to_job_cond(HV* hv, slurmdb_job_cond_t* job_cond)
 
     FETCH_FIELD(hv, job_cond, cpus_max,                 uint32_t, FALSE);
     FETCH_FIELD(hv, job_cond, cpus_min,                 uint32_t, FALSE);
+    FETCH_FIELD(hv, job_cond, db_flags,                 uint32_t, FALSE);
     FETCH_FIELD(hv, job_cond, flags,                    uint32_t, FALSE);
     FETCH_FIELD(hv, job_cond, exitcode,                 int32_t, FALSE);
     FETCH_FIELD(hv, job_cond, nodes_max,                uint32_t, FALSE);
@@ -644,10 +646,18 @@ stats_to_hv(slurmdb_stats_t *stats, HV* hv)
     STORE_FIELD(hv, stats, tres_usage_in_max,     charp);
     STORE_FIELD(hv, stats, tres_usage_in_max_nodeid, charp);
     STORE_FIELD(hv, stats, tres_usage_in_max_taskid, charp);
+    STORE_FIELD(hv, stats, tres_usage_in_min,     charp);
+    STORE_FIELD(hv, stats, tres_usage_in_min_nodeid, charp);
+    STORE_FIELD(hv, stats, tres_usage_in_min_taskid, charp);
+    STORE_FIELD(hv, stats, tres_usage_in_tot, charp);
     STORE_FIELD(hv, stats, tres_usage_out_ave,    charp);
     STORE_FIELD(hv, stats, tres_usage_out_max,    charp);
     STORE_FIELD(hv, stats, tres_usage_out_max_nodeid, charp);
     STORE_FIELD(hv, stats, tres_usage_out_max_taskid, charp);
+    STORE_FIELD(hv, stats, tres_usage_out_min,    charp);
+    STORE_FIELD(hv, stats, tres_usage_out_min_nodeid, charp);
+    STORE_FIELD(hv, stats, tres_usage_out_min_taskid, charp);
+    STORE_FIELD(hv, stats, tres_usage_out_tot, charp);
 
     return 0;
 }

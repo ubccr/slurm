@@ -1,10 +1,10 @@
 --[[
 
- Example lua script demonstrating the SLURM job_submit/lua interface.
+ Example lua script demonstrating the Slurm job_submit/lua interface.
  This is only an example, not meant for use in its current form.
 
  For use, this script should be copied into a file name "job_submit.lua"
- in the same directory as the SLURM configuration file, slurm.conf.
+ in the same directory as the Slurm configuration file, slurm.conf.
 
 --]]
 
@@ -29,7 +29,7 @@ end
 
 --########################################################################--
 --
---  SLURM job_submit/lua interface:
+--  Slurm job_submit/lua interface:
 --
 --########################################################################--
 
@@ -46,7 +46,7 @@ function slurm_job_submit ( job_desc, part_list, submit_uid )
 		return slurm.ESLURM_INVALID_LICENSES
 	end
 
-	return 0
+	return slurm.SUCCESS
 end
 
 function slurm_job_modify ( job_desc, job_rec, part_list, modify_uid )
@@ -61,7 +61,7 @@ function slurm_job_modify ( job_desc, job_rec, part_list, modify_uid )
 		return slurm.ESLURM_INVALID_LICENSES
 	end
 
-	return 0
+	return slurm.SUCCESS
 end
 
 slurm.log_info("initialized")

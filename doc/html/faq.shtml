@@ -625,14 +625,14 @@ While the size of a pending job may be changed with few restrictions, several
 significant restrictions apply to changing the size of a running job as noted
 below:
 <ol>
-<li>Support is not available on Cray ALPS system due to limitations
-in the software underlying Slurm.</li>
 <li>Job(s) changing size must not be in a suspended state, including jobs
 suspended for gang scheduling. The jobs must be in a state of pending or
-running. We plan to modify the gang scheduling logic in the future to
-concurrently schedule a job to be used for expanding another job and the
-job to be expanded.</li>
-</ol></p>
+running.</li>
+<li>Job expansion for runnings jobs is disabled by default.
+Site administrators can enable this capability by setting
+<i>SchedulerParameters=permit_job_expansion</i> in <i>slurm.conf</i></li>
+</ol>
+</p>
 
 <p>Use the <i>scontrol</i> command to change a job's size either by specifying
 a new node count (<i>NumNodes=</i>) for the job or identify the specific nodes
@@ -965,13 +965,8 @@ regex white:default ^JOBID.*
 <img src="squeue_color.png" width=600>
 
 <p><a name="x11"><b>33. Can Slurm export an X11 display on an allocated compute node?</b></a><br/>
-You can use the X11 builtin feature starting at version 17.11. This plugin is
-based on libssh2 and it supports <i>hostbased</i> and <i>pubkey</i>
-authentication.<br/>You just need to have <i>libssh2</i> installed on compute
-nodes, <i>libssh2</i> development package installed in the build host at build
-time and <i>PrologFlags=x11</i> set in <i>slurm.conf</i>. You will need also
-user public/private keys available on compute nodes or otherwise a
-<i>hostbased</i> authentication setup in your ssh servers.
+You can use the X11 builtin feature starting at version 17.11.
+It is enabled by setting <i>PrologFlags=x11</i> in <i>slurm.conf</i>.
 Other X11 plugins must be deactivated.
 <br/>
 Run it as shown:
@@ -1876,10 +1871,8 @@ following procedure is recommended:
 <ol>
 <li>Stop the slurmctld daemon (e.g. "systemctl stop slurmctld" on the head node)</li>
 <li>Update the slurm.conf file on all nodes in the cluster</li>
+<li>Restart the slurmd daemons on all nodes (e.g. "systemctl start slurmd" on all nodes)</li>
 <li>Restart the slurmctld daemon (e.g. "systemctl start slurmctld" on the head node)</li>
-<li>Start the slurmd daemons on the new nodes (e.g. "systemctl start slurmd" on those nodes)</li>
-<li>Have all slurmd daemons read the new configuration file (e.g.
-"scontrol reconfig", no need to restart the daemons)</li>
 </ol>
 
 NOTE: Jobs submitted with srun, and that are waiting for an allocation,
@@ -2334,6 +2327,6 @@ cray_netroot_preload.settings.load.data.compute.size_limit: 0
 accessed files within jobs.</p>
 
 
-<p style="text-align:center;">Last modified 04 July 2018</p>
+<p style="text-align:center;">Last modified 1 July 2019</p>
 
 <!--#include virtual="footer.txt"-->

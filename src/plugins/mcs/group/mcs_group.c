@@ -127,7 +127,15 @@ static int _get_user_groups(uint32_t user_id, uint32_t group_id,
 
 	user_name = uid_to_string((uid_t) user_id);
 	*ngroups = max_groups;
+#if defined(__APPLE__)
+	/*
+	 * macOS has (int *) for the third argument instead
+	 * of (gid_t *) like FreeBSD, NetBSD, and Linux.
+	 */
+	rc = getgrouplist(user_name, (gid_t) group_id, (int *) groups, ngroups);
+#else
 	rc = getgrouplist(user_name, (gid_t) group_id, groups, ngroups);
+#endif
 
 	if (rc < 0) {
 		error("getgrouplist(%s): %m", user_name);
@@ -170,8 +178,8 @@ static int _check_and_load_params(void)
 		/* no | in param : just one group */
 		if (mcs_params_specific != NULL) {
 			if (gid_from_string(mcs_params_specific, &gid ) != 0 ) {
-				info("mcs: Only one invalid group : %s. "
-				"ondemand, ondemandselect set", groups_names);
+				info("mcs: Only one invalid group : %s. ondemand, ondemandselect set",
+				     mcs_params_specific);
 				nb_mcs_groups = 0;
 				array_mcs_parameter = xmalloc(nb_mcs_groups *
 							      sizeof(uint32_t));
@@ -186,9 +194,7 @@ static int _check_and_load_params(void)
 			}
 		} else {
 			/* no group */
-			info("mcs: no group in MCSParameters : %s. "
-			     "ondemand, ondemandselect set",
-			     mcs_params_specific);
+			info("mcs: no group in MCSParameters. ondemand, ondemandselect set");
 			nb_mcs_groups = 0;
 			array_mcs_parameter = xmalloc(nb_mcs_groups *
 						      sizeof(uint32_t));

@@ -1421,7 +1421,7 @@ extern int sacctmgr_list_user(int argc, char **argv)
 			slurm_addto_char_list(format_list, "Coord");
 		if (user_cond->with_assocs)
 			slurm_addto_char_list(format_list,
-					      "Cl,Acc,Part,Share,"
+					      "Cl,Acc,Part,Share,Priority,"
 					      "MaxJ,MaxN,MaxCPUs,MaxS,MaxW,"
 					      "MaxCPUMins,QOS,DefaultQOS");
 		else
@@ -1627,6 +1627,12 @@ extern int sacctmgr_list_user(int argc, char **argv)
 					field->print_routine(
 						field,
 						user->name,
+						(curr_inx == field_count));
+					break;
+				case PRINT_PRIO:
+					field->print_routine(
+						field,
+						INFINITE,
 						(curr_inx == field_count));
 					break;
 				default:

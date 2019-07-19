@@ -47,7 +47,6 @@ A list of propagated options follows.</p>
 <li>--acctg-freq</li>
 <li>--begin</li>
 <li>--checkpoint</li>
-<li>--checkpoint-dir</li>
 <li>--cluster-constraint</li>
 <li>--clusters</li>
 <li>--comment</li>
@@ -108,7 +107,7 @@ A list of propagated options follows.</p>
 <p>The task distribution specification applies separately within each job
 component. Consider for example a heterogeneous job with each component being
 allocated 4 CPUs on 2 nodes. In our example, job component zero is allocated
-2 CPUs on node "nid00001" and 2 CPUs on node "nid00002". Job component zero is
+2 CPUs on node "nid00001" and 2 CPUs on node "nid00002". Job component one is
 allocated 2 CPUs on node "nid00003" and 2 CPUs on node "nid00004". A task
 distribution of "cyclic" will distribute the first 4 tasks in a cyclic fashion
 on nodes "nid00001" and "nid00002", then distribute the next 4 tasks in a cyclic
@@ -499,10 +498,12 @@ error: Attempt to run a job step with pack-group value of 2,
 <h2><a name="env_var">Environment Variables</a></h2>
 
 <p>Slurm environment variables will be set independently for each component of
-the job by appending "_PACK_GROUP_" and a sequence number the the usual name.
+the job by appending "_PACK_GROUP_" and a sequence number the usual name.
 In addition, the "SLURM_JOB_ID" environment variable will contain the job ID
 of the heterogeneous job leader and "SLURM_PACK_SIZE" will contain the number of
-components in the job. For example:</p>
+components in the job. If using srun with a single specific pack group (for
+instance --pack-group=1) "SLURM_JOB_ID" will contain the job ID of that specific
+component, behaving like a regular (non-heterogeneous job). For example:</p>
 <pre>
 $ salloc -N1 : -N2 bash
 salloc: Pending job allocation 11741
@@ -518,6 +519,10 @@ SLURM_JOB_NODES_PACK_GROUP_1=2
 SLURM_JOB_NODELIST_PACK_GROUP_0=nid00001
 SLURM_JOB_NODELIST_PACK_GROUP_1=nid[00011-00012]
 ...
+$ srun --pack-group=1 printenv SLURM_JOB_ID
+11742
+$ srun --pack-group=0 printenv SLURM_JOB_ID
+11741
 </pre>
 
 <p>The various MPI implementations rely heavily upon Slurm environment variables
@@ -609,8 +614,6 @@ The more frequently executed scheduling logic only starts jobs on a first-in
 first-out (FIFO) basis and lacks logic for concurrently scheduling all
 components of a heterogeneous job.</p>
 
-<p>Heterogeneous jobs are not supported with Slurm's select/serial plugin.</p>
-
 <p>Heterogeneous jobs are not supported on Cray ALPS systems.</p>
 
 <p>Heterogeneous jobs are not supported on IBM PE systems.</p>
@@ -643,7 +646,8 @@ basis.</p>
 
 <p>Scheduling of heterogeneous jobs is performed only by the sched/backfill
 plugin and all heterogeneous job components are either all scheduled at the same
-time or deferred.
+time or deferred. The pending reason of heterogeneous jobs isn't set until
+backfill evaluation.
 In order to ensure the timely initiation of both heterogeneous and
 non-heterogeneous jobs, the backfill scheduler alternates between two different
 modes on each iteration.
@@ -707,6 +711,6 @@ Such a situation will have an adverse effect upon scheduling other jobs,
 especially other heterogeneous jobs.</p>
 
 
-<p style="text-align:center;">Last modified 16 October 2018</p>
+<p style="text-align:center;">Last modified 18 October 2018</p>
 
 <!--#include virtual="footer.txt"-->

@@ -8,9 +8,6 @@ AUTOMAKE_OPTIONS = foreign
 
 if HAVE_NATIVE_CRAY
 sbin_SCRIPTS = slurmconfgen.py
-endif
-
-if HAVE_REAL_CRAY
 noinst_DATA = opt_modulefiles_slurm
 endif
 
@@ -32,7 +29,6 @@ endif
 EXTRA_DIST = \
 	$(NATIVE_EXTRA_DIST)		\
 	etc_sysconfig_slurm		\
-	libalps_test_programs.tar.gz	\
 	opt_modulefiles_slurm.in	\
 	pam_job.c 			\
 	plugstack.conf.template		\

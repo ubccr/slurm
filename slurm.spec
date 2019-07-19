@@ -1,6 +1,6 @@
 Name:		slurm
-Version:	18.08.4
-%define rel	1
+Version:	19.05.1
+%define rel	2
 Release:	%{rel}%{?dist}
 Summary:	Slurm Workload Manager
 
@@ -22,21 +22,24 @@ Source:		%{slurm_source_dir}.tar.bz2
 # --prefix		%_prefix path		install path for commands, libraries, etc.
 # --with cray		%_with_cray 1		build for a Native-Slurm Cray system
 # --with cray_network	%_with_cray_network 1	build for a non-Cray system with a Cray network
+# --with slurmsmwd      %_with_slurmsmwd 1      build slurmsmwd
 # --without debug	%_without_debug 1	don't compile with debugging symbols
 # --with hdf5		%_with_hdf5 path	require hdf5 support
 # --with hwloc		%_with_hwloc 1		require hwloc support
 # --with lua		%_with_lua path		build Slurm lua bindings
 # --with mysql		%_with_mysql 1		require mysql/mariadb support
 # --with numa		%_with_numa 1		require NUMA support
-# --with openssl	%_with_openssl 1	require openssl RPM to be installed
-#						ensures auth/openssl and crypto/openssl are built
 # --without pam		%_without_pam 1		don't require pam-devel RPM to be installed
 # --without x11		%_without_x11 1		disable internal X11 support
+# --with ucx		%_with_ucx path		require ucx support
+# --with pmix		%_with_pmix path	require pmix support
 
 #  Options that are off by default (enable with --with <opt>)
 %bcond_with cray
 %bcond_with cray_network
+%bcond_with slurmsmwd
 %bcond_with multiple_slurmd
+%bcond_with ucx
 
 # These options are only here to force there to be these on the build.
 # If they are not set they will still be compiled if the packages exist.
@@ -46,9 +49,7 @@ Source:		%{slurm_source_dir}.tar.bz2
 %bcond_with lua
 %bcond_with numa
 %bcond_with x11
-
-# Build with OpenSSL by default on all platforms (disable using --without openssl)
-%bcond_without openssl
+%bcond_with pmix
 
 # Use debug by default on all systems
 %bcond_without debug
@@ -67,10 +68,6 @@ Obsoletes: slurm-lua slurm-munge slurm-plugins
 
 # fake systemd support when building rpms on other platforms
 %{!?_unitdir: %global _unitdir /lib/systemd/systemd}
-
-%if %{with openssl}
-BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
-%endif
 
 %define use_mysql_devel %(perl -e '`rpm -q mariadb-devel`; print $?;')
 
@@ -123,6 +120,16 @@ BuildRequires: libnuma-devel
 %else
 BuildRequires: numactl-devel
 %endif
+%endif
+
+%if %{with pmix}
+BuildRequires: pmix
+%global pmix %(rpm -q pmix --qf "%{VERSION}")
+%endif
+
+%if %{with ucx}
+BuildRequires: ucx-devel
+%global ucx_version %(rpm -q ucx-devel --qf "%{VERSION}")
 %endif
 
 #  Allow override of sysconfdir via _slurm_sysconfdir.
@@ -210,6 +217,12 @@ to launch jobs.
 Summary: Slurm compute node daemon
 Group: System Environment/Base
 Requires: %{name}%{?_isa} = %{version}-%{release}
+%if %{with pmix}
+Requires: pmix = %{pmix_version}
+%endif
+%if %{with ucx}
+Requires: ucx = %{ucx_version}
+%endif
 %description slurmd
 Slurm compute node daemon. Used to launch jobs on compute nodes
 
@@ -276,14 +289,14 @@ running on the node, or any user who has allocated resources on the node
 according to the Slurm
 %endif
 
-%if %{with cray}
+%if %{with slurmsmwd}
 %package slurmsmwd
 Summary: support daemons and software for the Cray SMW
 Group: System Environment/Base
 Requires: %{name}%{?_isa} = %{version}-%{release}
 Obsoletes: craysmw
 %description slurmsmwd
-support daeamons and software for the Cray SMW.  Includes slurmsmwd which
+support daemons and software for the Cray SMW.  Includes slurmsmwd which
 notifies slurm about failed nodes.
 %endif
 
@@ -300,7 +313,7 @@ notifies slurm about failed nodes.
 	%{?_with_cpusetdir} \
 	%{?_with_mysql_config} \
 	%{?_with_ssl} \
-	%{?_without_cray:--disable-native-cray}\
+	%{?_without_cray:--enable-really-no-cray}\
 	%{?_with_cray_network:--enable-cray-network}\
 	%{?_with_multiple_slurmd:--enable-multiple-slurmd} \
 	%{?_with_pmix} \
@@ -308,6 +321,7 @@ notifies slurm about failed nodes.
 	%{?_with_hdf5} \
 	%{?_with_shared_libslurm} \
 	%{?_without_x11:--disable-x11} \
+	%{?_with_ucx} \
 	%{?_with_cflags}
 
 make %{?_smp_mflags}
@@ -346,17 +360,21 @@ install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/slurmdbd.service
    mkdir -p %{buildroot}/opt/modulefiles/slurm
    test -f contribs/cray/opt_modulefiles_slurm &&
       install -D -m644 contribs/cray/opt_modulefiles_slurm %{buildroot}/opt/modulefiles/slurm/%{version}-%{rel}
-   install -D -m644 contribs/cray/slurmsmwd/slurmsmwd.service %{buildroot}/%{_unitdir}/slurmsmwd.service
    echo -e '#%Module\nset ModulesVersion "%{version}-%{rel}"' > %{buildroot}/opt/modulefiles/slurm/.version
 %else
    rm -f contribs/cray/opt_modulefiles_slurm
-   rm -f contribs/cray/slurmsmwd/slurmsmwd.service
    rm -f %{buildroot}/%{_sysconfdir}/plugstack.conf.template
    rm -f %{buildroot}/%{_sysconfdir}/slurm.conf.template
    rm -f %{buildroot}/%{_sbindir}/capmc_suspend
    rm -f %{buildroot}/%{_sbindir}/capmc_resume
    rm -f %{buildroot}/%{_sbindir}/slurmconfgen.py
+%endif
+
+%if %{with slurmsmwd}
+   install -D -m644 contribs/cray/slurmsmwd/slurmsmwd.service %{buildroot}/%{_unitdir}/slurmsmwd.service
+%else
    rm -f %{buildroot}/%{_sbindir}/slurmsmwd
+   rm -f contribs/cray/slurmsmwd/slurmsmwd.service
 %endif
 
 install -D -m644 etc/cgroup.conf.example %{buildroot}/%{_sysconfdir}/cgroup.conf.example
@@ -374,15 +392,6 @@ rm -f %{buildroot}/%{_libdir}/slurm/job_submit_defaults.so
 rm -f %{buildroot}/%{_libdir}/slurm/job_submit_logging.so
 rm -f %{buildroot}/%{_libdir}/slurm/job_submit_partition.so
 rm -f %{buildroot}/%{_libdir}/slurm/auth_none.so
-rm -f %{buildroot}/%{_libdir}/slurm/launch_poe.so
-rm -f %{buildroot}/%{_libdir}/slurm/libpermapi.so
-rm -f %{buildroot}/%{_libdir}/slurm/libsched_if.so
-rm -f %{buildroot}/%{_libdir}/slurm/libsched_if64.so
-rm -f %{buildroot}/%{_libdir}/slurm/proctrack_sgi_job.so
-rm -f %{buildroot}/%{_libdir}/slurm/runjob_plugin.so
-rm -f %{buildroot}/%{_libdir}/slurm/select_bluegene.so
-rm -f %{buildroot}/%{_libdir}/slurm/switch_nrt.so
-rm -f %{buildroot}/%{_mandir}/man5/bluegene*
 rm -f %{buildroot}/%{_sbindir}/sfree
 rm -f %{buildroot}/%{_sbindir}/slurm_epilog
 rm -f %{buildroot}/%{_sbindir}/slurm_prolog
@@ -600,7 +609,7 @@ rm -rf %{buildroot}
 %endif
 #############################################################################
 
-%if %{with cray}
+%if %{with slurmsmwd}
 %files slurmsmwd
 %{_sbindir}/slurmsmwd
 %{_unitdir}/slurmsmwd.service

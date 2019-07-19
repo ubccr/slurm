@@ -3,9 +3,9 @@
  *
  *  NOTE: These functions are designed so they can be used by multiple burst
  *  buffer plugins at the same time (e.g. you might provide users access to
- *  both burst_buffer/cray and burst_buffer/generic on the same system), so
- *  the state information is largely in the individual plugin and passed as
- *  a pointer argument to these functions.
+ *  both burst_buffer/datawarp and burst_buffer/generic on the same system),
+ *  so the state information is largely in the individual plugin and passed
+ *  as a pointer argument to these functions.
  *****************************************************************************
  *  Copyright (C) 2014-2015 SchedMD LLC.
  *  Written by Morris Jette <jette@schedmd.com>
@@ -50,7 +50,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#if defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #define POLLRDHUP POLLHUP
 #include <signal.h>
 #endif
@@ -326,22 +326,13 @@ static uint64_t _atoi(char *tok)
 {
 	char *end_ptr = NULL;
 	int64_t size_i;
-	uint64_t size_u = 0;
+	uint64_t mult, size_u = 0;
 
 	size_i = (int64_t) strtoll(tok, &end_ptr, 10);
 	if (size_i > 0) {
 		size_u = (uint64_t) size_i;
-		if ((end_ptr[0] == 'k') || (end_ptr[0] == 'K')) {
-			size_u = size_u * 1024;
-		} else if ((end_ptr[0] == 'm') || (end_ptr[0] == 'M')) {
-			size_u = size_u * 1024 * 1024;
-		} else if ((end_ptr[0] == 'g') || (end_ptr[0] == 'G')) {
-			size_u = size_u * 1024 * 1024 * 1024;
-		} else if ((end_ptr[0] == 't') || (end_ptr[0] == 'T')) {
-			size_u = size_u * 1024 * 1024 * 1024 * 1024;
-		} else if ((end_ptr[0] == 'p') || (end_ptr[0] == 'P')) {
-			size_u = size_u * 1024 * 1024 * 1024 * 1024 * 1024;
-		}
+		if ((mult = suffix_mult(end_ptr)) != NO_VAL64)
+			size_u *= mult;
 	}
 	return size_u;
 }
@@ -423,7 +414,7 @@ extern void bb_load_config(bb_state_t *state_ptr, char *plugin_type)
 	state_ptr->bb_config.validate_timeout = DEFAULT_VALIDATE_TIMEOUT;
 
 	/* First look for "burst_buffer.conf" then with "type" field,
-	 * for example "burst_buffer_cray.conf" */
+	 * for example "burst_buffer_datawarp.conf" */
 	bb_conf = get_extra_conf_path("burst_buffer.conf");
 	fd = open(bb_conf, 0);
 	if (fd >= 0) {
@@ -743,7 +734,7 @@ extern int bb_pack_usage(uid_t uid, bb_state_t *state_ptr, Buf buffer,
 extern uint64_t bb_get_size_num(char *tok, uint64_t granularity)
 {
 	char *tmp = NULL, *unit;
-	uint64_t bb_size_i;
+	uint64_t bb_size_i, mult;
 	uint64_t bb_size_u = 0;
 
 	bb_size_i = (uint64_t) strtoull(tok, &tmp, 10);
@@ -751,42 +742,13 @@ extern uint64_t bb_get_size_num(char *tok, uint64_t granularity)
 		bb_size_u = bb_size_i;
 		unit = xstrdup(tmp);
 		strtok(unit, " ");
-		if (!xstrcasecmp(unit, "k") || !xstrcasecmp(unit, "kib")) {
-			bb_size_u *= 1024;
-		} else if (!xstrcasecmp(unit, "kb")) {
-			bb_size_u *= 1000;
-
-		} else if (!xstrcasecmp(unit, "m") ||
-			   !xstrcasecmp(unit, "mib")) {
-			bb_size_u *= ((uint64_t)1024 * 1024);
-		} else if (!xstrcasecmp(unit, "mb")) {
-			bb_size_u *= ((uint64_t)1000 * 1000);
-
-		} else if (!xstrcasecmp(unit, "g") ||
-			   !xstrcasecmp(unit, "gib")) {
-			bb_size_u *= ((uint64_t)1024 * 1024 * 1024);
-		} else if (!xstrcasecmp(unit, "gb")) {
-			bb_size_u *= ((uint64_t)1000 * 1000 * 1000);
-
-		} else if (!xstrcasecmp(unit, "t") ||
-			   !xstrcasecmp(unit, "tib")) {
-			bb_size_u *= ((uint64_t)1024 * 1024 * 1024 * 1024);
-		} else if (!xstrcasecmp(unit, "tb")) {
-			bb_size_u *= ((uint64_t)1000 * 1000 * 1000 * 1000);
-
-		} else if (!xstrcasecmp(unit, "p") ||
-			   !xstrcasecmp(unit, "pib")) {
-			bb_size_u *= ((uint64_t)1024 * 1024 * 1024 * 1024
-				      * 1024);
-		} else if (!xstrcasecmp(unit, "pb")) {
-			bb_size_u *= ((uint64_t)1000 * 1000 * 1000 * 1000
-				      * 1000);
-
-		} else if (!xstrcasecmp(unit, "n") ||
-			   !xstrcasecmp(unit, "node") ||
-			   !xstrcasecmp(unit, "nodes")) {
+		if (!xstrcasecmp(unit, "n") ||
+		    !xstrcasecmp(unit, "node") ||
+		    !xstrcasecmp(unit, "nodes")) {
 			bb_size_u |= BB_SIZE_IN_NODES;
 			granularity = 1;
+		} else if ((mult = suffix_mult(unit)) != NO_VAL64) {
+			bb_size_u *= mult;
 		}
 		xfree(unit);
 	}
@@ -1266,9 +1228,11 @@ extern void bb_limit_rem(uint32_t user_id, uint64_t bb_size, char *pool,
 		if (state_ptr->unfree_space >= bb_size) {
 			state_ptr->unfree_space -= bb_size;
 		} else {
-			/* This will happen if we reload burst buffer state
+			/*
+			 * This will happen if we reload burst buffer state
 			 * after making a claim against resources, but before
-			 * the buffer actually gets created */
+			 * the buffer actually gets created.
+			 */
 			debug2("%s: unfree_space underflow (%"PRIu64" < %"PRIu64")",
 			        __func__, state_ptr->unfree_space, bb_size);
 			state_ptr->unfree_space = 0;
@@ -1288,8 +1252,13 @@ extern void bb_limit_rem(uint32_t user_id, uint64_t bb_size, char *pool,
 			if (pool_ptr->unfree_space >= bb_size) {
 				pool_ptr->unfree_space -= bb_size;
 			} else {
-				error("%s: unfree_space underflow for pool %s",
-				      __func__, pool);
+				/*
+				 * This will happen if we reload burst buffer
+				 * state after making a claim against resources,
+				 * but before the buffer actually gets created.
+				 */
+				debug2("%s: unfree_space underflow for pool %s",
+				       __func__, pool);
 				pool_ptr->unfree_space = 0;
 			}
 			break;

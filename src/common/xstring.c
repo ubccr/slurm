@@ -335,7 +335,7 @@ char * xstrdup(const char *str)
 		return NULL;
 	}
 	siz = strlen(str) + 1;
-	result = (char *)xmalloc(siz);
+	result = xmalloc(siz);
 
 	rsiz = strlcpy(result, str, siz);
 	if (rsiz)
@@ -379,7 +379,7 @@ char * xstrndup(const char *str, size_t n)
 	if (n < siz)
 		siz = n;
 	siz++;
-	result = (char *)xmalloc(siz);
+	result = xmalloc(siz);
 
 	(void) strlcpy(result, str, siz);
 
@@ -570,10 +570,10 @@ char *xstrstr(const char *haystack, const char *needle)
 	return strstr(haystack, needle);
 }
 
-char *xstrcasestr(char *haystack, char *needle)
+char *xstrcasestr(const char *haystack, const char *needle)
 {
 	int hay_inx, hay_size, need_inx, need_size;
-	char *hay_ptr = haystack;
+	char *hay_ptr = (char *) haystack;
 
 	if (haystack == NULL || needle == NULL)
 		return NULL;
@@ -609,11 +609,9 @@ static char *_xstrdup_vprintf(const char *fmt, va_list ap)
 {
 	/* Start out with a size of 100 bytes. */
 	int n, size = 100;
-	char *p = NULL;
 	va_list our_ap;
+	char *p = xmalloc(size);
 
-	if ((p = xmalloc(size)) == NULL)
-		return NULL;
 	while (1) {
 		/* Try to print in the allocated space. */
 		va_copy(our_ap, ap);
@@ -627,8 +625,7 @@ static char *_xstrdup_vprintf(const char *fmt, va_list ap)
 			size = n + 1;           /* precisely what is needed */
 		else                      /* glibc 2.0 */
 			size *= 2;              /* twice the old size */
-		if ((p = xrealloc(p, size)) == NULL)
-			return NULL;
+		p = xrealloc(p, size);
 	}
 	/* NOTREACHED */
 }

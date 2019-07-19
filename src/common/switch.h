@@ -94,15 +94,6 @@ extern int  switch_g_restore(char *dir_name, bool recover);
  */
 extern int  switch_g_clear(void);
 
-/* return the number of a switch-specific error code */
-extern int switch_g_get_errno(void);
-
-/* return a string description of a switch specific error code
- * IN errnum - switch specific error return code
- * RET       - string describing the nature of the error
- */
-extern char *switch_g_strerror(int errnum);
-
 /******************************************************\
  * JOB-SPECIFIC SWITCH CREDENTIAL MANAGEMENT FUNCIONS *
 \******************************************************/
@@ -127,6 +118,15 @@ extern int  switch_g_alloc_jobinfo (dynamic_plugin_data_t **jobinfo,
 extern int  switch_g_build_jobinfo(dynamic_plugin_data_t *jobinfo,
 				   slurm_step_layout_t *step_layout,
 				   char *network);
+
+/* duplicate a job's switch credential
+ * IN  source  - storage for a switch job credential
+ * OUT dest    - pointer to NULL at beginning, will point to storage for
+ *               duplicated switch job credential
+ * NOTE: storage must be freed using g_switch_g_free_jobinfo
+ */
+extern int  switch_g_duplicate_jobinfo(dynamic_plugin_data_t *source,
+				       dynamic_plugin_data_t **dest);
 
 /* free storage previously allocated for a switch job credential
  * IN jobinfo  - the switch job credential to be freed

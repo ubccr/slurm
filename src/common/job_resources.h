@@ -81,6 +81,9 @@
  * sockets_per_node	- Count of sockets on this node, build by
  *			  build_job_resources() and ensures consistent
  *			  interpretation of core_bitmap
+ * tasks_per_node	- Expected tasks to launch per node. Currently used only
+ *			  by cons_tres for tres_per_task support at resource
+ *			  allocation time. No need to save/restore or pack.
  * whole_node		- Job allocated full node (used only by select/cons_res)
  *
  * NOTES:
@@ -118,6 +121,7 @@ struct job_resources {
 	uint32_t  ncpus;
 	uint32_t *sock_core_rep_count;
 	uint16_t *sockets_per_node;
+	uint16_t *tasks_per_node;
 	uint8_t   whole_node;
 };
 
@@ -273,6 +277,10 @@ extern bitstr_t * copy_job_resources_node(job_resources_t *job_resrcs_ptr,
 extern int get_job_resources_cnt(job_resources_t *job_resrcs_ptr,
 				 uint32_t node_id, uint16_t *socket_cnt,
 				 uint16_t *cores_per_socket_cnt);
+
+/* Get CPU count for a specific node_id (zero origin), return -1 on error */
+extern int get_job_resources_cpus(job_resources_t *job_resrcs_ptr,
+				  uint32_t node_id);
 
 /*
  * Test if job can fit into the given full-length core_bitmap

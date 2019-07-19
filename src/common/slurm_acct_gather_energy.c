@@ -185,10 +185,7 @@ extern int acct_gather_energy_fini(void)
 
 extern acct_gather_energy_t *acct_gather_energy_alloc(uint16_t cnt)
 {
-	acct_gather_energy_t *energy =
-		xmalloc(sizeof(struct acct_gather_energy) * cnt);
-
-	return energy;
+	return xcalloc(cnt, sizeof(struct acct_gather_energy));
 }
 
 extern void acct_gather_energy_destroy(acct_gather_energy_t *energy)
@@ -211,7 +208,7 @@ extern void acct_gather_energy_pack(acct_gather_energy_t *energy, Buf buffer,
 		}
 
 		pack64(energy->base_consumed_energy, buffer);
-		pack32(energy->base_watts, buffer);
+		pack32(energy->ave_watts, buffer);
 		pack64(energy->consumed_energy, buffer);
 		pack32(energy->current_watts, buffer);
 		pack64(energy->previous_consumed_energy, buffer);
@@ -233,7 +230,7 @@ extern int acct_gather_energy_unpack(acct_gather_energy_t **energy, Buf buffer,
 
 	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		safe_unpack64(&energy_ptr->base_consumed_energy, buffer);
-		safe_unpack32(&energy_ptr->base_watts, buffer);
+		safe_unpack32(&energy_ptr->ave_watts, buffer);
 		safe_unpack64(&energy_ptr->consumed_energy, buffer);
 		safe_unpack32(&energy_ptr->current_watts, buffer);
 		safe_unpack64(&energy_ptr->previous_consumed_energy, buffer);

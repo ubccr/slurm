@@ -75,6 +75,7 @@ struct sprio_parameters {
 	char* jobs;
 	char* parts;
 	char* users;
+	char* sort;
 
 	List  format_list;
 	List  job_list;
@@ -87,6 +88,7 @@ struct sprio_parameters {
 extern struct sprio_parameters params;
 extern uint32_t max_age; /* time when not to add any more */
 extern uint32_t weight_age; /* weight for age factor */
+extern uint32_t weight_assoc; /* weight for Assoc factor */
 extern uint32_t weight_fs; /* weight for Fairshare factor */
 extern uint32_t weight_js; /* weight for Job Size factor */
 extern uint32_t weight_part; /* weight for Partition factor */
@@ -95,5 +97,6 @@ extern char    *weight_tres; /* weight str TRES factors */
 
 extern void parse_command_line( int argc, char* *argv );
 extern int  parse_format( char* format );
+extern void sort_job_list(List job_list);
 
 #endif

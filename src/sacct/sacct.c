@@ -59,6 +59,7 @@ print_field_t fields[] = {
 	{16, "BlockID", print_fields_str, PRINT_BLOCKID},
 	{10, "Cluster", print_fields_str, PRINT_CLUSTER},
 	{14, "Comment", print_fields_str, PRINT_COMMENT},
+	{19, "Constraints", print_fields_str, PRINT_CONSTRAINTS},
 	{14, "ConsumedEnergy", print_fields_str, PRINT_CONSUMED_ENERGY},
 	{17, "ConsumedEnergyRaw", print_fields_uint64,
 	 PRINT_CONSUMED_ENERGY_RAW},
@@ -70,6 +71,7 @@ print_field_t fields[] = {
 	{19, "Eligible", print_fields_date, PRINT_ELIGIBLE},
 	{19, "End", print_fields_date, PRINT_END},
 	{8,  "ExitCode", print_fields_str, PRINT_EXITCODE},
+	{19, "Flags", print_fields_str, PRINT_FLAGS},
 	{6,  "GID", print_fields_uint, PRINT_GID},
 	{9,  "Group", print_fields_str, PRINT_GROUP},
 	{-12, "JobID", print_fields_str, PRINT_JOBID},
@@ -103,6 +105,7 @@ print_field_t fields[] = {
 	{10, "Partition", print_fields_str, PRINT_PARTITION},
 	{10, "QOS", print_fields_str, PRINT_QOS},
 	{6,  "QOSRAW", print_fields_uint, PRINT_QOSRAW},
+	{22, "Reason", print_fields_str, PRINT_REASON},
 	{10, "ReqCPUFreq", print_fields_str, PRINT_REQ_CPUFREQ_MAX}, /* vestigial */
 	{13, "ReqCPUFreqMin", print_fields_str, PRINT_REQ_CPUFREQ_MIN},
 	{13, "ReqCPUFreqMax", print_fields_str, PRINT_REQ_CPUFREQ_MAX},

@@ -72,6 +72,16 @@ typedef struct {
 	char *geo;
 	char *bg_start_point;
 	char *work_dir;
+	char *resv_name;
+	char *req_gres;
+	char *account;
+	char *qos_name;
+	char *wckey;
+	char *cluster;
+	char *submit_time;
+	char *eligible_time;
+	char *derived_ec;
+	char *exit_code;
 } jobcomp_job_rec_t;
 
 typedef struct slurm_jobcomp_context * slurm_jobcomp_context_t;
@@ -86,12 +96,6 @@ extern int g_slurm_jobcomp_fini(void);
 
 /* write record of a job's completion */
 extern int g_slurm_jobcomp_write(struct job_record *job_ptr);
-
-/* return error code */
-extern int g_slurm_jobcomp_errno(void);
-
-/* convert job completion logger specific error code to a string */
-extern char *g_slurm_jobcomp_strerror(int errnum);
 
 /*
  * get info from the storage

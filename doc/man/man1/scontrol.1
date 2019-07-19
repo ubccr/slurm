@@ -1,7 +1,7 @@
-.TH scontrol "1" "Slurm Commands" "June 2018" "Slurm Commands"
+.TH scontrol "1" "Slurm Commands" "February 2019" "Slurm Commands"
 
 .SH "NAME"
-scontrol \- Used view and modify Slurm configuration and state.
+scontrol \- view or modify Slurm configuration and state.
 
 .SH "SYNOPSIS"
 \fBscontrol\fR [\fIOPTIONS\fR...] [\fICOMMAND\fR...]
@@ -228,31 +228,41 @@ Ping the primary and secondary slurmctld daemon and report if
 they are responding.
 
 .TP
-\fBreboot\fP [ASAP] [nextstate=<RESUME|DOWN>] [reason=<reason>] [\fINodeList\fP]
-Reboot all nodes in the system when they become idle using the
+\fBreboot\fP [ASAP] [nextstate=<RESUME|DOWN>] [reason=<reason>] <\fIALL|\
+NodeList\fP>
+Reboot the nodes in the system when they become idle using the
 \fBRebootProgram\fP as configured in Slurm's slurm.conf file.
-The option "ASAP" prevents initiation of additional jobs so the node can be
-rebooted and returned to service "As Soon As Possible" (i.e. ASAP). A user
-defined message can be added to the nodes by using the "reason" option. The
-message will be cleared when the node is resumed.  If "nextstate" is specified
-as "DOWN", then the node(s) will remain in a down state after rebooting. If the
-"nextstate" is specifed as "RESUME", then the node(s) will resume as normal
-when the node registers. "Resuming" nodes will be considered as available in
+Each node will have the "REBOOT" flag added to its node state.
+After a node reboots and the slurmd daemon starts up again, the
+HealthCheckProgram will run once. Then, the slurmd daemon will register
+itself with the slurmctld daemon and the "REBOOT" flag will be cleared.
+If the node reason is "Reboot ASAP", Slurm will clear the node's "DRAIN"
+state flag as well.
+The "ASAP" option adds the "DRAIN" flag to each node's state, preventing
+additional jobs from running on the node so it can be
+rebooted and returned to service "As Soon As Possible" (i.e. ASAP).
+"ASAP" will also set the node reason to "Reboot ASAP" if the "reason" option
+isn't specified.
+If the "nextstate" option is specified
+as "DOWN", then the node will remain in a down state after rebooting. If
+"nextstate" is specified as "RESUME", then the nodes will resume as normal
+when the node registers and the node reason will be cleared.
+Resuming nodes will be considered as available in
 backfill future scheduling and won't be replaced by idle nodes in a reservation.
 When using the "nextstate" and "reason" options together the reason will be
-appended with "reboot issused" when the reboot is issued and "reboot complete"
-when the node registers with a "nextstate" of "DOWN". An optional list of nodes
-to reboot may be specified. By default all nodes are rebooted.
-NOTE: This command does not prevent additional jobs from being scheduled on
-these nodes, so many jobs can be executed on the nodes prior to them being
-rebooted. You can explicitly drain the nodes in order to reboot nodes as soon
-as possible, but the nodes must also explicitly be returned to service after
-being rebooted. You can alternately create an advanced reservation to
+appended with "reboot issued" when the reboot is issued and "reboot complete"
+when the node registers with a "nextstate" of "DOWN".
+The "reason" option sets each node's reason to a user-defined message.
+You must specify either a list of nodes or that ALL nodes are to be rebooted.
+NOTE: By default, this command does not prevent additional jobs from being
+scheduled on any nodes before reboot.
+To do this, you can either use the "ASAP" option or explicitly drain the nodes
+beforehand.
+You can alternately create an advanced reservation to
 prevent additional jobs from being initiated on nodes to be rebooted.
-NOTE: Nodes will be placed in a state of "REBOOT" until rebooted and returned
-to service with a normal state.
-Alternately the node's state "REBOOT" may be cleared by using the scontrol
-command to set the node state to "RESUME", which clears the "REBOOT" flag.
+Pending reboots can be cancelled by using "scontrol cancel_reboot <node>" or
+setting the node state to "CANCEL_REBOOT".
+A node will be marked "DOWN" if it doesn't reboot within \fBResumeTimeout\fR.
 
 .TP
 \fBreconfigure\fP
@@ -278,18 +288,31 @@ that name.
 Also see \fBhold\fR.
 
 .TP
-\fBrequeue\fP \fIjob_list\fP
+\fBrequeue\f  [option] \fIjob_list\fP
 Requeue a running, suspended or finished Slurm batch job into pending state.
 The job_list argument is a comma separated list of job IDs.
+The command accepts the following option:
+.RS
+.TP
+\fIIncomplete\fP
+Operate only on jobs (or tasks of a job array) which have not completed.
+Specifically only jobs in the following states will be requeued:
+CONFIGURING, RUNNING, STOPPED or SUSPENDED.
+.RE
 
 .TP
-\fBrequeuehold\fP \fIjob_list\fP
+\fBrequeuehold\fP [option] \fIjob_list\fP
 Requeue a running, suspended or finished Slurm batch job into pending state,
 moreover the job is put in held state (priority zero).
 The job_list argument is a comma separated list of job IDs.
 A held job can be released using scontrol to reset its priority (e.g.
-"scontrol release <job_id>"). The command accepts the following option:
+"scontrol release <job_id>"). The command accepts the following options:
 .RS
+.TP
+\fIIncomplete\fP
+Operate only on jobs (or tasks of a job array) which have not completed.
+Specifically only jobs in the following states will be requeued:
+CONFIGURING, RUNNING, STOPPED or SUSPENDED.
 .TP
 \fIState=SpecialExit\fP
 The "SpecialExit" keyword specifies that the job
@@ -311,6 +334,11 @@ configurations or severe degradation in performance with other configurations.
 Use of the scancel command to send SIGSTOP and SIGCONT signals would stop a
 job without releasing its CPUs for allocation to other jobs and would be a
 preferable mechanism in many cases.
+If performing system maintenance you may want to use suspend/resume in the
+following way. Before suspending set all nodes to draining or set all
+partitions to down so that no new jobs can be scheduled. Then suspend
+jobs. Once maintenance is done resume jobs then resume nodes and/or set all
+partitions back to up.
 Use with caution.
 
 .TP
@@ -422,6 +450,8 @@ User processes must stop on receipt of SIGSTOP signal and resume
 upon receipt of SIGCONT for this operation to be effective.
 Not all architectures and configurations support job suspension.
 If a suspended job is requeued, it will be placed in a held state.
+The time a job is suspended will not count against a job's time limit.
+Only an operator, administrator, SlurmUser, or root can suspend jobs.
 
 .TP
 \fBtakeover\fP
@@ -626,7 +656,7 @@ Only pending jobs can have the deadline updated.
 Only the Slurm administrator or root can change this parameter.
 .TP
 \fBDelayBoot\fP=<time_spec>
-Change the time to decide wether to reboot nodes in order to satisfy job's
+Change the time to decide whether to reboot nodes in order to satisfy job's
 feature specification if the job has been eligible to run for less than this
 time period. See salloc/sbatch man pages option \-\-delay\-boot.
 .TP
@@ -809,7 +839,7 @@ Set the job's QOS (Quality Of Service) to the specified value.
 Value may be cleared with blank data value, "QOS=".
 .TP
 \fBReboot\fP=<yes|no>
-Set the job's flag that specifies wether to force the allocated nodes to reboot
+Set the job's flag that specifies whether to force the allocated nodes to reboot
 before starting the job. This is only supported with some system configurations
 and therefore it could be silently ignored.
 .TP
@@ -846,6 +876,10 @@ Reset the job's accrue time value to 0 meaning it will loose any time
 previously accrued for priority.  Helpful if you have a large queue of jobs
 already in the queue and want to start limiting how many jobs can accrue time
 without waiting for the queue to flush out.
+.TP
+\fISiteFactor\fP=<account>
+Specify the job's admin priority factor in the range of +/\-2147483645.
+Only privileged users can modify the value.
 .TP
 \fIStdOut\fP=<filepath>
 Set the batch job's stdout file path.
@@ -924,6 +958,8 @@ precede the time and equal sign with a "+" or "\-" to increment or decrement the
 current time limit (e.g. "TimeLimit+=30"). In order to increment or decrement
 the current time limit, the \fIJobId\fP specification must precede the
 \fITimeLimit\fP specification.
+Note that incrementing or decrementing the time limit for a job array is only
+allowed before the job array has been split into more than one job record.
 Only the Slurm administrator or root can increase job's TimeLimit.
 
 .TP
@@ -937,7 +973,7 @@ Set the job's workload characterization key to the specified value.
 
 .TP
 \fBSPECIFICATIONS FOR SHOW COMMAND, JOBS\fR
-\.LP
+.LP
 
 The "show" command, when used with the "job" or "job <jobid>"
 entity displays detailed information about a job or jobs.  Much of
@@ -977,10 +1013,16 @@ baseboard, socket and core).
 Unconstrained values may be shown as "0" or "*".
 .ad
 .TP
+\fIPreemptEligibleTime\fP
+Time the job becomes eligible for preemption. Modified by PreemptExemptTime,
+either from the global option in slurm.conf or the job QOS. This is hidden if
+the job has not started or if PreemptMode=OFF.
+.TP
 \fIPreemptTime\fP
 Time at which job was signaled that it was selected for preemption.
 (Meaningful only for PreemptMode=CANCEL and the partition or QOS
-with which the job is associated has a GraceTime value designated.)
+with which the job is associated has a GraceTime value designated.) This is
+hidden if the job has not started or if PreemptMode=OFF.
 .TP
 \fIPreSusTime\fP
 Time the job ran prior to last suspend.
@@ -1136,8 +1178,16 @@ Identify generic resources to be associated with the specified node.  Any
 previously defined generic resources will be overwritten with the new value.
 Specifications for multiple generic resources should be comma separated.
 Each resource specification consists of a name followed by an optional
-colon with a numeric value (default value is one)
-(e.g. "Gres=bandwidth:10000,gpus").
+colon with a numeric value (default value is one) (e.g. "Gres=bandwidth:10000").
+Modification of GRES count associated with specific files (e.g. GPUs) is not
+allowed other than to set their count on a node to zero.
+In order to change the GRES count to another value, modify your slurm.conf and
+gres.conf files and restart daemons.
+If GRES as associated with specific sockets, that information will be reported
+For example if all 4 GPUs on a node are all associated with socket zero, then
+"Gres=gpu:4(S:0)". If associated with sockets 0 and 1 then "Gres=gpu:4(S:0-1)".
+The information of which specific GPUs are associated with specific GPUs is not
+reported, but only available by parsing the gres.conf file.
 Generic resources assigned via \fBscontrol\fR will only persist across the
 restart of the slurmctld daemon with the \fI\-R\fR option and state files
 preserved or slurmctld's receipt of a SIGHUP.
@@ -1174,6 +1224,8 @@ available.
 "RESUME" is not an actual node state, but will change a node state from
 "DRAINED", "DRAINING", "DOWN" or "REBOOT" to either
 "IDLE" or "ALLOCATED" state as appropriate.
+"RESUME" will also clear the "POWERING_DOWN" state of a node and make it
+eligible to be allocted.
 "UNDRAIN" clears the node from being drained (like "RESUME"), but will
 not change the node's base state (e.g. "DOWN").
 Setting a node "DOWN" will cause all running and suspended jobs on that
@@ -1388,6 +1440,19 @@ or commands.
 Possible values are "YES" and "NO".
 
 .TP
+\fIJobDefaults\fP=<specs>
+Specify job default values using a comma delimited list of "key=value" pairs.
+Supported keys include
+.RS
+.TP 14
+\fIDefCpuPerGPU\fP
+Default number of CPUs per allocated GPU.
+.TP
+\fIDefMemPerGPU\fP
+Default memory limit (in megabytes) per allocated GPU.
+.RE
+
+.TP
 \fIMaxMemPerCPU\fP=<MB>
 Set the maximum memory to be allocated per CPU for jobs in this partition.
 The memory size is specified in megabytes.
@@ -1593,7 +1658,8 @@ not possible to also explicitly specify allowed accounts.
 Specification of burst buffer resources which are to be reserved.
 "buffer_spec" consists of four elements:
 [plugin:][type:]#[units]
-"plugin" is the burst buffer plugin name, currently either "cray" or "generic".
+"plugin" is the burst buffer plugin name, currently either "datawarp" or
+"generic".
 If no plugin is specified, the reservation applies to all configured burst
 buffer plugins.
 "type" specifies a Cray generic burst buffer resource, for example "nodes".
@@ -1601,7 +1667,7 @@ if "type" is not specified, the number is a measure of storage space.
 The "units" may be "N" (nodes), "K|KiB", "M|MiB", "G|GiB", "T|TiB", "P|PiB"
 (for powers of 1024) and "KB", "MB", "GB", "TB", "PB" (for powers of 1000).
 The default units are bytes for reservations of storage space.
-For example "BurstBuffer=cray:2TB" (reserve 2TB of storage plus
+For example "BurstBuffer=datawarp:2TB" (reserve 2TB of storage plus
 3 nodes from the Cray plugin) or
 "BurstBuffer=100GB" (reserve 100 GB of storage from all configured burst buffer
 plugins).
@@ -1927,7 +1993,7 @@ A valid strftime() format can also be specified. For example, a value of
 .TP
 \fBSLURM_TOPO_LEN\fR
 Specify the maximum size of the line when printing Topology. If not set, the
-default value "512" will be used.
+default value is unlimited.
 
 .SH "AUTHORIZATION"
 

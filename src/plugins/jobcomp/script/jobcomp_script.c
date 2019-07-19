@@ -142,35 +142,6 @@ static pthread_cond_t comp_list_cond = PTHREAD_COND_INITIALIZER;
 static int agent_exit = 0;
 
 /*
- *  Local plugin errno
- */
-static int plugin_errno = SLURM_SUCCESS;
-
-static struct jobcomp_errno {
-	int n;
-	const char *descr;
-} errno_table [] = {
-	{ 0,      "No Error"              },
-	{ EACCES, "Script access denied"  },
-	{ EEXIST, "Script does not exist" },
-	{ EINVAL, "JocCompLoc invalid"    },
-	{ -1,     "Unknown Error"         }
-};
-
-/*
- *  Return string representation of plugin errno
- */
-static const char * _jobcomp_script_strerror (int errnum)
-{
-	struct jobcomp_errno *ep = errno_table;
-
-	while ((ep->n != errnum) && (ep->n != -1))
-		ep++;
-
-	return (ep->descr);
-}
-
-/*
  *  Structure for holding job completion information for later
  *   use by script;
  */
@@ -179,6 +150,7 @@ struct jobcomp_info {
 	uint32_t array_job_id;
 	uint32_t array_task_id;
 	uint32_t exit_code;
+	uint32_t db_flags;
 	uint32_t derived_ec;
 	uint32_t pack_job_id;
 	uint32_t pack_job_offset;
@@ -192,6 +164,7 @@ struct jobcomp_info {
 	time_t start;
 	time_t end;
 	char *cluster;
+	char *constraints;
 	char *group_name;
 	char *orig_dependency;
 	char *nodes;
@@ -203,6 +176,7 @@ struct jobcomp_info {
 	char *work_dir;
 	char *user_name;
 	char *reservation;
+	uint32_t state_reason_prev;
 	char *std_in;
 	char *std_out;
 	char *std_err;
@@ -211,10 +185,14 @@ struct jobcomp_info {
 static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 {
 	enum job_states state;
-	struct jobcomp_info * j = xmalloc (sizeof (*j));
+	struct jobcomp_info *j = xmalloc(sizeof(struct jobcomp_info));
 
 	j->jobid = job->job_id;
 	j->exit_code = job->exit_code;
+	if (job->details)
+		j->constraints = xstrdup(job->details->features);
+	j->db_flags = job->db_flags;
+	j->state_reason_prev = job->state_reason_prev_db;
 	j->derived_ec = job->derived_ec;
 	j->uid = job->user_id;
 	j->user_name = xstrdup(uid_to_string_cached((uid_t)job->user_id));
@@ -329,17 +307,14 @@ _check_script_permissions(char * path)
 	struct stat st;
 
 	if (stat(path, &st) < 0) {
-		plugin_errno = errno;
 		return error("jobcomp/script: failed to stat %s: %m", path);
 	}
 
 	if (!(st.st_mode & S_IFREG)) {
-		plugin_errno = EACCES;
 		return error("jobcomp/script: %s isn't a regular file", path);
 	}
 
 	if (access(path, X_OK) < 0) {
-		plugin_errno = EACCES;
 		return error("jobcomp/script: %s is not executable", path);
 	}
 
@@ -440,8 +415,13 @@ static char ** _create_environment (struct jobcomp_info *job)
 	_env_append_fmt (&env, "PROCS", "%u",  job->nprocs);
 	_env_append_fmt (&env, "NODECNT", "%u", job->nnodes);
 
+	tz = slurmdb_job_flags_str(job->db_flags);
+	_env_append (&env, "DB_FLAGS", tz);
+	xfree(tz);
+
 	_env_append (&env, "BATCH", (job->batch_flag ? "yes" : "no"));
 	_env_append (&env, "CLUSTER",	job->cluster);
+	_env_append (&env, "CONSTRAINTS", job->constraints);
 	_env_append (&env, "NODES",     job->nodes);
 	_env_append (&env, "ACCOUNT",   job->account);
 	_env_append (&env, "JOBNAME",   job->name);
@@ -453,6 +433,8 @@ static char ** _create_environment (struct jobcomp_info *job)
 	_env_append (&env, "RESERVATION", job->reservation);
 	_env_append (&env, "USERNAME", job->user_name);
 	_env_append (&env, "GROUPNAME", job->group_name);
+	_env_append (&env, "STATEREASONPREV",
+		     job_reason_string(job->state_reason_prev));
 	if (job->std_in)
 		_env_append (&env, "STDIN",     job->std_in);
 	if (job->std_out)
@@ -620,7 +602,6 @@ extern int init(void)
 extern int slurm_jobcomp_set_location (char * location)
 {
 	if (location == NULL) {
-		plugin_errno = EACCES;
 		return error("jobcomp/script JobCompLoc needs to be set");
 	}
 
@@ -650,18 +631,6 @@ int slurm_jobcomp_log_record (struct job_record *record)
 	return SLURM_SUCCESS;
 }
 
-/* Return the error code of the plugin*/
-extern int slurm_jobcomp_get_errno(void)
-{
-	return plugin_errno;
-}
-
-/* Return a string representation of the error */
-extern const char * slurm_jobcomp_strerror(int errnum)
-{
-	return _jobcomp_script_strerror (errnum);
-}
-
 /* Called when script unloads */
 extern int fini ( void )
 {
@@ -669,7 +638,9 @@ extern int fini ( void )
 	if (script_thread) {
 		verbose("Script Job Completion plugin shutting down");
 		agent_exit = 1;
+		slurm_mutex_lock(&comp_list_mutex);
 		slurm_cond_broadcast(&comp_list_cond);
+		slurm_mutex_unlock(&comp_list_mutex);
 		pthread_join(script_thread, NULL);
 		script_thread = 0;
 	}

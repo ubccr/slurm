@@ -51,12 +51,6 @@
 
 #define _DEBUG 0
 
-/*
- * WARNING:  Do not change the order of these fields or add additional
- * fields at the beginning of the structure.  If you do, MPI plugins
- * will stop working.  If you need to add fields, add them
- * at the end of the structure.
- */
 typedef struct slurm_mpi_ops {
 	int          (*slurmstepd_prefork)(const stepd_step_rec_t *job,
 					   char ***env);
@@ -188,14 +182,7 @@ int _mpi_init (char *mpi_type)
 
 	if (!xstrcmp(mpi_type, "list")) {
 		char *plugin_dir;
-		plugrack_t mpi_rack;
-
-		mpi_rack = plugrack_create();
-		if (!mpi_rack) {
-			error("Unable to create a plugin manager");
-			exit(0);
-		}
-		plugrack_set_major_type(mpi_rack, "mpi");
+		plugrack_t *mpi_rack = plugrack_create("mpi");
 		plugin_dir = slurm_get_plugin_dir();
 		plugrack_read_dir(mpi_rack, plugin_dir);
 		plugrack_print_all_plugin(mpi_rack);

@@ -111,8 +111,6 @@
 #define bit_copybits		slurm_bit_copybits
 
 /* fd.[ch] functions */
-#define fd_read_n		slurm_fd_read_n
-#define fd_write_n		slurm_fd_write_n
 #define fd_set_blocking		slurm_fd_set_blocking
 #define fd_set_nonblocking	slurm_fd_set_nonblocking
 
@@ -204,6 +202,8 @@
 #define	list_install_fork_handlers slurm_list_install_fork_handlers
 
 /* log.[ch] functions */
+#define get_log_level		slurm_get_log_level
+#define get_sched_log_level	slurm_get_sched_log_level
 #define	log_init		slurm_log_init
 #define	log_reinit		slurm_log_reinit
 #define	log_fini		slurm_log_fini
@@ -213,6 +213,7 @@
 #define	log_fp			slurm_log_fp
 #define	log_has_data		slurm_log_has_data
 #define	log_flush		slurm_log_flush
+#define log_var			slurm_log_var
 #define	fatal_abort		slurm_fatal_abort
 #define	fatal			slurm_fatal
 #define	error			slurm_error
@@ -358,7 +359,6 @@
 #define node_state_string_compact slurm_node_state_string_compact
 #define private_data_string	slurm_private_data_string
 #define accounting_enforce_string slurm_accounting_enforce_string
-#define node_use_string		slurm_node_use_string
 #define reservation_flags_string slurm_reservation_flags_string
 #define print_multi_line_string slurm_print_multi_line_string
 
@@ -385,7 +385,6 @@
 #define plugrack_destroy        slurm_plugrack_destroy
 #define plugrack_read_dir       slurm_plugrack_read_dir
 #define plugrack_set_major_type slurm_plugrack_set_major_type
-#define plugrack_set_paranoia   slurm_plugrack_set_paranoia
 #define plugrack_use_by_type    slurm_plugrack_use_by_type
 
 #define jobacctinfo_pack	slurm_jobacctinfo_pack
@@ -441,7 +440,16 @@
 #define stepd_get_uid			slurm_stepd_get_uid
 #define stepd_add_extern_pid		slurm_stepd_add_extern_pid
 #define stepd_get_x11_display		slurm_stepd_get_x11_display
+#define stepd_get_info			slurm_stepd_get_info
+#define stepd_getpw			slurm_stepd_getpw
+#define xfree_struct_passwd		slurm_xfree_struct_passwd
+#define stepd_getgr			slurm_stepd_getgr
+#define xfree_struct_group_array	slurm_xfree_struct_group_array
 
+/* xcgroup_read_config.[ch] */
+#define xcgroup_config_read_mutex       slurm_xcgroup_config_read_mutex
+#define xcgroup_get_slurm_cgroup_conf   slurm_xcgroup_get_slurm_cgroup_conf
+#define xcgroup_fini_slurm_cgroup_conf  slurm_xcgroup_fini_slurm_cgroup_conf
 
 #endif /* USE_ALIAS */
 
@@ -467,6 +475,7 @@
 #include "src/common/switch.h"
 #include "src/common/working_cluster.h"
 #include "src/common/xassert.h"
+#include "src/common/xcgroup_read_config.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"

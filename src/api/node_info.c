@@ -178,12 +178,17 @@ char *slurm_sprint_node_table(node_info_t *node_ptr, int one_liner)
 	uint32_t my_state = node_ptr->node_state;
 	char *cloud_str = "", *comp_str = "", *drain_str = "", *power_str = "";
 	char time_str[32];
-	char *out = NULL, *reason_str = NULL, *select_reason_str = NULL;
+	char *out = NULL, *reason_str = NULL;
 	uint16_t alloc_cpus = 0;
 	int idle_cpus;
 	uint64_t alloc_memory;
 	char *node_alloc_tres = NULL;
 	char *line_end = (one_liner) ? " " : "\n   ";
+	slurm_ctl_conf_info_msg_t  *slurm_ctl_conf_ptr = NULL;
+
+	if (slurm_load_ctl_conf((time_t) NULL, &slurm_ctl_conf_ptr)
+	    != SLURM_SUCCESS)
+		fatal("Cannot load slurmctld conf file");
 
 	if (my_state & NODE_STATE_CLOUD) {
 		my_state &= (~NODE_STATE_CLOUD);
@@ -204,6 +209,10 @@ char *slurm_sprint_node_table(node_info_t *node_ptr, int one_liner)
 	if (my_state & NODE_STATE_POWER_SAVE) {
 		my_state &= (~NODE_STATE_POWER_SAVE);
 		power_str = "+POWER";
+	}
+	if (my_state & NODE_STATE_POWERING_DOWN) {
+		my_state &= (~NODE_STATE_POWERING_DOWN);
+		power_str = "+POWERING_DOWN";
 	}
 	slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
 				  SELECT_NODEDATA_SUBCNT,
@@ -287,7 +296,8 @@ char *slurm_sprint_node_table(node_info_t *node_ptr, int one_liner)
 			line_used = true;
 		}
 
-		if (node_ptr->version && xstrcmp(node_ptr->version, slurmctld_conf.version)) {
+		if (node_ptr->version &&
+		    xstrcmp(node_ptr->version, slurm_ctl_conf_ptr->version)) {
 			xstrfmtcat(out, "Version=%s", node_ptr->version);
 			line_used = true;
 		}
@@ -409,14 +419,11 @@ char *slurm_sprint_node_table(node_info_t *node_ptr, int one_liner)
 
 	/****** Power Consumption Line ******/
 	if (!node_ptr->energy || node_ptr->energy->current_watts == NO_VAL)
-		xstrcat(out, "CurrentWatts=n/s LowestJoules=n/s ConsumedJoules=n/s");
+		xstrcat(out, "CurrentWatts=n/s AveWatts=n/s");
 	else
-		xstrfmtcat(out, "CurrentWatts=%u "
-				"LowestJoules=%"PRIu64" "
-				"ConsumedJoules=%"PRIu64"",
+		xstrfmtcat(out, "CurrentWatts=%u AveWatts=%u",
 				node_ptr->energy->current_watts,
-				node_ptr->energy->base_consumed_energy,
-				node_ptr->energy->consumed_energy);
+				node_ptr->energy->ave_watts);
 
 	xstrcat(out, line_end);
 
@@ -447,15 +454,6 @@ char *slurm_sprint_node_table(node_info_t *node_ptr, int one_liner)
 	/****** Line ******/
 	if (node_ptr->reason && node_ptr->reason[0])
 		xstrcat(reason_str, node_ptr->reason);
-	slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
-				  SELECT_NODEDATA_EXTRA_INFO,
-				  0, &select_reason_str);
-	if (select_reason_str && select_reason_str[0]) {
-		if (reason_str)
-			xstrcat(reason_str, "\n");
-		xstrcat(reason_str, select_reason_str);
-	}
-	xfree(select_reason_str);
 	if (reason_str) {
 		int inx = 1;
 		char *save_ptr = NULL, *tok, *user_name;
@@ -484,6 +482,7 @@ char *slurm_sprint_node_table(node_info_t *node_ptr, int one_liner)
 	else
 		xstrcat(out, "\n\n");
 
+	slurm_free_ctl_conf(slurm_ctl_conf_ptr);
 	return out;
 }
 
@@ -539,7 +538,7 @@ static int _load_cluster_nodes(slurm_msg_t *req_msg,
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /* Maintain a consistent ordering of records */
@@ -669,7 +668,7 @@ static int _load_fed_nodes(slurm_msg_t *req_msg,
 	if (!orig_msg)
 		slurm_seterrno_ret(SLURM_ERROR);
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -708,6 +707,7 @@ extern int slurm_load_node(time_t update_time, node_info_msg_t **resp,
 	}
 
 	slurm_msg_t_init(&req_msg);
+	memset(&req, 0, sizeof(req));
 	req.last_update  = update_time;
 	req.show_flags   = show_flags;
 	req_msg.msg_type = REQUEST_NODE_INFO;
@@ -740,6 +740,7 @@ extern int slurm_load_node2(time_t update_time, node_info_msg_t **resp,
 	node_info_request_msg_t req;
 
 	slurm_msg_t_init(&req_msg);
+	memset(&req, 0, sizeof(req));
 	req.last_update  = update_time;
 	req.show_flags   = show_flags;
 	req_msg.msg_type = REQUEST_NODE_INFO;
@@ -764,6 +765,7 @@ extern int slurm_load_node_single(node_info_msg_t **resp, char *node_name,
 	node_info_single_msg_t req;
 
 	slurm_msg_t_init(&req_msg);
+	memset(&req, 0, sizeof(req));
 	req.node_name    = node_name;
 	req.show_flags   = show_flags;
 	req_msg.msg_type = REQUEST_NODE_INFO_SINGLE;
@@ -785,6 +787,7 @@ extern int slurm_load_node_single2(node_info_msg_t **resp, char *node_name,
 	node_info_single_msg_t req;
 
 	slurm_msg_t_init(&req_msg);
+	memset(&req, 0, sizeof(req));
 	req.node_name    = node_name;
 	req.show_flags   = show_flags;
 	req_msg.msg_type = REQUEST_NODE_INFO_SINGLE;
@@ -850,6 +853,7 @@ extern int slurm_get_node_energy(char *host, uint16_t delta,
 		xfree(this_addr);
 	}
 
+	memset(&req, 0, sizeof(req));
 	req.delta        = delta;
 	req_msg.msg_type = REQUEST_ACCT_GATHER_ENERGY;
 	req_msg.data     = &req;
@@ -884,5 +888,5 @@ extern int slurm_get_node_energy(char *host, uint16_t delta,
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }

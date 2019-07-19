@@ -77,7 +77,7 @@ extern void *rpc_mgr(void *no_data)
 
 	/* initialize port for RPCs */
 	if ((sockfd = slurm_init_msg_engine_port(get_dbd_port()))
-	    == SLURM_SOCKET_ERROR)
+	    == SLURM_ERROR)
 		fatal("slurm_init_msg_engine_port error %m");
 
 	slurm_persist_conn_recv_server_init();
@@ -93,7 +93,7 @@ extern void *rpc_mgr(void *no_data)
 		 */
 		if ((newsockfd = slurm_accept_msg_conn(sockfd,
 						       &cli_addr)) ==
-		    SLURM_SOCKET_ERROR) {
+		    SLURM_ERROR) {
 			slurm_persist_conn_free_thread_loc(i);
 			if (errno != EINTR)
 				error("slurm_accept_msg_conn: %m");
@@ -109,11 +109,11 @@ extern void *rpc_mgr(void *no_data)
 		conn_arg->conn->callback_fini = _connection_fini_callback;
 		conn_arg->conn->shutdown = &shutdown_time;
 		conn_arg->conn->version = SLURM_MIN_PROTOCOL_VERSION;
-		conn_arg->conn->rem_host = xmalloc_nz(sizeof(char) * 16);
+		conn_arg->conn->rem_host = xmalloc_nz(16);
 		/* Don't fill in the rem_port here.  It will be filled in
 		 * later if it is a slurmctld connection. */
 		slurm_get_ip_str(&cli_addr, &port,
-				 conn_arg->conn->rem_host, sizeof(char) * 16);
+				 conn_arg->conn->rem_host, 16);
 
 		slurm_persist_conn_recv_thread_init(
 			conn_arg->conn, i, conn_arg);

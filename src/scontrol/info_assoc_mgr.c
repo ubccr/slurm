@@ -240,9 +240,9 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 			else
 				printf("UserName= ");
 
-			printf("Partition=%s ID=%u%s",
+			printf("Partition=%s Priority=%u ID=%u%s",
 			       assoc_rec->partition ? assoc_rec->partition : "",
-			       assoc_rec->id,
+			       assoc_rec->priority, assoc_rec->id,
 			       new_line_char);
 
 			printf("SharesRaw/Norm/Level/Factor="
@@ -680,7 +680,7 @@ extern void scontrol_print_assoc_mgr_info(int argc, char **argv)
 	/* call the controller to get the meat */
 	cc = slurm_load_assoc_mgr_info(&req, &msg);
 
-	if (cc == SLURM_PROTOCOL_SUCCESS) {
+	if (cc == SLURM_SUCCESS) {
 		/* print the info
 		 */
 		_print_assoc_mgr_info(msg);

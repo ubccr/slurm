@@ -1,4 +1,4 @@
-.TH sacctmgr "1" "Slurm Commands" "June 2018" "Slurm Commands"
+.TH sacctmgr "1" "Slurm Commands" "July 2019" "Slurm Commands"
 
 .SH "NAME"
 sacctmgr \- Used to view and modify Slurm account information.
@@ -427,6 +427,13 @@ NOTE: Changing this value will have no effect on any running or
 pending job.
 
 .TP
+\fIPriority\fP
+What priority will be added to a job\'s priority when using this association.
+This is overridden if set directly on a user.
+Default is the cluster's limit.
+To clear a previously set value use the modify command with a new value of \-1.
+
+.TP
 \fIQosLevel\fP<operator><comma separated list of qos names>
 Specify the default Quality of Service's that jobs are able to run at
 for this association.  To get a list of valid QOS's use 'sacctmgr list qos'.
@@ -707,6 +714,10 @@ The account name of the parent of this association.
 .TP
 \fIPartition\fP
 The name of a partition in the association.
+
+.TP
+\fIPriority\fP
+What priority will be added to a job\'s priority when using this association.
 
 .TP
 \fIWithRawQOSLevel\fP
@@ -1070,7 +1081,7 @@ The index of the cluster in the federation.
 .TP
 \fIDerivedExitCode\fP
 The derived exit code can be modified after a job completes based on
-the user's judgement of whether the job succeeded or failed.  The user
+the user's judgment of whether the job succeeded or failed. The user
 can only modify the derived exit code of their own job.
 
 .TP
@@ -1159,6 +1170,11 @@ GrpWall limits can be increased or the QOS RawUsage value reset to 0
 (zero) to again allow jobs submitted with this QOS to be queued (if
 DenyOnLimit is set) or run (pending with QOSGrp{TRES}MinutesLimit
 or QOSGrpWallLimit reasons, where {TRES} is some type of trackable resource).
+.TP
+\fIUsageFactorSafe\fP
+If set, and \fIAccountingStorageEnforce\fR includes \fISafe\fR, jobs will only
+be able to run if the job can run to completion with the \fIUsageFactor\fR
+applied.
 .RE
 
 .TP
@@ -1284,6 +1300,15 @@ PreemptMode=OFF or PreemptMode=SUSPEND (i.e. preempted jobs must be removed
 from the resources).
 
 .TP
+\fIPreemptExemptTime\fP
+Specifies a minimum run time for jobs of this QOS before they are considered for
+preemption. This QOS option takes precedence over the global
+\fIPreemptExemptTime\fP. Setting to -1 disables the option, allowing another
+QOS or the global option to take effect. Setting to 0 indicates no minimum run
+time and supersedes the lower priority QOS (see \fIOverPartQOS\fP) and/or the
+global option in slurm.conf.
+
+.TP
 \fIPriority\fP
 What priority will be added to a job\'s priority when using this QOS.
 
@@ -1296,7 +1321,7 @@ accounts.
 
 .TP
 \fIUsageFactor\fP
-Usage factor when running with this QOS.
+Usage factor when running with this QOS. See below for more details.
 
 .TP
 \fIUsageThreshold\fP
@@ -1472,13 +1497,33 @@ To clear a previously set value use the modify command with a new value of \-1.
 
 .TP
 \fIUsageFactor\fP
-Usage factor when running with this QOS.  This is a float that is factored into
-the priority time calculations of running jobs.  e.g. if the usagefactor of a
-QOS was 2 for every TRESBillingUnit second a job ran it would count for 2.
-Also if the usagefactor was .5, every second would only count for half
-of the time.  Setting this value to 0 will make it so that running
-jobs will not add time to fairshare or association/qos limits.  To
-clear a previously set value use the modify command with a new value of \-1.
+A float that is factored into a job’s TRES usage (e.g. RawUsage, TRESMins,
+TRESRunMins). For example, if the usagefactor was 2, for every TRESBillingUnit
+second a job ran it would count for 2. If the usagefactor was .5, every second
+would only count for half of the time. A setting of 0 would add no timed usage
+from the job.
+
+The usage factor only applies to the job's QOS and not the partition QOS.
+
+If the \fIUsageFactorSafe\fR flag \fIis\fR set and
+\fIAccountingStorageEnforce\fR includes \fISafe\fR, jobs will only be
+able to run if the job can run to completion with the \fIUsageFactor\fR
+applied.
+
+If the \fIUsageFactorSafe\fR flag is \fInot\fR set and
+\fIAccountingStorageEnforce\fR includes \fISafe\fR, a job will be able to
+be scheduled without the \fIUsageFactor\fR applied and will be able to run
+without being killed due to limits.
+
+If the \fIUsageFactorSafe\fR flag is \fInot\fR set and
+\fIAccountingStorageEnforce\fR does not include \fISafe\fR, a job will be
+able to be scheduled without the \fIUsageFactor\fR applied and could be killed
+due to limits.
+
+See \fIAccountingStorageEnforce\fR in slurm.conf man page.
+
+Default is 1. To clear a previously set value use the modify command with a new
+value of -1.
 
 .SH "SPECIFICATIONS FOR RESERVATIONS"
 
@@ -1896,10 +1941,6 @@ This is the case for each limit that deals with TRES.  To remove the
 limit \-1 is used i.e. GrpTRESMins=cpu=-1 would remove only the cpu
 TRES limit.
 
-NOTE: On GrpTRES limits dealing with nodes as a TRES.  Each job's node
-allocation is counted separately (i.e. if a single node has resources
-allocated to two jobs, this is counted as two allocated nodes).
-
 NOTE: When dealing with Memory as a TRES all limits are in MB.
 
 NOTE: The Billing TRES is calculated from a partition's TRESBillingWeights. It
@@ -1987,10 +2028,6 @@ association and all associations which are children of this association.
 Maximum number of nodes running jobs are able to be
 allocated in aggregate for this association and all associations which
 are children of this association.
-.P
-NOTE: Each job's node allocation is counted separately (i.e. if a
-single node has resources allocated to two jobs, this is counted as
-two allocated nodes).
 .TP
 \fIGrpSubmitJobs=\fP
 Maximum number of jobs which can be in a pending or
@@ -2068,10 +2105,6 @@ association and all associations which are children of this association.
 Maximum number of nodes running jobs are able to be
 allocated in aggregate for this association and all associations which
 are children of this association.
-.P
-NOTE: Each job's node allocation is counted separately (i.e. if a
-single node has resources allocated to two jobs, this is counted as
-two allocated nodes).
 .TP
 \fIGrpSubmitJobs=\fP
 Maximum number of jobs which can be in a pending or
@@ -2206,7 +2239,13 @@ all suspend data removed will be lost permanently.
 
 .TP
 \fIArchive Load\fP
-Load in to the database previously archived data.
+Load in to the database previously archived data. The archive file will not be
+loaded if the records already exist in the database - therefore, trying to load
+an archive file more than once will result in an error. When this data is again
+archived and purged from the database, if the old archive file is still in the
+directory ArchiveDir, a new archive file will be created (see ArchiveDir in the
+slurmdbd.conf man page), so the old file will not be overwritten and these files
+will have duplicate records.
 
 .TP
 \fIFile=\fP

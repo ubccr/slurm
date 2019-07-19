@@ -384,10 +384,11 @@ extern int container_p_add_cont(uint32_t job_id, uint64_t cont_id)
 }
 
 /* Add a process to a job container, create the proctrack container to add */
-extern int container_p_add_pid(uint32_t job_id, pid_t pid, uid_t uid)
+extern int container_p_join(uint32_t job_id, uid_t uid)
 {
 	stepd_step_rec_t job;
 	int rc;
+	pid_t pid = getpid();
 	DEF_TIMERS;
 
 	START_TIMER;
@@ -421,8 +422,8 @@ extern int container_p_delete(uint32_t job_id)
 #ifdef HAVE_NATIVE_CRAY
 	rid_t resv_id = job_id;
 	DEF_TIMERS;
+	int rc;
 #endif
-	int rc = 0;
 	int i, found = -1;
 	bool job_id_change = false;
 
@@ -450,12 +451,14 @@ extern int container_p_delete(uint32_t job_id)
 	} else
 		END_TIMER3("container_p_delete: job_end_reservation took",
 			   3000000);
-#endif
 	if (rc == 0)
 		return SLURM_SUCCESS;
-
 	if ((errno == ENOENT) || (errno == EINPROGRESS) || (errno == EALREADY))
 		return SLURM_SUCCESS;	/* Not fatal error */
 	error("%s: delete(%u): %m", plugin_type, job_id);
 	return SLURM_ERROR;
+#else
+	return SLURM_SUCCESS;
+#endif
+
 }

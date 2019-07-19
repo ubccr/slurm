@@ -51,7 +51,7 @@
 
 #include "task_cgroup.h"
 
-#if defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #define POLLRDHUP POLLHUP
 #else
 #include <sys/eventfd.h>
@@ -117,10 +117,11 @@ static uint64_t percent_in_bytes (uint64_t mb, float percent)
 	return ((mb * 1024 * 1024) * (percent / 100.0));
 }
 
-extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
+extern int task_cgroup_memory_init(void)
 {
 	xcgroup_t memory_cg;
 	bool set_swappiness;
+	slurm_cgroup_conf_t *slurm_cgroup_conf;
 
 	/* initialize user/job/jobstep cgroup relative paths */
 	user_cgroup_path[0]='\0';
@@ -128,8 +129,7 @@ extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	jobstep_cgroup_path[0]='\0';
 
 	/* initialize memory cgroup namespace */
-	if (xcgroup_ns_create(slurm_cgroup_conf, &memory_ns, "", "memory")
-	    != XCGROUP_SUCCESS) {
+	if (xcgroup_ns_create(&memory_ns, "", "memory") != XCGROUP_SUCCESS) {
 		error("task/cgroup: unable to create memory namespace. "
 			"You may need to set the Linux kernel option "
 			"cgroup_enable=memory (and reboot), or disable "
@@ -145,6 +145,10 @@ extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		return SLURM_ERROR;
 	}
 	xcgroup_set_param(&memory_cg, "memory.use_hierarchy","1");
+
+	/* read cgroup configuration */
+	slurm_mutex_lock(&xcgroup_config_read_mutex);
+	slurm_cgroup_conf = xcgroup_get_slurm_cgroup_conf();
 
 	set_swappiness = (slurm_cgroup_conf->memory_swappiness != NO_VAL64);
 	if (set_swappiness)
@@ -222,6 +226,7 @@ extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
          *  in /etc/sysconfig/slurm would be the same
          */
         setenv("SLURMSTEPD_OOM_ADJ", "-1000", 0);
+	slurm_mutex_unlock(&xcgroup_config_read_mutex);
 
 	return SLURM_SUCCESS;
 }
@@ -362,6 +367,16 @@ static int memcg_initialize (xcgroup_ns_t *ns, xcgroup_t *cg,
 	uint64_t mlb_soft = mem_limit_in_bytes(mem_limit, false);
 	uint64_t mls = swap_limit_in_bytes  (mem_limit);
 
+	if (mlb_soft > mlb) {
+		/*
+		 * NOTE: It is recommended to set the soft limit always below
+		 * the hard limit, otherwise the hard one will take precedence.
+		 */
+		debug2("%s: Setting memory.soft_limit_in_bytes (%"PRIu64" bytes) to the same value as memory.limit_in_bytes (%"PRIu64" bytes) for cgroup: %s",
+		       __func__, mlb_soft, mlb, path);
+		mlb_soft = mlb;
+	}
+
 	if (xcgroup_create (ns, cg, path, uid, gid) != XCGROUP_SUCCESS)
 		return -1;
 
@@ -409,11 +424,11 @@ static int memcg_initialize (xcgroup_ns_t *ns, xcgroup_t *cg,
 	return 0;
 }
 
-#if defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
 
 static int _register_oom_notifications(char *ignored)
 {
-	error("OOM notification does not work on FreeBSD or NetBSD");
+	error("OOM notification does not work on FreeBSD, NetBSD, or macOS");
 
 	return SLURM_ERROR;
 }
@@ -658,7 +673,7 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 {
 	int fstatus = SLURM_ERROR;
 	xcgroup_t memory_cg;
-	uint32_t jobid = job->jobid;
+	uint32_t jobid;
 	uint32_t stepid = job->stepid;
 	uid_t uid = job->uid;
 	gid_t gid = job->gid;
@@ -683,6 +698,10 @@ extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 	xfree(slurm_cgpath);
 
 	/* build job cgroup relative path if no set (should not be) */
+	if (job->pack_jobid && (job->pack_jobid != NO_VAL))
+		jobid = job->pack_jobid;
+	else
+		jobid = job->jobid;
 	if (*job_cgroup_path == '\0') {
 		if (snprintf(job_cgroup_path,PATH_MAX,"%s/job_%u",
 			      user_cgroup_path, jobid) >= PATH_MAX) {
@@ -833,6 +852,7 @@ extern int task_cgroup_memory_check_oom(stepd_step_rec_t *job)
 	char step_str[20];
 	uint64_t stop_msg;
 	ssize_t ret;
+	uint32_t jobid;
 
 	if (xcgroup_create(&memory_ns, &memory_cg, "", 0, 0)
 	    != XCGROUP_SUCCESS) {
@@ -845,15 +865,17 @@ extern int task_cgroup_memory_check_oom(stepd_step_rec_t *job)
 		goto fail_xcgroup_lock;
 	}
 
+	if (job->pack_jobid && (job->pack_jobid != NO_VAL))
+		jobid = job->pack_jobid;
+	else
+		jobid = job->jobid;
 	if (job->stepid == SLURM_BATCH_SCRIPT)
-		snprintf(step_str, sizeof(step_str), "%u.batch",
-			 job->jobid);
+		snprintf(step_str, sizeof(step_str), "%u.batch", jobid);
 	else if (job->stepid == SLURM_EXTERN_CONT)
-		snprintf(step_str, sizeof(step_str), "%u.extern",
-			 job->jobid);
+		snprintf(step_str, sizeof(step_str), "%u.extern", jobid);
 	else
 		snprintf(step_str, sizeof(step_str), "%u.%u",
-			 job->jobid, job->stepid);
+			 jobid, job->stepid);
 
 	if (failcnt_non_zero(&step_memory_cg, "memory.memsw.failcnt")) {
 		/*
@@ -873,10 +895,10 @@ extern int task_cgroup_memory_check_oom(stepd_step_rec_t *job)
 
 	if (failcnt_non_zero(&job_memory_cg, "memory.memsw.failcnt")) {
 		info("Job %u hit memory+swap limit at least once during execution. This may or may not result in some failure.",
-		     job->jobid);
+		     jobid);
 	} else if (failcnt_non_zero(&job_memory_cg, "memory.failcnt")) {
 		info("Job %u hit memory limit at least once during execution. This may or may not result in some failure.",
-		     job->jobid);
+		     jobid);
 	}
 
 	if (!oom_thread_created) {

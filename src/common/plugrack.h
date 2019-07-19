@@ -45,12 +45,12 @@
 #include "src/common/list.h"
 
 /* Opaque type for plugin rack. */
-typedef struct _plugrack * plugrack_t;
+typedef struct _plugrack plugrack_t;
 
 /*
- * Returns a new plugin rack object on success and NULL on failure.
+ * Returns a new plugin rack object for a provided major type.
  */
-plugrack_t plugrack_create( void );
+plugrack_t *plugrack_create(const char *major_type);
 
 /*
  * Destroy a plugin rack.  All the associated plugins are unloaded and
@@ -58,84 +58,16 @@ plugrack_t plugrack_create( void );
  *
  * Returns a Slurm errno.
  */
-int plugrack_destroy( plugrack_t rack );
-
-/*
- * Set the major type of the plugins for this rack.  This affects
- * subsequent calls to add plugins from files.
- *
- * Pass NULL to disable typing in plugins handled by this rack.
- * This is the default.
- *
- * Returns a Slurm errno.
- */
-int plugrack_set_major_type( plugrack_t rack, const char *type );
-
-/*
- * Paranoia settings.  OR these together, if desired.
- *
- * _DIR_OWN - verify that the directory containing the plugin is owned
- * by a certain user.
- * _DIR_WRITABLE - verify that the directory containing the plugin is
- * not writable by anyone except its owner.
- * _FILE_OWN - verify that the plugin is owned by a certain user.
- * _FILE_WRITABLE - verify that the plugin is not writable by anyone
- * except its onwer.
- */
-#define PLUGRACK_PARANOIA_NONE			0x00
-#define PLUGRACK_PARANOIA_DIR_OWN		0x01
-#define PLUGRACK_PARANOIA_DIR_WRITABLE		0x02
-#define PLUGRACK_PARANOIA_FILE_OWN		0x04
-#define PLUGRACK_PARANOIA_FILE_WRITABLE		0x08
-
-/*
- * Indicate the manner in which the rack should be paranoid about
- * accepting plugins.
- *
- * paranoia_flags is an ORed combination of the flags listed above.
- * They do not combine across separate calls; the flags must be fully
- * specified at each call.
- *
- * The paranoia setting affects only subsequent attempts to place
- * plugins in the rack.
- *
- * If the flag parameter specifies ownership checking, "uid" gives the
- * numerical user ID of the authorized owner of the plugin and the
- * directory where it resides.  If no ownership checking is requested,
- * this parameter is ignored.
- *
- * Returns a Slurm errno.
- */
-int plugrack_set_paranoia( plugrack_t rack,
-			   const uint32_t paranoia_flags,
-			   const uid_t uid );
+int plugrack_destroy(plugrack_t *rack);
 
 /*
  * Add plugins to a rack by scanning the given directory.  If a
  * type has been set for this rack, only those plugins whose major type
- * matches the rack's type will be loaded.  If a rack's paranoia factors
- * have been set, they are applied to files considered candidates for
- * plugins.  Plugins that fail the paranoid examination are not loaded.
+ * matches the rack's type will be loaded.
  *
  * Returns a Slurm errno.
  */
-int plugrack_read_dir( plugrack_t rack,
-		       const char *dir );
-
-/*
- * Remove from memory all plugins that are not currently in use by the
- * program.
- *
- * Returns a Slurm errno.
- */
-int plugrack_purge_idle( plugrack_t rack );
-
-/*
- * Load into memory all plugins which are currently unloaded.
- *
- * Returns a Slurm errno.
- */
-int plugrack_load_all( plugrack_t rack );
+int plugrack_read_dir(plugrack_t *rack, const char *dir);
 
 /*
  * Find a plugin in the rack which matches the given minor type,
@@ -144,23 +76,13 @@ int plugrack_load_all( plugrack_t rack );
  * Returns PLUGIN_INVALID_HANDLE if a suitable plugin cannot be
  * found or loaded.
  */
-plugin_handle_t plugrack_use_by_type( plugrack_t rack,
-				      const char *type );
-
-/*
- * Indicate that a plugin is no longer needed.  Whether the plugin
- * is actually unloaded depends on the rack's disposal policy.
- *
- * Returns a Slurm errno.
- */
-int plugrack_finished_with_plugin( plugrack_t rack, plugin_handle_t plug );
+plugin_handle_t plugrack_use_by_type(plugrack_t *rack, const char *type);
 
 /*
  * print all plugins in rack
  *
  * Returns a Slurm errno.
  */
-int plugrack_print_all_plugin( plugrack_t rack);
-
+int plugrack_print_all_plugin(plugrack_t *rack);
 
 #endif /*__PLUGRACK_H__*/

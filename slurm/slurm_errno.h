@@ -55,12 +55,6 @@ extern "C" {
 /* general return codes */
 #define SLURM_SUCCESS   0
 #define SLURM_ERROR    -1
-#define SLURM_FAILURE  -1
-
-/* general communication layer return codes */
-#define SLURM_SOCKET_ERROR     -1
-#define SLURM_PROTOCOL_SUCCESS  0
-#define SLURM_PROTOCOL_ERROR   -1
 
 enum {
 	/* General Message error codes */
@@ -131,7 +125,7 @@ enum {
 	ESLURM_TASKDIST_ARBITRARY_UNSUPPORTED =		2040,
 	ESLURM_TASKDIST_REQUIRES_OVERCOMMIT,
 	ESLURM_JOB_HELD,
-	ESLURM_INVALID_CRYPTO_TYPE_CHANGE,
+	ESLURM_INVALID_CRED_TYPE_CHANGE,
 	ESLURM_INVALID_TASK_MEMORY,
 	ESLURM_INVALID_ACCOUNT,
 	ESLURM_INVALID_PARENT_ACCOUNT,
@@ -210,18 +204,12 @@ enum {
 	ESLURM_INVALID_GRES_TYPE,
 	ESLURM_REBOOT_IN_PROGRESS =			2120,
 	ESLURM_MULTI_KNL_CONSTRAINT,
-
-	/* switch specific error codes, specific values defined in plugin module */
-	ESLURM_SWITCH_MIN = 3000,
-	ESLURM_SWITCH_MAX = 3099,
-	ESLURM_JOBCOMP_MIN = 3100,
-	ESLURM_JOBCOMP_MAX = 3199,
-	ESLURM_SCHED_MIN = 3200,
-	ESLURM_SCHED_MAX = 3299,
-	/* reserved for other plugin specific error codes up to 3999 */
+	ESLURM_UNSUPPORTED_GRES,
+	ESLURM_INVALID_NICE,
+	ESLURM_INVALID_TIME_MIN_LIMIT,
 
 	/* slurmd error codes */
-	ESLRUMD_PIPE_ERROR_ON_TASK_SPAWN =		4000,
+	ESLURMD_PIPE_ERROR_ON_TASK_SPAWN =		4000,
 	ESLURMD_KILL_TASK_FAILED,
 	ESLURMD_KILL_JOB_ALREADY_COMPLETE,
 	ESLURMD_INVALID_ACCT_FREQ,
@@ -251,6 +239,7 @@ enum {
 	ESLURMD_JOB_NOTRUNNING,
 	ESLURMD_STEP_SUSPENDED,
 	ESLURMD_STEP_NOTSUSPENDED,
+	ESLURMD_INVALID_SOCKET_NAME_LEN =		4030,
 
 	/* slurmd errors in user batch job */
 	ESCRIPT_CHDIR_FAILED =			4100,
@@ -270,6 +259,10 @@ enum {
 	ESLURM_AUTH_FOPEN_ERROR,
 	ESLURM_AUTH_NET_ERROR,
 	ESLURM_AUTH_UNABLE_TO_SIGN,
+	ESLURM_AUTH_BADARG,
+	ESLURM_AUTH_MEMORY,
+	ESLURM_AUTH_INVALID,
+	ESLURM_AUTH_UNPACK,
 
 	/* accounting errors */
 	ESLURM_DB_CONNECTION            = 7000,
@@ -305,7 +298,7 @@ void slurm_seterrno(int errnum);
 int slurm_get_errno(void);
 
 /* print message: error string for current errno value */
-void slurm_perror(char *msg);
+void slurm_perror(const char *msg);
 
 #ifdef __cplusplus
 }

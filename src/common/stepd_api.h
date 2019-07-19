@@ -49,7 +49,7 @@
 
 typedef enum {
 	REQUEST_CONNECT = 0,
-	REQUEST_SIGNAL_PROCESS_GROUP, /* Defunct, See REQUEST_SIGNAL_CONTAINER */
+	REQUEST_SIGNAL_PROCESS_GROUP, /* Defunct since July 2013 */
 	REQUEST_SIGNAL_TASK_LOCAL, /* Defunct see REQUEST_SIGNAL_CONTAINER */
 	REQUEST_SIGNAL_TASK_GLOBAL, /* Defunct see REQUEST_SIGNAL_CONTAINER */
 	REQUEST_SIGNAL_CONTAINER,
@@ -72,6 +72,8 @@ typedef enum {
 	REQUEST_STEP_NODEID,
 	REQUEST_ADD_EXTERN_PID,
 	REQUEST_X11_DISPLAY,
+	REQUEST_GETPW,
+	REQUEST_GETGR,
 } step_msg_t;
 
 typedef enum {
@@ -80,6 +82,18 @@ typedef enum {
 	SLURMSTEPD_STEP_RUNNING,
 	SLURMSTEPD_STEP_ENDING
 } slurmstepd_state_t;
+
+typedef enum {
+	GETPW_MATCH_USER_AND_PID = 0,	/* user must match, pid must belong */
+	GETPW_MATCH_ALWAYS,		/* always return */
+	GETPW_MATCH_PID,		/* only pid must belong */
+} stepd_getpw_mode_t;
+
+typedef enum {
+	GETGR_MATCH_GROUP_AND_PID = 0,	/* user must match, pid must belong */
+	GETGR_MATCH_ALWAYS,		/* always return */
+	GETGR_MATCH_PID,		/* only pid must belong */
+} stepd_getgr_mode_t;
 
 typedef struct {
 	uid_t uid;
@@ -212,6 +226,27 @@ extern int stepd_add_extern_pid(int fd, uint16_t protocol_version, pid_t pid);
  */
 extern int stepd_get_x11_display(int fd, uint16_t protocol_version,
 				 char **xauthority);
+
+/*
+ * Get the 'struct passwd' info for the user running this job step iff
+ * the cluster is running with enable_nss_slurm.
+ */
+extern struct passwd *stepd_getpw(int fd, uint16_t protocol_version,
+				  int mode, uid_t uid, const char *name);
+
+extern void xfree_struct_passwd(struct passwd *pwd);
+
+/*
+ * Get the 'struct group' info for the user running this job step iff
+ * the cluster is running with enable_nss_slurm.
+ *
+ * Returns a NULL-terminated array of 'struct group' elements, with all
+ * fields allocated with xmalloc().
+ */
+extern struct group **stepd_getgr(int fd, uint16_t protocol_version,
+				  int mode, gid_t gid, const char *name);
+
+extern void xfree_struct_group_array(struct group **grp);
 
 /*
  * Return the process ID of the slurmstepd.

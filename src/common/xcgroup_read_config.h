@@ -3,6 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2009 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
+ *  Copyright (C) 2018 SchedMD LLC.
  *
  *  This file is part of Slurm, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
@@ -39,6 +40,8 @@
 
 #include <inttypes.h>
 
+extern pthread_mutex_t xcgroup_config_read_mutex;
+
 /*  Default lower bound on memory limit in MB. This is required so we
  *   don't immediately kill slurmstepd on mem cgroup creation if
  *   an administrator or user sets and absurdly low mem limit.
@@ -72,33 +75,53 @@ typedef struct slurm_cgroup_conf {
 	float     max_swap_percent;      /* Upper bound on swap as % of RAM  */
 	uint64_t  memory_swappiness;
 
-	bool      memlimit_enforcement;
-	float     memlimit_threshold;
-
 	bool      constrain_devices;
 	char *    allowed_devices_file;
 
 } slurm_cgroup_conf_t;
 
 /*
- * read_slurm_cgroup_conf - load the Slurm cgroup configuration from the
- *      cgroup.conf  file.
- *      This function can be called more than once if so desired.
- * RET SLURM_SUCCESS if no error, otherwise an error code
+ * xcgroup_get_slurm_cgroup_conf - returns slurm_cgroup_conf_t representing the
+ *      contents of the cgroup.conf file.
+ *      This must have xcgroup_config_read_mutex locked before calling and while
+ *      using the returned slurm_cgroup_conf_t.
  */
-extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf);
+extern slurm_cgroup_conf_t *xcgroup_get_slurm_cgroup_conf(void);
 
 /*
- * free_slurm_cgroup_conf - free storage associated with the global variable
- *	slurm_cgroup_conf
- */
-extern void free_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf);
-
-/*
- * get_slurm_cgroup_conf - load the Slurm cgroup configuration from the
+ * xcgroup_get_conf_list - load the Slurm cgroup configuration from the
  *      cgroup.conf  file and return a key pair <name,value> ordered list.
+ *      xcgroup_config_read_mutex must not be locked before calling.
  * RET List with cgroup.conf <name,value> pairs if no error, NULL otherwise.
  */
-extern List get_slurm_cgroup_conf(void);
+extern List xcgroup_get_conf_list(void);
 
-#endif /* !_DBD_READ_CONFIG_H */
+/*
+ * Reread cgroup.conf
+ *      xcgroup_config_read_mutex must not be locked before calling.
+ */
+extern void xcgroup_reconfig_slurm_cgroup_conf(void);
+
+/*
+ * Write the cgroup.conf file out to the stepd.
+ *      xcgroup_config_read_mutex must not be locked before calling.
+ */
+extern int xcgroup_write_conf(int fd);
+
+/*
+ * Read in the cgroup.conf file on the slurmstepd from the slurmd.
+ *      xcgroup_config_read_mutex must not be locked before calling.
+ */
+extern int xcgroup_read_conf(int fd);
+
+/*
+ * xcgroup_fini_slurm_cgroup_conf - when finished using the cgroup.conf file
+ *      free the structure.
+ *      xcgroup_config_read_mutex must not be locked before calling.
+ */
+extern void xcgroup_fini_slurm_cgroup_conf(void);
+
+/* Check that memspec cgroup job confinement is configured */
+extern bool xcgroup_mem_cgroup_job_confinement(void);
+
+#endif /* !_CGROUP_READ_CONFIG_H */

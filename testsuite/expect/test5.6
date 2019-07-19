@@ -38,6 +38,7 @@ set exit_code    0
 set file_in      "test$test_id.input"
 set job_id1      0
 set job_id2      0
+set step_id      0
 set job_name1    "test$test_id.job1"
 set job_name2    "test$test_id.job2"
 set node_cnt 1-1
@@ -47,12 +48,6 @@ print_header $test_id
 if {[job_submit_all_partitions] != 0} {
 	send_user "\nWARNING: This test is incompatible with JobSubmitPlugins=all_partitions\n"
 	exit 0
-}
-
-if {[test_launch_poe]} {
-	set step_id 1
-} else {
-	set step_id 0
 }
 
 #
@@ -316,7 +311,11 @@ expect {
 # Wait long enough to make sure the job step is running and has
 # started its job steps. Check the squeue job step filter option
 #
-wait_for_job $job_id1 "RUNNING"
+if {[wait_for_job $job_id1 "RUNNING"] != 0} {
+	send_user "\nFAILURE: error waiting for job $job_id1 to start\n"
+	cancel_job $job_id1
+	set exit_code 1
+}
 exec $bin_sleep 10
 set job_found 0
 spawn $squeue --format=%i --steps $job_id1.$step_id
@@ -339,7 +338,7 @@ expect {
 		wait
 	}
 }
-if {[test_alps] == 0 && $job_found == 0} {
+if {$job_found == 0} {
 	send_user "\nFAILURE: squeue failed to locate desired job step\n"
 	set exit_code 1
 }

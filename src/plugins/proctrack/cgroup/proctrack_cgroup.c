@@ -83,8 +83,6 @@ const char plugin_name[]      = "Process tracking via linux cgroup freezer subsy
 const char plugin_type[]      = "proctrack/cgroup";
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
-static slurm_cgroup_conf_t slurm_cgroup_conf;
-
 static char user_cgroup_path[PATH_MAX];
 static char job_cgroup_path[PATH_MAX];
 static char jobstep_cgroup_path[PATH_MAX];
@@ -107,8 +105,7 @@ int _slurm_cgroup_init(void)
 	jobstep_cgroup_path[0]='\0';
 
 	/* initialize freezer cgroup namespace */
-	if (xcgroup_ns_create(&slurm_cgroup_conf, &freezer_ns, "", "freezer")
-	    != XCGROUP_SUCCESS) {
+	if (xcgroup_ns_create(&freezer_ns, "", "freezer") != XCGROUP_SUCCESS) {
 		error("unable to create freezer cgroup namespace");
 		return SLURM_ERROR;
 	}
@@ -130,7 +127,18 @@ int _slurm_cgroup_create(stepd_step_rec_t *job, uint64_t id, uid_t uid, gid_t gi
 	 * we do it here as we do not have access to the conf structure
 	 * in libslurm (src/common/xcgroup.c)
 	 */
-	char *pre = (char *)xstrdup(slurm_cgroup_conf.cgroup_prepend);
+	char *pre;
+	slurm_cgroup_conf_t *cg_conf;
+	uint32_t jobid;
+
+	/* read cgroup configuration */
+	slurm_mutex_lock(&xcgroup_config_read_mutex);
+	cg_conf = xcgroup_get_slurm_cgroup_conf();
+
+	pre = xstrdup(cg_conf->cgroup_prepend);
+
+	slurm_mutex_unlock(&xcgroup_config_read_mutex);
+
 #ifdef MULTIPLE_SLURMD
 	if ( conf->node_name != NULL )
 		xstrsubstitute(pre,"%n", conf->node_name);
@@ -175,11 +183,15 @@ int _slurm_cgroup_create(stepd_step_rec_t *job, uint64_t id, uid_t uid, gid_t gi
 	xfree(pre);
 
 	/* build job cgroup relative path if no set (should not be) */
+	if (job->pack_jobid && (job->pack_jobid != NO_VAL))
+		jobid = job->pack_jobid;
+	else
+		jobid = job->jobid;
 	if (*job_cgroup_path == '\0') {
 		if (snprintf(job_cgroup_path, PATH_MAX, "%s/job_%u",
-			     user_cgroup_path, job->jobid) >= PATH_MAX) {
+			     user_cgroup_path, jobid) >= PATH_MAX) {
 			error("unable to build job %u cgroup relative path : %m",
-			      job->jobid);
+			      jobid);
 			goto bail;
 		}
 	}
@@ -201,7 +213,7 @@ int _slurm_cgroup_create(stepd_step_rec_t *job, uint64_t id, uid_t uid, gid_t gi
 		if (cc >= PATH_MAX) {
 			error("proctrack/cgroup unable to build job step %u.%u "
 			      "freezer cg relative path: %m",
-			      job->jobid, job->stepid);
+			      jobid, job->stepid);
 			goto bail;
 		}
 	}
@@ -438,20 +450,14 @@ _slurm_cgroup_is_pid_a_slurm_task(uint64_t id, pid_t pid)
  */
 extern int init (void)
 {
-	/* read cgroup configuration */
-	if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
-		return SLURM_ERROR;
-
 	/* initialize cpuinfo internal data */
 	if (xcpuinfo_init() != XCPUINFO_SUCCESS) {
-		free_slurm_cgroup_conf(&slurm_cgroup_conf);
 		return SLURM_ERROR;
 	}
 
 	/* initialize cgroup internal data */
 	if (_slurm_cgroup_init() != SLURM_SUCCESS) {
 		xcpuinfo_fini();
-		free_slurm_cgroup_conf(&slurm_cgroup_conf);
 		return SLURM_ERROR;
 	}
 
@@ -462,7 +468,6 @@ extern int fini (void)
 {
 	_slurm_cgroup_destroy();
 	xcpuinfo_fini();
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
 	return SLURM_SUCCESS;
 }
 

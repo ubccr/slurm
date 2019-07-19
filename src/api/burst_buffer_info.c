@@ -148,7 +148,7 @@ extern int slurm_load_burst_buffer_stat(int argc, char **argv,
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -192,7 +192,7 @@ extern int slurm_load_burst_buffer_info(burst_buffer_info_msg_t **
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -226,25 +226,22 @@ static void _print_burst_buffer_resv(FILE *out,
 				     burst_buffer_resv_t* burst_buffer_ptr,
 				     int one_liner, bool verbose)
 {
-	char sz_buf[32], time_buf[64], tmp_line[512];
+	char sz_buf[32], time_buf[64];
 	char *out_buf = NULL, *user_name;
 
 	/****** Line 1 ******/
 	if (burst_buffer_ptr->job_id &&
 	    (burst_buffer_ptr->array_task_id == NO_VAL)) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"    JobID=%u ", burst_buffer_ptr->job_id);
+		xstrfmtcat(out_buf, "    JobID=%u ", burst_buffer_ptr->job_id);
 	} else if (burst_buffer_ptr->job_id) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"    JobID=%u_%u(%u) ",
-			burst_buffer_ptr->array_job_id,
-		        burst_buffer_ptr->array_task_id,
-		        burst_buffer_ptr->job_id);
+		xstrfmtcat(out_buf, "    JobID=%u_%u(%u) ",
+			   burst_buffer_ptr->array_job_id,
+			   burst_buffer_ptr->array_task_id,
+			   burst_buffer_ptr->job_id);
 	} else {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"    Name=%s ", burst_buffer_ptr->name);
+		xstrfmtcat(out_buf, "    Name=%s ", burst_buffer_ptr->name);
 	}
-	xstrcat(out_buf, tmp_line);
+
 	_get_size_str(sz_buf, sizeof(sz_buf), burst_buffer_ptr->size);
 	if (burst_buffer_ptr->create_time) {
 		slurm_make_time_str(&burst_buffer_ptr->create_time, time_buf,
@@ -256,23 +253,19 @@ static void _print_burst_buffer_resv(FILE *out,
 
 	user_name = uid_to_string(burst_buffer_ptr->user_id);
 	if (verbose) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "Account=%s CreateTime=%s Partition=%s Pool=%s QOS=%s "
-			 "Size=%s State=%s UserID=%s(%u)",
-			 burst_buffer_ptr->account, time_buf,
-			 burst_buffer_ptr->partition, burst_buffer_ptr->pool,
-			 burst_buffer_ptr->qos,
-			 sz_buf, bb_state_string(burst_buffer_ptr->state),
-			 user_name, burst_buffer_ptr->user_id);
+		xstrfmtcat(out_buf, "Account=%s CreateTime=%s Partition=%s Pool=%s QOS=%s Size=%s State=%s UserID=%s(%u)",
+			   burst_buffer_ptr->account, time_buf,
+			   burst_buffer_ptr->partition, burst_buffer_ptr->pool,
+			   burst_buffer_ptr->qos, sz_buf,
+			   bb_state_string(burst_buffer_ptr->state),
+			   user_name, burst_buffer_ptr->user_id);
 	} else {
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "CreateTime=%s Pool=%s Size=%s State=%s UserID=%s(%u)",
-			 time_buf, burst_buffer_ptr->pool, sz_buf,
-			 bb_state_string(burst_buffer_ptr->state),
-			 user_name, burst_buffer_ptr->user_id);
+		xstrfmtcat(out_buf, "CreateTime=%s Pool=%s Size=%s State=%s UserID=%s(%u)",
+			   time_buf, burst_buffer_ptr->pool, sz_buf,
+			   bb_state_string(burst_buffer_ptr->state),
+			   user_name, burst_buffer_ptr->user_id);
 	}
 	xfree(user_name);
-	xstrcat(out_buf, tmp_line);
 
 	xstrcat(out_buf, "\n");
 	fprintf(out, "%s", out_buf);
@@ -283,17 +276,15 @@ static void _print_burst_buffer_use(FILE *out,
 				    burst_buffer_use_t* usage_ptr,
 				    int one_liner)
 {
-	char tmp_line[512], sz_buf[32];
+	char sz_buf[32];
 	char *out_buf = NULL, *user_name;
 
 	user_name = uid_to_string(usage_ptr->user_id);
 	_get_size_str(sz_buf, sizeof(sz_buf), usage_ptr->used);
-	snprintf(tmp_line, sizeof(tmp_line),
-		 "    UserID=%s(%u) Used=%s",
-	         user_name, usage_ptr->user_id, sz_buf);
+	xstrfmtcat(out_buf, "    UserID=%s(%u) Used=%s",
+		   user_name, usage_ptr->user_id, sz_buf);
 	xfree(user_name);
 
-	xstrcat(out_buf, tmp_line);
 	xstrcat(out_buf, "\n");
 	fprintf(out, "%s", out_buf);
 	xfree(out_buf);
@@ -314,13 +305,12 @@ extern void slurm_print_burst_buffer_record(FILE *out,
 		burst_buffer_info_t *burst_buffer_ptr, int one_liner,
 		int verbose)
 {
-	char tmp_line[512];
-	char f_sz_buf[32], g_sz_buf[32],t_sz_buf[32], u_sz_buf[32];
+	char f_sz_buf[32], g_sz_buf[32], t_sz_buf[32], u_sz_buf[32];
 	char *out_buf = NULL;
+	char *line_end = (one_liner) ? " " : "\n  ";
 	uint64_t free_space;
 	burst_buffer_resv_t *bb_resv_ptr;
 	burst_buffer_use_t  *bb_use_ptr;
-	bool has_acl = false;
 	int i;
 
 	/****** Line ******/
@@ -333,18 +323,14 @@ extern void slurm_print_burst_buffer_record(FILE *out,
 		      burst_buffer_ptr->total_space);
 	_get_size_str(u_sz_buf, sizeof(u_sz_buf),
 		      burst_buffer_ptr->used_space);
-	snprintf(tmp_line, sizeof(tmp_line),
-		 "Name=%s DefaultPool=%s Granularity=%s TotalSpace=%s "
-		 "FreeSpace=%s UsedSpace=%s",
-		 burst_buffer_ptr->name, burst_buffer_ptr->default_pool,
-		 g_sz_buf, t_sz_buf, f_sz_buf, u_sz_buf);
-	xstrcat(out_buf, tmp_line);
-	if (!one_liner)
-		xstrcat(out_buf, "\n");
+	xstrfmtcat(out_buf, "Name=%s DefaultPool=%s Granularity=%s TotalSpace=%s FreeSpace=%s UsedSpace=%s",
+		   burst_buffer_ptr->name, burst_buffer_ptr->default_pool,
+		   g_sz_buf, t_sz_buf, f_sz_buf, u_sz_buf);
 
 	/****** Line (optional) ******/
 	/* Alternate pool information */
 	for (i = 0; i < burst_buffer_ptr->pool_cnt; i++) {
+		xstrcat(out_buf, line_end);
 		free_space = burst_buffer_ptr->pool_ptr[i].total_space -
 			     burst_buffer_ptr->pool_ptr[i].unfree_space;
 		_get_size_str(f_sz_buf, sizeof(f_sz_buf), free_space);
@@ -354,121 +340,88 @@ extern void slurm_print_burst_buffer_record(FILE *out,
 			      burst_buffer_ptr->pool_ptr[i].total_space);
 		_get_size_str(u_sz_buf, sizeof(u_sz_buf),
 			      burst_buffer_ptr->pool_ptr[i].used_space);
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "  AltPoolName[%d]=%s Granularity=%s TotalSpace=%s "
-			 "FreeSpace=%s UsedSpace=%s",
-			 i, burst_buffer_ptr->pool_ptr[i].name,
-			 g_sz_buf, t_sz_buf, f_sz_buf, u_sz_buf);
-		xstrcat(out_buf, tmp_line);
-		if (!one_liner)
-			xstrcat(out_buf, "\n");
+		xstrfmtcat(out_buf, "AltPoolName[%d]=%s Granularity=%s TotalSpace=%s FreeSpace=%s UsedSpace=%s",
+			   i, burst_buffer_ptr->pool_ptr[i].name,
+			   g_sz_buf, t_sz_buf, f_sz_buf, u_sz_buf);
 	}
 
 	/****** Line ******/
-	snprintf(tmp_line, sizeof(tmp_line),
-		"  Flags=%s",
-		slurm_bb_flags2str(burst_buffer_ptr->flags));
-	xstrcat(out_buf, tmp_line);
-	if (!one_liner)
-		xstrcat(out_buf, "\n");
+	xstrcat(out_buf, line_end);
+	xstrfmtcat(out_buf, "Flags=%s",
+		   slurm_bb_flags2str(burst_buffer_ptr->flags));
 
 	/****** Line ******/
-	snprintf(tmp_line, sizeof(tmp_line),
-		"  StageInTimeout=%u StageOutTimeout=%u ValidateTimeout=%u "
-		"OtherTimeout=%u",
-		burst_buffer_ptr->stage_in_timeout,
-		burst_buffer_ptr->stage_out_timeout,
-		burst_buffer_ptr->validate_timeout,
-		burst_buffer_ptr->other_timeout);
-	xstrcat(out_buf, tmp_line);
-	if (!one_liner)
-		xstrcat(out_buf, "\n");
+	xstrcat(out_buf, line_end);
+	xstrfmtcat(out_buf, "StageInTimeout=%u StageOutTimeout=%u ValidateTimeout=%u OtherTimeout=%u",
+		   burst_buffer_ptr->stage_in_timeout,
+		   burst_buffer_ptr->stage_out_timeout,
+		   burst_buffer_ptr->validate_timeout,
+		   burst_buffer_ptr->other_timeout);
 
 	/****** Line (optional) ******/
 	if (burst_buffer_ptr->allow_users) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"  AllowUsers=%s", burst_buffer_ptr->allow_users);
-		xstrcat(out_buf, tmp_line);
-		has_acl = true;
+		xstrcat(out_buf, line_end);
+		xstrfmtcat(out_buf, "AllowUsers=%s",
+			   burst_buffer_ptr->allow_users);
 	} else if (burst_buffer_ptr->deny_users) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"  DenyUsers=%s", burst_buffer_ptr->deny_users);
-		xstrcat(out_buf, tmp_line);
-		has_acl = true;
+		xstrcat(out_buf, line_end);
+		xstrfmtcat(out_buf, "DenyUsers=%s",
+			   burst_buffer_ptr->deny_users);
 	}
-	if (has_acl && !one_liner)
-		xstrcat(out_buf, "\n");
 
 	/****** Line (optional) ******/
 	if (burst_buffer_ptr->create_buffer) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"  CreateBuffer=%s", burst_buffer_ptr->create_buffer);
-		xstrcat(out_buf, tmp_line);
-		if (!one_liner)
-			xstrcat(out_buf, "\n");
+		xstrcat(out_buf, line_end);
+		xstrfmtcat(out_buf, "CreateBuffer=%s",
+			   burst_buffer_ptr->create_buffer);
 	}
 
 	/****** Line (optional) ******/
 	if (burst_buffer_ptr->destroy_buffer) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"  DestroyBuffer=%s", burst_buffer_ptr->destroy_buffer);
-		xstrcat(out_buf, tmp_line);
-		if (!one_liner)
-			xstrcat(out_buf, "\n");
+		xstrcat(out_buf, line_end);
+		xstrfmtcat(out_buf, "DestroyBuffer=%s",
+			   burst_buffer_ptr->destroy_buffer);
 	}
 
 	/****** Line ******/
-	snprintf(tmp_line, sizeof(tmp_line),
-		"  GetSysState=%s", burst_buffer_ptr->get_sys_state);
-	xstrcat(out_buf, tmp_line);
-	if (!one_liner)
-		xstrcat(out_buf, "\n");
+	xstrcat(out_buf, line_end);
+	xstrfmtcat(out_buf, "GetSysState=%s",
+		   burst_buffer_ptr->get_sys_state);
 
 	/****** Line ******/
-	snprintf(tmp_line, sizeof(tmp_line),
-		"  GetSysStatus=%s", burst_buffer_ptr->get_sys_status);
-	xstrcat(out_buf, tmp_line);
-	if (!one_liner)
-		xstrcat(out_buf, "\n");
+	xstrcat(out_buf, line_end);
+	xstrfmtcat(out_buf, "GetSysStatus=%s",
+		   burst_buffer_ptr->get_sys_status);
 
 	/****** Line (optional) ******/
 	if (burst_buffer_ptr->start_stage_in) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"  StartStageIn=%s", burst_buffer_ptr->start_stage_in);
-		xstrcat(out_buf, tmp_line);
-		if (!one_liner)
-			xstrcat(out_buf, "\n");
+		xstrcat(out_buf, line_end);
+		xstrfmtcat(out_buf, "StartStageIn=%s",
+			   burst_buffer_ptr->start_stage_in);
 	}
 
 	/****** Line ******/
 	if (burst_buffer_ptr->start_stage_out) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"  StartStageIn=%s", burst_buffer_ptr->start_stage_out);
-		xstrcat(out_buf, tmp_line);
-		if (!one_liner)
-			xstrcat(out_buf, "\n");
+		xstrcat(out_buf, line_end);
+		xstrfmtcat(out_buf, "StartStageIn=%s",
+			   burst_buffer_ptr->start_stage_out);
 	}
 
 	/****** Line (optional) ******/
 	if (burst_buffer_ptr->stop_stage_in) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"  StopStageIn=%s", burst_buffer_ptr->stop_stage_in);
-		xstrcat(out_buf, tmp_line);
-		if (!one_liner)
-			xstrcat(out_buf, "\n");
+		xstrcat(out_buf, line_end);
+		xstrfmtcat(out_buf, "StopStageIn=%s",
+			   burst_buffer_ptr->stop_stage_in);
 	}
 
 	/****** Line (optional) ******/
 	if (burst_buffer_ptr->stop_stage_out) {
-		snprintf(tmp_line, sizeof(tmp_line),
-			"  StopStageIn=%s", burst_buffer_ptr->stop_stage_out);
-		xstrcat(out_buf, tmp_line);
-		if (!one_liner)
-			xstrcat(out_buf, "\n");
+		xstrcat(out_buf, line_end);
+		xstrfmtcat(out_buf, "StopStageIn=%s",
+			   burst_buffer_ptr->stop_stage_out);
 	}
 
-	if (one_liner)
-		xstrcat(out_buf, "\n");
+	xstrcat(out_buf, "\n");
 	fprintf(out, "%s", out_buf);
 	xfree(out_buf);
 

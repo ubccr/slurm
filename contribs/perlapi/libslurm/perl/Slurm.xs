@@ -249,18 +249,6 @@ slurm_accounting_enforce_string(slurm_t self, uint16_t enforce)
 	OUTPUT:
 		RETVAL
 
-char *
-slurm_node_use_string(slurm_t self, uint16_t node_use)
-	CODE:
-		if (self); /* this is needed to avoid a warning about
-			      unused variables.  But if we take slurm_t self
-			      out of the mix Slurm-> doesn't work,
-			      only Slurm::
-			    */
-		RETVAL = slurm_node_use_string((enum node_use_type)node_use);
-	OUTPUT:
-		RETVAL
-
 ######################################################################
 # 	RESOURCE ALLOCATION FUNCTIONS
 ######################################################################
@@ -792,7 +780,7 @@ slurm_step_launch(slurm_step_ctx_t *ctx, HV *params, HV *callbacks=NULL)
 				set_slcb(callbacks);
 				cb = &slcb;
 			}
-			RETVAL = slurm_step_launch(ctx, &lp, cb, -1);
+			RETVAL = slurm_step_launch(ctx, &lp, cb);
 			free_slurm_step_launch_params_memory(&lp);
 		}
 	OUTPUT:
@@ -1668,8 +1656,6 @@ int
 slurm_get_select_nodeinfo(slurm_t self, dynamic_plugin_data_t *nodeinfo, uint32_t data_type, uint32_t state, SV *data)
 	PREINIT:
 		uint16_t tmp_16;
-		char *tmp_str;
-		bitstr_t *tmp_bitmap;
 		select_nodeinfo_t *tmp_ptr;
 	CODE:
 		if (self); /* this is needed to avoid a warning about
@@ -1678,30 +1664,10 @@ slurm_get_select_nodeinfo(slurm_t self, dynamic_plugin_data_t *nodeinfo, uint32_
 			      only Slurm::
 			    */
 		switch(data_type) {
-		case SELECT_NODEDATA_BITMAP_SIZE: /* data-> uint16_t */
-		case SELECT_NODEDATA_SUBGRP_SIZE: /* data-> uint16_t */
 		case SELECT_NODEDATA_SUBCNT:      /* data-> uint16_t */
 			RETVAL = slurm_get_select_nodeinfo(nodeinfo, data_type, state, &tmp_16);
 			if (RETVAL == 0) {
 				sv_setuv(data, (UV)tmp_16);
-			}
-			break;
-		case SELECT_NODEDATA_BITMAP:      /* data-> bitstr_t * needs to be
-						   * freed with FREE_NULL_BITMAP */
-			RETVAL = slurm_get_select_nodeinfo(nodeinfo, data_type, state, &tmp_bitmap);
-			if (RETVAL == 0) {
-				sv_setref_pv(data, "Slurm::Bitstr", tmp_bitmap);
-			}
-			break;
-		case SELECT_NODEDATA_STR:         /* data-> char *  needs to be freed with xfree */
-			RETVAL = slurm_get_select_nodeinfo(nodeinfo, data_type, state, &tmp_str);
-			if (RETVAL == 0) {
-				char *str;
-				int len = strlen(tmp_str) + 1;
-				New(0, str, len, char);
-				Copy(tmp_str, str, len, char);
-				xfree(tmp_str);
-				sv_setpvn(data, str, len);
 			}
 			break;
 		case SELECT_NODEDATA_PTR:         /* data-> select_nodeinfo_t *nodeinfo */

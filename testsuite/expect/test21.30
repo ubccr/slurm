@@ -199,25 +199,7 @@ if {$got_node != 1} {
 }
 
 # Get the number of cpus on a node
-
-spawn $scontrol show node $test_node
-expect {
-	-re "CPUTot=($number)" {
-		set totcpus $expect_out(1,string)
-		exp_continue
-	}
-	-re "ThreadsPerCore=($number)" {
-		set nthreads $expect_out(1,string)
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: scontrol is not responding\n"
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
+lassign [get_node_cpus $test_node] totcpus nthreads
 
 if {$totcpus == 0} {
 	send_user "\nFAILURE: no cpus where found\n"
@@ -347,8 +329,7 @@ if {[test_super_user] == 0} {
 #
 # Some tests will not work properly when allocating sockets or whole nodes to jobs
 #
-set select_type [test_select_type]
-if {![string compare $select_type "linear"] || [default_part_exclusive]} {
+if {[test_linear] || [default_part_exclusive]} {
 	send_user "\nWARNING: This test is incompatible with exclusive node allocations\n"
 	exit 0
 }

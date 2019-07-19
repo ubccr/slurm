@@ -126,6 +126,11 @@ int switch_p_build_jobinfo ( switch_jobinfo_t *switch_job,
 	return SLURM_SUCCESS;
 }
 
+int switch_p_duplicate_jobinfo (switch_jobinfo_t *tmp,
+			     switch_jobinfo_t **dest)
+{
+	return SLURM_SUCCESS;
+}
 void switch_p_free_jobinfo ( switch_jobinfo_t *switch_job )
 {
 	return;
@@ -254,19 +259,6 @@ extern int switch_p_get_jobinfo(switch_jobinfo_t *switch_job,
 {
 	slurm_seterrno(EINVAL);
 	return SLURM_ERROR;
-}
-
-/*
- * switch functions for other purposes
- */
-extern int switch_p_get_errno(void)
-{
-	return SLURM_SUCCESS;
-}
-
-extern char *switch_p_strerror(int errnum)
-{
-	return NULL;
 }
 
 /*

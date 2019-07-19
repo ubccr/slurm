@@ -45,6 +45,7 @@
 
 #include "slurm/slurmdb.h"
 
+#include "src/common/assoc_mgr.h"
 #include "src/common/bitstring.h"
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
@@ -54,6 +55,7 @@
 #include "src/common/slurmdb_defs.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/strlcpy.h"
 #include "src/common/uid.h"
 #include "src/common/xstring.h"
 

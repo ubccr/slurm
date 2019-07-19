@@ -52,7 +52,6 @@
 #include "src/common/env.h"
 #include "src/common/gres.h"
 #include "src/common/list.h"
-#include "src/common/xcgroup_read_config.c"
 #include "src/common/xstring.h"
 
 #include "../common/gres_common.h"
@@ -95,8 +94,7 @@ static void _set_env(char ***env_ptr, void *gres_ptr, int node_inx,
 		     bool *already_seen, int *local_inx,
 		     bool reset, bool is_job)
 {
-	char *global_list = NULL, *local_list = NULL;
-	char *slurm_env_var = NULL;
+	char *global_list = NULL, *local_list = NULL, *slurm_env_var = NULL;
 
 	if (is_job)
 			slurm_env_var = "SLURM_JOB_NICS";
@@ -110,9 +108,8 @@ static void _set_env(char ***env_ptr, void *gres_ptr, int node_inx,
 	}
 
 	common_gres_set_env(gres_devices, env_ptr, gres_ptr, node_inx,
-			    usable_gres, "mlx4_", local_inx,
-			    &local_list, &global_list,
-			    reset, is_job);
+			    usable_gres, "mlx4_", local_inx, NULL,
+			    &local_list, &global_list, reset, is_job, NULL);
 
 	if (global_list) {
 		env_array_overwrite(env_ptr, slurm_env_var, global_list);
@@ -146,15 +143,14 @@ extern int fini(void)
  * This only validates that the configuration was specified in gres.conf.
  * In the general case, no code would need to be changed.
  */
-extern int node_config_load(List gres_conf_list)
+extern int node_config_load(List gres_conf_list, node_config_load_t *config)
 {
 	int rc = SLURM_SUCCESS;
 
 	if (gres_devices)
 		return rc;
 
-	rc = common_node_config_load(gres_conf_list, gres_name,
-				     &gres_devices);
+	rc = common_node_config_load(gres_conf_list, gres_name, &gres_devices);
 
 	if (rc != SLURM_SUCCESS)
 		fatal("%s failed to load configuration", plugin_name);
@@ -197,7 +193,7 @@ extern void step_set_env(char ***step_env_ptr, void *gres_ptr)
 }
 
 /*
- * Reset environment variables as appropriate for a job (i.e. this one tasks)
+ * Reset environment variables as appropriate for a job (i.e. this one task)
  * based upon the job step's GRES state and assigned CPUs.
  */
 extern void step_reset_env(char ***step_env_ptr, void *gres_ptr,
@@ -222,19 +218,73 @@ extern void recv_stepd(int fd)
 	common_recv_stepd(fd, &gres_devices);
 }
 
+/*
+ * get data from a job's GRES data structure
+ * IN job_gres_data  - job's GRES data structure
+ * IN node_inx - zero-origin index of the node within the job's allocation
+ *	for which data is desired
+ * IN data_type - type of data to get from the job's data
+ * OUT data - pointer to the data from job's GRES data structure
+ *            DO NOT FREE: This is a pointer into the job's data structure
+ * RET - SLURM_SUCCESS or error code
+ */
 extern int job_info(gres_job_state_t *job_gres_data, uint32_t node_inx,
 		     enum gres_job_data_type data_type, void *data)
 {
 	return EINVAL;
 }
 
+/*
+ * get data from a step's GRES data structure
+ * IN step_gres_data  - step's GRES data structure
+ * IN node_inx - zero-origin index of the node within the job's allocation
+ *	for which data is desired. Note this can differ from the step's
+ *	node allocation index.
+ * IN data_type - type of data to get from the step's data
+ * OUT data - pointer to the data from step's GRES data structure
+ *            DO NOT FREE: This is a pointer into the step's data structure
+ * RET - SLURM_SUCCESS or error code
+ */
 extern int step_info(gres_step_state_t *step_gres_data, uint32_t node_inx,
 		     enum gres_step_data_type data_type, void *data)
 {
 	return EINVAL;
 }
 
+/*
+ * Return a list of devices of this type. The list elements are of type
+ * "gres_device_t" and the list should be freed using FREE_NULL_LIST().
+ */
 extern List get_devices(void)
 {
 	return gres_devices;
+}
+
+extern void step_hardware_init(bitstr_t *usable_gres, char *settings)
+{
+	return;
+}
+
+extern void step_hardware_fini(void)
+{
+	return;
+}
+
+/*
+ * Build record used to set environment variables as appropriate for a job's
+ * prolog or epilog based GRES allocated to the job.
+ */
+extern gres_epilog_info_t *epilog_build_env(gres_job_state_t *gres_job_ptr)
+{
+	return NULL;
+}
+
+/*
+ * Set environment variables as appropriate for a job's prolog or epilog based
+ * GRES allocated to the job.
+ */
+extern void epilog_set_env(char ***epilog_env_ptr,
+			   gres_epilog_info_t *epilog_info, int node_inx)
+{
+	return;
 }

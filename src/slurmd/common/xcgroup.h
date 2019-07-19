@@ -47,7 +47,7 @@
 #define MAX_MOVE_WAIT 5000
 
 // http://lists.debian.org/debian-boot/2012/04/msg00047.html
-#if defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #define	MS_NOSUID	MNT_NOSUID
 #define	MS_NOEXEC	MNT_NOEXEC
 #define	MS_NODEV	0
@@ -78,8 +78,7 @@ typedef struct xcgroup {
  *  - XCGROUP_ERROR
  *  - XCGROUP_SUCCESS
  */
-int xcgroup_ns_create(slurm_cgroup_conf_t *conf,
-		      xcgroup_ns_t* cgns, char* mnt_args,
+int xcgroup_ns_create(xcgroup_ns_t* cgns, char* mnt_args,
 		      char* subsys);
 
 /*
@@ -134,7 +133,7 @@ int xcgroup_ns_find_by_pid(xcgroup_ns_t* cgns, xcgroup_t* cg, pid_t pid);
  *  - XCGROUP_ERROR
  *  - XCGROUP_SUCCESS
  */
-int xcgroup_ns_load(slurm_cgroup_conf_t *conf, xcgroup_ns_t *cgns, char *subsys);
+int xcgroup_ns_load(xcgroup_ns_t *cgns, char *subsys);
 
 /*
  * create a cgroup structure

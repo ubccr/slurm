@@ -73,11 +73,15 @@ if {$job_id == 0} {
 	exit 1
 }
 
-wait_for_job $job_id DONE
+if {[wait_for_job $job_id "DONE"] != 0} {
+	send_user "\nFAILURE: error waiting for job $job_id to complete\n"
+	cancel_job $job_id
+	set exit_code 1
+}
 
 set failed_cnt 0
 set timeout_cnt 0
-spawn $sacct --jobs=$job_id --format=State --noheader
+spawn $sacct --jobs=$job_id --format=State --noheader --starttime=00:00
 expect {
 	-re "FAILED" {
 		incr failed_cnt
@@ -103,7 +107,7 @@ if {$failed_cnt != 2 || $timeout_cnt != 1} {
 	set exit_code 1
 
 	send_user "\nGathering more job information:\n"
-	spawn $sacct --jobs=$job_id
+	spawn $sacct --jobs=$job_id --starttime=00:00
 	expect {
 		eof {
 			wait

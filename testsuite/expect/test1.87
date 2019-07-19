@@ -45,15 +45,6 @@ print_header $test_id
 if {[test_front_end] != 0} {
 	send_user "\nWARNING: This test is incompatible with front-end systems\n"
 	exit 0
-} elseif {[test_serial]} {
-	send_user "\nWARNING: This test is incompatible with front-end systems\n"
-	exit 0
-}
-
-if {[test_launch_poe]} {
-	set node_name_env MP_I_UPMD_HOSTNAME
-} else {
-	set node_name_env SLURMD_NODENAME
 }
 
 # find out if we have enough nodes to test functionality
@@ -126,7 +117,7 @@ set host_0      ""
 set host_1      ""
 set host_2      ""
 set host_3      ""
-send "$srun -l $bin_printenv $node_name_env\r"
+send "$srun -l $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "($number): *($alpha_numeric_under)" {
 		set host_num $expect_out(1,string)
@@ -191,7 +182,7 @@ if {$exit_code != 0} {
 #
 set matches 0
 
-send "$srun -l -N2 -n2 --relative=0 $bin_printenv $node_name_env\r"
+send "$srun -l -N2 -n2 --relative=0 $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "($number): *($alpha_numeric_under)" {
 		set host_num $expect_out(1,string)
@@ -243,7 +234,7 @@ if {$matches < 2} {
 # Get two nodes relative (starting at) node 2
 #
 set matches 0
-send "$srun -l -N2 -n2 --relative=2 $bin_printenv $node_name_env\r"
+send "$srun -l -N2 -n2 --relative=2 $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "($number): *($alpha_numeric_under)" {
 		set host_num $expect_out(1,string)
@@ -296,7 +287,7 @@ if {$matches < 2} {
 # Since there is only one node left, we check for a error message
 #
 set error 0
-send "$srun -l -N2 -n2 -O --relative=3 $bin_printenv $node_name_env\r"
+send "$srun -l -N2 -n2 -O --relative=3 $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "error:" {
 		send_user "This error is expected, no worries\n"

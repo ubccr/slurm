@@ -60,6 +60,7 @@
 #include "src/common/read_config.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_auth.h"
+#include "src/common/slurm_rlimits_info.h"
 #include "src/common/slurm_time.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
@@ -89,9 +90,9 @@ static int    foreground = 0;		/* run process as a daemon */
 static log_options_t log_opts = 	/* Log to stderr & syslog */
 	LOG_OPTS_INITIALIZER;
 static int	 new_nice = 0;
-static pthread_t rpc_handler_thread;	/* thread ID for RPC hander */
-static pthread_t rollup_handler_thread;	/* thread ID for rollup hander */
-static pthread_t commit_handler_thread;	/* thread ID for commit hander */
+static pthread_t rpc_handler_thread = 0; /* thread ID for RPC hander */
+static pthread_t rollup_handler_thread = 0; /* thread ID for rollup hander */
+static pthread_t commit_handler_thread = 0; /* thread ID for commit hander */
 static pthread_mutex_t rollup_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool running_rollup = 0;
 static bool running_commit = 0;
@@ -398,10 +399,7 @@ static void  _init_config(void)
 {
 	struct rlimit rlim;
 
-	if (getrlimit(RLIMIT_NOFILE, &rlim) == 0) {
-		rlim.rlim_cur = rlim.rlim_max;
-		(void) setrlimit(RLIMIT_NOFILE, &rlim);
-	}
+	rlimits_maximize_nofile();
 	if (getrlimit(RLIMIT_CORE, &rlim) == 0) {
 		rlim.rlim_cur = rlim.rlim_max;
 		(void) setrlimit(RLIMIT_CORE, &rlim);

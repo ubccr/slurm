@@ -65,15 +65,6 @@
 #include "opt.h"
 #include "launch.h"
 
-#if defined HAVE_ALPS_CRAY && defined HAVE_REAL_CRAY
-/*
- * On Cray installations, the libjob headers are not automatically installed
- * by default, while libjob.so always is, and kernels are > 2.6. Hence it is
- * simpler to just duplicate the single declaration here.
- */
-extern uint64_t job_getjid(pid_t pid);
-#endif
-
 #define MAX_ALLOC_WAIT	60	/* seconds */
 #define MIN_ALLOC_WAIT	5	/* seconds */
 #define MAX_RETRIES	10
@@ -83,6 +74,7 @@ pthread_mutex_t msg_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t msg_cond = PTHREAD_COND_INITIALIZER;
 allocation_msg_thread_t *msg_thr = NULL;
 struct pollfd global_fds[1];
+uint16_t slurmctld_comm_port = 0;
 
 extern char **environ;
 
@@ -380,7 +372,7 @@ extern resource_allocation_response_msg_t *
 
 	xassert(srun_opt);
 
-	if (srun_opt->relative_set && srun_opt->relative)
+	if (srun_opt->relative != NO_VAL)
 		fatal("--relative option invalid for job allocation request");
 
 	if ((j = _job_desc_msg_create_from_opts(&opt)) == NULL)
@@ -396,15 +388,6 @@ extern resource_allocation_response_msg_t *
 
 	j->origin_cluster = xstrdup(slurmctld_conf.cluster_name);
 
-	/* Do not re-use existing job id when submitting new job
-	 * from within a running job */
-	if ((j->job_id != NO_VAL) && !opt_local->jobid_set) {
-		info("WARNING: Creating Slurm job allocation from within "
-		     "another allocation");
-		info("WARNING: You are attempting to initiate a second job");
-		if (!opt_local->jobid_set)	/* Let slurmctld set jobid */
-			j->job_id = NO_VAL;
-	}
 	callbacks.ping = _ping_handler;
 	callbacks.timeout = _timeout_handler;
 	callbacks.job_complete = _job_complete_handler;
@@ -436,7 +419,8 @@ extern resource_allocation_response_msg_t *
 	}
 
 	if (resp)
-		print_multi_line_string(resp->job_submit_user_msg, -1);
+		print_multi_line_string(resp->job_submit_user_msg,
+					-1, LOG_LEVEL_INFO);
 
 	if (resp && !destroy_job) {
 		/*
@@ -451,7 +435,7 @@ extern resource_allocation_response_msg_t *
 		 * in the step creation.
 		 */
 		opt_local->pn_min_memory = NO_VAL64;
-		opt_local->mem_per_cpu   = NO_VAL64;
+		opt_local->mem_per_cpu = -1;
 		if (resp->pn_min_memory != NO_VAL64) {
 			if (resp->pn_min_memory & MEM_PER_CPU) {
 				opt_local->mem_per_cpu = (resp->pn_min_memory &
@@ -504,7 +488,6 @@ relinquish:
 List allocate_pack_nodes(bool handle_signals)
 {
 	resource_allocation_response_msg_t *resp = NULL;
-	bool jobid_log = true;
 	job_desc_msg_t *j, *first_job = NULL;
 	slurm_allocation_callbacks_t callbacks;
 	ListIterator opt_iter, resp_iter;
@@ -520,7 +503,7 @@ List allocate_pack_nodes(bool handle_signals)
 		xassert(srun_opt);
 		if (!first_opt)
 			first_opt = opt_local;
-		if (srun_opt->relative_set && srun_opt->relative)
+		if (srun_opt->relative != NO_VAL)
 			fatal("--relative option invalid for job allocation request");
 
 		if ((j = _job_desc_msg_create_from_opts(opt_local)) == NULL)
@@ -529,19 +512,6 @@ List allocate_pack_nodes(bool handle_signals)
 			first_job = j;
 
 		j->origin_cluster = xstrdup(slurmctld_conf.cluster_name);
-
-		/* Do not re-use existing job id when submitting new job
-		 * from within a running job */
-		if ((j->job_id != NO_VAL) && !opt_local->jobid_set) {
-			if (jobid_log) {
-				jobid_log = false;	/* log once */
-				info("WARNING: Creating Slurm job allocation from within "
-				     "another allocation");
-				info("WARNING: You are attempting to initiate a second job");
-			}
-			if (!opt_local->jobid_set) /* Let slurmctld set jobid */
-				j->job_id = NO_VAL;
-		}
 
 		list_append(job_req_list, j);
 	}
@@ -621,14 +591,11 @@ List allocate_pack_nodes(bool handle_signals)
 			 * pending so overwrite the request with what was
 			 * allocated so we don't have issues when we use them
 			 * in the step creation.
-			 *
-			 * NOTE: pn_min_memory here is an int64, not uint64.
-			 * These operations may have some bizarre side effects
 			 */
 			if (opt_local->pn_min_memory != NO_VAL64)
 				opt_local->pn_min_memory =
 					(resp->pn_min_memory & (~MEM_PER_CPU));
-			else if (opt_local->mem_per_cpu != NO_VAL64)
+			else if (opt_local->mem_per_cpu > -1)
 				opt_local->mem_per_cpu =
 					(resp->pn_min_memory & (~MEM_PER_CPU));
 
@@ -684,12 +651,12 @@ extern List existing_allocation(void)
 	uint32_t old_job_id;
 	List job_resp_list = NULL;
 
-	if (opt.jobid == NO_VAL)
+	if (sropt.jobid == NO_VAL)
 		return NULL;
 
-	old_job_id = (uint32_t) opt.jobid;
+	old_job_id = (uint32_t) sropt.jobid;
 	if (slurm_pack_job_lookup(old_job_id, &job_resp_list) < 0) {
-		if (opt.srun_opt->parallel_debug || opt.jobid_set)
+		if (sropt.parallel_debug)
 			return NULL;    /* create new allocation as needed */
 		if (errno == ESLURM_ALREADY_DONE)
 			error("Slurm job %u has expired", old_job_id);
@@ -708,14 +675,11 @@ extern List existing_allocation(void)
 int slurmctld_msg_init(void)
 {
 	slurm_addr_t slurm_address;
-	uint16_t port;
 	static int slurmctld_fd = -1;
 	uint16_t *ports;
 
 	if (slurmctld_fd >= 0)	/* May set early for queued job allocation */
 		return slurmctld_fd;
-
-	slurmctld_comm_addr.port = 0;
 
 	if ((ports = slurm_get_srun_port_range()))
 		slurmctld_fd = slurm_init_msg_engine_ports(ports);
@@ -734,9 +698,8 @@ int slurmctld_msg_init(void)
 	fd_set_nonblocking(slurmctld_fd);
 	/* hostname is not set,  so slurm_get_addr fails
 	   slurm_get_addr(&slurm_address, &port, hostname, sizeof(hostname)); */
-	port = ntohs(slurm_address.sin_port);
-	slurmctld_comm_addr.port     = port;
-	debug2("srun PMI messages to port=%u", slurmctld_comm_addr.port);
+	slurmctld_comm_port = ntohs(slurm_address.sin_port);
+	debug2("srun PMI messages to port=%u", slurmctld_comm_port);
 
 	return slurmctld_fd;
 }
@@ -753,33 +716,11 @@ static job_desc_msg_t *_job_desc_msg_create_from_opts(slurm_opt_t *opt_local)
 	xassert(srun_opt);
 
 	slurm_init_job_desc_msg(j);
-#if defined HAVE_ALPS_CRAY && defined HAVE_REAL_CRAY
-	static bool sgi_err_logged = false;
-	uint64_t pagg_id = job_getjid(getpid());
-	/*
-	 * Interactive sessions require pam_job.so in /etc/pam.d/common-session
-	 * since creating sgi_job containers requires root permissions. This is
-	 * the only exception where we allow the fallback of using the SID to
-	 * confirm the reservation (caught later, in do_basil_confirm).
-	 */
-	if (pagg_id != (uint64_t) -1) {
-		if (!j->select_jobinfo)
-			j->select_jobinfo = select_g_select_jobinfo_alloc();
-
-		select_g_select_jobinfo_set(j->select_jobinfo,
-					    SELECT_JOBDATA_PAGG_ID, &pagg_id);
-	} else if (!sgi_err_logged) {
-		error("No SGI job container ID detected - please enable the "
-		      "Cray job service via /etc/init.d/job");
-		sgi_err_logged = true;
-	}
-#endif
-
 	j->contiguous     = opt_local->contiguous;
 	if (opt_local->core_spec != NO_VAL16)
 		j->core_spec      = opt_local->core_spec;
-	j->features       = opt_local->constraints;
-	j->cluster_features = opt_local->c_constraints;
+	j->features       = opt_local->constraint;
+	j->cluster_features = opt_local->c_constraint;
 	if (opt_local->immediate == 1)
 		j->immediate = opt_local->immediate;
 	if (opt_local->job_name)
@@ -798,6 +739,7 @@ static job_desc_msg_t *_job_desc_msg_create_from_opts(slurm_opt_t *opt_local)
 	j->x11 = opt.x11;
 	if (j->x11) {
 		j->x11_magic_cookie = xstrdup(opt.x11_magic_cookie);
+		j->x11_target = xstrdup(opt.x11_target);
 		j->x11_target_port = opt.x11_target_port;
 	}
 
@@ -823,7 +765,7 @@ static job_desc_msg_t *_job_desc_msg_create_from_opts(slurm_opt_t *opt_local)
 		return NULL;
 	}
 	j->extra = opt_local->extra;
-	j->exc_nodes      = opt_local->exc_nodes;
+	j->exc_nodes      = opt_local->exclude;
 	j->partition      = opt_local->partition;
 	j->min_nodes      = opt_local->min_nodes;
 	if (opt_local->sockets_per_node != NO_VAL)
@@ -886,13 +828,11 @@ static job_desc_msg_t *_job_desc_msg_create_from_opts(slurm_opt_t *opt_local)
 		j->comment = opt_local->comment;
 	if (opt_local->qos)
 		j->qos = opt_local->qos;
-	if (opt_local->cwd)
-		j->work_dir = opt_local->cwd;
+	if (opt_local->chdir)
+		j->work_dir = opt_local->chdir;
 
 	if (opt_local->hold)
 		j->priority     = 0;
-	if (opt_local->jobid != NO_VAL)
-		j->job_id	= opt_local->jobid;
 	if (opt_local->reboot)
 		j->reboot = 1;
 
@@ -904,13 +844,13 @@ static job_desc_msg_t *_job_desc_msg_create_from_opts(slurm_opt_t *opt_local)
 		 */
 		j->max_nodes    = opt_local->min_nodes;
 	}
-	if (opt_local->pn_min_cpus != NO_VAL)
+	if (opt_local->pn_min_cpus > -1)
 		j->pn_min_cpus = opt_local->pn_min_cpus;
 	if (opt_local->pn_min_memory != NO_VAL64)
 		j->pn_min_memory = opt_local->pn_min_memory;
-	else if (opt_local->mem_per_cpu != NO_VAL64)
+	else if (opt_local->mem_per_cpu > -1)
 		j->pn_min_memory = opt_local->mem_per_cpu | MEM_PER_CPU;
-	if (opt_local->pn_min_tmp_disk != NO_VAL)
+	if (opt_local->pn_min_tmp_disk != NO_VAL64)
 		j->pn_min_tmp_disk = opt_local->pn_min_tmp_disk;
 	if (opt_local->overcommit) {
 		j->min_cpus    = opt_local->min_nodes;
@@ -955,16 +895,15 @@ static job_desc_msg_t *_job_desc_msg_create_from_opts(slurm_opt_t *opt_local)
 
 	/* srun uses the same listening port for the allocation response
 	 * message as all other messages */
-	j->alloc_resp_port = slurmctld_comm_addr.port;
-	j->other_port = slurmctld_comm_addr.port;
+	j->alloc_resp_port = slurmctld_comm_port;
+	j->other_port = slurmctld_comm_port;
 
 	if (opt_local->spank_job_env_size) {
 		j->spank_job_env      = opt_local->spank_job_env;
 		j->spank_job_env_size = opt_local->spank_job_env_size;
 	}
 
-	if (opt_local->power_flags)
-		j->power_flags = opt_local->power_flags;
+	j->power_flags = opt_local->power;
 	if (opt_local->mcs_label)
 		j->mcs_label = opt_local->mcs_label;
 	j->wait_all_nodes = 1;
@@ -986,7 +925,7 @@ static job_desc_msg_t *_job_desc_msg_create_from_opts(slurm_opt_t *opt_local)
 		xfree(opt.tres_bind);
 	}
 	j->tres_bind = xstrdup(opt.tres_bind);
-	xfmt_tres(&opt.tres_freq, "gpu", opt.gpu_freq);
+	xfmt_tres_freq(&opt.tres_freq, "gpu", opt.gpu_freq);
 	if (tres_freq_verify_cmdline(opt.tres_freq)) {
 		if (tres_freq_err_log) {	/* Log once */
 			error("Invalid --tres-freq argument: %s. Ignored",
@@ -1006,8 +945,8 @@ static job_desc_msg_t *_job_desc_msg_create_from_opts(slurm_opt_t *opt_local)
 	}
 	xfmt_tres(&j->tres_per_socket, "gpu", opt.gpus_per_socket);
 	xfmt_tres(&j->tres_per_task,   "gpu", opt.gpus_per_task);
-	if (opt.mem_per_gpu)
-		xstrfmtcat(j->mem_per_tres, "gpu:%"PRIi64, opt.mem_per_gpu);
+	if (opt.mem_per_gpu != NO_VAL64)
+		xstrfmtcat(j->mem_per_tres, "gpu:%"PRIu64, opt.mem_per_gpu);
 
 	return j;
 }

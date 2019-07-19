@@ -51,7 +51,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "src/common/log.h"
-#include "src/common/strlcpy.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -328,7 +327,7 @@ extern void multi_prog_parse(stepd_step_rec_t *job, uint32_t **gtid)
 {
 	int i, j, line_num = 0, rank_id, total_ranks = 0;
 	char *line = NULL, *local_data = NULL;
-	char *end_ptr = NULL, *save_ptr = NULL, *tmp_str;
+	char *end_ptr = NULL, *save_ptr = NULL, *tmp_str = NULL;
 	char *rank_spec = NULL, *cmd_spec = NULL, *args_spec = NULL;
 	char *p = NULL;
 	char **tmp_args, **tmp_cmd, *one_rank;
@@ -338,6 +337,7 @@ extern void multi_prog_parse(stepd_step_rec_t *job, uint32_t **gtid)
 	char *last_rank_spec = NULL;
 	int args_len, line_len;
 	hostlist_t hl;
+	uint32_t jobid;
 
 	tmp_args = xmalloc(sizeof(char *) * job->ntasks);
 	tmp_cmd = xmalloc(sizeof(char *) * job->ntasks);
@@ -358,8 +358,7 @@ extern void multi_prog_parse(stepd_step_rec_t *job, uint32_t **gtid)
 		else
 			line_break = false;
 		if (last_line_break && last_rank_spec) {
-			tmp_str = xmalloc(strlen(last_rank_spec) + 3);
-			sprintf(tmp_str, "[%s]", last_rank_spec);
+			xstrfmtcat(tmp_str, "[%s]", last_rank_spec);
 			hl = hostlist_create(tmp_str);
 			xfree(tmp_str);
 			if (!hl)
@@ -422,8 +421,7 @@ extern void multi_prog_parse(stepd_step_rec_t *job, uint32_t **gtid)
 		else
 			args_spec = p;		/* arguments string */
 
-		tmp_str = xmalloc(strlen(rank_spec) + 3);
-		sprintf(tmp_str, "[%s]", rank_spec);
+		xstrfmtcat(tmp_str, "[%s]", rank_spec);
 		hl = hostlist_create(tmp_str);
 		xfree(tmp_str);
 		if (!hl)
@@ -498,7 +496,13 @@ extern void multi_prog_parse(stepd_step_rec_t *job, uint32_t **gtid)
 	}
 
 	job->mpmd_set = xmalloc(sizeof(mpmd_set_t));
-	job->mpmd_set->apid      = SLURM_ID_HASH(job->jobid, job->stepid);
+
+	if (job->pack_jobid && (job->pack_jobid != NO_VAL))
+		jobid = job->pack_jobid;
+	else
+		jobid = job->jobid;
+
+	job->mpmd_set->apid      = SLURM_ID_HASH(jobid, job->stepid);
 	job->mpmd_set->args      = xmalloc(sizeof(char *) * job->ntasks);
 	job->mpmd_set->command   = xmalloc(sizeof(char *) * job->ntasks);
 	job->mpmd_set->first_pe  = xmalloc(sizeof(int) * job->ntasks);

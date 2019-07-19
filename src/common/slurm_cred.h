@@ -72,6 +72,8 @@
  */
 typedef struct slurm_cred_context   * slurm_cred_ctx_t;
 
+/* Used by slurm_cred_get_arg() */
+#define CRED_ARG_JOB_GRES_LIST 1
 
 /*
  * Initialize current process for slurm credential creation.
@@ -139,9 +141,13 @@ typedef struct {
 	uint32_t  stepid;
 	uid_t uid;
 	gid_t gid;
-	char *user_name;
+	char *pw_name;
+	char *pw_gecos;
+	char *pw_dir;
+	char *pw_shell;
 	int ngids;
 	gid_t *gids;
+	char **gr_names;
 
 	/* job_core_bitmap and step_core_bitmap cover the same set of nodes,
 	 * namely the set of nodes allocated to the job. The core and socket
@@ -172,10 +178,10 @@ typedef struct {
 } slurm_cred_arg_t;
 
 /* Initialize the plugin. */
-int slurm_crypto_init(void);
+int slurm_cred_init(void);
 
 /* Terminate the plugin and release all memory. */
-int slurm_crypto_fini(void);
+int slurm_cred_fini(void);
 
 /*
  * Create a slurm credential using the values in `arg.'
@@ -207,8 +213,16 @@ slurm_cred_t *slurm_cred_faker(slurm_cred_arg_t *arg);
  * slurm_cred_get_args() or slurm_cred_verify() */
 void slurm_cred_free_args(slurm_cred_arg_t *arg);
 
-/* Make a copy of the credential's arguements */
+/* Make a copy of the credential's arguments */
 int slurm_cred_get_args(slurm_cred_t *cred, slurm_cred_arg_t *arg);
+
+/*
+ * Return a pointer specific field from a job credential
+ * cred IN - job credential
+ * cred_arg_type in - Field desired
+ * RET - pointer to the information of interest, NULL on error
+ */
+extern void *slurm_cred_get_arg(slurm_cred_t *cred, int cred_arg_type);
 
 /*
  * Verify the signed credential `cred,' and return cred contents in
@@ -226,7 +240,7 @@ int slurm_cred_verify(slurm_cred_ctx_t ctx, slurm_cred_t *cred,
 
 /*
  * Rewind the last play of credential cred. This allows the credential
- *  be used again. Returns SLURM_FAILURE if no credential state is found
+ *  be used again. Returns SLURM_ERROR if no credential state is found
  *  to be rewound, SLURM_SUCCESS otherwise.
  */
 int slurm_cred_rewind(slurm_cred_ctx_t ctx, slurm_cred_t *cred);

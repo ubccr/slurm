@@ -1,4 +1,4 @@
-.TH "slurmdbd.conf" "5" "Slurm Configuration File" "August 2018" "Slurm Configuration File"
+.TH "slurmdbd.conf" "5" "Slurm Configuration File" "May 2019" "Slurm Configuration File"
 
 .SH "NAME"
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file
@@ -34,6 +34,11 @@ element is set to true.  Default is /tmp.  The format for this files name is
 .na
 $ArchiveDir/$ClusterName_$ArchiveObject_archive_$BeginTimeStamp_$endTimeStamp
 .ad
+We limit archive files to 50000 records per file. If more than 50000 records
+exist during that time period, they will be written to a new file.  Subsequent
+archive files during the same time period will have ".<number>" appended
+to the file, for example .2, with the number increasing by one for each file in
+the same time period.
 
 .TP
 \fBArchiveEvents\fR
@@ -125,6 +130,11 @@ this value is left unspecified, which results in the default authentication
 mechanism being used.
 
 .TP
+\fBAuthAltTypes\fR
+Command separated list of alternative authentication plugins that the slurmdbd
+will permit for communication.
+
+.TP
 \fBAuthType\fR
 Define the authentication method for communications between Slurm
 components.
@@ -175,7 +185,7 @@ This value must be specified.
 \fBDbdPort\fR
 The port number that the Slurm Database Daemon (slurmdbd) listens
 to for work. The default value is SLURMDBD_PORT as established at system
-build time. If none is explicitly specified, it will be set to 6819.
+build time. If no value is explicitly specified, it will be set to 6819.
 This value must be equal to the \fBAccountingStoragePort\fR parameter in the
 slurm.conf file.
 
@@ -506,11 +516,15 @@ If not set (default), then job step records are never purged.
 
 .TP
 \fBSlurmUser\fR
-The name of the user that the \fBslurmctld\fR daemon executes as.
+The name of the user that the \fBslurmdbd\fR daemon executes as.
 This user must exist on the machine executing the Slurm Database Daemon
-and have the same user ID as the hosts on which \fBslurmctld\fR execute.
+and have the same UID as the hosts on which \fBslurmctld\fR execute.
 For security purposes, a user other than "root" is recommended.
-The default value is "root".
+The default value is "root". This name should also be the same SlurmUser
+on all clusters reporting to the SlurmDBD.
+NOTE: If this user is different from the one set for \fBslurmctld\fR and is not
+root, it must be added to accounting with AdminLevel=Admin and \fBslurmctld\fR
+must be restarted.
 
 .TP
 \fBStorageHost\fR
@@ -604,7 +618,7 @@ AuthType=auth/munge
 .br
 DbdHost=db_host
 .br
-DebugLevel=4
+DebugLevel=info
 .br
 PurgeEventAfter=1month
 .br

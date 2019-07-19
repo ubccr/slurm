@@ -540,7 +540,7 @@ extern int launch_p_setup_srun_opt(char **rest, slurm_opt_t *opt_local)
 {
 	srun_opt_t *srun_opt = opt_local->srun_opt;
 	xassert(srun_opt);
-	if (srun_opt->debugger_test && srun_opt->parallel_debug)
+	if (srun_opt->debugger_test)
 		MPIR_being_debugged = 1;
 
 	/*
@@ -720,7 +720,7 @@ extern int launch_p_step_launch(srun_job_t *job, slurm_step_io_fds_t *cio_fds,
 	launch_params.argc = srun_opt->argc;
 	launch_params.argv = srun_opt->argv;
 	launch_params.multi_prog = srun_opt->multi_prog ? true : false;
-	launch_params.cwd = opt_local->cwd;
+	launch_params.cwd = opt_local->chdir;
 	launch_params.slurmd_debug = srun_opt->slurmd_debug;
 	launch_params.buffered_stdio = !srun_opt->unbuffered;
 	launch_params.labelio = srun_opt->labelio ? true : false;
@@ -732,9 +732,11 @@ extern int launch_p_step_launch(srun_job_t *job, slurm_step_io_fds_t *cio_fds,
 	launch_params.pack_nnodes = job->pack_nnodes;
 	launch_params.pack_ntasks = job->pack_ntasks;
 	launch_params.pack_offset = job->pack_offset;
+	launch_params.pack_step_cnt = srun_opt->pack_step_cnt;
 	launch_params.pack_task_offset = job->pack_task_offset;
 	launch_params.pack_task_cnts = job->pack_task_cnts;
 	launch_params.pack_tids = job->pack_tids;
+	launch_params.pack_tid_offsets = job->pack_tid_offsets;
 	launch_params.pack_node_list = job->pack_node_list;
 	launch_params.partition = job->partition;
 	launch_params.profile = opt_local->profile;
@@ -770,12 +772,9 @@ extern int launch_p_step_launch(srun_job_t *job, slurm_step_io_fds_t *cio_fds,
 	launch_params.tres_bind          = opt_local->tres_bind;
 	launch_params.tres_freq          = opt_local->tres_freq;
 	launch_params.task_dist          = opt_local->distribution;
-	launch_params.ckpt_dir		 = srun_opt->ckpt_dir;
-	launch_params.restart_dir        = srun_opt->restart_dir;
 	launch_params.preserve_env       = srun_opt->preserve_env;
 	launch_params.spank_job_env      = opt_local->spank_job_env;
 	launch_params.spank_job_env_size = opt_local->spank_job_env_size;
-	launch_params.user_managed_io    = srun_opt->user_managed_io;
 	launch_params.ntasks_per_board   = job->ntasks_per_board;
 	launch_params.ntasks_per_core    = job->ntasks_per_core;
 	launch_params.ntasks_per_socket  = job->ntasks_per_socket;
@@ -824,9 +823,7 @@ extern int launch_p_step_launch(srun_job_t *job, slurm_step_io_fds_t *cio_fds,
 	launch_start_time = time(NULL);
 	if (first_launch) {
 		if (slurm_step_launch(job->step_ctx, &launch_params,
-				      &callbacks,
-				      srun_opt->pack_step_cnt)
-				!= SLURM_SUCCESS) {
+				      &callbacks) != SLURM_SUCCESS) {
 			rc = errno;
 			*local_global_rc = errno;
 			error("Application launch failed: %m");

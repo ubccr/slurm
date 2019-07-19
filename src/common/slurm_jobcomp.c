@@ -52,17 +52,9 @@
 #include "src/common/xstring.h"
 #include "src/slurmctld/slurmctld.h"
 
-/*
- * WARNING:  Do not change the order of these fields or add additional
- * fields at the beginning of the structure.  If you do, job completion
- * logging plugins will stop working.  If you need to add fields, add them
- * at the end of the structure.
- */
 typedef struct slurm_jobcomp_ops {
 	int          (*set_loc)   ( char *loc );
 	int          (*job_write) ( struct job_record *job_ptr);
-	int          (*sa_errno)  ( void );
-	char *       (*job_strerror)  ( int errnum );
 	List         (*get_jobs)  ( slurmdb_job_cond_t *params );
 	int          (*archive)   ( slurmdb_archive_cond_t *params );
 } slurm_jobcomp_ops_t;
@@ -74,8 +66,6 @@ typedef struct slurm_jobcomp_ops {
 static const char *syms[] = {
 	"slurm_jobcomp_set_location",
 	"slurm_jobcomp_log_record",
-	"slurm_jobcomp_get_errno",
-	"slurm_jobcomp_strerror",
 	"slurm_jobcomp_get_jobs",
 	"slurm_jobcomp_archive"
 };
@@ -106,6 +96,16 @@ jobcomp_destroy_job(void *object)
 		xfree(job->geo);
 		xfree(job->bg_start_point);
 		xfree(job->work_dir);
+		xfree(job->resv_name);
+		xfree(job->req_gres);
+		xfree(job->account);
+		xfree(job->qos_name);
+		xfree(job->wckey);
+		xfree(job->cluster);
+		xfree(job->submit_time);
+		xfree(job->eligible_time);
+		xfree(job->exit_code);
+		xfree(job->derived_ec);
 		xfree(job);
 	}
 }
@@ -174,36 +174,6 @@ g_slurm_jobcomp_write(struct job_record *job_ptr)
 		error ("slurm_jobcomp plugin context not initialized");
 		retval = ENOENT;
 	}
-	slurm_mutex_unlock( &context_lock );
-	return retval;
-}
-
-extern int
-g_slurm_jobcomp_errno(void)
-{
-	int retval = SLURM_SUCCESS;
-
-	slurm_mutex_lock( &context_lock );
-	if ( g_context )
-		retval = (*(ops.sa_errno))();
-	else {
-		error ("slurm_jobcomp plugin context not initialized");
-		retval = ENOENT;
-	}
-	slurm_mutex_unlock( &context_lock );
-	return retval;
-}
-
-extern char *
-g_slurm_jobcomp_strerror(int errnum)
-{
-	char *retval = NULL;
-
-	slurm_mutex_lock( &context_lock );
-	if ( g_context )
-		retval = (*(ops.job_strerror))(errnum);
-	else
-		error ("slurm_jobcomp plugin context not initialized");
 	slurm_mutex_unlock( &context_lock );
 	return retval;
 }

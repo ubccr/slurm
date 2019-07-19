@@ -98,30 +98,60 @@ const char plugin_type[] = "acct_gather_filesystem/lustre";
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
 typedef struct {
-	time_t last_update_time;
-	time_t update_time;
-	uint64_t lustre_nb_writes;
-	uint64_t lustre_nb_reads;
-	uint64_t all_lustre_nb_writes;
-	uint64_t all_lustre_nb_reads;
-	uint64_t lustre_write_bytes;
-	uint64_t lustre_read_bytes;
-	uint64_t all_lustre_write_bytes;
-	uint64_t all_lustre_read_bytes;
-} lustre_sens_t;
+	time_t update_time;	/* time of last plugin stats sampling. */
+	uint64_t write_samples;	/* cumulative number of write samples. */
+	uint64_t read_samples;	/* cumulative number of read samples. */
+	uint64_t write_bytes;	/* cumulative bytes written. */
+	uint64_t read_bytes;	/* cumulative bytes read. */
+} lustre_stats_t;
 
-static lustre_sens_t lustre_se = {0,0,0,0,0,0,0,0};
+static lustre_stats_t lstats = {0,0,0,0,0};
+static lustre_stats_t lstats_prev = {0,0,0,0,0};
 
 static uint64_t debug_flags = 0;
 static pthread_mutex_t lustre_lock = PTHREAD_MUTEX_INITIALIZER;
 static int tres_pos = -1;
 
-/* Default path to lustre stats */
-const char proc_base_path[] = "/proc/fs/lustre";
 
-/**
- *  is lustre fs supported
- **/
+/*
+ * _llite_path()
+ *
+ * returns the path to Lustre clients stats (depends on Lustre version)
+ * or NULL if none found
+ *
+ */
+static char *_llite_path(void)
+{
+	static char *llite_path = NULL;
+	int i = 0;
+	DIR *llite_dir;
+	static char *test_paths[] = {
+		"/proc/fs/lustre/llite",
+		"/sys/kernel/debug/lustre/llite",
+		NULL
+	};
+
+	if (llite_path)
+		return llite_path;
+
+	while ((llite_path = test_paths[i++])) {
+		if ((llite_dir = opendir(llite_path))) {
+			closedir(llite_dir);
+			return llite_path;
+		}
+
+		debug("%s: unable to open %s %m", __func__, llite_path);
+	}
+	return NULL;
+}
+
+
+/*
+ * _check_lustre_fs()
+ *
+ * check if Lustre is supported
+ *
+ */
 static int _check_lustre_fs(void)
 {
 	static bool set = false;
@@ -129,23 +159,18 @@ static int _check_lustre_fs(void)
 
 	if (!set) {
 		uint32_t profile = 0;
-		char lustre_directory[BUFSIZ];
-		DIR *proc_dir;
 
 		set = true;
 		acct_gather_profile_g_get(ACCT_GATHER_PROFILE_RUNNING,
 					  &profile);
 		if ((profile & ACCT_GATHER_PROFILE_LUSTRE)) {
-			snprintf(lustre_directory, BUFSIZ,
-				 "%s/llite", proc_base_path);
-			proc_dir = opendir(proc_base_path);
-			if (!proc_dir) {
-				error("%s: not able to read %s %m",
-				      __func__, lustre_directory);
-				rc = SLURM_FAILURE;
-			} else {
-				closedir(proc_dir);
-			}
+			char *llite_path = _llite_path();
+			if (!llite_path) {
+				error("%s: can't find Lustre stats", __func__);
+				rc = SLURM_ERROR;
+			} else
+				debug("%s: using Lustre stats in %s",
+				      __func__, llite_path);
 		} else
 			rc = SLURM_ERROR;
 	}
@@ -154,10 +179,13 @@ static int _check_lustre_fs(void)
 }
 
 /* _read_lustre_counters()
+ *
  * Read counters from all mounted lustre fs
  * from the file stats under the directories:
  *
  * /proc/fs/lustre/llite/lustre-xxxx
+ *  or
+ * /sys/kernel/debug/lustre/llite/lustre-xxxx
  *
  * From the file stat we use 2 entries:
  *
@@ -167,28 +195,34 @@ static int _check_lustre_fs(void)
  */
 static int _read_lustre_counters(void)
 {
-	char lustre_dir[PATH_MAX];
+	char *lustre_dir;
 	DIR *proc_dir;
 	struct dirent *entry;
 	FILE *fff;
 	char buffer[BUFSIZ];
+	static bool first = true;
 
-
-	snprintf(lustre_dir, PATH_MAX, "%s/llite", proc_base_path);
+	lustre_dir = _llite_path();
+	if (!lustre_dir) {
+		error("%s: can't find Lustre stats", __func__);
+		return SLURM_ERROR;
+	}
 
 	proc_dir = opendir(lustre_dir);
-	if (proc_dir == NULL) {
+	if (!proc_dir) {
 		error("%s: Cannot open %s %m", __func__, lustre_dir);
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 
 	while ((entry = readdir(proc_dir))) {
 		char *path_stats = NULL;
 		bool bread;
 		bool bwrote;
+		uint64_t write_samples = 0, write_bytes = 0;
+		uint64_t read_samples = 0, read_bytes = 0;
 
-		if (xstrcmp(entry->d_name, ".") == 0
-		    || xstrcmp(entry->d_name, "..") == 0)
+		if (!xstrcmp(entry->d_name, ".") ||
+		    !xstrcmp(entry->d_name, ".."))
 			continue;
 
 		xstrfmtcat(path_stats, "%s/%s/stats",
@@ -196,7 +230,7 @@ static int _read_lustre_counters(void)
 		debug3("%s: Found file %s", __func__, path_stats);
 
 		fff = fopen(path_stats, "r");
-		if (fff == NULL) {
+		if (!fff) {
 			error("%s: Cannot open %s %m", __func__, path_stats);
 			xfree(path_stats);
 			continue;
@@ -211,74 +245,56 @@ static int _read_lustre_counters(void)
 
 			if (strstr(buffer, "write_bytes")) {
 				sscanf(buffer,
-				       "%*s %"PRIu64" %*s %*s "
-				       "%*d %*d %"PRIu64"",
-				       &lustre_se.lustre_nb_writes,
-				       &lustre_se.lustre_write_bytes);
-				debug3("%s "
-				       "%"PRIu64" "
-				       "write_bytes %"PRIu64" "
-				       "writes",
-				       __func__,
-				       lustre_se.lustre_write_bytes,
-				       lustre_se.lustre_nb_writes);
+				       "%*s %"PRIu64" %*s %*s %*d %*d %"PRIu64,
+				       &write_samples, &write_bytes);
+				debug3("%s %"PRIu64" write_bytes %"PRIu64" writes",
+				       __func__, write_bytes, write_samples);
 				bwrote = true;
 			}
 
 			if (strstr(buffer, "read_bytes")) {
 				sscanf(buffer,
-				       "%*s %"PRIu64" %*s %*s "
-				       "%*d %*d %"PRIu64"",
-				       &lustre_se.lustre_nb_reads,
-				       &lustre_se.lustre_read_bytes);
-				debug3("%s "
-				       "%"PRIu64" "
-				       "read_bytes %"PRIu64" "
-				       "reads",
-				       __func__,
-				       lustre_se.lustre_read_bytes,
-				       lustre_se.lustre_nb_reads);
+				       "%*s %"PRIu64" %*s %*s %*d %*d %"PRIu64,
+				       &read_samples, &read_bytes);
+				debug3("%s %"PRIu64" read_bytes %"PRIu64" reads",
+				       __func__, read_bytes, read_samples);
 				bread = true;
 			}
 		}
 		fclose(fff);
 
-		lustre_se.all_lustre_write_bytes +=
-			lustre_se.lustre_write_bytes;
-		lustre_se.all_lustre_read_bytes += lustre_se.lustre_read_bytes;
-		lustre_se.all_lustre_nb_writes += lustre_se.lustre_nb_writes;
-		lustre_se.all_lustre_nb_reads += lustre_se.lustre_nb_reads;
-		debug3("%s: all_lustre_write_bytes %"PRIu64" "
-		       "all_lustre_read_bytes %"PRIu64"",
-		       __func__, lustre_se.all_lustre_write_bytes,
-		       lustre_se.all_lustre_read_bytes);
-		debug3("%s: all_lustre_nb_writes %"PRIu64" "
-		       "all_lustre_nb_reads %"PRIu64"",
-		       __func__, lustre_se.all_lustre_nb_writes,
-		       lustre_se.all_lustre_nb_reads);
-
-	} /* while ((entry = readdir(proc_dir)))  */
+		lstats.write_bytes += write_bytes;
+		lstats.read_bytes += read_bytes;
+		lstats.write_samples += write_samples;
+		lstats.read_samples += read_samples;
+		debug3("%s: write_bytes %"PRIu64" read_bytes %"PRIu64,
+		       __func__, lstats.write_bytes, lstats.read_bytes);
+		debug3("%s: write_samples %"PRIu64" read_samples %"PRIu64,
+		       __func__, lstats.write_samples, lstats.read_samples);
+	} /* while ((entry = readdir(proc_dir))) */
 	closedir(proc_dir);
 
-	lustre_se.last_update_time = lustre_se.update_time;
-	lustre_se.update_time = time(NULL);
+	lstats.update_time = time(NULL);
+
+	if (first) {
+		memcpy(&lstats_prev, &lstats, sizeof(lustre_stats_t));
+		first = false;
+	}
 
 	return SLURM_SUCCESS;
 }
 
-
-
-
 /*
- * _thread_update_node_energy calls _read_ipmi_values and updates all values
- * for node consumption
+ *_update_node_filesystem()
+ *
+ * acct_gather_filesystem_p_node_update calls _update_node_filesystem and
+ * updates all values for node Lustre usage
+ *
  */
 static int _update_node_filesystem(void)
 {
-	static acct_gather_data_t previous;
 	static int dataset_id = -1;
 	static bool first = true;
-	acct_gather_data_t current;
 
 	enum {
 		FIELD_READ,
@@ -306,23 +322,17 @@ static int _update_node_filesystem(void)
 	if (_read_lustre_counters() != SLURM_SUCCESS) {
 		error("%s: Cannot read lustre counters", __func__);
 		slurm_mutex_unlock(&lustre_lock);
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 
 	if (first) {
 		dataset_id = acct_gather_profile_g_create_dataset(
 			"Filesystem", NO_PARENT, dataset);
 		if (dataset_id == SLURM_ERROR) {
-			error("FileSystem: Failed to create the dataset "
-			      "for Lustre");
+			error("FileSystem: Failed to create the dataset for Lustre");
 			slurm_mutex_unlock(&lustre_lock);
 			return SLURM_ERROR;
 		}
-
-		previous.num_reads = lustre_se.all_lustre_nb_reads;
-		previous.num_writes = lustre_se.all_lustre_nb_writes;
-		previous.size_read = lustre_se.all_lustre_read_bytes;
-		previous.size_write = lustre_se.all_lustre_write_bytes;
 
 		first = false;
 	}
@@ -333,32 +343,29 @@ static int _update_node_filesystem(void)
 	}
 
 	/* Compute the current values read from all lustre-xxxx directories */
-	current.num_reads = lustre_se.all_lustre_nb_reads;
-	current.num_writes = lustre_se.all_lustre_nb_writes;
-	current.size_read = lustre_se.all_lustre_read_bytes;
-	current.size_write = lustre_se.all_lustre_write_bytes;
+	data[FIELD_READ].u64 =
+		lstats.read_samples - lstats_prev.read_samples;
+	data[FIELD_READMB].d =
+		(double)(lstats.read_bytes - lstats_prev.read_bytes) /
+		(1 << 20);
+	data[FIELD_WRITE].u64 =
+		lstats.write_samples - lstats_prev.write_samples;
+	data[FIELD_WRITEMB].d =
+		(double)(lstats.write_bytes - lstats_prev.write_bytes) /
+		(1 << 20);
 
 	/* record sample */
-	data[FIELD_READ].u64 = current.num_reads - previous.num_reads;
-	data[FIELD_READMB].d =
-		(double)(current.size_read - previous.size_read) / (1 << 20);
-	data[FIELD_WRITE].u64 = current.num_writes - previous.num_writes;
-	data[FIELD_WRITEMB].d =
-		(double)(current.size_write - previous.size_write) / (1 << 20);
-
 	if (debug_flags & DEBUG_FLAG_PROFILE) {
 		char str[256];
-		info("PROFILE-Lustre: %s", acct_gather_profile_dataset_str(
+		info("PROFILE-Lustre: %s",
+		     acct_gather_profile_dataset_str(
 			     dataset, data, str, sizeof(str)));
 	}
 	acct_gather_profile_g_add_sample_data(dataset_id, (void *)data,
-					      lustre_se.update_time);
+					      lstats.update_time);
 
-	/* Save current as previous and clean up the working
-	 * data structure.
-	 */
-	memcpy(&previous, &current, sizeof(acct_gather_data_t));
-	memset(&lustre_se, 0, sizeof(lustre_sens_t));
+	/* Save current as previous. */
+	memcpy(&lstats_prev, &lstats, sizeof(lustre_stats_t));
 
 	slurm_mutex_unlock(&lustre_lock);
 
@@ -454,16 +461,24 @@ extern int acct_gather_filesystem_p_get_data(acct_gather_data_t *data)
 	if (_read_lustre_counters() != SLURM_SUCCESS) {
 		error("%s: Cannot read lustre counters", __func__);
 		slurm_mutex_unlock(&lustre_lock);
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 
 	/* Obtain the current values read from all lustre-xxxx directories */
+	data[tres_pos].num_reads =
+		lstats.read_samples - lstats_prev.read_samples;
+	data[tres_pos].num_writes =
+		lstats.write_samples - lstats_prev.write_samples;
+	data[tres_pos].size_read =
+		(double)(lstats.read_bytes - lstats_prev.read_bytes) /
+		(1 << 20);
+	data[tres_pos].size_write =
+		(double)(lstats.write_bytes - lstats_prev.write_bytes) /
+		(1 << 20);
 
-	data[tres_pos].num_reads = lustre_se.all_lustre_nb_reads;
-	data[tres_pos].num_writes = lustre_se.all_lustre_nb_writes;
-	data[tres_pos].size_read = lustre_se.all_lustre_read_bytes;
-	data[tres_pos].size_write = lustre_se.all_lustre_write_bytes;
+	memcpy(&lstats_prev, &lstats, sizeof(lustre_stats_t));
 
 	slurm_mutex_unlock(&lustre_lock);
+
 	return retval;
 }

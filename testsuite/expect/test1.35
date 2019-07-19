@@ -43,18 +43,13 @@ set steps_started        30
 
 print_header $test_id
 
-if {[test_alps]} {
-	send_user "\nWARNING: This test is incompatible with Cray/ALPS systems\n"
-	exit $exit_code
-}
-
 log_user 0
 set job_mem_opt  "--comment=no_mem"
 set step_mem_opt "--comment=no_mem"
 spawn -noecho $bin_bash -c "exec $scontrol show config | $bin_grep SelectTypeParameters"
 expect {
 	-re "MEMORY" {
-		set job_mem_opt  "--mem-per-cpu=256"
+		set job_mem_opt  "--mem-per-cpu=64"
 		set step_mem_opt "--mem-per-cpu=2"
 		exp_continue
 	}

@@ -82,7 +82,7 @@ extern void acct_policy_alter_job(struct job_record *job_ptr,
  * exceeding any association or QOS limit.
  * job_desc IN - job descriptor being submitted
  * part_ptr IN - pointer to (one) partition to which the job is being submitted
- * assoc_in IN - pointer to assocation to which the job is being submitted
+ * assoc_in IN - pointer to association to which the job is being submitted
  * qos_ptr IN - pointer to QOS to which the job is being submitted
  * state_reason OUT - if non-NULL, set to reason for rejecting the job
  * acct_policy_limit_set IN/OUT - limits set for the job, pre-allocated storage
@@ -173,5 +173,28 @@ extern void acct_policy_remove_accrue_time(struct job_record *job_ptr,
 
 extern uint32_t acct_policy_get_prio_thresh(struct job_record *job_ptr,
 					    bool assoc_mgr_locked);
+
+/*
+ * acct_policy_get_preemptable_time - get the time the job becomes preemptable
+ * 	based on conf and qos PreemptExemptTime
+ */
+extern time_t acct_policy_get_preemptable_time(struct job_record *job_ptr);
+
+/*
+ * acct_policy_is_job_preemptable - Check if job is preemptable checking
+ * 	global conf and qos options PreemptExemptTime
+ * 	returns true if job is *exempt* from preemption
+ */
+extern bool acct_policy_is_job_preempt_exempt(struct job_record *job_ptr);
+
+extern void acct_policy_set_qos_order(struct job_record *job_ptr,
+				      slurmdb_qos_rec_t **qos_ptr_1,
+				      slurmdb_qos_rec_t **qos_ptr_2);
+
+extern slurmdb_used_limits_t *acct_policy_get_acct_used_limits(
+	List *acct_limit_list, char *acct);
+
+extern slurmdb_used_limits_t *acct_policy_get_user_used_limits(
+	 List *user_limit_list, uint32_t user_id);
 
 #endif /* !_HAVE_ACCT_POLICY_H */

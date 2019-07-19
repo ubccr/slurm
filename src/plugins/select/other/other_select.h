@@ -161,11 +161,6 @@ extern int other_job_begin(struct job_record *job_ptr);
 extern int other_job_ready(struct job_record *job_ptr);
 
 /*
- * Test if expanding a job is permitted
- */
-extern bool other_job_expand_allow(void);
-
-/*
  * Move the resource allocated to one job into that of another job.
  *	All resources are removed from "from_job_ptr" and moved into
  *	"to_job_ptr". Also see other_job_resized().
@@ -361,8 +356,5 @@ extern bitstr_t * other_resv_test(resv_desc_msg_t *resv_desc_ptr,
 				  uint32_t node_cnt,
 				  bitstr_t *avail_bitmap,
 				  bitstr_t **core_bitmap);
-
-extern void other_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check);
-extern int *other_ba_get_dims(void);
 
 #endif /* _CRAY_OTHER_SELECT_H */

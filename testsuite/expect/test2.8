@@ -37,13 +37,13 @@ set test_id     "2.8"
 set exit_code   0
 set job_id1     0
 set job_id2     0
+set step_id	0
 
 print_header $test_id
 
-set select_type [test_select_type]
 set def_part_name [default_partition]
 set nb_nodes [get_node_cnt_in_part $def_part_name]
-if {![string compare $select_type "linear"]} {
+if {[test_linear]} {
 	if {$nb_nodes < 2} {
 		send_user "\nWARNING: This test is incompatible with select/linear and only one node\n"
 		exit $exit_code
@@ -69,12 +69,6 @@ proc end_it {code} {
 		send_user "\nSUCCESS\n"
 	}
 	exit $code
-}
-
-if {[test_launch_poe]} {
-	set step_id 1
-} else {
-	set step_id 0
 }
 
 #
@@ -337,8 +331,8 @@ expect {
 		wait
 	}
 }
-if {[test_alps] == 0 && $matches != 1} {
-	send_user "\nFAILURE: scontrol failed to find all job steps\n"
+if {$matches != 1} {
+	send_user "\nFAILURE: scontrol failed to find job step $job_id1.$step_id\n"
 	end_it 1
 }
 
@@ -365,7 +359,7 @@ expect {
 		wait
 	}
 }
-if {[test_alps] == 0 && $matches != 1} {
+if {$matches != 1} {
 	send_user "\nFAILURE: scontrol failed to specific job step\n"
 	end_it 1
 }
@@ -401,7 +395,7 @@ expect {
 		wait
 	}
 }
-if {[test_alps] == 0 && $matches != 1} {
+if {$matches != 1} {
 	send_user "\nFAILURE: scontrol found unexpected job step\n"
 	end_it 1
 }

@@ -38,8 +38,8 @@ set exit_code   0
 print_header $test_id
 
 set bb_types [get_bb_types]
-if {[string first "cray" $bb_types] == -1} {
-	send_user "\nWARNING: This test can only be run with the burst_buffer/cray plugin\n"
+if {[string first "datawarp" $bb_types] == -1} {
+	send_user "\nWARNING: This test can only be run with the burst_buffer/datawarp plugin\n"
 	exit 0
 }
 
@@ -101,7 +101,11 @@ send_user "\n\n"
 set matches 0
 spawn $scontrol show dwstat configurations
 expect {
-	-re "conf *state *inst *type *access_type activs" {
+	-re "conf *state *inst *type *activs" {
+		set matches 1
+		exp_continue
+	}
+	-re "no scratch, cache, swap configurations" {
 		set matches 1
 		exp_continue
 	}
@@ -123,6 +127,10 @@ set matches 0
 spawn $scontrol show dwstat sessions
 expect {
 	-re "sess *state *token *creator *owner *created *expiration *nodes" {
+		set matches 1
+		exp_continue
+	}
+	-re "no sessions" {
 		set matches 1
 		exp_continue
 	}

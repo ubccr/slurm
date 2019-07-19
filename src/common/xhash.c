@@ -59,9 +59,6 @@
 
 typedef struct xhash_item_st {
 	void*		item;    /* user item                               */
-	const char*	key;     /* cached key calculated by user function, */
-                                 /* needed by uthash                        */
-	uint32_t	keysize; /* cached key size                         */
 	UT_hash_handle	hh;      /* make this structure hashable by uthash  */
 } xhash_item_t;
 
@@ -78,7 +75,7 @@ xhash_t *xhash_init(xhash_idfunc_t idfunc, xhash_freefunc_t freefunc)
 	xhash_t* table = NULL;
 	if (!idfunc)
 		return NULL;
-	table = (xhash_t*)xmalloc(sizeof(xhash_t));
+	table = xmalloc(sizeof(xhash_t));
 	table->ht = NULL; /* required by uthash */
 	table->count = 0;
 	table->identify = idfunc;
@@ -86,45 +83,49 @@ xhash_t *xhash_init(xhash_idfunc_t idfunc, xhash_freefunc_t freefunc)
 	return table;
 }
 
-static xhash_item_t* xhash_find(xhash_t* table, const char* key)
+static xhash_item_t* xhash_find(xhash_t* table, const char* key, uint32_t len)
 {
 	xhash_item_t* hash_item = NULL;
-	uint32_t      key_size  = 0;
 
 	if (!table || !key)
 		return NULL;
-	key_size = strlen(key);
-	HASH_FIND(hh, table->ht, key, key_size, hash_item);
+	HASH_FIND(hh, table->ht, key, len, hash_item);
 	return hash_item;
 }
 
-void* xhash_get(xhash_t* table, const char* key)
+void* xhash_get(xhash_t* table, const char* key, uint32_t key_len)
 {
-	xhash_item_t* item = xhash_find(table, key);
+	xhash_item_t* item = xhash_find(table, key, key_len);
 	if (!item)
 		return NULL;
 	return item->item;
 }
 
+void* xhash_get_str(xhash_t* table, const char* key)
+{
+	return xhash_get(table, key, strlen(key));
+}
+
 void* xhash_add(xhash_t* table, void* item)
 {
 	xhash_item_t* hash_item = NULL;
+	const char *key = NULL;
+	uint32_t keylen = 0;
+
 	if (!table || !item)
 		return NULL;
-	hash_item          = (xhash_item_t*)xmalloc(sizeof(xhash_item_t));
+	hash_item = xmalloc(sizeof(xhash_item_t));
 	hash_item->item    = item;
-	hash_item->key     = table->identify(item);
-	hash_item->keysize = strlen(hash_item->key);
-	HASH_ADD_KEYPTR(hh, table->ht, hash_item->key,
-			hash_item->keysize, hash_item);
+	table->identify(item, &key, &keylen);
+	HASH_ADD_KEYPTR(hh, table->ht, key, keylen, hash_item);
 	++table->count;
 	return hash_item->item;
 }
 
-void* xhash_pop(xhash_t* table, const char* key)
+void* xhash_pop(xhash_t* table, const char* key, uint32_t len)
 {
 	void* item_item;
-	xhash_item_t* item = xhash_find(table, key);
+	xhash_item_t* item = xhash_find(table, key, len);
 	if (!item)
 		return NULL;
 	item_item = item->item;
@@ -134,13 +135,23 @@ void* xhash_pop(xhash_t* table, const char* key)
 	return item_item;
 }
 
-void xhash_delete(xhash_t* table, const char* key)
+void* xhash_pop_str(xhash_t* table, const char* key)
 {
-	if (!table || !key)
+	return xhash_pop(table, key, strlen(key));
+}
+
+void xhash_delete(xhash_t* table, const char* key, uint32_t len)
+{
+	if (!table || !key || !len)
 		return;
-	void* item_item = xhash_pop(table, key);
+	void* item_item = xhash_pop(table, key, len);
 	if (table->freefunc)
 		table->freefunc(item_item);
+}
+
+void xhash_delete_str(xhash_t* table, const char* key)
+{
+	return xhash_delete(table, key, strlen(key));
 }
 
 uint32_t xhash_count(xhash_t* table)

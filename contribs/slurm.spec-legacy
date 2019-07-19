@@ -2,8 +2,8 @@
 # DEPRECATED, NOT MAINTAINED, WILL BE REMOVED IN A FUTURE RELEASE.
 
 Name:		slurm
-Version:	18.08.4
-%define rel	1
+Version:	19.05.1
+%define rel	2
 Release:	%{rel}%{?dist}
 Summary:	Slurm Workload Manager
 
@@ -35,18 +35,14 @@ Source:		%{slurm_source_dir}.tar.bz2
 # --with blcr        %_with_blcr          1     require blcr support
 # --with bluegene    %_with_bluegene      1     build bluegene RPM
 # --with cray        %_with_cray          1     build for a Cray system without ALPS
-# --with cray_alps   %_with_cray_alps     1     build for a Cray system with ALPS
 # --with cray_network %_with_cray_network 1     build for a non-Cray system with a Cray network
 # --without debug    %_without_debug      1     don't compile with debugging symbols
 # --with lua         %_with_lua           1     build Slurm lua bindings (proctrack only for now)
 # --without munge    %_without_munge      path  don't build auth-munge RPM
 # --with mysql       %_with_mysql         1     require mysql/mariadb support
 # --without netloc   %_without_netloc     path  require netloc support
-# --with openssl     %_with_openssl       1     require openssl RPM to be installed
 # --without pam      %_without_pam        1     don't require pam-devel RPM to be installed
-# --with percs       %_with_percs         1     build percs RPM
 # --without readline %_without_readline   1     don't require readline-devel RPM to be installed
-# --with sgijob      %_with_sgijob        1     build proctrack-sgi-job RPM
 #
 #  Allow defining --with and --without build options or %_with and %without in .rpmmacros
 #    slurm_with    builds option by default unless --without is specified
@@ -63,7 +59,6 @@ Source:		%{slurm_source_dir}.tar.bz2
 %slurm_without_opt auth_none
 %slurm_without_opt bluegene
 %slurm_without_opt cray
-%slurm_without_opt cray_alps
 %slurm_without_opt cray_network
 %slurm_without_opt salloc_background
 %slurm_without_opt multiple_slurmd
@@ -72,13 +67,9 @@ Source:		%{slurm_source_dir}.tar.bz2
 # If they are not set they will still be compiled if the packages exist.
 %slurm_without_opt mysql
 %slurm_without_opt blcr
-%slurm_without_opt openssl
 
 # Build with munge by default on all platforms (disable using --without munge)
 %slurm_with_opt munge
-
-# Build with OpenSSL by default on all platforms (disable using --without openssl)
-%slurm_with_opt openssl
 
 # Use readline by default on all systems
 %slurm_with_opt readline
@@ -91,13 +82,8 @@ Source:		%{slurm_source_dir}.tar.bz2
 %slurm_with_opt pam
 %endif
 
-%slurm_without_opt sgijob
 %slurm_without_opt lua
 %slurm_without_opt partial-attach
-
-%if %{slurm_with cray_alps}
-%slurm_with_opt sgijob
-%endif
 
 Requires: slurm-plugins
 
@@ -114,10 +100,6 @@ BuildRequires: python
 BuildRequires: readline-devel
 %endif
 
-%if %{slurm_with openssl}
-BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
-%endif
-
 %define use_mysql_devel %(perl -e '`rpm -q mariadb-devel`; print $?;')
 
 %if %{slurm_with mysql}
@@ -125,14 +107,6 @@ BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
 BuildRequires: mysql-devel >= 5.0.0
 %else
 BuildRequires: mariadb-devel >= 5.0.0
-%endif
-%endif
-
-%if %{slurm_with cray_alps}
-%if %{use_mysql_devel}
-BuildRequires: mysql-devel
-%else
-BuildRequires: mariadb-devel
 %endif
 %endif
 
@@ -245,16 +219,16 @@ Slurm NULL authentication module
 %endif
 
 # This is named munge instead of auth-munge since there are 2 plugins in the
-# package.  auth-munge and crypto-munge
+# package.  auth-munge and cred-munge
 %if %{slurm_with munge}
 %package munge
-Summary: Slurm authentication and crypto implementation using Munge
+Summary: Slurm authentication and cred implementation using Munge
 Group: System Environment/Base
 Requires: slurm munge
 BuildRequires: munge-devel munge-libs
 Obsoletes: slurm-auth-munge
 %description munge
-Slurm authentication and crypto implementation using Munge. Used to
+Slurm authentication and cred implementation using Munge. Used to
 authenticate user originating an RPC, digitally sign and/or encrypt messages
 %endif
 
@@ -304,27 +278,6 @@ Requires: slurm-perlapi
 %description openlava
 OpenLava wrapper scripts used for helping migrate from OpenLava/LSF to Slurm
 
-%if %{slurm_with percs}
-%package percs
-Summary: Slurm plugins to run on an IBM PERCS system
-Group: System Environment/Base
-Requires: slurm nrt
-BuildRequires: nrt
-%description percs
-Slurm plugins to run on an IBM PERCS system, POE interface and NRT switch plugin
-%endif
-
-%if %{slurm_with sgijob}
-%package proctrack-sgi-job
-Summary: Slurm process tracking plugin for SGI job containers
-Group: System Environment/Base
-Requires: slurm
-BuildRequires: job
-%description proctrack-sgi-job
-Slurm process tracking plugin for SGI job containers
-(See http://oss.sgi.com/projects/pagg)
-%endif
-
 %if %{slurm_with lua}
 %package lua
 Summary: Slurm lua bindings
@@ -333,7 +286,7 @@ Requires: slurm lua
 BuildRequires: lua-devel
 %description lua
 Slurm lua bindings
-Includes the Slurm proctrack/lua and job_submit/lua plugin
+Includes the Slurm job_submit/lua plugin
 %endif
 
 %package contribs
@@ -374,7 +327,7 @@ Group: System Environment/Base
 Requires: %{name}%{?_isa} = %{version}-%{release}
 Obsoletes: craysmw
 %description slurmsmwd
-support daeamons and software for the Cray SMW.  Includes slurmsmwd which
+support daemons and software for the Cray SMW.  Includes slurmsmwd which
 notifies slurm about failed nodes.
 %endif
 
@@ -447,7 +400,7 @@ fi
 
 # Do not package Slurm's version of libpmi on Cray systems.
 # Cray's version of libpmi should be used.
-%if %{slurm_with cray} || %{slurm_with cray_alps}
+%if %{slurm_with cray}
    rm -f $RPM_BUILD_ROOT/%{_libdir}/libpmi*
    %if %{slurm_with cray}
       install -D -m644 contribs/cray/plugstack.conf.template ${RPM_BUILD_ROOT}%{_sysconfdir}/plugstack.conf.template
@@ -510,6 +463,7 @@ rm -f $RPM_BUILD_ROOT/lib64/security/pam_slurm_adopt.a
 rm -f $RPM_BUILD_ROOT/lib64/security/pam_slurm_adopt.la
 %if ! %{slurm_with auth_none}
 rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/auth_none.so
+rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/cred_none.so
 %endif
 %if ! %{slurm_with bluegene}
 rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/libsched_if.so
@@ -522,7 +476,7 @@ rm -f $RPM_BUILD_ROOT/%{_sbindir}/slurm_prolog
 %endif
 %if ! %{slurm_with munge}
 rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/auth_munge.so
-rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_munge.so
+rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/cred_munge.so
 %endif
 rm -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/.packlist
 rm -f $RPM_BUILD_ROOT/%{_perlarchlibdir}/perllocal.pod
@@ -539,17 +493,6 @@ rm -f ${RPM_BUILD_ROOT}%{_libexecdir}/slurm/cr_*
 
 %if ! %{slurm_with lua}
 rm -f ${RPM_BUILD_ROOT}%{_libdir}/slurm/job_submit_lua.so
-rm -f ${RPM_BUILD_ROOT}%{_libdir}/slurm/proctrack_lua.so
-%endif
-
-%if ! %{slurm_with sgijob}
-rm -f ${RPM_BUILD_ROOT}%{_libdir}/slurm/proctrack_sgi_job.so
-%endif
-
-%if ! %{slurm_with percs}
-rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/launch_poe.so
-rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/libpermapi.so
-rm -f ${RPM_BUILD_ROOT}%{_libdir}/slurm/switch_nrt.so
 %endif
 
 # Build man pages that are generated directly by the tools
@@ -620,18 +563,6 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/launch_runjob.so &&
 
 %endif
 
-LIST=./percs.files
-touch $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/checkpoint_poe.so	&&
-   echo %{_libdir}/slurm/checkpoint_poe.so		 >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/switch_nrt.so  	&&
-  echo %{_libdir}/slurm/switch_nrt.so			>> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/libpermapi.so  	&&
-  echo %{_libdir}/slurm/libpermapi.so			>> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/launch_poe.so          &&
-   echo %{_libdir}/slurm/launch_poe.so                  >> $LIST
-
-
 LIST=./slurmdbd.files
 touch $LIST
 test -f $RPM_BUILD_ROOT/etc/init.d/slurmdbd			&&
@@ -650,32 +581,32 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/jobcomp_mysql.so            &&
 
 LIST=./plugins.files
 touch $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_cray.so  &&
-   echo %{_libdir}/slurm/acct_gather_energy_cray.so  >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_cray_aries.so &&
+   echo %{_libdir}/slurm/acct_gather_energy_cray_aries.so >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_ibmaem.so &&
    echo %{_libdir}/slurm/acct_gather_energy_ibmaem.so  >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_ipmi.so  &&
    echo %{_libdir}/slurm/acct_gather_energy_ipmi.so  >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_rapl.so  &&
    echo %{_libdir}/slurm/acct_gather_energy_rapl.so  >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_energy_xcc.so  &&
+   echo %{_libdir}/slurm/acct_gather_energy_xcc.so  >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_interconnect_ofed.so &&
    echo %{_libdir}/slurm/acct_gather_interconnect_ofed.so >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_profile_hdf5.so &&
    echo %{_libdir}/slurm/acct_gather_profile_hdf5.so >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/burst_buffer_cray.so        &&
-   echo %{_libdir}/slurm/burst_buffer_cray.so        >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/checkpoint_blcr.so          &&
-   echo %{_libdir}/slurm/checkpoint_blcr.so          >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_openssl.so           &&
-   echo %{_libdir}/slurm/crypto_openssl.so           >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/acct_gather_profile_influxdb.so &&
+   echo %{_libdir}/slurm/acct_gather_profile_influxdb.so >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/burst_buffer_datawarp.so    &&
+   echo %{_libdir}/slurm/burst_buffer_datawarp.so    >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/ext_sensors_rrd.so          &&
    echo %{_libdir}/slurm/ext_sensors_rrd.so          >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/gres_mps.so                 &&
+   echo %{_libdir}/slurm/gres_mps.so                 >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/jobcomp_elasticsearch.so    &&
    echo %{_libdir}/slurm/jobcomp_elasticsearch.so    >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/launch_slurm.so             &&
    echo %{_libdir}/slurm/launch_slurm.so             >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/launch_aprun.so             &&
-   echo %{_libdir}/slurm/launch_aprun.so             >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/mpi_pmix.so                 &&
    echo %{_libdir}/slurm/mpi_pmix.so                 >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/mpi_pmix_v1.so              &&
@@ -686,10 +617,8 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/node_features_knl_cray.so   &&
    echo %{_libdir}/slurm/node_features_knl_cray.so   >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/node_features_knl_generic.so &&
    echo %{_libdir}/slurm/node_features_knl_generic.so   >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/power_cray.so               &&
-   echo %{_libdir}/slurm/power_cray.so               >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/select_bluegene.so          &&
-   echo %{_libdir}/slurm/select_bluegene.so          >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/power_cray_aries.so         &&
+   echo %{_libdir}/slurm/power_cray_aries.so         >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_affinity.so            &&
    echo %{_libdir}/slurm/task_affinity.so            >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_cgroup.so              &&
@@ -698,14 +627,14 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/job_container_cncu.so       &&
    echo %{_libdir}/slurm/job_container_cncu.so       >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/job_container_none.so       &&
    echo %{_libdir}/slurm/job_container_none.so       >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_cray.so                &&
-   echo %{_libdir}/slurm/task_cray.so                >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_cray_aries.so          &&
+   echo %{_libdir}/slurm/task_cray_aries.so          >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/slurmctld_nonstop.so        &&
    echo %{_libdir}/slurm/slurmctld_nonstop.so        >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/switch_cray.so              &&
-   echo %{_libdir}/slurm/switch_cray.so              >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/proctrack_cray.so           &&
-   echo %{_libdir}/slurm/proctrack_cray.so           >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/switch_cray_aries.so        &&
+   echo %{_libdir}/slurm/switch_cray_aries.so        >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/proctrack_cray_aries.so     &&
+   echo %{_libdir}/slurm/proctrack_cray_aries.so     >> $LIST
 
 LIST=./pam.files
 touch $LIST
@@ -767,7 +696,7 @@ rm -rf $RPM_BUILD_ROOT
 %dir %{_libdir}/slurm/src
 %dir /etc/ld.so.conf.d
 /etc/ld.so.conf.d/slurm.conf
-%if %{slurm_with cray} || %{slurm_with cray_alps}
+%if %{slurm_with cray}
 %dir /opt/modulefiles/slurm
 %endif
 %if %{slurm_with cray}
@@ -799,6 +728,7 @@ rm -rf $RPM_BUILD_ROOT
 %files auth-none
 %defattr(-,root,root)
 %{_libdir}/slurm/auth_none.so
+%{_libdir}/slurm/cred_none.so
 %endif
 #############################################################################
 
@@ -806,7 +736,7 @@ rm -rf $RPM_BUILD_ROOT
 %files munge
 %defattr(-,root,root)
 %{_libdir}/slurm/auth_munge.so
-%{_libdir}/slurm/crypto_munge.so
+%{_libdir}/slurm/cred_munge.so
 %endif
 #############################################################################
 
@@ -863,14 +793,16 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/burst_buffer_generic.so
 %{_libdir}/slurm/checkpoint_none.so
 %{_libdir}/slurm/checkpoint_ompi.so
-%{_libdir}/slurm/core_spec_cray.so
+%{_libdir}/slurm/cli_filter_none.so
+%{_libdir}/slurm/core_spec_cray_aries.so
 %{_libdir}/slurm/core_spec_none.so
 %{_libdir}/slurm/ext_sensors_none.so
+%{_libdir}/slurm/gpu_generic.so
 %{_libdir}/slurm/gres_gpu.so
 %{_libdir}/slurm/gres_mic.so
 %{_libdir}/slurm/gres_nic.so
 %{_libdir}/slurm/job_submit_all_partitions.so
-%{_libdir}/slurm/job_submit_cray.so
+%{_libdir}/slurm/job_submit_cray_aries.so
 %{_libdir}/slurm/job_submit_require_timelimit.so
 %{_libdir}/slurm/job_submit_throttle.so
 %{_libdir}/slurm/jobacct_gather_cgroup.so
@@ -905,11 +837,11 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/sched_backfill.so
 %{_libdir}/slurm/sched_builtin.so
 %{_libdir}/slurm/sched_hold.so
-%{_libdir}/slurm/select_alps.so
-%{_libdir}/slurm/select_cray.so
+%{_libdir}/slurm/select_cray_aries.so
 %{_libdir}/slurm/select_cons_res.so
+%{_libdir}/slurm/select_cons_tres.so
 %{_libdir}/slurm/select_linear.so
-%{_libdir}/slurm/select_serial.so
+%{_libdir}/slurm/site_factor_none.so
 %{_libdir}/slurm/switch_generic.so
 %{_libdir}/slurm/switch_none.so
 %{_libdir}/slurm/task_none.so
@@ -945,25 +877,11 @@ rm -rf $RPM_BUILD_ROOT
 
 #############################################################################
 
-%if %{slurm_with percs}
-%files -f percs.files percs
-%defattr(-,root,root)
-%endif
-#############################################################################
-
-%if %{slurm_with sgijob}
-%files proctrack-sgi-job
-%defattr(-,root,root)
-%{_libdir}/slurm/proctrack_sgi_job.so
-%endif
-#############################################################################
-
 %if %{slurm_with lua}
 %files lua
 %defattr(-,root,root)
 %doc contribs/lua/proctrack.lua
 %{_libdir}/slurm/job_submit_lua.so
-%{_libdir}/slurm/proctrack_lua.so
 %endif
 #############################################################################
 

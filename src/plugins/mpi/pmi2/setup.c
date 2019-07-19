@@ -301,16 +301,28 @@ _setup_stepd_sockets(const stepd_step_rec_t *job, char ***env)
 	/*
 	 * Make sure we adjust for the spool dir coming in on the address to
 	 * point to the right spot.
-	 */
-	xstrsubstitute(spool, "%n", job->node_name);
-	xstrsubstitute(spool, "%h", job->node_name);
-	snprintf(sa.sun_path, sizeof(sa.sun_path), PMI2_SOCK_ADDR_FMT,
-		 spool, job_info.jobid, job_info.stepid);
-	/*
 	 * We need to unlink this later so we need a formatted version of the
 	 * string to unlink.
 	 */
-	fmt_tree_sock_addr = xstrdup(sa.sun_path);
+	xstrsubstitute(spool, "%n", job->node_name);
+	xstrsubstitute(spool, "%h", job->node_name);
+	xstrfmtcat(fmt_tree_sock_addr, PMI2_SOCK_ADDR_FMT, spool,
+		   job_info.jobid, job_info.stepid);
+	/*
+	 * If socket name would be truncated, emit error and exit
+	 */
+	if (strlen(fmt_tree_sock_addr) >= sizeof(sa.sun_path)) {
+		error("%s: Unix socket path '%s' is too long. (%ld > %ld)",
+		      __func__, fmt_tree_sock_addr,
+		      (long int)(strlen(fmt_tree_sock_addr) + 1),
+		      (long int)sizeof(sa.sun_path));
+		xfree(spool);
+		xfree(fmt_tree_sock_addr);
+		return SLURM_ERROR;
+	}
+
+	strlcpy(sa.sun_path, fmt_tree_sock_addr, sizeof(sa.sun_path));
+	xfree(fmt_tree_sock_addr);
 
 	unlink(sa.sun_path);    /* remove possible old socket */
 	xfree(spool);
@@ -777,7 +789,7 @@ pmi2_setup_srun(const mpi_plugin_client_info_t *job, char ***env)
 	int rc = SLURM_SUCCESS;
 
 	run_in_stepd = false;
-	if ((job->pack_jobid == NO_VAL) || (job->pack_jobid == job->jobid)) {
+	if ((job->pack_jobid == NO_VAL) || (job->pack_task_offset == 0)) {
 		rc = _setup_srun_job_info(job);
 		if (rc == SLURM_SUCCESS)
 			rc = _setup_srun_tree_info();

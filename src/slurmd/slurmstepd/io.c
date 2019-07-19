@@ -1705,19 +1705,19 @@ io_dup_stdio(stepd_step_task_info_t *t)
 {
 	if (dup2(t->stdin_fd, STDIN_FILENO  ) < 0) {
 		error("dup2(stdin): %m");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 	fd_set_noclose_on_exec(STDIN_FILENO);
 
 	if (dup2(t->stdout_fd, STDOUT_FILENO) < 0) {
 		error("dup2(stdout): %m");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 	fd_set_noclose_on_exec(STDOUT_FILENO);
 
 	if (dup2(t->stderr_fd, STDERR_FILENO) < 0) {
 		error("dup2(stderr): %m");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 	fd_set_noclose_on_exec(STDERR_FILENO);
 
@@ -1868,18 +1868,12 @@ alloc_io_buf(void)
 {
 	struct io_buf *buf;
 
-	buf = (struct io_buf *)xmalloc(sizeof(struct io_buf));
-	if (!buf)
-		return NULL;
+	buf = xmalloc(sizeof(struct io_buf));
 	buf->ref_count = 0;
 	buf->length = 0;
 	/* The following "+ 1" is just temporary so I can stick a \0 at
 	   the end and do a printf of the data pointer */
 	buf->data = xmalloc(MAX_MSG_LEN + io_hdr_packed_size() + 1);
-	if (!buf->data) {
-		xfree(buf);
-		return NULL;
-	}
 
 	return buf;
 }

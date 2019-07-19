@@ -58,6 +58,7 @@
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/stepd_api.h"
 #include "src/common/switch.h"
+#include "src/common/xcgroup_read_config.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
@@ -130,7 +131,7 @@ main (int argc, char **argv)
 	 * launch_tasks_request_msg_t or a batch_job_launch_msg_t */
 	if (!(job = _step_setup(cli, self, msg))) {
 		_send_fail_to_slurmd(STDOUT_FILENO);
-		rc = SLURM_FAILURE;
+		rc = SLURM_ERROR;
 		goto ending;
 	}
 
@@ -142,7 +143,7 @@ main (int argc, char **argv)
 	/* sets job->msg_handle and job->msgid */
 	if (msg_thr_create(job) == SLURM_ERROR) {
 		_send_fail_to_slurmd(STDOUT_FILENO);
-		rc = SLURM_FAILURE;
+		rc = SLURM_ERROR;
 		goto ending;
 	}
 
@@ -202,6 +203,8 @@ extern int stepd_cleanup(slurm_msg_t *msg, stepd_step_rec_t *job,
 	_step_cleanup(job, msg, rc);
 
 	fini_setproctitle();
+
+	xcgroup_fini_slurm_cgroup_conf();
 
 	xfree(cli);
 	xfree(self);
@@ -417,7 +420,7 @@ _send_fail_to_slurmd(int sock)
 	/* If running under valgrind/memcheck, this pipe doesn't work correctly
 	 * so just skip it. */
 #if (SLURMSTEPD_MEMCHECK == 0)
-	int fail = SLURM_FAILURE;
+	int fail = SLURM_ERROR;
 
 	if (errno)
 		fail = errno;
@@ -502,7 +505,7 @@ _init_from_slurmd(int sock, char **argv,
 	/* Receive TRES information for slurmd */
 	safe_read(sock, &len, sizeof(int));
 	if (len > 0) {
-		incoming_buffer = xmalloc(sizeof(char) * len);
+		incoming_buffer = xmalloc(len);
 		safe_read(sock, incoming_buffer, len);
 		buffer = create_buf(incoming_buffer, len);
 		slurm_unpack_list(&tmp_list,
@@ -524,6 +527,14 @@ _init_from_slurmd(int sock, char **argv,
 	tmp_list = NULL;
 	assoc_mgr_unlock(&locks);
 
+	/* receive cgroup conf from slurmd */
+	if (xcgroup_read_conf(sock) != SLURM_SUCCESS)
+		fatal("Failed to read cgroup conf from slurmd");
+
+	/* receive acct_gather conf from slurmd */
+	if (acct_gather_read_conf(sock) != SLURM_SUCCESS)
+		fatal("Failed to read acct_gather conf from slurmd");
+
 	/* receive job type from slurmd */
 	safe_read(sock, &step_type, sizeof(int));
 	debug3("step_type = %d", step_type);
@@ -536,7 +547,8 @@ _init_from_slurmd(int sock, char **argv,
 	safe_read(sock, &step_complete.depth, sizeof(int));
 	safe_read(sock, &step_complete.max_depth, sizeof(int));
 	safe_read(sock, &step_complete.parent_addr, sizeof(slurm_addr_t));
-	step_complete.bits = bit_alloc(step_complete.children);
+	if (step_complete.children)
+		step_complete.bits = bit_alloc(step_complete.children);
 	step_complete.jobacct = jobacctinfo_create(NULL);
 	slurm_mutex_unlock(&step_complete.lock);
 
@@ -548,7 +560,7 @@ _init_from_slurmd(int sock, char **argv,
 
 	/* receive cli from slurmd */
 	safe_read(sock, &len, sizeof(int));
-	incoming_buffer = xmalloc(sizeof(char) * len);
+	incoming_buffer = xmalloc(len);
 	safe_read(sock, incoming_buffer, len);
 	buffer = create_buf(incoming_buffer,len);
 	cli = xmalloc(sizeof(slurm_addr_t));
@@ -560,7 +572,7 @@ _init_from_slurmd(int sock, char **argv,
 	safe_read(sock, &len, sizeof(int));
 	if (len > 0) {
 		/* receive packed self from main slurmd */
-		incoming_buffer = xmalloc(sizeof(char) * len);
+		incoming_buffer = xmalloc(len);
 		safe_read(sock, incoming_buffer, len);
 		buffer = create_buf(incoming_buffer,len);
 		self = xmalloc(sizeof(slurm_addr_t));
@@ -586,7 +598,7 @@ _init_from_slurmd(int sock, char **argv,
 
 	/* receive req from slurmd */
 	safe_read(sock, &len, sizeof(int));
-	incoming_buffer = xmalloc(sizeof(char) * len);
+	incoming_buffer = xmalloc(len);
 	safe_read(sock, incoming_buffer, len);
 	buffer = create_buf(incoming_buffer,len);
 
@@ -684,10 +696,12 @@ _step_setup(slurm_addr_t *cli, slurm_addr_t *self, slurm_msg_t *msg)
 		gres_plugin_step_state_log(job->step_gres_list, job->jobid,
 					   job->stepid);
 	}
-	if (msg->msg_type == REQUEST_BATCH_JOB_LAUNCH)
+	if (msg->msg_type == REQUEST_BATCH_JOB_LAUNCH) {
 		gres_plugin_job_set_env(&job->env, job->job_gres_list, 0);
-	else if (msg->msg_type == REQUEST_LAUNCH_TASKS)
-		gres_plugin_step_set_env(&job->env, job->step_gres_list, 0);
+	} else if (msg->msg_type == REQUEST_LAUNCH_TASKS) {
+		gres_plugin_step_set_env(&job->env, job->step_gres_list, 0,
+					 NULL, NULL, -1);
+	}
 
 	/*
 	 * Add slurmd node topology informations to job env array

@@ -49,6 +49,7 @@
 
 #include "src/common/slurm_xlator.h"	/* Must be first */
 #include "src/common/bitstring.h"
+#include "src/common/fd.h"
 #include "src/common/job_resources.h"
 #include "src/common/list.h"
 #include "src/common/node_conf.h"
@@ -235,10 +236,10 @@ static int _unpack_job_state(job_failures_t **job_pptr, Buf buffer)
 	safe_unpack16(&job_fail_ptr->callback_port, buffer);
 	safe_unpack32(&job_fail_ptr->job_id, buffer);
 	safe_unpack32(&job_fail_ptr->fail_node_cnt, buffer);
-	job_fail_ptr->fail_node_cpus  = xmalloc(sizeof(uint32_t) *
-						job_fail_ptr->fail_node_cnt);
-	job_fail_ptr->fail_node_names = xmalloc(sizeof(char *) *
-						job_fail_ptr->fail_node_cnt);
+	safe_xcalloc(job_fail_ptr->fail_node_cpus,job_fail_ptr->fail_node_cnt,
+		     sizeof(uint32_t));
+	safe_xcalloc(job_fail_ptr->fail_node_names, job_fail_ptr->fail_node_cnt,
+		     sizeof(char *));
 	for (i = 0; i < job_fail_ptr->fail_node_cnt; i++) {
 		safe_unpack32(&job_fail_ptr->fail_node_cpus[i], buffer);
 		safe_unpackstr_xmalloc(&job_fail_ptr->fail_node_names[i],
@@ -369,12 +370,10 @@ extern int save_nonstop_state(void)
 extern int restore_nonstop_state(void)
 {
 	char *dir_path, *state_file;
-	uint32_t data_allocated, data_size = 0;
 	uint32_t job_cnt = 0;
-	char *data;
 	uint16_t protocol_version = NO_VAL16;
 	Buf buffer;
-	int error_code = SLURM_SUCCESS, i, state_fd, data_read;
+	int error_code = SLURM_SUCCESS, i;
 	time_t buf_time;
 	job_failures_t *job_fail_ptr = NULL;
 
@@ -383,37 +382,14 @@ extern int restore_nonstop_state(void)
 	xstrcat(state_file, "/nonstop_state");
 	xfree(dir_path);
 
-	state_fd = open(state_file, O_RDONLY);
-	if (state_fd < 0) {
+	if (!(buffer = create_mmap_buf(state_file))) {
 		error("No nonstop state file (%s) to recover", state_file);
 		xfree(state_file);
 		return error_code;
-	} else {
-		data_allocated = BUF_SIZE;
-		data = xmalloc(data_allocated);
-		while (1) {
-			data_read = read(state_fd, &data[data_size],
-					 BUF_SIZE);
-			if (data_read < 0) {
-				if (errno == EINTR)
-					continue;
-				else {
-					error("Read error on %s: %m",
-					      state_file);
-					break;
-				}
-			} else if (data_read == 0)	/* eof */
-				break;
-			data_size      += data_read;
-			data_allocated += data_read;
-			xrealloc(data, data_allocated);
-		}
-		close(state_fd);
 	}
 	xfree(state_file);
 
 	/* Validate state version */
-	buffer = create_buf(data, data_size);
 	safe_unpack16(&protocol_version, buffer);
 	debug3("Version in slurmctld/nonstop header is %u", protocol_version);
 
@@ -450,7 +426,7 @@ unpack_error:
 		fatal("Incomplete nonstop state file, start with '-i' to ignore this");
 	error("Incomplete nonstop state file");
 	free_buf(buffer);
-	return SLURM_FAILURE;
+	return SLURM_ERROR;
 }
 
 extern void init_job_db(void)

@@ -212,7 +212,7 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 						  opt_local->ntasks_per_node;
 	job->ctx_params.task_count = opt_local->ntasks;
 
-	if (opt_local->mem_per_cpu != NO_VAL64)
+	if (opt_local->mem_per_cpu > -1)
 		job->ctx_params.pn_min_memory = opt_local->mem_per_cpu |
 						MEM_PER_CPU;
 	else if (opt_local->pn_min_memory != NO_VAL64)
@@ -239,13 +239,12 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	job->ctx_params.cpu_freq_gov = opt_local->cpu_freq_gov;
 	job->ctx_params.relative = (uint16_t)srun_opt->relative;
 	job->ctx_params.ckpt_interval = (uint16_t)srun_opt->ckpt_interval;
-	job->ctx_params.ckpt_dir = srun_opt->ckpt_dir;
 	job->ctx_params.exclusive = (uint16_t)srun_opt->exclusive;
 	if (opt_local->immediate == 1)
 		job->ctx_params.immediate = (uint16_t)opt_local->immediate;
 	if (opt_local->time_limit != NO_VAL)
 		job->ctx_params.time_limit = (uint32_t)opt_local->time_limit;
-	job->ctx_params.verbose_level = (uint16_t)_verbose;
+	job->ctx_params.verbose_level = (uint16_t) opt.verbose;
 	if (srun_opt->resv_port_cnt != NO_VAL) {
 		job->ctx_params.resv_port_cnt = (uint16_t)srun_opt->resv_port_cnt;
 	} else {
@@ -299,11 +298,11 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	job->ctx_params.node_list = opt_local->nodelist;
 	job->ctx_params.network = opt_local->network;
 	job->ctx_params.no_kill = opt_local->no_kill;
-	if (srun_opt->job_name_set_cmd && opt_local->job_name)
+	if (slurm_option_set_by_cli('J'))
 		job->ctx_params.name = opt_local->job_name;
 	else
 		job->ctx_params.name = srun_opt->cmd_name;
-	job->ctx_params.features = opt_local->constraints;
+	job->ctx_params.features = opt_local->constraint;
 
 	if (opt_local->cpus_per_gpu) {
 		xstrfmtcat(job->ctx_params.cpus_per_tres, "gpu:%d",
@@ -322,7 +321,7 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	}
 	job->ctx_params.tres_bind = xstrdup(opt_local->tres_bind);
 	xfree(opt_local->tres_freq);	/* Vestigial value from job allocate */
-	xfmt_tres(&opt_local->tres_freq, "gpu", opt_local->gpu_freq);
+	xfmt_tres_freq(&opt_local->tres_freq, "gpu", opt_local->gpu_freq);
 	if (tres_freq_verify_cmdline(opt_local->tres_freq)) {
 		if (tres_freq_err_log) {	/* Log once */
 			error("Invalid --tres-freq argument: %s. Ignored",
@@ -350,8 +349,8 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 		  opt_local->gpus_per_socket);
 	xfmt_tres(&job->ctx_params.tres_per_task, "gpu",
 		  opt_local->gpus_per_task);
-	if (opt_local->mem_per_gpu) {
-		xstrfmtcat(job->ctx_params.mem_per_tres, "gpu:%"PRIi64,
+	if (opt_local->mem_per_gpu != NO_VAL64) {
+		xstrfmtcat(job->ctx_params.mem_per_tres, "gpu:%"PRIu64,
 			   opt.mem_per_gpu);
 	}
 

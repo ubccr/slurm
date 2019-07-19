@@ -402,7 +402,7 @@ static int _print_one_job_from_format(job_info_t * job, List list)
 	job_format_t *current;
 	int total_width = 0;
 
-	while ((current = (job_format_t *) list_next(iter)) != NULL) {
+	while ((current = list_next(iter))) {
 		if (current->
 		    function(job, current->width, current->right_justify,
 			     current->suffix)
@@ -476,11 +476,8 @@ job_format_add_function(List list, int width, bool right, char *suffix,
 	tmp->width = width;
 	tmp->right_justify = right;
 	tmp->suffix = suffix;
+	list_append(list, tmp);
 
-	if (list_append(list, tmp) == NULL) {
-		fprintf(stderr, "Memory exhausted\n");
-		exit(1);
-	}
 	return SLURM_SUCCESS;
 }
 
@@ -1641,6 +1638,8 @@ int _print_job_cpus_per_task(job_info_t * job, int width, bool right_justify,
 {
 	if (job == NULL)
 		_print_str("CPUS_PER_TASK", width, right_justify, true);
+	else if (job->cpus_per_task == NO_VAL16)
+		_print_str("N/A", width, right_justify, true);
 	else
 		_print_int(job->cpus_per_task, width, right_justify, true);
 
@@ -2322,7 +2321,7 @@ static int _print_step_from_format(void *x, void *arg)
 	step_format_t *current;
 	int total_width = 0;
 
-	while ((current = (step_format_t *) list_next(i)) != NULL) {
+	while ((current = list_next(i))) {
 		if (current->
 		    function(job_step, current->width,
 			     current->right_justify, current->suffix)
@@ -2350,11 +2349,8 @@ step_format_add_function(List list, int width, bool right_justify,
 	tmp->width = width;
 	tmp->right_justify = right_justify;
 	tmp->suffix = suffix;
+	list_append(list, tmp);
 
-	if (list_append(list, tmp) == NULL) {
-		fprintf(stderr, "Memory exhausted\n");
-		exit(1);
-	}
 	return SLURM_SUCCESS;
 }
 
@@ -2384,6 +2380,9 @@ int _print_step_id(job_step_info_t * step, int width, bool right, char* suffix)
 		} else if (step->step_id == SLURM_EXTERN_CONT) {
 			snprintf(id, FORMAT_STRING_SIZE, "%u_%u.Extern",
 				 step->array_job_id, step->array_task_id);
+		} else if (step->step_id == SLURM_BATCH_SCRIPT) {
+			snprintf(id, FORMAT_STRING_SIZE, "%u_%u.Batch",
+				 step->array_job_id, step->array_task_id);
 		} else {
 			snprintf(id, FORMAT_STRING_SIZE, "%u_%u.%u",
 				 step->array_job_id, step->array_task_id,
@@ -2396,6 +2395,9 @@ int _print_step_id(job_step_info_t * step, int width, bool right, char* suffix)
 				 step->job_id);
 		} else if (step->step_id == SLURM_EXTERN_CONT) {
 			snprintf(id, FORMAT_STRING_SIZE, "%u.Extern",
+				 step->job_id);
+		} else if (step->step_id == SLURM_BATCH_SCRIPT) {
+			snprintf(id, FORMAT_STRING_SIZE, "%u.Batch",
 				 step->job_id);
 		} else {
 			snprintf(id, FORMAT_STRING_SIZE, "%u.%u",

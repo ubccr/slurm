@@ -86,13 +86,6 @@ strong_alias(jobacctinfo_unpack, slurm_jobacctinfo_unpack);
 strong_alias(jobacctinfo_create, slurm_jobacctinfo_create);
 strong_alias(jobacctinfo_destroy, slurm_jobacctinfo_destroy);
 
-
-/*
- * WARNING:  Do not change the order of these fields or add additional
- * fields at the beginning of the structure.  If you do, job accounting
- * plugins will stop working.  If you need to add fields, add them
- * at the end of the structure.
- */
 typedef struct slurm_jobacct_gather_ops {
 	void (*poll_data) (List task_list, bool pgid_plugin, uint64_t cont_id,
 			   bool profile);
@@ -142,7 +135,7 @@ static void _init_tres_usage(struct jobacctinfo *jobacct,
 
 	jobacct->tres_count = tres_cnt;
 
-	jobacct->tres_ids = xmalloc(tres_cnt * sizeof(uint32_t));
+	jobacct->tres_ids = xcalloc(tres_cnt, sizeof(uint32_t));
 
 	alloc_size = tres_cnt * sizeof(uint64_t);
 
@@ -947,7 +940,12 @@ extern int jobacctinfo_setinfo(jobacctinfo_t *jobacct,
 
 	switch (type) {
 	case JOBACCT_DATA_TOTAL:
-		_copy_tres_usage(&jobacct, send);
+		if (!jobacct) {
+			/* Avoid possible memory leak from _copy_tres_usage() */
+			error("%s: \'jobacct\' argument is NULL", __func__);
+			rc = SLURM_ERROR;
+		} else
+			_copy_tres_usage(&jobacct, send);
 		break;
 	case JOBACCT_DATA_PIPE:
 		if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
@@ -991,7 +989,7 @@ extern int jobacctinfo_setinfo(jobacctinfo_t *jobacct,
 		jobacct->tres_usage_in_tot[TRES_ARRAY_VMEM] = *uint64;
 		break;
 	default:
-		debug("jobacct_g_set_setinfo data_type %d invalid", type);
+		debug("%s: data_type %d invalid", __func__, type);
 	}
 
 	return rc;
@@ -1020,7 +1018,12 @@ extern int jobacctinfo_getinfo(
 
 	switch (type) {
 	case JOBACCT_DATA_TOTAL:
-		_copy_tres_usage(&send, jobacct);
+		if (!send) {
+			/* Avoid possible memory leak from _copy_tres_usage() */
+			error("%s: \'data\' argument is NULL", __func__);
+			rc = SLURM_ERROR;
+		} else
+			_copy_tres_usage(&send, jobacct);
 		break;
 	case JOBACCT_DATA_PIPE:
 		if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
@@ -1051,7 +1054,7 @@ extern int jobacctinfo_getinfo(
 		*uint64 = jobacct->tres_usage_in_tot[TRES_ARRAY_VMEM];
 		break;
 	default:
-		debug("jobacct_g_set_getinfo data_type %d invalid", type);
+		debug("%s: data_type %d invalid", __func__, type);
 	}
 	return rc;
 

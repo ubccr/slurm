@@ -346,6 +346,9 @@ parse_command_line( int argc, char* *argv )
 		}
 	}
 
+	if (params.long_list && params.format)
+		fatal("Options -o(--format) and -l(--long) are mutually exclusive. Please remove one and retry.");
+
 	if (!override_format_env) {
 		if ((env_val = getenv("SQUEUE_FORMAT")))
 			params.format = xstrdup(env_val);
@@ -637,7 +640,7 @@ extern int parse_format( char* format )
 							   right_justify,
 							   suffix );
 			else if (format_all)
-				;	/* ignore */
+				xfree(suffix);	/* ignore */
 			else {
 				prefix = xstrdup("%");
 				xstrcat(prefix, token);
@@ -917,7 +920,7 @@ extern int parse_format( char* format )
 							 right_justify,
 							 suffix );
 			else if (format_all)
-				;	/* ignore */
+				xfree(suffix);	/* ignore */
 			else {
 				prefix = xstrdup("%");
 				xstrcat(prefix, token);
@@ -966,7 +969,8 @@ extern int parse_long_format( char* format_long )
 							     field_size,
 							     right_justify,
 							     suffix);
-			else if (!xstrcasecmp(token, "numtask"))
+			else if (!xstrncasecmp(token, "numtasks",
+					       strlen("numtask")))
 				step_format_add_num_tasks( params.format_list,
 							   field_size,
 							   right_justify,
@@ -1193,7 +1197,8 @@ extern int parse_long_format( char* format_long )
 							  field_size,
 							  right_justify,
 							  suffix  );
-			else if (!xstrcasecmp(token, "numtasks"))
+			else if (!xstrncasecmp(token, "numtasks",
+					       strlen("numtask")))
 				job_format_add_num_tasks( params.format_list,
 							  field_size,
 							  right_justify,

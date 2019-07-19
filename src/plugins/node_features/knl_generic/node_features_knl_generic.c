@@ -55,7 +55,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#if defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #define POLLRDHUP POLLHUP
 #endif
 
@@ -119,7 +119,7 @@
  * overwritten when linking with the slurmctld.
  */
 #if defined (__APPLE__)
-slurmctld_config_t slurmctld_config __attribute__((weak_import));
+extern slurmctld_config_t slurmctld_config __attribute__((weak_import));
 #else
 slurmctld_config_t slurmctld_config;
 #endif
@@ -1721,6 +1721,9 @@ extern int node_features_p_node_update(char *active_features,
 		if (mcdram_per_node && (mcdram_inx >= 0)) {
 			mcdram_size = mcdram_per_node[i] *
 				      (100 - mcdram_pct[mcdram_inx]) / 100;
+			if (!node_ptr->gres)
+				node_ptr->gres =
+					xstrdup(node_ptr->config_ptr->gres);
 			gres_plugin_node_feature(node_ptr->name, "hbm",
 						 mcdram_size, &node_ptr->gres,
 						 &node_ptr->gres_list);

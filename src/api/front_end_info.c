@@ -114,7 +114,7 @@ slurm_sprint_front_end_table (front_end_info_t * front_end_ptr,
 {
 	uint32_t my_state = front_end_ptr->node_state;
 	char *drain_str = "";
-	char tmp_line[512], time_str[32];
+	char time_str[32];
 	char *out = NULL;
 
 	if (my_state & NODE_STATE_DRAIN) {
@@ -123,27 +123,18 @@ slurm_sprint_front_end_table (front_end_info_t * front_end_ptr,
 	}
 
 	/****** Line 1 ******/
-	snprintf(tmp_line, sizeof(tmp_line), "FrontendName=%s ",
-		 front_end_ptr->name);
-	xstrcat(out, tmp_line);
-	snprintf(tmp_line, sizeof(tmp_line), "State=%s%s ",
-		 node_state_string(my_state), drain_str);
-	xstrcat(out, tmp_line);
-	snprintf(tmp_line, sizeof(tmp_line), "Version=%s ",
-		 front_end_ptr->version);
-	xstrcat(out, tmp_line);
+	xstrfmtcat(out, "FrontendName=%s ", front_end_ptr->name);
+	xstrfmtcat(out, "State=%s%s ", node_state_string(my_state), drain_str);
+	xstrfmtcat(out, "Version=%s ", front_end_ptr->version);
 	if (front_end_ptr->reason_time) {
 		char *user_name = uid_to_string(front_end_ptr->reason_uid);
 		slurm_make_time_str((time_t *)&front_end_ptr->reason_time,
 				    time_str, sizeof(time_str));
-		snprintf(tmp_line, sizeof(tmp_line), "Reason=%s [%s@%s]",
-			 front_end_ptr->reason, user_name, time_str);
-		xstrcat(out, tmp_line);
+		xstrfmtcat(out, "Reason=%s [%s@%s]",
+			   front_end_ptr->reason, user_name, time_str);
 		xfree(user_name);
 	} else {
-		snprintf(tmp_line, sizeof(tmp_line), "Reason=%s",
-			 front_end_ptr->reason);
-		xstrcat(out, tmp_line);
+		xstrfmtcat(out, "Reason=%s", front_end_ptr->reason);
 	}
 	if (one_liner)
 		xstrcat(out, " ");
@@ -153,12 +144,10 @@ slurm_sprint_front_end_table (front_end_info_t * front_end_ptr,
 	/****** Line 2 ******/
 	slurm_make_time_str((time_t *)&front_end_ptr->boot_time,
 			    time_str, sizeof(time_str));
-	snprintf(tmp_line, sizeof(tmp_line), "BootTime=%s ", time_str);
-	xstrcat(out, tmp_line);
+	xstrfmtcat(out, "BootTime=%s ", time_str);
 	slurm_make_time_str((time_t *)&front_end_ptr->slurmd_start_time,
 			    time_str, sizeof(time_str));
-	snprintf(tmp_line, sizeof(tmp_line), "SlurmdStartTime=%s", time_str);
-	xstrcat(out, tmp_line);
+	xstrfmtcat(out, "SlurmdStartTime=%s", time_str);
 	if (one_liner)
 		xstrcat(out, " ");
 	else
@@ -216,6 +205,7 @@ slurm_load_front_end (time_t update_time, front_end_info_msg_t **resp)
 
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
+	memset(&req, 0, sizeof(req));
 	req.last_update  = update_time;
 	req_msg.msg_type = REQUEST_FRONT_END_INFO;
 	req_msg.data     = &req;
@@ -240,5 +230,5 @@ slurm_load_front_end (time_t update_time, front_end_info_msg_t **resp)
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }

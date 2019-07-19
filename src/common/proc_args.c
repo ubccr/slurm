@@ -44,10 +44,6 @@
 
 #define _GNU_SOURCE
 
-#ifndef SYSTEM_DIMENSIONS
-#  define SYSTEM_DIMENSIONS 1
-#endif
-
 #include <ctype.h>		/* isdigit    */
 #include <fcntl.h>
 #include <limits.h>
@@ -81,13 +77,9 @@ void print_slurm_version(void)
 /* print the available gres options */
 void print_gres_help(void)
 {
-	char help_msg[1024] = "";
-
-	gres_plugin_help_msg(help_msg, sizeof(help_msg));
-	if (help_msg[0])
-		printf("%s", help_msg);
-	else
-		printf("No gres help is available\n");
+	char *msg = gres_plugin_help_msg();
+	printf("%s", msg);
+	xfree(msg);
 }
 
 void set_distribution(task_dist_states_t distribution,
@@ -456,10 +448,9 @@ extern char *format_task_dist_states(task_dist_states_t t)
 }
 
 /* return command name from its full path name */
-char * base_name(char* command)
+char *base_name(const char *command)
 {
-	char *char_ptr, *name;
-	int i;
+	const char *char_ptr;
 
 	if (command == NULL)
 		return NULL;
@@ -470,21 +461,21 @@ char * base_name(char* command)
 	else
 		char_ptr++;
 
-	i = strlen(char_ptr);
-	name = xmalloc(i+1);
-	strcpy(name, char_ptr);
-	return name;
+	return xstrdup(char_ptr);
 }
 
-static long _str_to_mbtyes(const char *arg, int use_gbytes)
+static uint64_t _str_to_mbytes(const char *arg, int use_gbytes)
 {
-	long result;
+	long long result;
 	char *endptr;
 
 	errno = 0;
-	result = strtol(arg, &endptr, 10);
-	if ((errno != 0) && ((result == LONG_MIN) || (result == LONG_MAX)))
-		result = -1;
+	result = strtoll(arg, &endptr, 10);
+	if ((errno != 0) && ((result == LLONG_MIN) || (result == LLONG_MAX)))
+		return NO_VAL64;
+	if (result < 0)
+		return NO_VAL64;
+
 	else if ((endptr[0] == '\0') && (use_gbytes == 1))  /* GB default */
 		result *= 1024;
 	else if (endptr[0] == '\0')	/* MB default */
@@ -498,18 +489,18 @@ static long _str_to_mbtyes(const char *arg, int use_gbytes)
 	else if ((endptr[0] == 't') || (endptr[0] == 'T'))
 		result *= (1024 * 1024);
 	else
-		result = -1;
+		return NO_VAL64;
 
-	return result;
+	return (uint64_t) result;
 }
 
 /*
  * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
  * or "T" at end and return the number in mega-bytes. Default units are MB.
  */
-long str_to_mbytes(const char *arg)
+uint64_t str_to_mbytes(const char *arg)
 {
-	return _str_to_mbtyes(arg, 0);
+	return _str_to_mbytes(arg, 0);
 }
 
 /*
@@ -517,20 +508,51 @@ long str_to_mbytes(const char *arg)
  * or "T" at end and return the number in mega-bytes. Default units are GB
  * if "SchedulerParameters=default_gbytes" is configured, otherwise MB.
  */
-long str_to_mbytes2(const char *arg)
+uint64_t str_to_mbytes2(const char *arg)
 {
 	static int use_gbytes = -1;
 
 	if (use_gbytes == -1) {
 		char *sched_params = slurm_get_sched_params();
-		if (sched_params && strstr(sched_params, "default_gbytes"))
+		if (xstrcasestr(sched_params, "default_gbytes"))
 			use_gbytes = 1;
 		else
 			use_gbytes = 0;
 		xfree(sched_params);
 	}
 
-	return _str_to_mbtyes(arg, use_gbytes);
+	return _str_to_mbytes(arg, use_gbytes);
+}
+
+extern char *mbytes2_to_str(uint64_t mbytes)
+{
+	int i = 0;
+	char *unit = "MGTP?";
+	static int use_gbytes = -1;
+
+	if (mbytes == NO_VAL64)
+		return NULL;
+
+	if (use_gbytes == -1) {
+		char *sched_params = slurm_get_sched_params();
+		if (xstrcasestr(sched_params, "default_gbytes"))
+			use_gbytes = 1;
+		else
+			use_gbytes = 0;
+		xfree(sched_params);
+	}
+
+	for (i = 0; unit[i] != '?'; i++) {
+		if (mbytes && (mbytes % 1024))
+			break;
+		mbytes /= 1024;
+	}
+
+	/* no need to display the default unit */
+	if ((unit[i] == 'G' && use_gbytes) || (unit[i] == 'M' && !use_gbytes))
+		return xstrdup_printf("%"PRIu64, mbytes);
+
+	return xstrdup_printf("%"PRIu64"%c", mbytes, unit[i]);
 }
 
 /* Convert a string into a node count */
@@ -1063,12 +1085,13 @@ static bool _accessible(const char *path, int access_mode)
  * search PATH to confirm the location and access mode of the given command
  * IN cwd - current working directory
  * IN cmd - command to execute
- * IN check_current_dir - if true, search cwd for the command
+ * IN check_cwd_last - if true, search cwd after PATH is checked
+ *                   - if false, search cwd for the command first
  * IN access_mode - required access rights of cmd
  * IN test_exec - if false, do not confirm access mode of cmd if full path
  * RET full path of cmd or NULL if not found
  */
-char *search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode,
+char *search_path(char *cwd, char *cmd, bool check_cwd_last, int access_mode,
 		  bool test_exec)
 {
 	List         l        = NULL;
@@ -1079,26 +1102,42 @@ char *search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode,
 	if (cmd[0] == '.') {
 		if (test_exec) {
 			char *cmd1 = xstrdup_printf("%s/%s", cwd, cmd);
-			if (_exists(cmd1) && _accessible(cmd1, access_mode))
+			if (_exists(cmd1) && _accessible(cmd1, access_mode)) {
 				fullpath = xstrdup(cmd1);
+				debug5("%s: relative path found %s -> %s",
+					__func__, cmd, cmd1);
+			} else {
+				debug5("%s: relative path not found %s -> %s",
+					__func__, cmd, cmd1);
+			}
 			xfree(cmd1);
 		}
 		return fullpath;
 	}
 	/* Absolute path */
 	if (cmd[0] == '/') {
-		if (test_exec && _exists(cmd) && _accessible(cmd, access_mode))
+		if (test_exec && _exists(cmd) && _accessible(cmd, access_mode)) {
 			fullpath = xstrdup(cmd);
+			debug5("%s: absolute path found %s",
+			       __func__, cmd);
+		} else {
+			debug5("%s: absolute path not found %s",
+			       __func__, cmd);
+		}
 		return fullpath;
 	}
 	/* Otherwise search in PATH */
 	l = _create_path_list();
-	if (l == NULL)
+	if (l == NULL) {
+		debug5("%s: empty PATH environment",
+			__func__);
 		return NULL;
+	}
 
-	/* Check cwd last, so local binaries do not trump binaries in PATH */
-	if (check_current_dir)
+	if (check_cwd_last)
 		list_append(l, xstrdup(cwd));
+	else
+		list_prepend(l, xstrdup(cwd));
 
 	i = list_iterator_create(l);
 	while ((path = list_next(i))) {
@@ -1108,11 +1147,21 @@ char *search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode,
 			xstrfmtcat(fullpath, "%s/%s", path, cmd);
 		/* Use first executable found in PATH */
 		if (_exists(fullpath)) {
-			if (!test_exec)
+			if (!test_exec) {
+				debug5("%s: env PATH found: %s",
+					__func__, fullpath);
 				break;
-			if (_accessible(path, access_mode))
+			}
+			if (_accessible(path, access_mode)) {
+				debug5("%s: env PATH found: %s",
+					__func__, fullpath);
 				break;
+			}
 		}
+
+		debug5("%s: env PATH not found: %s",
+			__func__, fullpath);
+
 		xfree(fullpath);
 	}
 	list_iterator_destroy(i);
@@ -1123,38 +1172,13 @@ char *search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode,
 char *print_commandline(const int script_argc, char **script_argv)
 {
 	int i;
-	char tmp[256], *out_buf = NULL, *prefix;
+	char *out_buf = NULL, *prefix = "";
 
 	for (i = 0; i < script_argc; i++) {
-		if (out_buf)
-			prefix = " ";
-		else
-			prefix = "";
-		snprintf(tmp, 256,  "%s%s", prefix, script_argv[i]);
-		xstrcat(out_buf, tmp);
+		xstrfmtcat(out_buf,  "%s%s", prefix, script_argv[i]);
+		prefix = " ";
 	}
 	return out_buf;
-}
-
-char *print_geometry(const uint16_t *geometry)
-{
-	int i;
-	char buf[32], *rc = NULL;
-	int dims = slurmdb_setup_cluster_dims();
-
-	if ((dims == 0) || !geometry[0]
-	    ||  (geometry[0] == NO_VAL16))
-		return NULL;
-
-	for (i=0; i<dims; i++) {
-		if (i > 0)
-			snprintf(buf, sizeof(buf), "x%u", geometry[i]);
-		else
-			snprintf(buf, sizeof(buf), "%u", geometry[i]);
-		xstrcat(rc, buf);
-	}
-
-	return rc;
 }
 
 /* Translate a signal option string "--signal=<int>[@<time>]" into
@@ -1198,31 +1222,50 @@ int get_signal_opts(char *optarg, uint16_t *warn_signal, uint16_t *warn_time,
 	return -1;
 }
 
+extern char *signal_opts_to_cmdline(uint16_t warn_signal, uint16_t warn_time,
+				    uint16_t warn_flags)
+{
+	char *cmdline = NULL, *sig_name;
+
+	if (warn_flags == KILL_JOB_BATCH)
+		xstrcat(cmdline, "B:");
+
+	sig_name = sig_num2name(warn_signal);
+	xstrcat(cmdline, sig_name);
+	xfree(sig_name);
+
+	if (warn_time != 60) /* default value above, don't print */
+		xstrfmtcat(cmdline, "@%u", warn_time);
+
+	return cmdline;
+}
+
+static struct {
+	char *name;
+	uint16_t val;
+} signals_mapping[] = {
+	{ "HUP",	SIGHUP	},
+	{ "INT",	SIGINT	},
+	{ "QUIT",	SIGQUIT	},
+	{ "ABRT",	SIGABRT	},
+	{ "KILL",	SIGKILL	},
+	{ "ALRM",	SIGALRM	},
+	{ "TERM",	SIGTERM	},
+	{ "USR1",	SIGUSR1	},
+	{ "USR2",	SIGUSR2	},
+	{ "URG",	SIGURG	},
+	{ "CONT",	SIGCONT	},
+	{ "STOP",	SIGSTOP	},
+	{ "TSTP",	SIGTSTP	},
+	{ "TTIN",	SIGTTIN	},
+	{ "TTOU",	SIGTTOU	},
+	{ NULL,		0	}	/* terminate array */
+};
+
 /* Convert a signal name to it's numeric equivalent.
  * Return 0 on failure */
-int sig_name2num(char *signal_name)
+int sig_name2num(const char *signal_name)
 {
-	struct signal_name_value {
-		char *name;
-		uint16_t val;
-	} signals[] = {
-		{ "HUP",	SIGHUP	},
-		{ "INT",	SIGINT	},
-		{ "QUIT",	SIGQUIT	},
-		{ "ABRT",	SIGABRT	},
-		{ "KILL",	SIGKILL	},
-		{ "ALRM",	SIGALRM	},
-		{ "TERM",	SIGTERM	},
-		{ "USR1",	SIGUSR1	},
-		{ "USR2",	SIGUSR2	},
-		{ "URG",	SIGURG	},
-		{ "CONT",	SIGCONT	},
-		{ "STOP",	SIGSTOP	},
-		{ "TSTP",	SIGTSTP	},
-		{ "TTIN",	SIGTTIN	},
-		{ "TTOU",	SIGTTOU	},
-		{ NULL,		0	}	/* terminate array */
-	};
 	char *ptr;
 	long tmp;
 	int i;
@@ -1236,24 +1279,34 @@ int sig_name2num(char *signal_name)
 	}
 
 	/* search the array */
-	ptr = signal_name;
+	ptr = (char *) signal_name;
 	while (isspace((int)*ptr))
 		ptr++;
 	if (xstrncasecmp(ptr, "SIG", 3) == 0)
 		ptr += 3;
 	for (i = 0; ; i++) {
 		int siglen;
-		if (signals[i].name == NULL)
+		if (signals_mapping[i].name == NULL)
 			return 0;
-		siglen = strlen(signals[i].name);
-		if ((!xstrncasecmp(ptr, signals[i].name, siglen)
+		siglen = strlen(signals_mapping[i].name);
+		if ((!xstrncasecmp(ptr, signals_mapping[i].name, siglen)
 		    && xstring_is_whitespace(ptr + siglen))) {
 			/* found the signal name */
-			return signals[i].val;
+			return signals_mapping[i].val;
 		}
 	}
 
 	return 0;	/* not found */
+}
+
+extern char *sig_num2name(int signal)
+{
+	for (int i = 0; signals_mapping[i].name; i++) {
+		if (signal == signals_mapping[i].val)
+			return xstrdup(signals_mapping[i].name);
+	}
+
+	return xstrdup_printf("%d", signal);
 }
 
 /*
@@ -1533,7 +1586,7 @@ extern uint64_t parse_resv_flags(const char *flagstr, const char *msg)
 			outflags |= RESERVE_FLAG_NO_HOLD_JOBS;
 		} else {
 			error("Error parsing flags %s.  %s", flagstr, msg);
-			return 0xffffffff;
+			return INFINITE64;
 		}
 
 		if (*curr == ',') {
@@ -1578,10 +1631,10 @@ extern int validate_acctg_freq(char *acctg_freq)
 	bool valid;
 	int rc = SLURM_SUCCESS;
 
-	if (!optarg)
+	if (!acctg_freq)
 		return rc;
 
-	tmp = xstrdup(optarg);
+	tmp = xstrdup(acctg_freq);
 	tok = strtok_r(tmp, ",", &save_ptr);
 	while (tok) {
 		valid = false;
@@ -1614,6 +1667,10 @@ extern void xfmt_tres(char **dest, char *prefix, char *src)
 
 	if (!src || (src[0] == '\0'))
 		return;
+	if (*dest) {
+		result = xstrdup(*dest);
+		sep = ",";
+	}
 	tmp = xstrdup(src);
 	tok = strtok_r(tmp, ",", &save_ptr);
 	while (tok) {
@@ -1622,5 +1679,25 @@ extern void xfmt_tres(char **dest, char *prefix, char *src)
 		tok = strtok_r(NULL, ",", &save_ptr);
 	}
 	xfree(tmp);
+	*dest = result;
+}
+
+/*
+ * Format a tres_freq argument
+ * dest OUT - resulting string
+ * prefix IN - TRES type (e.g. "gpu")
+ * src IN - user input
+ */
+extern void xfmt_tres_freq(char **dest, char *prefix, char *src)
+{
+	char *result = NULL, *sep = "";
+
+	if (!src || (src[0] == '\0'))
+		return;
+	if (*dest) {
+		result = xstrdup(*dest);
+		sep = ";";
+	}
+	xstrfmtcat(result, "%s%s:%s", sep, prefix, src);
 	*dest = result;
 }

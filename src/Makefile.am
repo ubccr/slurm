@@ -3,7 +3,6 @@ SUBDIRS =		\
 	bcast		\
 	common		\
 	database	\
-	db_api		\
 	layouts		\
 	plugins		\
 	sacct		\
@@ -24,7 +23,6 @@ SUBDIRS =		\
 	squeue		\
 	sreport		\
 	srun		\
-	srun_cr		\
 	sshare		\
 	sstat		\
 	strigger	\

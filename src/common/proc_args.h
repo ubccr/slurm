@@ -61,20 +61,25 @@ void set_distribution(task_dist_states_t distribution,
 task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size);
 
 /* return command name from its full path name */
-char * base_name(char* command);
+char *base_name(const char *command);
 
 /*
  * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
  * or "T" at end and return the number in mega-bytes. Default units are MB.
  */
-long str_to_mbytes(const char *arg);
+uint64_t str_to_mbytes(const char *arg);
 
 /*
  * str_to_mbytes2(): verify that arg is numeric with optional "K", "M", "G"
  * or "T" at end and return the number in mega-bytes. Default units are GB
  * if ???, otherwise MB.
  */
-long str_to_mbytes2(const char *arg);
+uint64_t str_to_mbytes2(const char *arg);
+
+/*
+ * Reverse the above conversion. Returns an xmalloc()'d string.
+ */
+extern char *mbytes2_to_str(uint64_t mbytes);
 
 /* verify that a node count in arg is of a known form (count or min-max) */
 bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes);
@@ -117,29 +122,32 @@ char *print_mail_type(const uint16_t type);
  * search PATH to confirm the location and access mode of the given command
  * IN cwd - current working directory
  * IN cmd - command to execute
- * IN check_current_dir - if true, search cwd for the command
+ * IN check_cwd_last - if true, search cwd after PATH is checked
+ *                   - if false, search cwd for the command first
  * IN access_mode - required access rights of cmd
  * IN test_exec - if false, do not confirm access mode of cmd if full path
  * RET full path of cmd or NULL if not found
  */
-char *search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode,
+char *search_path(char *cwd, char *cmd, bool check_cwd_last, int access_mode,
 		  bool test_exec);
 
 /* helper function for printing options */
 char *print_commandline(const int script_argc, char **script_argv);
-
-/* helper function for printing geometry option */
-char *print_geometry(const uint16_t *geometry);
 
 /* Translate a signal option string "--signal=<int>[@<time>]" into
  * it's warn_signal and warn_time components.
  * RET 0 on success, -1 on failure */
 int get_signal_opts(char *optarg, uint16_t *warn_signal, uint16_t *warn_time,
 		    uint16_t *warn_flags);
+/* Return an xmalloc()'d string representing the original cmdline args */
+extern char *signal_opts_to_cmdline(uint16_t warn_signal, uint16_t warn_time,
+				    uint16_t warn_flags);
 
 /* Convert a signal name to it's numeric equivalent.
  * Return 0 on failure */
-int sig_name2num(char *signal_name);
+int sig_name2num(const char *signal_name);
+/* Return an xmalloc()'d string reversing the above conversion */
+extern char *sig_num2name(int signal);
 
 /*
  * parse_uint16/32/64 - Convert ascii string to a 16/32/64 bit unsigned int.
@@ -189,5 +197,13 @@ extern int validate_acctg_freq(char *acctg_freq);
  * src IN - user input, can include multiple comma-separated specifications
  */
 extern void xfmt_tres(char **dest, char *prefix, char *src);
+
+/*
+ * Format a tres_freq argument
+ * dest OUT - resulting string
+ * prefix IN - TRES type (e.g. "gpu")
+ * src IN - user input
+ */
+extern void xfmt_tres_freq(char **dest, char *prefix, char *src);
 
 #endif /* !_PROC_ARGS_H */

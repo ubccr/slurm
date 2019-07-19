@@ -13,11 +13,11 @@
 #define xfree(__p) \
 	slurm_xfree((void **)&(__p), __FILE__, __LINE__, __func__)
 #define xmalloc(__sz) \
-	slurm_xmalloc (__sz, true, __FILE__, __LINE__, __func__)
+	slurm_xcalloc(1, __sz, true, false, __FILE__, __LINE__, __func__)
 #endif
 
 extern void slurm_xfree(void **, const char *, int, const char *);
-extern void *slurm_xmalloc(size_t, bool, const char *, int, const char *);
+extern void *slurm_xcalloc(size_t, size_t, bool, bool, const char *, int, const char *);
 
 extern void slurm_api_clear_config(void);
 
@@ -37,7 +37,6 @@ extern void  slurm_private_data_string(uint16_t private_data,
 				       char *str, int str_len);
 extern void  slurm_accounting_enforce_string(uint16_t enforce,
 					     char *str, int str_len);
-extern char *slurm_node_use_string(enum node_use_type node_use);
 
 
 /********** resource allocation related conversion functions **********/

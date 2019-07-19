@@ -57,6 +57,7 @@
 #include <time.h>
 
 #include "src/common/assoc_mgr.h"
+#include "src/common/gres.h"
 #include "src/common/hostlist.h"
 #include "src/common/macros.h"
 #include "src/common/node_select.h"
@@ -94,7 +95,8 @@ static struct node_record *
 		_find_node_record (char *name,bool test_alias,bool log_missing);
 static void	_list_delete_config (void *config_entry);
 static int	_list_find_config (void *config_entry, void *key);
-static const char* _node_record_hash_identity (void* item);
+static void _node_record_hash_identity (void* item, const char** key,
+					uint32_t* key_len);
 
 /*
  * _build_single_nodeline_info - From the slurm.conf reader, build table,
@@ -197,8 +199,7 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 #endif	/* MULTIPLE_SLURMD */
 #endif	/* HAVE_FRONT_END */
 	if ((port_count != alias_count) && (port_count > 1)) {
-		error("Port count must equal that of NodeName "
-		      "records or there must be no more than one (%u != %u)",
+		error("Port count must equal that of NodeName records or there must be no more than one (%u != %u)",
 		      port_count, alias_count);
 		goto cleanup;
 	}
@@ -228,10 +229,8 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 				fatal("Invalid Port %s", node_ptr->port_str);
 			port = port_int;
 		}
-		/* find_node_record locks this to get the
-		 * alias so we need to unlock */
-		node_rec = find_node_record2(alias);
 
+		node_rec = find_node_record2(alias);
 		if (node_rec == NULL) {
 			node_rec = create_node_record(config_ptr, alias);
 			if ((state_val != NO_VAL) &&
@@ -349,10 +348,12 @@ static int _list_find_config (void *config_entry, void *key)
  * xhash helper function to index node_record per name field
  * in node_hash_table
  */
-static const char* _node_record_hash_identity (void* item)
+static void _node_record_hash_identity (void* item, const char** key,
+					uint32_t* key_len)
 {
 	struct node_record *node_ptr = (struct node_record *) item;
-	return node_ptr->name;
+	*key = node_ptr->name;
+	*key_len = strlen(node_ptr->name);
 }
 
 /*
@@ -521,16 +522,20 @@ extern int build_all_frontend_info (bool is_slurmd_context)
 /*
  * build_all_nodeline_info - get a array of slurm_conf_node_t structures
  *	from the slurm.conf reader, build table, and set values
- * IN set_bitmap - if true, set node_bitmap in config record (used by slurmd)
+ * IN set_bitmap - if true then set node_bitmap in config record (used by
+ *		    slurmd), false is used by slurmctld and testsuite
  * IN tres_cnt - number of TRES configured on system (used on controller side)
  * RET 0 if no error, error code otherwise
  */
-extern int build_all_nodeline_info (bool set_bitmap, int tres_cnt)
+extern int build_all_nodeline_info(bool set_bitmap, int tres_cnt)
 {
 	slurm_conf_node_t *node, **ptr_array;
 	struct config_record *config_ptr = NULL;
 	int count;
 	int i, rc, max_rc = SLURM_SUCCESS;
+	bool in_daemon;
+
+	in_daemon = run_in_daemon("slurmctld,slurmd");
 
 	count = slurm_conf_nodename_array(&ptr_array);
 	if (count == 0)
@@ -565,8 +570,10 @@ extern int build_all_nodeline_info (bool set_bitmap, int tres_cnt)
 		config_ptr->weight = node->weight;
 		if (node->feature && node->feature[0])
 			config_ptr->feature = xstrdup(node->feature);
-		if (node->gres && node->gres[0])
-			config_ptr->gres = xstrdup(node->gres);
+		if (in_daemon) {
+			config_ptr->gres = gres_plugin_name_filter(node->gres,
+							       node->nodenames);
+		}
 
 		rc = _build_single_nodeline_info(node, config_ptr);
 		max_rc = MAX(max_rc, rc);
@@ -597,18 +604,15 @@ extern int build_all_nodeline_info (bool set_bitmap, int tres_cnt)
  */
 extern struct config_record * create_config_record (void)
 {
-	struct config_record *config_ptr;
+	struct config_record *config_ptr = xmalloc(sizeof(*config_ptr));
 
 	last_node_update = time (NULL);
-	config_ptr = (struct config_record *)
-		     xmalloc (sizeof (struct config_record));
 
 	config_ptr->nodes = NULL;
 	config_ptr->node_bitmap = NULL;
 	xassert (config_ptr->magic = CONFIG_MAGIC);  /* set value */
 
-	if (list_append(config_list, config_ptr) == NULL)
-		fatal ("create_config_record: unable to allocate memory");
+	list_append(config_list, config_ptr);
 
 	return config_ptr;
 }
@@ -640,8 +644,7 @@ extern struct node_record *create_node_record (
 	new_buffer_size =
 		((int) ((new_buffer_size / BUF_SIZE) + 1)) * BUF_SIZE;
 	if (!node_record_table_ptr) {
-		node_record_table_ptr =
-			(struct node_record *) xmalloc (new_buffer_size);
+		node_record_table_ptr = xmalloc(new_buffer_size);
 	} else if (old_buffer_size != new_buffer_size) {
 		xrealloc (node_record_table_ptr, new_buffer_size);
 		/*
@@ -729,7 +732,7 @@ static struct node_record *_find_node_record (char *name, bool test_alias,
 	struct node_record *node_ptr;
 
 	if ((name == NULL) || (name[0] == '\0')) {
-		info("find_node_record passed NULL name");
+		info("%s: passed NULL node name", __func__);
 		return NULL;
 	}
 
@@ -739,7 +742,7 @@ static struct node_record *_find_node_record (char *name, bool test_alias,
 
 	/* try to find via hash table, if it exists */
 	if ((node_ptr =
-	     (struct node_record*) xhash_get(node_hash_table, name))) {
+	     (struct node_record*) xhash_get_str(node_hash_table, name))) {
 		xassert(node_ptr->magic == NODE_MAGIC);
 		return node_ptr;
 	}
@@ -759,7 +762,7 @@ static struct node_record *_find_node_record (char *name, bool test_alias,
 		if (!alias)
 			return NULL;
 
-		node_ptr = xhash_get(node_hash_table, alias);
+		node_ptr = xhash_get_str(node_hash_table, alias);
 		if (log_missing)
 			error("%s(%d): lookup failure for %s alias %s",
 			      __func__, __LINE__, name, alias);
@@ -893,7 +896,7 @@ extern int hostlist2bitmap (hostlist_t hl, bool best_effort, bitstr_t **bitmap)
 	*bitmap = my_bitmap;
 
 	hi = hostlist_iterator_create(hl);
-	while ((name = hostlist_next(hi)) != NULL) {
+	while ((name = hostlist_next(hi))) {
 		struct node_record *node_ptr;
 		node_ptr = _find_node_record(name, best_effort, true);
 		if (node_ptr) {
@@ -1064,17 +1067,25 @@ extern bitstr_t *cr_create_cluster_core_bitmap(int core_mult)
 	return core_bitmap;
 }
 
-/* Given the number of tasks per core and the actual number of hw threads,
- * compute how many CPUs are "visible" and, hence, usable on the node.
+/*
+ * Determine maximum number of CPUs on this node usable by a job
+ * ntasks_per_core IN - tasks-per-core to be launched by this job
+ * cpus_per_task IN - number of required  CPUs per task for this job
+ * total_cores IN - total number of cores on this node
+ * total_cpus IN - total number of CPUs on this node
+ * RET count of usable CPUs on this node usable by this job
  */
-extern int adjust_cpus_nppcu(uint16_t ntasks_per_core, uint16_t threads,
-			     int cpus)
+extern int adjust_cpus_nppcu(uint16_t ntasks_per_core, int cpus_per_task,
+			     int total_cores, int total_cpus)
 {
+	int cpus = total_cpus;
+
+//FIXME: This function ignores tasks-per-socket and tasks-per-node checks.
+// Those parameters are tested later
 	if ((ntasks_per_core != 0) && (ntasks_per_core != 0xffff) &&
-	    (threads != 0)) {
-		/* Adjust the number of CPUs according to the percentage of the
-		 * hwthreads/core being used. */
-		cpus = cpus * ntasks_per_core / threads;
+	    (cpus_per_task != 0)) {
+		cpus = MAX((total_cores * ntasks_per_core * cpus_per_task),
+			   total_cpus);
 	}
 
 	return cpus;

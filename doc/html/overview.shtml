@@ -79,7 +79,7 @@ building block approach. These plugins presently include:
   HPC workload container support and implementations.
 </li>
 
-<li><a href="crypto_plugins.html">Cryptography (Digital Signature
+<li><a href="cred_plugins.html">Credential (Digital Signature
   Generation)</a>:
   Mechanism used to generate a digital signature, which is used to validate
   that job step is authorized to execute on specific nodes.
@@ -140,6 +140,11 @@ building block approach. These plugins presently include:
 
 <li><a href="selectplugins.html">Node selection</a>:
   Plugin used to determine the resources used for a job allocation.
+</li>
+
+<li><a href="site_factor.html">Site Factor (Priority)</a>:
+  Assigns a specific site_factor component of a job's multifactor priority to
+  jobs upon submission and on an ongoing basis (e.g. as they age).
 </li>
 
 <li><a href="switchplugins.html">Switch or interconnect</a>:
@@ -232,6 +237,6 @@ PartitionName=DEFAULT MaxTime=UNLIMITED MaxNodes=4096
 PartitionName=batch Nodes=lx[0041-9999]
 </pre>
 
-<p style="text-align:center;">Last modified 6 March 2013</p>
+<p style="text-align:center;">Last modified 24 April 2019</p>
 
 <!--#include virtual="footer.txt"-->

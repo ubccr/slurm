@@ -1,4 +1,4 @@
-.TH sprio "1" "Slurm Commands" "March 2017" "Slurm Commands"
+.TH sprio "1" "Slurm Commands" "September 2018" "Slurm Commands"
 
 .SH "NAME"
 sprio \- view the factors that comprise a job's scheduling priority
@@ -64,10 +64,10 @@ assigned non-zero weights are
 .RS
 .TP 15
 \fIdefault\fR
-"%.15i %9r %.10Y %.10A %.10F %.10J %.10P %.10Q %20T"
+"%.15i %9r %.10Y %.10S %.10A %.10B %.10F %.10J %.10P %.10Q %20T"
 .TP
 \fI\-l, \-\-long\fR
-"%.15i %9r %.8u %.10Y %.10A %.10F %.10J %.10P %.10Q %.6N %20T"
+"%.15i %9r %.8u %.10Y %.10S %.10A %.10B %.10F %.10J %.10P %.10Q %.11N %.20T";
 .RE
 
 .IP
@@ -93,6 +93,12 @@ Normalized age priority
 .TP
 \fB%A\fR
 Weighted age priority
+.TP
+\fB%b\fR
+Normalized association priority
+.TP
+\fB%B\fR
+Weighted association priority
 .TP
 \fB%c\fR
 Cluster name. Only applicable for federated clusters
@@ -121,14 +127,17 @@ Normalized partition priority
 \fB%P\fR
 Weighted partition priority
 .TP
-\fB%r\fR
-Partition name
-.TP
 \fB%q\fR
 Normalized quality of service priority
 .TP
 \fB%Q\fR
 Weighted quality of service priority
+.TP
+\fB%r\fR
+Partition name
+.TP
+\fB%S\fR
+Weighted admin priority.
 .TP
 \fB%t\fR
 Normalized TRES priorities
@@ -145,6 +154,16 @@ Job priority
 \fB%y\fR
 Normalized job priority
 .RE
+
+.TP
+\fB-S <sort_list>\fR, \fB--sort=<sort_list>\fR
+Specification of the order in which jobs should be reported. This uses the same
+field specification as <output_format>. Multiple sorts may be performed by
+listing multiple sort fields separated by commas. The field specifications may
+be preceded by "+" or "\-" for ascending (default) or descending respectively.
+For example, a <sort_list> of "u,r,\-y" will sort the job priority reports by
+username, partition name, and descending job priority, in that order. The
+default <sort_list> is "i" (ascending job id).
 
 .TP
 \fB\-p <partition_list>\fR, \fB\-\-partition=<partition_list>\fR
@@ -189,6 +208,7 @@ the following environment variables.
 .TP 20
 \fBSLURM_CLUSTERS\fR
 Same as \fB\-\-clusters\fR
+
 .TP
 \fBSLURM_CONF\fR
 The location of the Slurm configuration file.
@@ -196,6 +216,10 @@ The location of the Slurm configuration file.
 .TP
 \fBSPRIO_FEDERATION\fR
 Same as \fB\-\-federation\fR
+
+.TP
+\fBSPRIO_FORMAT\fR
+Same as \fB\-o <output_format>, \-\-format=<output_format>\fR
 
 .TP
 \fBSPRIO_LOCAL\fR

@@ -111,6 +111,7 @@ extern int	scontrol_job_notify(int argc, char **argv);
 extern int	scontrol_job_ready(char *job_id_str);
 extern void	scontrol_list_pids(const char *jobid_str,
 				   const char *node_name);
+extern void	scontrol_getent(const char *node_name);
 extern int	scontrol_load_front_end(front_end_info_msg_t **
 					front_end_buffer_pptr);
 extern int	scontrol_load_job(job_info_msg_t ** job_buffer_pptr,
@@ -144,8 +145,8 @@ extern void	scontrol_print_step (char *job_step_id_str);
 extern void	scontrol_print_topo (char *node_list);
 extern void	scontrol_print_layout (int argc, char **argv);
 extern void	scontrol_print_powercap (char *node_list);
-extern void	scontrol_requeue(char *job_str);
-extern void	scontrol_requeue_hold(uint32_t state_flag, char *job_str);
+extern void	scontrol_requeue(uint32_t flags, char *job_str);
+extern void	scontrol_requeue_hold(uint32_t flags, char *job_str);
 extern void	scontrol_suspend(char *op, char *job_id_str);
 extern void	scontrol_top_job(char *job_str);
 extern int	scontrol_update_front_end (int argc, char **argv);

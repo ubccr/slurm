@@ -138,7 +138,6 @@ typedef struct slurmctld_config {
 	int	daemonize;
 	char    node_name_long[MAX_SLURM_NAME];
 	char    node_name_short[MAX_SLURM_NAME];
-	bool	send_groups_in_cred;
 	bool	resume_backup;
 	bool    scheduling_disabled;
 	int	server_thread_count;
@@ -213,6 +212,7 @@ enum {
 	TRES_ARRAY_TOTAL_CNT
 };
 
+extern bool  preempt_send_user_signal;
 extern time_t	last_proc_req_start;
 extern diag_stats_t slurmctld_diag_stats;
 extern slurmctld_config_t slurmctld_config;
@@ -226,6 +226,7 @@ extern uint32_t   cluster_cpus;
 extern bool node_features_updated;
 extern pthread_cond_t purge_thread_cond;
 extern pthread_mutex_t purge_thread_lock;
+extern pthread_mutex_t check_bf_running_lock;
 extern int   sched_interval;
 extern bool  slurmctld_init_db;
 extern int   slurmctld_primary;
@@ -328,6 +329,12 @@ extern time_t last_front_end_update;	/* time of last front_end update */
 \*****************************************************************************/
 #define PART_MAGIC 0xaefe8495
 
+typedef struct {
+	slurmdb_bf_usage_t *job_usage;
+	slurmdb_bf_usage_t *resv_usage;
+	xhash_t *user_usage;
+} bf_part_data_t;
+
 struct part_record {
 	uint32_t magic;		/* magic cookie to test data integrity */
 				/* DO NOT ALPHABETIZE */
@@ -389,6 +396,7 @@ struct part_record {
 	uint16_t cr_type;	/* Custom CR values for partition (if supported by select plugin) */
 	uint64_t *tres_cnt;	/* array of total TRES in partition. NO_PACK */
 	char     *tres_fmt_str;	/* str of configured TRES in partition */
+	bf_part_data_t *bf_data;/* backfill data, NO PACK */
 };
 
 extern List part_list;			/* list of part_record entries */
@@ -535,6 +543,9 @@ struct job_details {
 	uint16_t mem_bind_type;		/* see mem_bind_type_t */
 	uint32_t min_cpus;		/* minimum number of cpus */
 	uint32_t orig_min_cpus;		/* requested value of min_cpus */
+	int min_gres_cpu;		/* Minimum CPU count per node required
+					 * to satisfy GRES requirements,
+					 * not saved/restored, but rebuilt */
 	uint32_t min_nodes;		/* minimum number of nodes */
 	uint32_t nice;			/* requested priority change,
 					 * NICE_OFFSET == no change */
@@ -579,7 +590,7 @@ struct job_details {
 	char *work_dir;			/* pathname of working directory */
 	uint16_t x11;			/* --x11 flags */
 	char *x11_magic_cookie;		/* x11 magic cookie */
-	/* no x11_target_host, alloc_node is the same */
+	char *x11_target;		/* target host, or socket if port == 0 */
 	uint16_t x11_target_port;	/* target TCP port on alloc_node */
 };
 
@@ -616,6 +627,16 @@ typedef struct {
 	char    *siblings_viable_str;	/* comma separated list of viable
 					   sibling names */
 } job_fed_details_t;
+
+#define HETJOB_PRIO_MIN	0x0001	/* Sort by mininum component priority[tier] */
+#define HETJOB_PRIO_MAX	0x0002	/* Sort by maximum component priority[tier] */
+#define HETJOB_PRIO_AVG	0x0004	/* Sort by average component priority[tier] */
+
+typedef struct {
+	bool any_resv;			/* at least one component with resv */
+	uint32_t priority_tier;		/* whole hetjob calculated tier */
+	uint32_t priority;		/* whole hetjob calculated priority */
+} pack_details_t;
 
 /*
  * NOTE: When adding fields to the job_record, or any underlying structures,
@@ -668,6 +689,8 @@ struct job_record {
 					 * linear plugin
 					 * 0 if cr is NOT enabled,
 					 * 1 if cr is enabled */
+	uint32_t db_flags;              /* Flags to send to the database
+					 * record */
 	uint64_t db_index;              /* used only for database plugins */
 	time_t deadline;		/* deadline */
 	uint32_t delay_boot;		/* Delay boot for desired node mode */
@@ -687,10 +710,6 @@ struct job_record {
 	job_fed_details_t *fed_details;	/* details for federated jobs. */
 	front_end_record_t *front_end_ptr; /* Pointer to front-end node running
 					 * this job */
-	gid_t *gids;			/* extended group ids, count is ngids
-					 * do not pack. this is here to cache
-					 * the record, and may not be set
-					 * depending on configuration */
 	List gres_list;			/* generic resource allocation detail */
 	char *gres_alloc;		/* Allocated GRES added over all nodes
 					 * to be passed to slurmdbd */
@@ -725,10 +744,6 @@ struct job_record {
 	char *name;			/* name of the job */
 	char *network;			/* network/switch requirement spec */
 	uint32_t next_step_id;		/* next step id to be used */
-	int ngids;			/* number of extended group ids in gids
-					 * do not pack. this is here to cache
-					 * the record, and may not be set
-					 * depending on configuration */
 	char *nodes;			/* list of nodes allocated to job */
 	slurm_addr_t *node_addr;	/* addresses of the nodes allocated to
 					 * job */
@@ -751,6 +766,7 @@ struct job_record {
 	char *origin_cluster;		/* cluster name that the job was
 					 * submitted from */
 	uint16_t other_port;		/* port for client communications */
+	pack_details_t *pack_details;	/* hetjob details */
 	uint32_t pack_job_id;		/* lead job ID of pack job leader */
 	char *pack_job_id_set;		/* job IDs for all components */
 	uint32_t pack_job_offset;	/* pack job index */
@@ -790,6 +806,7 @@ struct job_record {
 	char *resp_host;		/* host for srun communications */
 	char *sched_nodes;		/* list of nodes scheduled for job */
 	dynamic_plugin_data_t *select_jobinfo;/* opaque data, BlueGene */
+	uint32_t site_factor;		/* factor to consider in priority */
 	char **spank_job_env;		/* environment variables for job prolog
 					 * and epilog scripts as set by SPANK
 					 * plugins */
@@ -803,11 +820,14 @@ struct job_record {
 					 * actual or expected */
 	char *state_desc;		/* optional details for state_reason */
 	uint32_t state_reason;		/* reason job still pending or failed
-					 * see slurm.h:enum job_wait_reason */
+					 * see slurm.h:enum job_state_reason */
 	uint32_t state_reason_prev;	/* Previous state_reason, needed to
 					 * return valid job information during
 					 * scheduling cycle (state_reason is
 					 * cleared at start of cycle) */
+	uint32_t state_reason_prev_db;	/* Previous state_reason that isn't
+					 * priority or resources, only stored in
+					 * the database. */
 	List step_list;			/* list of job's steps */
 	time_t suspend_time;		/* time job last suspended or resumed */
 	char *system_comment;		/* slurmctld's arbitrary comment */
@@ -945,7 +965,7 @@ struct 	step_record {
 	dynamic_plugin_data_t *switch_job; /* switch context, opaque */
 	time_t time_last_active;	/* time step was last found on node */
 	time_t tot_sus_time;		/* total time in suspended state */
-	char *tres_alloc_str;           /* simple tres string for step */
+	char *tres_alloc_str;           /* simple TRES string for step */
 	char *tres_bind;		/* Task to TRES binding directives */
 	char *tres_fmt_alloc_str;       /* formatted tres string for step */
 	char *tres_freq;		/* TRES frequency directives */
@@ -1016,6 +1036,20 @@ extern pthread_cond_t assoc_cache_cond; /* assoc cache condition */
  */
 extern void abort_job_on_node(uint32_t job_id, struct job_record *job_ptr,
 			      char *node_name);
+
+/*
+ * abort_job_on_nodes - Kill the specific job_on the specific nodes,
+ *	the request is not processed immediately, but queued.
+ *	This is to prevent a flood of pthreads if slurmctld restarts
+ *	without saved state and slurmd daemons register with a
+ *	multitude of running jobs. Slurmctld will not recognize
+ *	these jobs and use this function to kill them - one
+ *	agent request per node as they register.
+ * IN job_ptr - pointer to terminating job
+ * IN node_name - name of the node on which the job resides
+ */
+extern void abort_job_on_nodes(struct job_record *job_ptr,
+			       bitstr_t *node_bitmap);
 
 /*
  * allocated_session_in_use - check if an interactive session is already running
@@ -1405,10 +1439,15 @@ extern int job_checkpoint(checkpoint_msg_t *ckpt_ptr, uid_t uid,
 /* log the completion of the specified job */
 extern void job_completion_logger(struct job_record  *job_ptr, bool requeue);
 
-/* Convert a pn_min_memory into total memory for the job either cpu or
- * node based. */
-extern uint64_t job_get_tres_mem(uint64_t pn_min_memory,
-				 uint32_t cpu_cnt, uint32_t node_cnt);
+/*
+ * Return total amount of memory allocated to a job. This can be based upon
+ * a GRES specification with various GRES/memory allocations on each node.
+ * If current allocation information is not available, estimate memory based
+ * upon pn_min_memory and either CPU or node count.
+ */
+extern uint64_t job_get_tres_mem(struct job_resources *job_res,
+				 uint64_t pn_min_memory, uint32_t cpu_cnt,
+				 uint32_t node_cnt);
 
 /*
  * job_epilog_complete - Note the completion of the epilog script for a
@@ -1633,11 +1672,11 @@ extern int job_req_node_filter(struct job_record *job_ptr,
  * IN job_id - id of the job to be requeued
  * IN msg - slurm_msg to send response back on
  * IN preempt - true if job being preempted
- * IN state - may be set to JOB_SPECIAL_EXIT and/or JOB_REQUEUE_HOLD
+ * IN flags - JobExitRequeue | Hold | JobFailed | etc.
  * RET 0 on success, otherwise ESLURM error code
  */
 extern int job_requeue(uid_t uid, uint32_t job_id, slurm_msg_t *msg,
-		       bool preempt, uint32_t state);
+		       bool preempt, uint32_t flags);
 
 /*
  * job_requeue2 - Requeue a running or pending batch job
@@ -2183,6 +2222,11 @@ extern int post_job_step(struct step_record *step_ptr);
  */
 extern struct step_record *build_extern_step(struct job_record *job_ptr);
 
+/*
+ * Create the batch step and add it to the job.
+ */
+extern struct step_record *build_batch_step(struct job_record *job_ptr);
+
 /* update first assigned job id as needed on reconfigure */
 extern void reset_first_job_id(void);
 
@@ -2327,14 +2371,13 @@ extern void step_alloc_lps(struct step_record *step_ptr);
  *	according to the step_specs.
  * IN step_specs - job step specifications
  * OUT new_step_record - pointer to the new step_record (NULL on error)
- * IN batch_step - set if step is a batch script
  * IN protocol_version - slurm protocol version of client
   * RET - 0 or error code
  * NOTE: don't free the returned step_record because that is managed through
  * 	the job.
  */
 extern int step_create(job_step_create_request_msg_t *step_specs,
-		       struct step_record** new_step_record, bool batch_step,
+		       struct step_record** new_step_record,
 		       uint16_t protocol_version);
 
 /*
@@ -2428,6 +2471,12 @@ extern int sync_job_files(void);
 /* After recovering job state, if using priority/basic then we increment the
  * priorities of all jobs to avoid decrementing the base down to zero */
 extern void sync_job_priorities(void);
+
+/* True if running jobs are allowed to expand, false otherwise. */
+extern bool permit_job_expansion(void);
+
+/* True if running jobs are allowed to shrink, false otherwise. */
+extern bool permit_job_shrink(void);
 
 /*
  * update_job - update a job's parameters per the supplied specifications
@@ -2710,5 +2759,20 @@ extern bool valid_tres_cnt(char *tres);
  * This is currently a subset of all defined TRES.
  */
 extern bool valid_tres_name(char *name);
+
+/*
+ * Check for nodes that haven't rebooted yet.
+ *
+ * If the node hasn't booted by ResumeTimeout, mark the node as down.
+ */
+extern void check_reboot_nodes();
+
+/*
+ * Send warning signal to job before end time.
+ *
+ * IN job_ptr - job to send warn signal to.
+ * IN ignore_time - If set, ignore the warn time and just send it.
+ */
+extern void send_job_warn_signal(struct job_record *job_ptr, bool ignore_time);
 
 #endif /* !_HAVE_SLURMCTLD_H */

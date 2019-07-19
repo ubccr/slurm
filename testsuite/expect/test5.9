@@ -38,6 +38,7 @@ set cwd           "[$bin_pwd]"
 set exit_code     0
 set test_node     ""
 set job_id        0
+set step_id       0
 set file_err      "${cwd}/test${test_id}_err"
 set file_in       "test${test_id}_script"
 set file_out      "${cwd}/test${test_id}_out"
@@ -56,6 +57,8 @@ set sq_format(stdout)        $file_out
 set sq_format(stdin)         /dev/null
 # numcpus
 set sq_format(numcpus)       1
+# numtasks
+set sq_format(numtasks)      "DUMMY"
 # numnodes
 set sq_format(numnodes)      1
 # timelimit
@@ -94,9 +97,6 @@ print_header $test_id
 if { [test_using_slurmdbd] == 0 } {
 	send_user "\nWARNING: This test can't be run without AccountStorageType=slurmdbd\n"
 	exit $exit_code
-} elseif {[test_serial]} {
-	send_user "\nWARNING: This test is incompatible with serial systems\n"
-	exit $exit_code
 }
 if {[string compare [check_accounting_admin_level] "Administrator"]} {
 	send_user "\nThis test can't be run without being an Accounting administrator.\n"
@@ -106,12 +106,6 @@ set available [available_nodes $partition idle]
 if {$available < 2} {
     send_user "\nWARNING: not enough nodes currently available ($available avail, 2 needed)\n"
     exit $exit_code
-}
-
-if {[test_launch_poe]} {
-	set step_id 1
-} else {
-	set step_id 0
 }
 
 remove_acct [get_cluster_name] $test_acct
@@ -142,7 +136,11 @@ if {$tmp_job == 0} {
 	exit 0
 }
 
-wait_for_job $tmp_job RUNNING
+if {[wait_for_job $tmp_job "RUNNING"] != 0} {
+	send_user "\nFAILURE: error waiting for job $tmp_job to start\n"
+	cancel_job $tmp_job
+	set exit_code 1
+}
 
 set got_node 0
 spawn $scontrol show job $tmp_job
@@ -166,6 +164,9 @@ if {$got_node != 1} {
 	exit 0
 }
 
+
+lassign [get_node_cpus $test_node] cpu_tot sq_format(cpuspertask)
+
 set socket_cnt 1
 spawn $scontrol show node $test_node
 expect {
@@ -175,10 +176,6 @@ expect {
 	}
 	-re "Sockets=($number)" {
 		set socket_cnt $expect_out(1,string)
-		exp_continue
-	}
-	-re "ThreadsPerCore=($number)" {
-		set sq_format(cpuspertask) $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
@@ -277,8 +274,9 @@ expect {
 	}
 }
 
-if {[wait_for_job $job_id RUNNING] != 0} {
+if {[wait_for_job $job_id "RUNNING"] != 0} {
 	send_user "\nFAILURE: error waiting for job $job_id to start\n"
+	cancel_job $job_id
 	set exit_code 1
 }
 # Wait for steps to start too
@@ -293,6 +291,11 @@ expect {
 		incr match 1
 		exp_continue
 	}
+	-re "Tasks=($number)" {
+		set sq_format(numtasks) $expect_out(1,string)
+		incr match 1
+		exp_continue
+	}
 	timeout {
 		send_user "\nFAILURE: scontrol is not responding\n"
 		set exit_code 1
@@ -301,7 +304,7 @@ expect {
 		wait
 	}
 }
-if {$match != 1} {
+if {$match != 2} {
 	send_user "\nFAILURE: scontrol did not provide correct job values ($match != 1)\n"
 	set exit_code 1
 }
@@ -378,8 +381,8 @@ set sq_step_format(stepstate)   "DUMMY"
 set sq_step_format(network)     "DUMMY"
 # numcpus
 set sq_step_format(numcpus)     $sq_format(numcpus)
-# numtask
-set sq_step_format(numtask)     "DUMMY"
+# numtasks
+set sq_step_format(numtasks)    "DUMMY"
 # username
 set sq_step_format(username)    $sq_format(username)
 
@@ -397,7 +400,7 @@ expect {
 		exp_continue
 	}
 	-re "Tasks=($number)" {
-		set sq_step_format(numtask) $expect_out(1,string)
+		set sq_step_format(numtasks) $expect_out(1,string)
 		incr match 1
 		exp_continue
 	}
@@ -452,7 +455,10 @@ if {$match != $cnt} {
 }
 
 cancel_job $job_id
-wait_for_job $job_id DONE
+if {[wait_for_job $job_id "DONE"] != 0} {
+	send_user "\nFAILURE: error waiting for job $job_id to complete\n"
+	set exit_code 1
+}
 
 remove_acct "" $test_acct
 

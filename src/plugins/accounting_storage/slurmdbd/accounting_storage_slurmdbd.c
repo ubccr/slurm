@@ -67,12 +67,12 @@
  * overwritten when linking with the slurmctld.
  */
 #if defined(__APPLE__)
-slurm_ctl_conf_t slurmctld_conf __attribute__((weak_import));
-List job_list __attribute__((weak_import)) = NULL;
-uint16_t running_cache __attribute__((weak_import)) = 0;
-pthread_mutex_t assoc_cache_mutex __attribute__((weak_import));
-pthread_cond_t assoc_cache_cond __attribute__((weak_import));
-int node_record_count __attribute__((weak_import);
+extern slurm_ctl_conf_t slurmctld_conf __attribute__((weak_import));
+extern List job_list __attribute__((weak_import));
+extern uint16_t running_cache __attribute__((weak_import));
+extern pthread_mutex_t assoc_cache_mutex __attribute__((weak_import));
+extern pthread_cond_t assoc_cache_cond __attribute__((weak_import));
+extern int node_record_count __attribute__((weak_import));
 #else
 slurm_ctl_conf_t slurmctld_conf;
 List job_list = NULL;
@@ -127,7 +127,7 @@ static void _partial_free_dbd_job_start(void *object)
 	if (req) {
 		xfree(req->account);
 		xfree(req->array_task_str);
-		xfree(req->block_id);
+		xfree(req->constraints);
 		xfree(req->mcs_label);
 		xfree(req->name);
 		xfree(req->nodes);
@@ -204,8 +204,12 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 		req->array_task_pending = job_ptr->array_recs->task_cnt;
 	}
 
+	req->db_flags      = job_ptr->db_flags;
+
 	req->db_index      = job_ptr->db_index;
+	req->constraints   = xstrdup(job_ptr->details->features);
 	req->job_state     = job_ptr->job_state;
+	req->state_reason_prev = job_ptr->state_reason_prev_db;
 	req->name          = xstrdup(job_ptr->name);
 	req->nodes         = xstrdup(job_ptr->nodes);
 	req->work_dir      = xstrdup(job_ptr->details->work_dir);
@@ -326,11 +330,11 @@ static void *_set_db_inx_thread(void *no_data)
 				continue;
 			}
 
-			/* we only want to destory the pointer
-			   here not the contents (except
-			   block_id) so call special function
-			   _partial_destroy_dbd_job_start.
-			*/
+			/*
+			 * We only want to destory the pointer
+			 * here not the contents so call special function
+			 * _partial_destroy_dbd_job_start.
+			 */
 			if (!local_job_list)
 				local_job_list = list_create(
 					_partial_destroy_dbd_job_start);
@@ -2698,15 +2702,6 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 
 	snprintf(node_list, BUFFER_SIZE, "%s", temp_nodes);
 
-	if (step_ptr->step_id == SLURM_BATCH_SCRIPT) {
-		/*
-		 * We overload tres_per_node with the node name of where the
-		 * script was running.
-		 */
-		snprintf(node_list, BUFFER_SIZE, "%s", step_ptr->tres_per_node);
-		nodes = tasks = 1;
-	}
-
 	if (!step_ptr->job_ptr->db_index
 	    && (!step_ptr->job_ptr->details
 		|| !step_ptr->job_ptr->details->submit_time)) {
@@ -2968,7 +2963,8 @@ extern int jobacct_storage_p_archive_load(void *db_conn,
 	rc = send_recv_slurmdbd_msg(SLURM_PROTOCOL_VERSION, &req, &resp);
 
 	if (rc != SLURM_SUCCESS)
-		error("slurmdbd: DBD_ARCHIVE_LOAD failure: %m");
+		error("slurmdbd: DBD_ARCHIVE_LOAD failure: %s",
+		      slurm_strerror(rc));
 	else if (resp.msg_type == PERSIST_RC) {
 		persist_rc_msg_t *msg = resp.data;
 		rc = msg->rc;
@@ -2981,7 +2977,8 @@ extern int jobacct_storage_p_archive_load(void *db_conn,
 		}
 		slurm_persist_free_rc_msg(msg);
 	} else {
-		error("unknown return for archive_load");
+		error("%s: unknown return msg_type for archive_load: %s(%u)",
+		      __func__, rpc_num2string(resp.msg_type), resp.msg_type);
 		rc = SLURM_ERROR;
 	}
 

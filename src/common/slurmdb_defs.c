@@ -111,6 +111,9 @@ static void _free_cluster_cond_members(slurmdb_cluster_cond_t *cluster_cond)
 	if (cluster_cond) {
 		FREE_NULL_LIST(cluster_cond->cluster_list);
 		FREE_NULL_LIST(cluster_cond->federation_list);
+		FREE_NULL_LIST(cluster_cond->format_list);
+		FREE_NULL_LIST(cluster_cond->plugin_id_select_list);
+		FREE_NULL_LIST(cluster_cond->rpc_version_list);
 	}
 }
 
@@ -348,6 +351,53 @@ extern int slurmdb_setup_cluster_rec(slurmdb_cluster_rec_t *cluster_rec)
 	return SLURM_SUCCESS;
 }
 
+extern void slurmdb_job_cond_def_start_end(slurmdb_job_cond_t *job_cond)
+{
+	if (!job_cond || (job_cond->flags & JOBCOND_FLAG_RUNAWAY))
+		return;
+	/*
+	 * Defaults for start and end times...
+	 * - with -j and -s:
+	 *   -S defaults to Epoch 0
+	 *   -E defaults to -S (unless no -S then Now)
+	 * - with only -j (NOT -s)
+	 *   -S defaults to Epoch 0
+	 *   -E defaults to Now
+	 * - with only -s (NOT -j):
+	 *   -S defaults to Now
+	 *   -E defaults to -S
+	 * - without either -j nor -s:
+	 *   -S defaults to Midnight
+	 *   -E defaults to Now
+	 */
+	if (job_cond->state_list && list_count(job_cond->state_list)) {
+		if (!job_cond->usage_start &&
+		    (!job_cond->step_list || !list_count(job_cond->step_list)))
+			job_cond->usage_start = time(NULL);
+
+		if (job_cond->usage_start && !job_cond->usage_end)
+			job_cond->usage_end = job_cond->usage_start;
+	} else if (!job_cond->step_list || !list_count(job_cond->step_list)) {
+		if (!job_cond->usage_start) {
+			struct tm start_tm;
+			job_cond->usage_start = time(NULL);
+			if (!slurm_localtime_r(&job_cond->usage_start,
+					       &start_tm)) {
+				error("Couldn't get localtime from %ld",
+				      (long)job_cond->usage_start);
+			} else {
+				start_tm.tm_sec = 0;
+				start_tm.tm_min = 0;
+				start_tm.tm_hour = 0;
+				job_cond->usage_start = slurm_mktime(&start_tm);
+			}
+		}
+	}
+
+	if (!job_cond->usage_end)
+		job_cond->usage_end = time(NULL);
+}
+
 static uint32_t _str_2_qos_flags(char *flags)
 {
 	if (xstrcasestr(flags, "DenyOnLimit"))
@@ -377,12 +427,32 @@ static uint32_t _str_2_qos_flags(char *flags)
 	if (xstrcasestr(flags, "NoDecay"))
 		return QOS_FLAG_NO_DECAY;
 
+	if (xstrcasestr(flags, "UsageFactorSafe"))
+		return QOS_FLAG_USAGE_FACTOR_SAFE;
+
 	return 0;
 }
 
 static uint32_t _str_2_res_flags(char *flags)
 {
 	return 0;
+}
+
+static uint32_t _str_2_job_flags(char *flags)
+{
+	if (xstrcasestr(flags, "None"))
+		return SLURMDB_JOB_FLAG_NONE;
+
+	if (xstrcasestr(flags, "SchedSubmit"))
+		return SLURMDB_JOB_FLAG_SUBMIT;
+
+	if (xstrcasestr(flags, "SchedMain"))
+		return SLURMDB_JOB_FLAG_SCHED;
+
+	if (xstrcasestr(flags, "SchedBackfill"))
+		return SLURMDB_JOB_FLAG_BACKFILL;
+
+	return SLURMDB_JOB_FLAG_NOTSET;
 }
 
 static void _destroy_local_cluster_rec(void *object)
@@ -438,7 +508,7 @@ static local_cluster_rec_t * _job_will_run (job_desc_msg_t *req)
 			ListIterator itr;
 			uint32_t *job_id_ptr;
 			char *job_list = NULL, *sep = "";
-			local_cluster->preempt_cnt = slurm_list_count(
+			local_cluster->preempt_cnt = list_count(
 				will_run_resp->preemptee_job_id);
 			itr = list_iterator_create(will_run_resp->
 						   preemptee_job_id);
@@ -648,12 +718,25 @@ extern void slurmdb_destroy_assoc_usage(void *object)
 
 	if (usage) {
 		FREE_NULL_LIST(usage->children_list);
-		FREE_NULL_BITMAP(usage->valid_qos);
+		FREE_NULL_BITMAP(usage->grp_node_bitmap);
+		xfree(usage->grp_node_job_cnt);
 		xfree(usage->grp_used_tres_run_secs);
 		xfree(usage->grp_used_tres);
 		xfree(usage->usage_tres_raw);
+		FREE_NULL_BITMAP(usage->valid_qos);
 		xfree(usage);
 	}
+}
+
+extern void slurmdb_destroy_bf_usage(void *object)
+{
+	slurmdb_destroy_bf_usage_members(object);
+	xfree(object);
+}
+
+extern void slurmdb_destroy_bf_usage_members(void *object)
+{
+	return;
 }
 
 extern void slurmdb_destroy_qos_usage(void *object)
@@ -663,11 +746,13 @@ extern void slurmdb_destroy_qos_usage(void *object)
 
 	if (usage) {
 		FREE_NULL_LIST(usage->acct_limit_list);
-		FREE_NULL_LIST(usage->job_list);
-		FREE_NULL_LIST(usage->user_limit_list);
+		FREE_NULL_BITMAP(usage->grp_node_bitmap);
+		xfree(usage->grp_node_job_cnt);
 		xfree(usage->grp_used_tres_run_secs);
 		xfree(usage->grp_used_tres);
+		FREE_NULL_LIST(usage->job_list);
 		xfree(usage->usage_tres_raw);
+		FREE_NULL_LIST(usage->user_limit_list);
 		xfree(usage);
 	}
 }
@@ -685,6 +770,7 @@ extern void slurmdb_destroy_user_rec(void *object)
 		xfree(slurmdb_user->name);
 		xfree(slurmdb_user->old_name);
 		FREE_NULL_LIST(slurmdb_user->wckey_list);
+		slurmdb_destroy_bf_usage(slurmdb_user->bf_usage);
 		xfree(slurmdb_user);
 	}
 }
@@ -798,6 +884,9 @@ extern void slurmdb_free_assoc_rec_members(slurmdb_assoc_rec_t *assoc)
 		xfree(assoc->user);
 
 		slurmdb_destroy_assoc_usage(assoc->usage);
+		/* NOTE assoc->user_rec is a soft reference, do not free here */
+		assoc->user_rec = NULL;
+		slurmdb_destroy_bf_usage(assoc->bf_usage);
 	}
 }
 
@@ -838,6 +927,7 @@ extern void slurmdb_destroy_job_rec(void *object)
 		xfree(job->array_task_str);
 		xfree(job->blockid);
 		xfree(job->cluster);
+		xfree(job->constraints);
 		xfree(job->derived_es);
 		xfree(job->jobname);
 		xfree(job->mcs_label);
@@ -1135,10 +1225,12 @@ extern void slurmdb_destroy_job_cond(void *object)
 		FREE_NULL_LIST(job_cond->acct_list);
 		FREE_NULL_LIST(job_cond->associd_list);
 		FREE_NULL_LIST(job_cond->cluster_list);
+		FREE_NULL_LIST(job_cond->constraint_list);
 		FREE_NULL_LIST(job_cond->groupid_list);
 		FREE_NULL_LIST(job_cond->jobname_list);
 		FREE_NULL_LIST(job_cond->partition_list);
 		FREE_NULL_LIST(job_cond->qos_list);
+		FREE_NULL_LIST(job_cond->reason_list);
 		FREE_NULL_LIST(job_cond->resv_list);
 		FREE_NULL_LIST(job_cond->resvid_list);
 		FREE_NULL_LIST(job_cond->step_list);
@@ -1254,6 +1346,8 @@ extern void slurmdb_destroy_used_limits(void *object)
 
 	if (slurmdb_used_limits) {
 		xfree(slurmdb_used_limits->acct);
+		FREE_NULL_BITMAP(slurmdb_used_limits->node_bitmap);
+		xfree(slurmdb_used_limits->node_job_cnt);
 		xfree(slurmdb_used_limits->tres);
 		xfree(slurmdb_used_limits->tres_run_mins);
 		xfree(slurmdb_used_limits);
@@ -1437,6 +1531,8 @@ extern void slurmdb_init_assoc_rec(slurmdb_assoc_rec_t *assoc,
 	assoc->max_submit_jobs = NO_VAL;
 	assoc->max_wall_pj = NO_VAL;
 
+	assoc->priority = NO_VAL;
+
 	/* assoc->shares_norm = NO_VAL64; */
 	assoc->shares_raw = NO_VAL;
 
@@ -1497,6 +1593,7 @@ extern void slurmdb_init_qos_rec(slurmdb_qos_rec_t *qos, bool free_it,
 
 	qos->grace_time = init_val;
 	qos->preempt_mode = (uint16_t)init_val;
+	qos->preempt_exempt_time = init_val;
 	qos->priority = init_val;
 
 	/* qos->grp_tres_mins = NULL; */
@@ -1758,6 +1855,60 @@ extern uint32_t str_2_cluster_fed_states(char *state)
 	return fed_state;
 }
 
+extern char *slurmdb_job_flags_str(uint32_t flags)
+{
+	char *job_flags = NULL;
+
+	if (flags == SLURMDB_JOB_FLAG_NONE)
+		return xstrdup("None");
+
+	if (flags & SLURMDB_JOB_FLAG_NOTSET)
+		return xstrdup("NotSet");
+
+	if (flags & SLURMDB_JOB_FLAG_SUBMIT)
+		xstrcat(job_flags, "SchedSubmit");
+	else if (flags & SLURMDB_JOB_FLAG_SCHED)
+		xstrcat(job_flags, "SchedMain");
+	else if (flags & SLURMDB_JOB_FLAG_BACKFILL)
+		xstrcat(job_flags, "SchedBackfill");
+
+	/*
+	 * In the future if there are more flags we will need to add comma's to
+	 * the end of Backfilled and NormalSched above and uncomment this code
+	 * below.
+	 */
+	/* if (job_flags) */
+	/* 	job_flags[strlen(job_flags)-1] = '\0'; */
+
+	return job_flags;
+}
+
+extern uint32_t str_2_job_flags(char *flags)
+{
+	uint32_t job_flags = 0;
+	char *token, *my_flags, *last = NULL;
+
+	if (!flags) {
+		error("We need a server job flags string to translate");
+		return SLURMDB_JOB_FLAG_NONE;
+	}
+
+	my_flags = xstrdup(flags);
+	token = strtok_r(my_flags, ",", &last);
+	while (token) {
+		job_flags |= _str_2_job_flags(token);
+		if (job_flags & SLURMDB_JOB_FLAG_NOTSET) {
+			error("%s: Invalid job flag %s", __func__, token);
+			xfree(my_flags);
+			return SLURMDB_JOB_FLAG_NOTSET;
+		}
+		token = strtok_r(NULL, ",", &last);
+	}
+	xfree(my_flags);
+
+	return job_flags;
+}
+
 extern char *slurmdb_qos_flags_str(uint32_t flags)
 {
 	char *qos_flags = NULL;
@@ -1787,6 +1938,8 @@ extern char *slurmdb_qos_flags_str(uint32_t flags)
 		xstrcat(qos_flags, "RequiresReservation,");
 	if (flags & QOS_FLAG_NO_DECAY)
 		xstrcat(qos_flags, "NoDecay,");
+	if (flags & QOS_FLAG_USAGE_FACTOR_SAFE)
+		xstrcat(qos_flags, "UsageFactorSafe,");
 
 	if (qos_flags)
 		qos_flags[strlen(qos_flags)-1] = '\0';
@@ -3267,6 +3420,8 @@ extern void slurmdb_copy_assoc_rec_limits(slurmdb_assoc_rec_t *out,
 	out->max_tres_run_mins = xstrdup(in->max_tres_run_mins);
 	out->max_wall_pj = in->max_wall_pj;
 
+	out->priority = in->priority;
+
 	FREE_NULL_LIST(out->qos_list);
 	out->qos_list = slurm_copy_char_list(in->qos_list);
 }
@@ -3381,6 +3536,7 @@ extern void slurmdb_copy_qos_rec_limits(slurmdb_qos_rec_t *out,
 	out->preempt_list = slurm_copy_char_list(in->preempt_list);
 
 	out->preempt_mode = in->preempt_mode;
+	out->preempt_exempt_time = in->preempt_exempt_time;
 
 	out->priority = in->priority;
 
@@ -4336,4 +4492,27 @@ extern void slurmdb_destroy_slurmdb_stats(slurmdb_stats_t *stats)
 {
 	slurmdb_free_slurmdb_stats_members(stats);
 	xfree(stats);
+}
+
+/*
+ * Comparator for sorting jobs by submit time. 0 (unknown) submit time
+ * is mapped to INFINITE
+ */
+extern int slurmdb_job_sort_by_submit_time(void *v1, void *v2)
+{
+	time_t time1 = (*(slurmdb_job_rec_t **)v1)->submit;
+	time_t time2 = (*(slurmdb_job_rec_t **)v2)->submit;
+
+	/*
+	 * Sanity check submits should never be 0, but if somehow that does
+	 * happen treat it as the highest number.
+	 */
+	time1 = time1 ? time1 : INFINITE;
+	time2 = time2 ? time2 : INFINITE;
+
+	if (time1 < time2)
+		return -1;
+	else if (time1 > time2)
+		return 1;
+	return 0;
 }

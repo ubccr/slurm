@@ -82,6 +82,15 @@ enum {
  */
 char *slurm_get_auth_info(void);
 
+/*
+ * slurm_auth_opts_to_socket
+ * Convert AuthInfo to a socket path. Accepts two input formats:
+ * 1) <path>           (Old format)
+ * 2) socket=<path>[,] (New format)
+ * RET char * - socket path,	MUST be xfreed by caller
+ */
+char *slurm_auth_opts_to_socket(char *opts);
+
 /* slurm_get_sbcast_parameters
  * RET char * - SbcastParameters from slurm.conf,  MUST be xfreed by caller
  */
@@ -99,10 +108,17 @@ int slurm_get_auth_ttl(void);
  */
 uint16_t slurm_get_batch_start_timeout(void);
 
+/* slurm_get_cli_filter_plugins
+ * get cli_filter_plugins from slurmctld_conf object from
+ * slurmctld_conf object
+ * RET char *   - cli_filter_plugins, MUST be xfreed by caller
+ */
+char *slurm_get_cli_filter_plugins(void);
+
 /*
  * slurm_get_control_cnt
  * RET Count of SlurmctldHost records from slurm.conf
- * (slurmctld server count, primary plus backups) 
+ * (slurmctld server count, primary plus backups)
  */
 uint32_t slurm_get_control_cnt(void);
 
@@ -325,6 +341,18 @@ char *slurm_get_priority_params(void);
  */
 uint16_t slurm_get_priority_reset_period(void);
 
+/* slurm_get_priority_site_factor_params
+ * returns the site_factor_params value from slurmctld_conf object
+ * RET char *    - site_factor_params, MUST be xfreed by caller
+ */
+char *slurm_get_priority_site_factor_params(void);
+
+/* slurm_get_priority_site_factor_plugin
+ * returns the site_factor_plugin value from slurmctld_conf object
+ * RET char *    - site_factor_plugin, MUST be xfreed by caller
+ */
+char *slurm_get_priority_site_factor_plugin(void);
+
 /* slurm_get_priority_type
  * returns the priority type from slurmctld_conf object
  * RET char *    - priority type, MUST be xfreed by caller
@@ -336,6 +364,12 @@ char *slurm_get_priority_type(void);
  * RET uint32_t - factor weight.
  */
 uint32_t slurm_get_priority_weight_age(void);
+
+/* slurm_get_priority_weight_assoc
+ * returns the priority weight for association from slurmctld_conf object
+ * RET uint32_t - factor weight.
+ */
+uint32_t slurm_get_priority_weight_assoc(void);
 
 /* slurm_get_priority_weight_fairshare
  * returns the priority weight for fairshare from slurmctld_conf object
@@ -411,11 +445,23 @@ char *slurm_get_resume_program(void);
  */
 char *slurm_get_state_save_location(void);
 
+/* slurm_get_stepd_loc
+ * get path to the slurmstepd
+ * RET char * - absolute path to the slurmstepd, MUST be xfreed by caller
+ */
+extern char *slurm_get_stepd_loc(void);
+
 /* slurm_get_tmp_fs
  * returns the TmpFS configuration parameter from slurmctld_conf object
  * RET char *    - tmp_fs, MUST be xfreed by caller
  */
 extern char *slurm_get_tmp_fs(char *node_name);
+
+/* slurm_get_auth_alt_types
+ * returns the alternate authentication types from slurmctld_conf object
+ * RET char *    - auth alternate types, MUST be xfreed by caller
+ */
+extern char *slurm_get_auth_alt_types(void);
 
 /* slurm_get_auth_type
  * returns the authentication type from slurmctld_conf object
@@ -429,12 +475,6 @@ extern char *slurm_get_auth_type(void);
  * RET 0 or error code
  */
 extern int slurm_set_auth_type(char *auth_type);
-
-/* slurm_get_auth_type
- * returns the authentication type from slurmctld_conf object
- * RET char *    - auth type, MUST be xfreed by caller
- */
-extern char *slurm_get_auth_type(void);
 
 /* slurm_get_bb_params
  * returns the BurstBufferParameters (bb_params) from slurmctld_conf object
@@ -472,11 +512,11 @@ char *slurm_get_cluster_name(void);
  */
 extern char *slurm_get_comm_parameters(void);
 
-/* slurm_get_crypto_type
- * returns the crypto_type from slurmctld_conf object
- * RET char *    - crypto type, MUST be xfreed by caller
+/* slurm_get_cred_type
+ * returns the cred_type from slurmctld_conf object
+ * RET char *    - cred type, MUST be xfreed by caller
  */
-extern char *slurm_get_crypto_type(void);
+extern char *slurm_get_cred_type(void);
 
 /* slurm_get_fast_schedule
  * returns the value of fast_schedule in slurmctld_conf object
@@ -669,6 +709,13 @@ char *slurm_get_jobacct_gather_type(void);
  * RET char *    - job accounting params,  MUST be xfreed by caller
  */
 char *slurm_get_jobacct_gather_params(void);
+
+/* slurm_get_job_acct_oom_kill
+ * returns the job_acct_oom_kill setting from the slurmctld_conf object
+ * which represents the value of the OverMemoryKill flag.
+ * RET bool *    - job_acct_oom_kill parameter
+ */
+bool slurm_get_job_acct_oom_kill(void);
 
 /* slurm_get_jobacct_gather_freq
  * returns the job accounting poll frequency from the slurmctld_conf object
@@ -938,6 +985,13 @@ int16_t slurm_get_srun_eio_timeout(void);
  * Return the timeout used for prolog/epilog
  */
 extern uint16_t slurm_get_prolog_timeout(void);
+
+/*
+ * slurm_get_jobcomp_type
+ * returns the configured GpuFreqDef value
+ * RET char *    - GpuFreqDef value,  MUST be xfreed by caller
+ */
+char *slurm_get_gpu_freq_def(void);
 
 /**********************************************************************\
  * general message management functions used by slurmctld, slurmd
@@ -1363,7 +1417,7 @@ extern void parse_int_to_array(int in, int *out);
  *	credential.
  * IN slurm_step_alloc_req_msg - description of job step request
  * OUT slurm_step_alloc_resp_msg - response to request
- * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ * RET SLURM_SUCCESS on success, otherwise return SLURM_ERROR with errno set
  * NOTE: free the response using slurm_free_job_step_create_response_msg
  */
 extern int slurm_job_step_create (

@@ -141,6 +141,8 @@
 	(_X->node_state & NODE_STATE_NO_RESPOND)
 #define IS_NODE_POWER_SAVE(_X)		\
 	(_X->node_state & NODE_STATE_POWER_SAVE)
+#define IS_NODE_POWERING_DOWN(_X)	\
+	(_X->node_state & NODE_STATE_POWERING_DOWN)
 #define IS_NODE_FAIL(_X)		\
 	(_X->node_state & NODE_STATE_FAIL)
 #define IS_NODE_POWER_UP(_X)		\
@@ -266,7 +268,7 @@ typedef enum {
 	REQUEST_ASSOC_MGR_INFO,
 	RESPONSE_ASSOC_MGR_INFO,
 	REQUEST_EVENT_LOG,
-	DEFUNCT_RESPONSE_SICP_INFO_DEFUNCT,	/* DEFUNCT */
+	DEFUNCT_RPC_2046, /* free for reuse */
 	REQUEST_LAYOUT_INFO,
 	RESPONSE_LAYOUT_INFO,
 	REQUEST_FED_INFO,
@@ -308,10 +310,8 @@ typedef enum {
 	RESPONSE_JOB_WILL_RUN,
 	REQUEST_JOB_ALLOCATION_INFO,
 	RESPONSE_JOB_ALLOCATION_INFO,
-	DEFUNCT_REQUEST_JOB_ALLOCATION_INFO_LITE, /* DEFUNCT, CAN BE REUSED 2
-						   * VERSIONS AFTER V17.02 */
-	DEFUNCT_RESPONSE_JOB_ALLOCATION_INFO_LITE, /* DEFUNCT, CAN BE REUSED 2
-						    * VERSIONS AFTER V17.02 */
+	DEFUNCT_RPC_4017, /* free for reuse */
+	DEFUNCT_RPC_4018, /* free for reuse */
 	REQUEST_UPDATE_JOB_TIME,
 	REQUEST_JOB_READY,
 	RESPONSE_JOB_READY,		/* 4020 */
@@ -337,7 +337,7 @@ typedef enum {
 	REQUEST_CANCEL_JOB_STEP,
 	RESPONSE_CANCEL_JOB_STEP,
 	REQUEST_UPDATE_JOB_STEP,
-	DEFUNCT_RESPONSE_COMPLETE_JOB_STEP, /* DEFUNCT */
+	DEFUNCT_RPC_5008, /* free for reuse */
 	REQUEST_CHECKPOINT,
 	RESPONSE_CHECKPOINT,		/* 5010 */
 	REQUEST_CHECKPOINT_COMP,
@@ -378,9 +378,8 @@ typedef enum {
 	REQUEST_REATTACH_TASKS,
 	RESPONSE_REATTACH_TASKS,
 	REQUEST_KILL_TIMELIMIT,
-	DEFUNCT_REQUEST_SIGNAL_JOB,	/* 6010 */ /* DEFUNCT REUSE 2 VERSIONS
-						    * AFTER 17.11 */
-	REQUEST_TERMINATE_JOB,
+	DEFUNCT_RPC_6010, /* free for reuse */
+	REQUEST_TERMINATE_JOB,		/* 6011 */
 	MESSAGE_EPILOG_COMPLETE,
 	REQUEST_ABORT_JOB,	/* job shouldn't be running, kill it without
 				 * job/step/task complete responses */
@@ -404,6 +403,7 @@ typedef enum {
 	SRUN_REQUEST_SUSPEND,
 	SRUN_STEP_SIGNAL,	/* for launch plugins aprun and poe,
 				 * srun forwards signal to the launch command */
+	SRUN_NET_FORWARD,
 
 	PMI_KVS_PUT_REQ = 7201,
 	PMI_KVS_PUT_RESP,
@@ -478,6 +478,11 @@ typedef struct slurm_protocol_config {
 typedef struct slurm_msg {
 	slurm_addr_t address;
 	void *auth_cred;
+	int auth_index;		/* DON'T PACK: zero for normal communication.
+				 * index value copied from incoming connection,
+				 * so that we'll respond with the same auth
+				 * plugin used to connect to us originally.
+				 */
 	uint32_t body_offset; /* DON'T PACK: offset in buffer where body part of
 				 buffer starts. */
 	Buf buffer; /* DON't PACK! ptr to buffer that msg was unpacked from. */
@@ -802,7 +807,10 @@ typedef struct launch_tasks_request_msg {
 	uint32_t  pack_nnodes;	/* total task count for entire pack job */
 	uint32_t  pack_ntasks;	/* total task count for entire pack job */
 	uint16_t *pack_task_cnts; /* Number of tasks on each node in pack job */
+	uint32_t **pack_tids;   /* Task IDs on each node of pack job */
+	uint32_t *pack_tid_offsets;/* map of tasks (by id) to originating pack*/
 	uint32_t  pack_offset;	/* pack job offset of NO_VAL */
+	uint32_t  pack_step_cnt; /* number of steps for entire pack job */
 	uint32_t  pack_task_offset;/* pack job task ID offset of NO_VAL */
 	char     *pack_node_list;  /* Pack step node list */
 	uint32_t  nnodes;	/* number of nodes in this job step       */
@@ -879,8 +887,10 @@ typedef struct launch_tasks_request_msg {
 
 	/* only filled out if step is SLURM_EXTERN_CONT */
 	uint16_t x11;			/* X11 forwarding setup flags */
+	char *x11_alloc_host;		/* host to proxy through */
+	uint16_t x11_alloc_port;	/* port to proxy through */
 	char *x11_magic_cookie;		/* X11 auth cookie to abuse */
-	char *x11_target_host;		/* X11 login node to connect back to */
+	char *x11_target;		/* X11 target host, or unix socket */
 	uint16_t x11_target_port;	/* X11 target port */
 } launch_tasks_request_msg_t;
 
@@ -958,6 +968,7 @@ typedef struct control_status_msg {
 #define SIG_NODE_FAIL	998	/* Dummy signal value to signify node failure */
 #define SIG_FAILURE	999	/* Dummy signal value to signify sys failure */
 typedef struct kill_job_msg {
+	List job_gres_info;	/* Used to set Epilog environment variables */
 	uint32_t job_id;
 	uint32_t job_state;
 	uint32_t job_uid;
@@ -1001,6 +1012,7 @@ typedef struct prolog_launch_msg {
 	char *alias_list;		/* node name/address/hostnamne aliases */
 	slurm_cred_t *cred;
 	uint32_t gid;
+	List job_gres_info;		/* Used to set Prolog env vars */
 	uint32_t job_id;		/* slurm job_id */
 	uint64_t job_mem_limit;		/* job's memory limit, passed via cred */
 	uint32_t nnodes;			/* count of nodes, passed via cred */
@@ -1016,8 +1028,10 @@ typedef struct prolog_launch_msg {
 	char *user_name;		/* job's user name */
 	char *work_dir;			/* full pathname of working directory */
 	uint16_t x11;			/* X11 forwarding setup flags */
+	char *x11_alloc_host;		/* srun/salloc host to setup proxy */
+	uint16_t x11_alloc_port;	/* srun/salloc port to setup proxy */
 	char *x11_magic_cookie;		/* X11 auth cookie to abuse */
-	char *x11_target_host;		/* X11 login node to connect back to */
+	char *x11_target;		/* X11 target host, or unix socket */
 	uint16_t x11_target_port;	/* X11 target port */
 } prolog_launch_msg_t;
 
@@ -1263,7 +1277,7 @@ typedef struct slurm_node_reg_resp_msg {
 typedef struct requeue_msg {
 	uint32_t job_id;	/* slurm job ID (number) */
 	char *   job_id_str;	/* slurm job ID (string) */
-	uint32_t state;        /* JobExitRequeue | Hold */
+	uint32_t flags;         /* JobExitRequeue | Hold | JobFailed | etc. */
 } requeue_msg_t;
 
 typedef struct slurm_event_log_msg {
@@ -1292,6 +1306,7 @@ typedef struct {
 				   passed to a remote then the uid will be the
 				   user and not the SlurmUser. */
 	uint16_t sib_msg_type; /* fed_job_update_type */
+	char    *submit_host;   /* node job was submitted from */
 } sib_msg_t;
 
 typedef struct {
@@ -1456,6 +1471,7 @@ extern void slurm_free_epilog_complete_msg(epilog_complete_msg_t * msg);
 extern void slurm_free_srun_job_complete_msg(srun_job_complete_msg_t * msg);
 extern void slurm_free_srun_exec_msg(srun_exec_msg_t *msg);
 extern void slurm_free_srun_ping_msg(srun_ping_msg_t * msg);
+extern void slurm_free_net_forward_msg(net_forward_msg_t *msg);
 extern void slurm_free_srun_node_fail_msg(srun_node_fail_msg_t * msg);
 extern void slurm_free_srun_step_missing_msg(srun_step_missing_msg_t * msg);
 extern void slurm_free_srun_timeout_msg(srun_timeout_msg_t * msg);
@@ -1527,7 +1543,7 @@ extern const char *preempt_mode_string(uint16_t preempt_mode);
 extern uint16_t preempt_mode_num(const char *preempt_mode);
 
 extern char *log_num2string(uint16_t inx);
-extern uint16_t log_string2num(char *name);
+extern uint16_t log_string2num(const char *name);
 
 /* Translate a burst buffer numeric value to its equivalent state string */
 extern char *bb_state_string(uint16_t state);
@@ -1539,6 +1555,7 @@ extern uint16_t bb_state_num(char *tok);
 extern char *health_check_node_state_str(uint32_t node_state);
 
 extern char *job_reason_string(enum job_state_reason inx);
+extern enum job_state_reason job_reason_num(char *reason);
 extern bool job_state_qos_grp_limit(enum job_state_reason state_reason);
 extern char *job_share_string(uint16_t shared);
 extern char *job_state_string(uint32_t inx);
@@ -1549,13 +1566,12 @@ extern uint32_t job_state_num(const char *state_name);
 extern char *node_state_string(uint32_t inx);
 extern char *node_state_string_compact(uint32_t inx);
 
-extern uint16_t power_flags_id(char *power_flags);
+extern uint16_t power_flags_id(const char *power_flags);
 extern char    *power_flags_str(uint16_t power_flags);
 
 extern void  private_data_string(uint16_t private_data, char *str, int str_len);
 extern void  accounting_enforce_string(uint16_t enforce,
 				       char *str, int str_len);
-extern char *node_use_string(enum node_use_type node_use);
 
 /* Translate a Slurm nodelist to a char * of numbers
  * nid000[36-37] -> 36-37
@@ -1600,13 +1616,21 @@ extern int get_cluster_node_offset(char *cluster_name,
  * Each \n will result in a new line.
  * If inx is != -1 it is prepended to the string.
  */
-extern void print_multi_line_string(char *user_msg, int inx);
+extern void print_multi_line_string(char *user_msg, int inx,
+				    log_level_t loglevel);
 
 /* Given a protocol opcode return its string
  * description mapping the slurm_msg_type_t
  * to its name.
  */
 extern char *rpc_num2string(uint16_t opcode);
+
+/*
+ * Given a numeric suffix, return the equivalent multiplier for the numeric
+ * portion. For example: "k" returns 1024, "KB" returns 1000, etc.
+ * The return value for an invalid suffix is NO_VAL64.
+ */
+extern uint64_t suffix_mult(char *suffix);
 
 #define safe_read(fd, buf, size) do {					\
 		int remaining = size;					\

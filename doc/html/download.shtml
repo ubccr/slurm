@@ -46,12 +46,10 @@ for the application to manage Kerberos V credentials.</li>
 
 <li><b>Checkpoint/Restart</b></li>
 <ul>
-<li><a href="https://upc-bugs.lbl.gov/blcr/doc/html/">
-<b> BLCR (Berkeley Lab Checkpoint/Restart)</a></b>
 <li><a href="http://dmtcp.sourceforge.net/">
-<b>DMTCP (Distributed MultiThreaded CheckPointing)</a></b>
+<b>DMTCP (Distributed MultiThreaded CheckPointing)</a></b></li>
 <li><a href="https://computation.llnl.gov/project/scr/">
-<b>Scalable Checkpoint/Restart (SCR) for MPI</a></b>
+<b>Scalable Checkpoint/Restart (SCR) for MPI</a></b></li>
 </ul><br>
 
 <li><b>Databases</b> can be used to store accounting information.
@@ -80,7 +78,7 @@ Using DRMAA, grid applications builders, portal developers and ISVs can use
 the same high-level API to link their software with different cluster/resource
 management systems.<br><br>
 There is a variant of PSNC DRMAA providing support for Slurm's --cluster option
-avaiable from
+available from
 <a href="https://github.com/natefoo/slurm-drmaa">https://github.com/natefoo/slurm-drmaa</a>.<br><br>
 Perl 6 DRMAA bindings are available from
 <a href="https://github.com/scovit/Scheduler-DRMAA">https://github.com/scovit/Scheduler-DRMAA</a>.
@@ -346,7 +344,7 @@ easy and elegantly manner.
 </ul></li><br>
 
 <li><a name="json"><b>JSON</b></a><br>
-Some Slurm plugins (burst_buffer/cray and power/cray) plugins
+Some Slurm plugins (burst_buffer/datawarp and power/cray_aries) plugins
 parse JSON format data.
 These plugins are designed to make use of the JSON-C library for this purpose.
 Instructions for the build are as follows:
@@ -393,6 +391,6 @@ Slurm-based HPC supercomputers. The website of Slurm-web, with screenshots:<br>
 
 </ul>
 
-<p style="text-align:center;">Last modified 6 June 2018</p>
+<p style="text-align:center;">Last modified 7 March 2019</p>
 
 <!--#include virtual="footer.txt"-->

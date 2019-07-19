@@ -193,7 +193,7 @@ static List _build_license_list(char *licenses, bool *valid)
  */
 extern char *license_list_to_string(List license_list)
 {
-	char buf[128], *sep;
+	char *sep = "";
 	char *licenses = NULL;
 	ListIterator iter;
 	licenses_t *license_entry;
@@ -203,13 +203,9 @@ extern char *license_list_to_string(List license_list)
 
 	iter = list_iterator_create(license_list);
 	while ((license_entry = (licenses_t *) list_next(iter))) {
-		if (licenses)
-			sep = ",";
-		else
-			sep = "";
-		snprintf(buf, sizeof(buf), "%s%s:%u", sep, license_entry->name,
-			 license_entry->total);
-		xstrcat(licenses, buf);
+		xstrfmtcat(licenses, "%s%s:%u",
+			   sep, license_entry->name, license_entry->total);
+		sep = ",";
 	}
 	list_iterator_destroy(iter);
 
@@ -571,7 +567,7 @@ extern List license_validate(char *licenses, bool validate_configured,
 			debug("License name requested (%s) does not exist",
 			      license_entry->name);
 			if (!validate_existing) {
-				list_remove(iter);
+				list_delete_item(iter);
 				continue;
 			}
 			*valid = false;

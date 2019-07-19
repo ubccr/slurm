@@ -216,6 +216,8 @@ _run_script_and_set_env(const char *name, const char *path,
 	if (cpid == 0) {
 		char *argv[2];
 
+		setenvf(&job->env, "SLURM_SCRIPT_CONTEXT", "prolog_task");
+
 		argv[0] = xstrdup(path);
 		argv[1] = NULL;
 		if (dup2(pfd[1], 1) == -1)
@@ -349,11 +351,11 @@ _setup_mpi(stepd_step_rec_t *job, int ltaskid)
 /*
  *  Current process is running as the user when this is called.
  */
-extern void exec_task(stepd_step_rec_t *job, int i)
+extern void exec_task(stepd_step_rec_t *job, int local_proc_id)
 {
 	uint32_t *gtids;		/* pointer to array of ranks */
 	int fd, j;
-	stepd_step_task_info_t *task = job->task[i];
+	stepd_step_task_info_t *task = job->task[local_proc_id];
 	char **tmp_env;
 	int saved_errno;
 	uint32_t node_offset = 0, task_offset = 0;
@@ -388,7 +390,6 @@ extern void exec_task(stepd_step_rec_t *job, int i)
 	job->envtp->mem_bind = xstrdup(job->mem_bind);
 	job->envtp->mem_bind_type = job->mem_bind_type;
 	job->envtp->distribution = -1;
-	job->envtp->ckpt_dir = xstrdup(job->ckpt_dir);
 	job->envtp->batch_flag = job->batch;
 	job->envtp->uid = job->uid;
 	job->envtp->user_name = xstrdup(job->user_name);
@@ -429,14 +430,15 @@ extern void exec_task(stepd_step_rec_t *job, int i)
 
 	if (!job->batch && (job->stepid != SLURM_EXTERN_CONT)) {
 		if (switch_g_job_attach(job->switch_job, &job->env,
-					job->nodeid, (uint32_t) i, job->nnodes,
-					job->ntasks, task->gtid) < 0) {
+					job->nodeid, (uint32_t) local_proc_id,
+					job->nnodes, job->ntasks,
+					task->gtid) < 0) {
 			error("Unable to attach to interconnect: %m");
 			log_fini();
 			exit(1);
 		}
 
-		if (_setup_mpi(job, i) != SLURM_SUCCESS) {
+		if (_setup_mpi(job, local_proc_id) != SLURM_SUCCESS) {
 			error("Unable to configure MPI plugin: %m");
 			log_fini();
 			exit(1);
@@ -450,19 +452,22 @@ extern void exec_task(stepd_step_rec_t *job, int i)
 		error("Failed to invoke task plugins: task_p_pre_launch error");
 		exit(1);
 	}
-	if (!job->batch && job->accel_bind_type) {
-		/* Modify copy of job's environment. Do not alter in place or
-		 * concurrent searches of the environment can generate invalid
-		 * memory references. */
+	if (!job->batch && (job->accel_bind_type || job->tres_bind)) {
+		/*
+		 * Modify copy of job's environment as needed for GRES. Do not
+		 * alter in place or concurrent searches of the environment can
+		 * generate invalid memory references.
+		 */
 		job->envtp->env = env_array_copy((const char **) job->env);
 		gres_plugin_step_set_env(&job->envtp->env, job->step_gres_list,
-					 job->accel_bind_type);
+					 job->accel_bind_type, job->tres_bind,
+					 job->tres_freq, local_proc_id);
 		tmp_env = job->env;
 		job->env = job->envtp->env;
 		env_array_free(tmp_env);
 	}
 
-	if (spank_user_task(job, i) < 0) {
+	if (spank_user_task(job, local_proc_id) < 0) {
 		error("Failed to invoke spank plugin stack");
 		exit(1);
 	}
@@ -485,7 +490,7 @@ extern void exec_task(stepd_step_rec_t *job, int i)
 	 * Set TMPDIR after running prolog scripts, since TMPDIR
 	 * might be set or changed in one of the prolog scripts.
 	 */
-	if (i == 0)
+	if (local_proc_id == 0)
 		_make_tmpdir(job);
 
 	if (!job->batch)

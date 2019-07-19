@@ -100,18 +100,6 @@ pid_t fd_is_read_lock_blocked(int fd);
  *    returns the pid of the process holding the lock; o/w, returns 0.
  */
 
-ssize_t fd_read_n(int fd, void *buf, size_t n);
-/*
- *  Reads up to (n) bytes from (fd) into (buf).
- *  Returns the number of bytes read, 0 on EOF, or -1 on error.
- */
-
-ssize_t fd_write_n(int fd, void *buf, size_t n);
-/*
- *  Writes (n) bytes from (buf) to (fd).
- *  Returns the number of bytes written, or -1 on error.
- */
-
 ssize_t fd_read_line(int fd, void *buf, size_t maxlen);
 /*
  *  Reads at most (maxlen-1) bytes up to a newline from (fd) into (buf).
@@ -120,14 +108,15 @@ ssize_t fd_read_line(int fd, void *buf, size_t maxlen);
  *  Returns the number of bytes read, 0 on EOF, or -1 on error.
  */
 
-int fd_is_blocking(int fd);
-/*
- * Return 1 if the file specified by the file descriptor is blocking.
- * Return 0 otherwise.
- */
-
 extern int wait_fd_readable(int fd, int time_limit);
 /* Wait for a file descriptor to be readable (up to time_limit seconds).
  * Return 0 when readable or -1 on error */
+
+/*
+ * fsync() then close() a file.
+ * Execute fsync() and close() multiple times if necessary and log failures
+ * RET 0 on success or -1 on error
+ */
+extern int fsync_and_close(int fd, const char *file_type);
 
 #endif /* !_FD_H */

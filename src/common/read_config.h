@@ -47,7 +47,6 @@
 
 #include "src/common/list.h"
 #include "src/common/slurm_protocol_defs.h"
-#include "src/common/slurm_protocol_socket_common.h"
 #include "src/common/parse_config.h"
 
 extern slurm_ctl_conf_t slurmctld_conf;
@@ -75,7 +74,7 @@ extern uint16_t drop_priv_flag;
 #define DEFAULT_AUTH_TYPE          "auth/munge"
 #define DEFAULT_BATCH_START_TIMEOUT 10
 #define DEFAULT_COMPLETE_WAIT       0
-#define DEFAULT_CRYPTO_TYPE        "crypto/munge"
+#define DEFAULT_CRED_TYPE           "cred/munge"
 #define DEFAULT_EPILOG_MSG_TIME     2000
 #define DEFAULT_EXT_SENSORS_TYPE    "ext_sensors/none"
 #define DEFAULT_FAST_SCHEDULE       1
@@ -113,15 +112,7 @@ extern uint16_t drop_priv_flag;
 #define DEFAULT_KILL_ON_BAD_EXIT    0
 #define DEFAULT_KILL_TREE           0
 #define DEFAULT_KILL_WAIT           30
-
-#if defined HAVE_LIBNRT
-#  define DEFAULT_LAUNCH_TYPE         "launch/poe"
-#elif defined HAVE_ALPS_CRAY && defined HAVE_REAL_CRAY
-#  define DEFAULT_LAUNCH_TYPE         "launch/aprun"
-#else
-#  define DEFAULT_LAUNCH_TYPE         "launch/slurm"
-#endif
-
+#define DEFAULT_LAUNCH_TYPE         "launch/slurm"
 #define DEFAULT_MAIL_PROG           "/bin/mail"
 #define DEFAULT_MAIL_PROG_ALT       "/usr/bin/mail"
 #define DEFAULT_MAX_ARRAY_SIZE      1001
@@ -138,11 +129,7 @@ extern uint16_t drop_priv_flag;
 #define DEFAULT_MSG_TIMEOUT         10
 #define DEFAULT_POWER_PLUGIN        ""
 #define DEFAULT_CHECKPOINT_TYPE     "checkpoint/none"
-#if defined HAVE_REAL_CRAY/* ALPS requires cluster-unique job container IDs */
-#  define DEFAULT_PROCTRACK_TYPE    "proctrack/sgi_job"
-#else
-#  define DEFAULT_PROCTRACK_TYPE    "proctrack/cgroup"
-#endif
+#define DEFAULT_PROCTRACK_TYPE      "proctrack/cgroup"
 #define DEFAULT_PREEMPT_TYPE        "preempt/none"
 #define DEFAULT_PRIORITY_DECAY      604800 /* 7 days */
 #define DEFAULT_PRIORITY_CALC_PERIOD 300 /* in seconds */
@@ -156,13 +143,12 @@ extern uint16_t drop_priv_flag;
 #define DEFAULT_SCHED_LOG_LEVEL     0
 #define DEFAULT_SCHED_TIME_SLICE    30
 #define DEFAULT_SCHEDTYPE           "sched/backfill"
-#if defined HAVE_ALPS_CRAY
-#  define DEFAULT_SELECT_TYPE       "select/alps"
-#elif defined HAVE_NATIVE_CRAY
-#  define DEFAULT_SELECT_TYPE       "select/cray"
+#if defined HAVE_NATIVE_CRAY
+#  define DEFAULT_SELECT_TYPE       "select/cray_aries"
 #else
 #  define DEFAULT_SELECT_TYPE       "select/linear"
 #endif
+#define DEFAULT_SITE_FACTOR_PLUGIN  "site_factor/none"
 #define DEFAULT_SLURMCTLD_PIDFILE   "/var/run/slurmctld.pid"
 #define DEFAULT_SLURMCTLD_TIMEOUT   120
 #define DEFAULT_SLURMD_PIDFILE      "/var/run/slurmd.pid"
@@ -177,14 +163,14 @@ extern uint16_t drop_priv_flag;
 #define DEFAULT_SUSPEND_TIME        0
 #define DEFAULT_SUSPEND_TIMEOUT     30
 #if defined HAVE_NATIVE_CRAY
-#  define DEFAULT_SWITCH_TYPE         "switch/cray"
+#  define DEFAULT_SWITCH_TYPE         "switch/cray_aries"
 #else
 #  define DEFAULT_SWITCH_TYPE         "switch/none"
 #endif
 #define DEFAULT_TASK_PLUGIN         "task/none"
 #define DEFAULT_TCP_TIMEOUT         2
 #define DEFAULT_TMP_FS              "/tmp"
-#if defined HAVE_3D && !defined HAVE_ALPS_CRAY
+#if defined HAVE_3D
 #  define DEFAULT_TOPOLOGY_PLUGIN     "topology/3d_torus"
 #else
 #  define DEFAULT_TOPOLOGY_PLUGIN     "topology/none"
@@ -505,7 +491,7 @@ extern uint16_t slurm_conf_get_port(const char *node_name);
 /*
  * slurm_conf_get_addr - Return the slurm_addr_t for a given NodeName in
  *	the parameter "address".  The return code is SLURM_SUCCESS on success,
- *	and SLURM_FAILURE if the address lookup failed.
+ *	and SLURM_ERROR if the address lookup failed.
  *
  * NOTE: Caller must NOT be holding slurm_conf_lock().
  */
@@ -515,7 +501,7 @@ extern int slurm_conf_get_addr(const char *node_name, slurm_addr_t *address);
  * slurm_conf_get_cpus_bsct -
  * Return the cpus, boards, sockets, cores, and threads configured for a
  * given NodeName
- * Returns SLURM_SUCCESS on success, SLURM_FAILURE on failure.
+ * Returns SLURM_SUCCESS on success, SLURM_ERROR on failure.
  *
  * NOTE: Caller must NOT be holding slurm_conf_lock().
  */
@@ -527,7 +513,7 @@ extern int slurm_conf_get_cpus_bsct(const char *node_name,
 /*
  * slurm_conf_get_res_spec_info - Return resource specialization info
  * for a given NodeName
- * Returns SLURM_SUCCESS on success, SLURM_FAILURE on failure.
+ * Returns SLURM_SUCCESS on success, SLURM_ERROR on failure.
  *
  * NOTE: Caller must NOT be holding slurm_conf_lock().
  */
@@ -560,7 +546,7 @@ extern void free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr,
  * NOTE: NodeName in the config may be different from real hostname.
  *       Use get_conf_node_name() to get the former.
  */
-extern int gethostname_short (char *name, size_t len);
+extern int gethostname_short(char *name, size_t len);
 
 /*
  * Replace first "%h" in path string with NodeHostname.

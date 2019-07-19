@@ -59,7 +59,7 @@
 #  include <json/json.h>
 #endif
 
-#if defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #define POLLRDHUP POLLHUP
 #endif
 
@@ -122,11 +122,13 @@
  * overwritten when linking with the slurmctld.
  */
 #if defined (__APPLE__)
-slurmctld_config_t slurmctld_config __attribute__((weak_import));
-bitstr_t *avail_node_bitmap __attribute__((weak_import));
+extern slurmctld_config_t slurmctld_config __attribute__((weak_import));
+extern bitstr_t *avail_node_bitmap __attribute__((weak_import));
+extern active_feature_list __attribute__((weak_import));
 #else
 slurmctld_config_t slurmctld_config;
 bitstr_t *avail_node_bitmap;
+List active_feature_list;
 #endif
 
 /*
@@ -157,16 +159,6 @@ bitstr_t *avail_node_bitmap;
 const char plugin_name[]        = "node_features knl_cray plugin";
 const char plugin_type[]        = "node_features/knl_cray";
 const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
-
-/* These are defined here so when we link with something other than
- * the slurmctld we will have these symbols defined.  They will get
- * overwritten when linking with the slurmctld.
- */
-#if defined (__APPLE__)
-List active_feature_list __attribute__((weak_import));
-#else
-List active_feature_list;
-#endif
 
 /* Configuration Parameters */
 static uint16_t allow_mcdram = KNL_MCDRAM_FLAG;
@@ -909,12 +901,12 @@ static char *_load_mcdram_type(int cache_pct)
 			resp_msg[i-1] = '\0';
 	}
 	_log_script_argv(script_argv, resp_msg);
-	_free_script_argv(script_argv);
 	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
 		error("%s: %s %s %s status:%u response:%s", __func__,
 		      script_argv[0], script_argv[1], script_argv[2],
 		      status, resp_msg);
 	}
+	_free_script_argv(script_argv);
 	return resp_msg;
 }
 
@@ -970,12 +962,12 @@ static char *_load_numa_type(char *type)
 			resp_msg[i-1] = '\0';
 	}
 	_log_script_argv(script_argv, resp_msg);
-	_free_script_argv(script_argv);
 	if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) {
 		error("%s: %s %s %s status:%u response:%s", __func__,
 		      script_argv[0], script_argv[1], script_argv[2],
 		      status, resp_msg);
 	}
+	_free_script_argv(script_argv);
 	return resp_msg;
 }
 
@@ -2573,7 +2565,8 @@ static int _update_node_state(char *node_list, bool set_locks)
 		time_t now = time(NULL);
 		for (i = 0, node_ptr = node_record_table_ptr;
 		     i < node_record_count; i++, node_ptr++) {
-			if (node_ptr->last_response > now) {
+			if ((node_ptr->last_response > now) &&
+			    IS_NODE_NO_RESPOND(node_ptr)) {
 				/*
 				 * Reboot likely in progress.
 				 * Preserve active KNL features and merge

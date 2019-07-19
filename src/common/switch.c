@@ -47,17 +47,12 @@
 #include "src/common/macros.h"
 #include "src/common/plugin.h"
 #include "src/common/plugrack.h"
+#include "src/common/read_config.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/switch.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
-/*
- * WARNING:  Do not change the order of these fields or add additional
- * fields at the beginning of the structure.  If you do, job completion
- * logging plugins will stop working.  If you need to add fields, add them
- * at the end of the structure.
- */
 typedef struct slurm_switch_ops {
 	uint32_t     (*plugin_id);
 	int          (*state_save)        ( char *dir_name );
@@ -68,6 +63,8 @@ typedef struct slurm_switch_ops {
 	int          (*build_jobinfo)     ( switch_jobinfo_t *jobinfo,
 					    slurm_step_layout_t *step_layout,
 					    char *network);
+	int          (*duplicate_jobinfo) ( switch_jobinfo_t *source,
+					    switch_jobinfo_t **dest);
 	void         (*free_jobinfo)      ( switch_jobinfo_t *jobinfo );
 	int          (*pack_jobinfo)      ( switch_jobinfo_t *jobinfo,
 					    Buf buffer,
@@ -105,8 +102,6 @@ typedef struct slurm_switch_ops {
 					    char ***env, uint32_t nodeid,
 					    uint32_t procid, uint32_t nnodes,
 					    uint32_t nprocs, uint32_t rank);
-	char *	     (*switch_strerror)   ( int errnum );
-	int          (*switch_errno)      ( void );
 	int          (*clear_node)        ( void );
 	int          (*alloc_nodeinfo)    ( switch_node_info_t **nodeinfo );
 	int          (*build_nodeinfo)    ( switch_node_info_t *nodeinfo );
@@ -147,6 +142,7 @@ static const char *syms[] = {
 	"switch_p_libstate_restore",
 	"switch_p_alloc_jobinfo",
 	"switch_p_build_jobinfo",
+	"switch_p_duplicate_jobinfo",
 	"switch_p_free_jobinfo",
 	"switch_p_pack_jobinfo",
 	"switch_p_unpack_jobinfo",
@@ -167,8 +163,6 @@ static const char *syms[] = {
 	"switch_p_job_fini",
 	"switch_p_job_postfini",
 	"switch_p_job_attach",
-	"switch_p_strerror",
-	"switch_p_get_errno",
 	"switch_p_clear_node_state",
 	"switch_p_alloc_node_info",
 	"switch_p_build_node_info",
@@ -224,6 +218,29 @@ static int _load_plugins(void *x, void *arg)
 	return 0;
 }
 
+static bool _running_in_slurmctld(void)
+{
+	static bool set = false;
+	static bool run = false;
+
+	if (!set) {
+		set = 1;
+		run = run_in_daemon("slurmctld");
+	}
+
+	return run;
+}
+
+static dynamic_plugin_data_t *_create_dynamic_plugin_data(uint32_t plugin_id)
+{
+	dynamic_plugin_data_t *jobinfo_ptr = NULL;
+
+	jobinfo_ptr = xmalloc(sizeof(dynamic_plugin_data_t));
+	jobinfo_ptr->plugin_id = plugin_id;
+
+	return jobinfo_ptr;
+}
+
 extern int switch_init(bool only_default)
 {
 	int retval = SLURM_SUCCESS;
@@ -255,9 +272,9 @@ extern int switch_init(bool only_default)
 		plugin_names = plugin_get_plugins_of_type(plugin_type);
 	}
 	if (plugin_names && (plugin_cnt = list_count(plugin_names))) {
-		ops = xmalloc(sizeof(slurm_switch_ops_t) * plugin_cnt);
-		switch_context = xmalloc(sizeof(plugin_context_t *) *
-					 plugin_cnt);
+		ops = xcalloc(plugin_cnt, sizeof(slurm_switch_ops_t));
+		switch_context = xcalloc(plugin_cnt,
+					 sizeof(plugin_context_t *));
 
 		list_for_each(plugin_names, _load_plugins, &plugin_args);
 	}
@@ -356,8 +373,7 @@ extern int  switch_g_alloc_jobinfo(dynamic_plugin_data_t **jobinfo,
 	if ( switch_init(0) < 0 )
 		return SLURM_ERROR;
 
-	jobinfo_ptr = xmalloc(sizeof(dynamic_plugin_data_t));
-	jobinfo_ptr->plugin_id = switch_context_default;
+	jobinfo_ptr = _create_dynamic_plugin_data(switch_context_default);
 	*jobinfo    = jobinfo_ptr;
 
 	return (*(ops[jobinfo_ptr->plugin_id].alloc_jobinfo))
@@ -381,6 +397,22 @@ extern int  switch_g_build_jobinfo(dynamic_plugin_data_t *jobinfo,
 		plugin_id = switch_context_default;
 
 	return (*(ops[plugin_id].build_jobinfo))(data, step_layout, network);
+}
+
+extern int  switch_g_duplicate_jobinfo(dynamic_plugin_data_t *source,
+				       dynamic_plugin_data_t **dest)
+{
+	dynamic_plugin_data_t *dest_ptr = NULL;
+	uint32_t plugin_id = source->plugin_id;
+
+	if ( switch_init(0) < 0 )
+		return SLURM_ERROR;
+
+	dest_ptr = _create_dynamic_plugin_data(plugin_id);
+	*dest = dest_ptr;
+
+	return (*(ops[plugin_id].duplicate_jobinfo))(
+		source->data, (switch_jobinfo_t **)&dest_ptr->data);
 }
 
 extern void switch_g_free_jobinfo(dynamic_plugin_data_t *jobinfo)
@@ -411,10 +443,8 @@ extern int switch_g_pack_jobinfo(dynamic_plugin_data_t *jobinfo, Buf buffer,
 	} else
 		plugin_id = switch_context_default;
 
-	if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		pack32(*(ops[plugin_id].plugin_id), buffer);
-	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		/* no op, plugin id was not packed before */
 	} else {
 		error("%s: protocol_version %hu not supported",
 		      __func__, protocol_version);
@@ -435,7 +465,7 @@ extern int switch_g_unpack_jobinfo(dynamic_plugin_data_t **jobinfo, Buf buffer,
 	jobinfo_ptr = xmalloc(sizeof(dynamic_plugin_data_t));
 	*jobinfo = jobinfo_ptr;
 
-	if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		int i;
 		uint32_t plugin_id;
 		safe_unpack32(&plugin_id, buffer);
@@ -449,14 +479,24 @@ extern int switch_g_unpack_jobinfo(dynamic_plugin_data_t **jobinfo, Buf buffer,
 			error("we don't have switch plugin type %u", plugin_id);
 			goto unpack_error;
 		}
-	} else {
-		jobinfo_ptr->plugin_id = switch_context_default;
-	}
+	} else
+		goto unpack_error;
 
 	if  ((*(ops[jobinfo_ptr->plugin_id].unpack_jobinfo))
 	     ((switch_jobinfo_t **)&jobinfo_ptr->data, buffer,
 	      protocol_version))
 		goto unpack_error;
+
+	/*
+	 * Free nodeinfo_ptr if it is different from local cluster as it is not
+	 * relevant to this cluster.
+	 */
+	if ((jobinfo_ptr->plugin_id != switch_context_default) &&
+	    _running_in_slurmctld()) {
+		switch_g_free_jobinfo(jobinfo_ptr);
+		*jobinfo = _create_dynamic_plugin_data(switch_context_default);
+	}
+
 
 	return SLURM_SUCCESS;
 
@@ -686,23 +726,6 @@ extern int switch_g_job_attach(dynamic_plugin_data_t *jobinfo, char ***env,
 	return (*(ops[plugin_id].job_attach))
 		(data, env, nodeid, procid, nnodes, nprocs, gid);
 }
-
-extern int switch_g_get_errno(void)
-{
-	if ( switch_init(0) < 0 )
-		return SLURM_ERROR;
-
-	return (*(ops[switch_context_default].switch_errno))( );
-}
-
-extern char *switch_g_strerror(int errnum)
-{
-	if ( switch_init(0) < 0 )
-		return NULL;
-
-	return (*(ops[switch_context_default].switch_strerror))( errnum );
-}
-
 
 /*
  * node switch state monitoring functions

@@ -151,14 +151,18 @@ spawn_req_pack(spawn_req_t *req, Buf buf)
 	void *auth_cred;
 	char *auth_info = slurm_get_auth_info();
 
-	auth_cred = g_slurm_auth_create(auth_info);
+	auth_cred = g_slurm_auth_create(AUTH_DEFAULT_INDEX, auth_info);
 	xfree(auth_info);
 	if (auth_cred == NULL) {
-		error("authentication: %s",
-		      g_slurm_auth_errstr(g_slurm_auth_errno(NULL)) );
+		error("authentication: %m");
 		return;
 	}
-	(void) g_slurm_auth_pack(auth_cred, buf);
+
+	/*
+	 * We can use SLURM_PROTOCOL_VERSION here since there is no possibility
+	 * of protocol mismatch.
+	 */
+	(void) g_slurm_auth_pack(auth_cred, buf, SLURM_PROTOCOL_VERSION);
 	(void) g_slurm_auth_destroy(auth_cred);
 
 	pack32(req->seq, buf);
@@ -197,15 +201,23 @@ spawn_req_unpack(spawn_req_t **req_ptr, Buf buf)
 	char *auth_info;
 	uid_t auth_uid, my_uid;
 
-	auth_cred = g_slurm_auth_unpack(buf);
+	/*
+	 * We can use SLURM_PROTOCOL_VERSION here since there is no possibility
+	 * of protocol mismatch.
+	 */
+	auth_cred = g_slurm_auth_unpack(buf, SLURM_PROTOCOL_VERSION);
 	if (auth_cred == NULL) {
-		error("authentication: %s",
-		      g_slurm_auth_errstr(g_slurm_auth_errno(NULL)) );
+		error("authentication: %m");
 		return SLURM_ERROR;
 	}
 	auth_info = slurm_get_auth_info();
-	auth_uid = g_slurm_auth_get_uid(auth_cred, auth_info);
+	if (g_slurm_auth_verify(auth_cred, auth_info)) {
+		error("authentication: %m");
+		xfree(auth_info);
+		return SLURM_ERROR;
+	}
 	xfree(auth_info);
+	auth_uid = g_slurm_auth_get_uid(auth_cred);
 	(void) g_slurm_auth_destroy(auth_cred);
 	my_uid = getuid();
 	if ((auth_uid != 0) && (auth_uid != my_uid)) {
@@ -220,11 +232,11 @@ spawn_req_unpack(spawn_req_t **req_ptr, Buf buf)
 	safe_unpackstr_xmalloc(&req->from_node, &temp32, buf);
 	safe_unpack32(&req->subcmd_cnt, buf);
 	/* subcmd_cnt must be greater than 0 */
-	req->subcmds = xmalloc(req->subcmd_cnt * sizeof(spawn_subcmd_t *));
+	safe_xcalloc(req->subcmds, req->subcmd_cnt, sizeof(spawn_subcmd_t *));
 	safe_unpack32(&req->preput_cnt, buf);
 	if (req->preput_cnt > 0) {
-		req->pp_keys = xmalloc(req->preput_cnt * sizeof(char *));
-		req->pp_vals = xmalloc(req->preput_cnt * sizeof(char *));
+		safe_xcalloc(req->pp_keys, req->preput_cnt, sizeof(char *));
+		safe_xcalloc(req->pp_vals, req->preput_cnt, sizeof(char *));
 		for (i = 0; i < req->preput_cnt; i ++) {
 			safe_unpackstr_xmalloc(&req->pp_keys[i], &temp32, buf);
 			safe_unpackstr_xmalloc(&req->pp_vals[i], &temp32, buf);
@@ -238,7 +250,8 @@ spawn_req_unpack(spawn_req_t **req_ptr, Buf buf)
 		safe_unpack32(&(subcmd->max_procs), buf);
 		safe_unpack32(&(subcmd->argc), buf);
 		if (subcmd->argc > 0) {
-			subcmd->argv = xmalloc(subcmd->argc * sizeof(char *));
+			safe_xcalloc(subcmd->argv, subcmd->argc,
+				     sizeof(char *));
 			for (j = 0; j < subcmd->argc; j ++) {
 				safe_unpackstr_xmalloc(&(subcmd->argv[j]),
 						       &temp32, buf);
@@ -246,10 +259,10 @@ spawn_req_unpack(spawn_req_t **req_ptr, Buf buf)
 		}
 		safe_unpack32(&(subcmd->info_cnt), buf);
 		if (subcmd->info_cnt > 0) {
-			subcmd->info_keys = xmalloc(subcmd->info_cnt *
-						    sizeof(char *));
-			subcmd->info_vals = xmalloc(subcmd->info_cnt *
-						    sizeof(char *));
+			safe_xcalloc(subcmd->info_keys, subcmd->info_cnt,
+				     sizeof(char *));
+			safe_xcalloc(subcmd->info_vals, subcmd->info_cnt,
+				     sizeof(char *));
 			for (j = 0; j < subcmd->info_cnt; j ++) {
 				safe_unpackstr_xmalloc(&(subcmd->info_keys[j]),
 						       &temp32, buf);
@@ -338,7 +351,7 @@ spawn_resp_unpack(spawn_resp_t **resp_ptr, Buf buf)
 	safe_unpackstr_xmalloc(&resp->jobid, &temp32, buf);
 	safe_unpack32(&resp->error_cnt, buf);
 	if (resp->error_cnt > 0) {
-		resp->error_codes = xmalloc(resp->error_cnt * sizeof(int));
+		safe_xcalloc(resp->error_codes, resp->error_cnt, sizeof(int));
 		for (i = 0; i < resp->error_cnt; i ++) {
 			safe_unpack32((uint32_t *)&(resp->error_codes[i]), buf);
 		}

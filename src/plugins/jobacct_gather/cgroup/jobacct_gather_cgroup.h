@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2011 Bull.
  *  Written by Martin Perry, <martin.perry@bull.com>, who borrowed heavily
- *  from other parts of SLURM
+ *  from other parts of Slurm
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of Slurm, a resource management program.
@@ -55,20 +55,16 @@ typedef struct task_cg_info {
 extern List task_memory_cg_list;
 extern List task_cpuacct_cg_list;
 
-extern int jobacct_gather_cgroup_cpuacct_init(
-	slurm_cgroup_conf_t *slurm_cgroup_conf);
+extern int jobacct_gather_cgroup_cpuacct_init(void);
 
-extern int jobacct_gather_cgroup_cpuacct_fini(
-	slurm_cgroup_conf_t *slurm_cgroup_conf);
+extern int jobacct_gather_cgroup_cpuacct_fini(void);
 
 extern int jobacct_gather_cgroup_cpuacct_attach_task(
 	pid_t pid, jobacct_id_t *jobacct_id);
 
-extern int jobacct_gather_cgroup_memory_init(
-	slurm_cgroup_conf_t *slurm_cgroup_conf);
+extern int jobacct_gather_cgroup_memory_init(void);
 
-extern int jobacct_gather_cgroup_memory_fini(
-	slurm_cgroup_conf_t *slurm_cgroup_conf);
+extern int jobacct_gather_cgroup_memory_fini(void);
 
 extern int jobacct_gather_cgroup_memory_attach_task(
 	pid_t pid, jobacct_id_t *jobacct_id);

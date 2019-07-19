@@ -62,6 +62,7 @@
 #include "src/common/xstring.h"
 
 #include "src/slurmd/common/fname.h"
+#include "src/slurmd/common/xcpuinfo.h"
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/io.h"
 #include "src/slurmd/slurmstepd/multi_prog.h"
@@ -178,7 +179,7 @@ _job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
 
 	if (job->flags & LAUNCH_MULTI_PROG) {
 		char *switch_type = slurm_get_switch_type();
-		if (!xstrcmp(switch_type, "switch/cray"))
+		if (!xstrcmp(switch_type, "switch/cray_aries"))
 			multi_prog_parse(job, gtid);
 		xfree(switch_type);
 		for (i = 0; i < job->node_tasks; i++){
@@ -235,6 +236,36 @@ _task_info_destroy(stepd_step_task_info_t *t, uint16_t multi_prog)
 	xfree(t);
 }
 
+static void _slurm_cred_to_step_rec(slurm_cred_t *cred, stepd_step_rec_t *job)
+{
+	slurm_cred_arg_t cred_arg;
+	slurm_cred_get_args(cred, &cred_arg);
+
+	/*
+	 * This may have been filed in already from batch_job_launch_msg_t
+	 * or launch_tasks_request_msg_t.
+	 */
+	if (!job->user_name) {
+		job->user_name = cred_arg.pw_name;
+		cred_arg.pw_name = NULL;
+	}
+
+	job->pw_gecos = cred_arg.pw_gecos;
+	cred_arg.pw_gecos = NULL;
+	job->pw_dir = cred_arg.pw_dir;
+	cred_arg.pw_dir = NULL;
+	job->pw_shell = cred_arg.pw_shell;
+	cred_arg.pw_shell = NULL;
+
+	job->ngids = cred_arg.ngids;
+	job->gids = cred_arg.gids;
+	cred_arg.gids = NULL;
+	job->gr_names = cred_arg.gr_names;
+	cred_arg.gr_names = NULL;
+
+	slurm_cred_free_args(&cred_arg);
+}
+
 /* create a slurmd job structure from a launch tasks message */
 extern stepd_step_rec_t *stepd_step_rec_create(launch_tasks_request_msg_t *msg,
 					       uint16_t protocol_version)
@@ -272,9 +303,9 @@ extern stepd_step_rec_t *stepd_step_rec_create(launch_tasks_request_msg_t *msg,
 	slurm_cond_init(&job->state_cond, NULL);
 	slurm_mutex_init(&job->state_mutex);
 	job->node_tasks	= msg->tasks_to_launch[nodeid];
-	i = sizeof(uint16_t) * msg->nnodes;
-	job->task_cnts  = xmalloc(i);
-	memcpy(job->task_cnts, msg->tasks_to_launch, i);
+	job->task_cnts  = xcalloc(msg->nnodes, sizeof(uint16_t));
+	memcpy(job->task_cnts, msg->tasks_to_launch,
+	       sizeof(uint16_t) * msg->nnodes);
 	job->ntasks	= msg->ntasks;
 	job->jobid	= msg->job_id;
 	job->stepid	= msg->job_step_id;
@@ -282,8 +313,17 @@ extern stepd_step_rec_t *stepd_step_rec_create(launch_tasks_request_msg_t *msg,
 	job->uid	= (uid_t) msg->uid;
 	job->gid	= (gid_t) msg->gid;
 	job->user_name	= xstrdup(msg->user_name);
-	job->ngids = (int) msg->ngids;
-	job->gids = copy_gids(msg->ngids, msg->gids);
+	_slurm_cred_to_step_rec(msg->cred, job);
+	/*
+	 * Favor the group info in the launch cred if available - for 19.05+
+	 * this is where it is managed, not in launch_tasks_request_msg_t.
+	 * For older versions, or for when send_gids is disabled, fall back
+	 * to the launch_tasks_request_msg_t info if necessary.
+	 */
+	if (!job->ngids) {
+		job->ngids = (int) msg->ngids;
+		job->gids = copy_gids(msg->ngids, msg->gids);
+	}
 
 	job->cwd	= xstrdup(msg->cwd);
 	job->task_dist	= msg->task_dist;
@@ -305,16 +345,38 @@ extern stepd_step_rec_t *stepd_step_rec_create(launch_tasks_request_msg_t *msg,
 	job->array_job_id  = msg->job_id;
 	job->array_task_id = NO_VAL;
 	job->node_offset = msg->node_offset;	/* Used for env vars */
+	job->pack_step_cnt = msg->pack_step_cnt;
 	job->pack_jobid  = msg->pack_jobid;	/* Used for env vars */
 	job->pack_nnodes = msg->pack_nnodes;	/* Used for env vars */
 	if (msg->pack_nnodes && msg->pack_ntasks && msg->pack_task_cnts) {
 		job->pack_ntasks = msg->pack_ntasks;	/* Used for env vars */
-		i = sizeof(uint16_t) * msg->pack_nnodes;
-		job->pack_task_cnts = xmalloc(i);
-		memcpy(job->pack_task_cnts, msg->pack_task_cnts, i);
+		job->pack_task_cnts = xcalloc(msg->pack_nnodes,
+					      sizeof(uint16_t));
+		memcpy(job->pack_task_cnts, msg->pack_task_cnts,
+		       sizeof(uint16_t) * msg->pack_nnodes);
+		if (msg->pack_tids) {
+			/* pack_tids == NULL if request from pre-v19.05 srun */
+			job->pack_tids = xcalloc(msg->pack_nnodes,
+						 sizeof(uint32_t *));
+			for (i = 0; i < msg->pack_nnodes; i++) {
+				job->pack_tids[i] =
+					xcalloc(job->pack_task_cnts[i],
+						sizeof(uint32_t));
+				memcpy(job->pack_tids[i], msg->pack_tids[i],
+				       sizeof(uint32_t) *
+				       job->pack_task_cnts[i]);
+			}
+		}
+		if (msg->pack_tid_offsets) {
+			job->pack_tid_offsets = xcalloc(job->pack_ntasks,
+							sizeof(uint32_t));
+			memcpy(job->pack_tid_offsets, msg->pack_tid_offsets,
+			       job->pack_ntasks * sizeof(uint32_t));
+		}
 	}
 	job->pack_offset = msg->pack_offset;	/* Used for env vars & labels */
-	job->pack_task_offset = msg->pack_task_offset;	/* Used for env vars & labels */
+	job->pack_task_offset = msg->pack_task_offset;	/* Used for env vars &
+							 * labels */
 	job->pack_node_list = xstrdup(msg->pack_node_list);
 	for (i = 0; i < msg->envc; i++) {
 		/*                         1234567890123456789 */
@@ -354,7 +416,6 @@ extern stepd_step_rec_t *stepd_step_rec_create(launch_tasks_request_msg_t *msg,
 	job->envtp->cpu_bind = NULL;
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
-	job->envtp->ckpt_dir = NULL;
 	if (!msg->resp_port)
 		msg->num_resp_port = 0;
 	if (msg->num_resp_port) {
@@ -411,36 +472,21 @@ extern stepd_step_rec_t *stepd_step_rec_create(launch_tasks_request_msg_t *msg,
 			   &job->job_alloc_cores, &job->step_alloc_cores,
 			   &job->job_mem, &job->step_mem);
 
-	/*
-	 * Always set mem limits now that MemLimitEnforce=no
-	 * by default or JobAcctGatherParams=OverMemoryKill will not work.
-	 */
-	if (job->step_mem) {
+	if (job->step_mem && conf->job_acct_oom_kill) {
 		jobacct_gather_set_mem_limit(job->jobid, job->stepid,
 					     job->step_mem);
-	} else if (job->job_mem) {
+	} else if (job->job_mem && conf->job_acct_oom_kill) {
 		jobacct_gather_set_mem_limit(job->jobid, job->stepid,
 					     job->job_mem);
 	}
 
-#ifdef HAVE_ALPS_CRAY
-	/*
-	 * This is only used for Cray emulation mode where slurmd is used to
-	 * launch job steps. On a real Cray system, ALPS is used to launch
-	 * the tasks instead of SLURM. Slurm's task launch RPC does NOT
-	 * contain the reservation ID, so just use some non-zero value here
-	 * for testing purposes.
-	 */
-	job->resv_id = 1;
-	select_g_select_jobinfo_set(msg->select_jobinfo, SELECT_JOBDATA_RESV_ID,
-				    &job->resv_id);
-#endif
-
 	/* only need these values on the extern step, don't copy otherwise */
 	if ((msg->job_step_id == SLURM_EXTERN_CONT) && msg->x11) {
 		job->x11 = msg->x11;
+		job->x11_alloc_host = xstrdup(msg->x11_alloc_host);
+		job->x11_alloc_port = msg->x11_alloc_port;
 		job->x11_magic_cookie = xstrdup(msg->x11_magic_cookie);
-		job->x11_target_host = xstrdup(msg->x11_target_host);
+		job->x11_target = xstrdup(msg->x11_target);
 		job->x11_target_port = msg->x11_target_port;
 	}
 
@@ -482,6 +528,7 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	job->stepid  = msg->step_id;
 	job->array_job_id  = msg->array_job_id;
 	job->array_task_id = msg->array_task_id;
+	job->pack_step_cnt = NO_VAL;
 	job->pack_jobid  = NO_VAL;	/* Used to set env vars */
 	job->pack_nnodes = NO_VAL;	/* Used to set env vars */
 	job->pack_ntasks = NO_VAL;	/* Used to set env vars */
@@ -494,8 +541,17 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	job->uid	= (uid_t) msg->uid;
 	job->gid	= (gid_t) msg->gid;
 	job->user_name	= xstrdup(msg->user_name);
-	job->ngids = (int) msg->ngids;
-	job->gids = copy_gids(msg->ngids, msg->gids);
+	_slurm_cred_to_step_rec(msg->cred, job);
+	/*
+	 * Favor the group info in the launch cred if available - for 19.05+
+	 * this is where it is managed, not in batch_job_launch_msg_t.
+	 * For older versions, or for when send_gids is disabled, fall back
+	 * to the batch_job_launch_msg_t info if necessary.
+	 */
+	if (!job->ngids) {
+		job->ngids = (int) msg->ngids;
+		job->gids = copy_gids(msg->ngids, msg->gids);
+	}
 
 	job->profile    = msg->profile;
 
@@ -533,7 +589,6 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	job->cpu_bind = xstrdup(msg->cpu_bind);
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
-	job->envtp->ckpt_dir = NULL;
 	job->envtp->restart_cnt = msg->restart_cnt;
 
 	if (msg->cpus_per_node)
@@ -542,9 +597,9 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	format_core_allocs(msg->cred, conf->node_name, conf->cpus,
 			   &job->job_alloc_cores, &job->step_alloc_cores,
 			   &job->job_mem, &job->step_mem);
-	if (job->step_mem)
+	if (job->step_mem && conf->job_acct_oom_kill)
 		jobacct_gather_set_mem_limit(job->jobid, NO_VAL, job->step_mem);
-	else if (job->job_mem)
+	else if (job->job_mem && conf->job_acct_oom_kill)
 		jobacct_gather_set_mem_limit(job->jobid, NO_VAL, job->job_mem);
 
 	get_cred_gres(msg->cred, conf->node_name,
@@ -580,11 +635,6 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	job->task[0]->argc = job->argc;
 	job->task[0]->argv = job->argv;
 
-#ifdef HAVE_ALPS_CRAY
-	select_g_select_jobinfo_get(msg->select_jobinfo, SELECT_JOBDATA_RESV_ID,
-				    &job->resv_id);
-#endif
-
 	return job;
 }
 
@@ -616,11 +666,22 @@ stepd_step_rec_destroy(stepd_step_rec_t *job)
 	xfree(job->cpu_bind);
 	xfree(job->cwd);
 	xfree(job->envtp);
+	xfree(job->pw_gecos);
+	xfree(job->pw_dir);
+	xfree(job->pw_shell);
 	xfree(job->gids);
 	xfree(job->mem_bind);
 	eio_handle_destroy(job->msg_handle);
 	xfree(job->node_name);
 	mpmd_free(job);
+	xfree(job->pack_task_cnts);
+	if ((job->pack_nnodes != NO_VAL) && job->pack_tids) {
+		/* pack_tids == NULL if request from pre-v19.05 srun */
+		for (i = 0; i < job->pack_nnodes; i++)
+			xfree(job->pack_tids[i]);
+		xfree(job->pack_tids);
+	}
+	xfree(job->pack_tid_offsets);
 	xfree(job->task_prolog);
 	xfree(job->task_epilog);
 	xfree(job->job_alloc_cores);

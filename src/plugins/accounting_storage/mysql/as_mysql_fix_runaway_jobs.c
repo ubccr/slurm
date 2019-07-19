@@ -36,19 +36,7 @@
 
 #include "as_mysql_fix_runaway_jobs.h"
 #include "src/common/list.h"
-
-static int _job_sort_by_start_time(void *void1, void * void2)
-{
-	time_t start1 = (*(slurmdb_job_rec_t **)void1)->start;
-	time_t start2 = (*(slurmdb_job_rec_t **)void2)->start;
-
-	if (start1 < start2)
-		return -1;
-	else if (start1 > start2)
-		return 1;
-	else
-		return 0;
-}
+#include "src/common/slurmdb_defs.h"
 
 static int _first_job_roll_up(mysql_conn_t *mysql_conn, time_t first_start)
 {
@@ -119,12 +107,40 @@ extern int as_mysql_fix_runaway_jobs(mysql_conn_t *mysql_conn, uint32_t uid,
 	ListIterator iter = NULL;
 	int rc = SLURM_SUCCESS;
 	slurmdb_job_rec_t *first_job;
+	char *temp_cluster_name = mysql_conn->cluster_name;
 
-	list_sort(runaway_jobs, _job_sort_by_start_time);
-	first_job = list_peek(runaway_jobs);
+	if (!runaway_jobs) {
+		error("%s: No List of runaway jobs to fix given.",
+		      __func__);
+		rc = SLURM_ERROR;
+		goto bail;
+	}
 
-	if (check_connection(mysql_conn) != SLURM_SUCCESS)
-		return ESLURM_DB_CONNECTION;
+	list_sort(runaway_jobs, slurmdb_job_sort_by_submit_time);
+
+	if (!(first_job = list_peek(runaway_jobs))) {
+		error("%s: List of runaway jobs to fix is unexpectedly empty",
+		      __func__);
+		rc = SLURM_ERROR;
+		goto bail;
+	}
+
+	if (!first_job->submit) {
+		error("Runaway jobs all have time_submit=0, something is wrong! Aborting fix runaway jobs");
+		rc = SLURM_ERROR;
+		goto bail;
+	}
+
+	if (check_connection(mysql_conn) != SLURM_SUCCESS) {
+		rc = ESLURM_DB_CONNECTION;
+		goto bail;
+	}
+
+	/*
+	 * Temporarily use mysql_conn->cluster_name for potentially non local
+	 * cluster name, change back before return
+	 */
+	mysql_conn->cluster_name = first_job->cluster;
 
 	if (!is_user_min_admin_level(mysql_conn, uid, SLURMDB_ADMIN_OPERATOR)) {
 		slurmdb_user_rec_t user;
@@ -135,14 +151,27 @@ extern int as_mysql_fix_runaway_jobs(mysql_conn_t *mysql_conn, uint32_t uid,
 		if (!is_user_any_coord(mysql_conn, &user)) {
 			error("Only admins/operators/coordinators "
 			      "can fix runaway jobs");
-			return ESLURM_ACCESS_DENIED;
+			rc = ESLURM_ACCESS_DENIED;
+			goto bail;
 		}
 	}
 
 	iter = list_iterator_create(runaway_jobs);
 	while ((job = list_next(iter))) {
+		/*
+		 * Currently you can only fix one cluster at a time, so we need
+		 * to verify we don't have multiple cluster names.
+		 */
+		if (xstrcmp(job->cluster, first_job->cluster)) {
+			error("%s: You can only fix runaway jobs on one cluster at a time.",
+			      __func__);
+			rc = SLURM_ERROR;
+			goto bail;
+		}
+
 		xstrfmtcat(job_ids, "%s%d", ((job_ids) ? "," : ""), job->jobid);
 	}
+	list_iterator_destroy(iter);
 
 	query = xstrdup_printf("UPDATE \"%s_%s\" SET time_end="
 			       "GREATEST(time_start, time_eligible, time_submit), "
@@ -152,17 +181,22 @@ extern int as_mysql_fix_runaway_jobs(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	if (debug_flags & DEBUG_FLAG_DB_QUERY)
 		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-	mysql_db_query(mysql_conn, query);
+	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
-	xfree(job_ids);
 
-	/* Set rollup to the the last day of the previous month of the first
-	 * runaway job */
-	rc = _first_job_roll_up(mysql_conn, first_job->start);
-	if (rc != SLURM_SUCCESS) {
-		error("Failed to fix runaway jobs");
-		return SLURM_ERROR;
+	if (rc) {
+		error("Failed to fix runaway jobs: update query failed");
+		goto bail;
 	}
 
+	/* Set rollup to the last day of the previous month of the first
+	 * runaway job */
+	rc = _first_job_roll_up(mysql_conn, first_job->submit);
+	if (rc != SLURM_SUCCESS)
+		error("Failed to fix runaway jobs");
+
+bail:
+	xfree(job_ids);
+	mysql_conn->cluster_name = temp_cluster_name;
 	return rc;
 }

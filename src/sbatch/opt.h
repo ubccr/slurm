@@ -53,6 +53,13 @@
 #include "src/common/slurmdb_defs.h"
 #include "src/common/slurm_opt.h"
 
+enum wrappers {
+	WRPR_START,
+	WRPR_BSUB,
+	WRPR_PBS,
+	WRPR_CNT
+};
+
 typedef struct sbatch_env_opts {
 	uint32_t cpus_per_task;
 	char *   dist;
@@ -71,7 +78,6 @@ extern slurm_opt_t opt;
 extern sbatch_opt_t sbopt;
 extern sbatch_env_t pack_env;
 extern int   error_exit;
-extern int   ignore_pbs;
 extern bool  is_pack_job;
 
 /*
@@ -120,4 +126,12 @@ extern int   spank_unset_job_env(const char *name);
 extern void init_envs(sbatch_env_t *local_env);
 extern void set_envs(char ***array_ptr, sbatch_env_t *local_env,
 		     int pack_offset);
+
+extern char *get_argument(const char *file, int lineno, const char *line,
+			  int *skipped);
+extern char *next_line(const void *buf, int size, void **state);
+
+/* Translate #BSUB and #PBS directives in job script */
+extern bool xlate_batch_script(const char *file, const void *body,
+			       int size, int magic);
 #endif	/* _HAVE_OPT_H */

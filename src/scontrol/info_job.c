@@ -37,6 +37,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #include <arpa/inet.h>
+#include <grp.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -60,11 +61,8 @@ scontrol_load_job(job_info_msg_t ** job_buffer_pptr, uint32_t job_id)
 	if (all_flag)
 		show_flags |= SHOW_ALL;
 
-	if (detail_flag) {
+	if (detail_flag)
 		show_flags |= SHOW_DETAIL;
-		if (detail_flag > 1)
-			show_flags |= SHOW_DETAIL2;
-	}
 	if (federation_flag)
 		show_flags |= SHOW_FEDERATION;
 	if (local_flag)
@@ -198,6 +196,8 @@ scontrol_print_completing_job(job_info_t *job_ptr,
 	node_info_t *node_info;
 	hostlist_t comp_nodes, down_nodes;
 	char *node_buf;
+	char time_str[32];
+	time_t completing_time = 0;
 
 	comp_nodes = hostlist_create(NULL);
 	down_nodes = hostlist_create(NULL);
@@ -221,6 +221,13 @@ scontrol_print_completing_job(job_info_t *job_ptr,
 	}
 
 	fprintf(stdout, "JobId=%u ", job_ptr->job_id);
+
+	slurm_make_time_str(&job_ptr->end_time, time_str, sizeof(time_str));
+	fprintf(stdout, "EndTime=%s ", time_str);
+
+	completing_time = time(NULL) - job_ptr->end_time;
+	secs2time_str(completing_time, time_str, sizeof(time_str));
+	fprintf(stdout, "CompletingTime=%s ", time_str);
 
 	node_buf = hostlist_ranged_string_xmalloc(comp_nodes);
 	if (node_buf && node_buf[0])
@@ -719,6 +726,72 @@ scontrol_list_pids(const char *jobid_str, const char *node_name)
 	}
 }
 
+extern void scontrol_getent(const char *node_name)
+{
+	List steps = NULL;
+	ListIterator itr = NULL;
+	step_loc_t *stepd;
+	int fd;
+	struct passwd *pwd = NULL;
+	struct group **grps = NULL;
+
+	if (!(steps = stepd_available(NULL, node_name))) {
+		fprintf(stderr, "No steps found on this node\n");
+		return;
+	}
+
+	itr = list_iterator_create(steps);
+	while ((stepd = list_next(itr))) {
+		fd = stepd_connect(NULL, node_name, stepd->jobid,
+				   stepd->stepid,
+				   &stepd->protocol_version);
+
+		if (fd < 0)
+			continue;
+		pwd = stepd_getpw(fd, stepd->protocol_version,
+				  GETPW_MATCH_ALWAYS, 0, NULL);
+
+		if (!pwd) {
+			close(fd);
+			continue;
+		}
+
+		if (stepd->stepid == SLURM_EXTERN_CONT)
+			printf("JobId=%u.Extern:\nUser:\n", stepd->jobid);
+		else if (stepd->stepid == SLURM_BATCH_SCRIPT)
+			printf("JobId=%u.Batch:\nUser:\n", stepd->jobid);
+		else
+			printf("JobId=%u.%u:\nUser:\n",
+			       stepd->jobid, stepd->stepid);
+
+		printf("%s:%s:%u:%u:%s:%s:%s\nGroups:\n",
+		       pwd->pw_name, pwd->pw_passwd, pwd->pw_uid, pwd->pw_gid,
+		       pwd->pw_gecos, pwd->pw_dir, pwd->pw_shell);
+
+		xfree_struct_passwd(pwd);
+
+		grps = stepd_getgr(fd, stepd->protocol_version,
+				   GETGR_MATCH_ALWAYS, 0, NULL);
+		if (!grps) {
+			close(fd);
+			printf("\n");
+			continue;
+		}
+
+		for (int i = 0; grps[i]; i++) {
+			printf("%s:%s:%u:%s\n",
+			       grps[i]->gr_name, grps[i]->gr_passwd,
+			       grps[i]->gr_gid,
+			       (grps[i]->gr_mem) ? grps[i]->gr_mem[0] : "");
+		}
+		close(fd);
+		xfree_struct_group_array(grps);
+		printf("\n");
+	}
+	list_iterator_destroy(itr);
+	FREE_NULL_LIST(steps);
+}
+
 /*
  * scontrol_print_hosts - given a node list expression, return
  *	a list of nodes, one per line
@@ -936,11 +1009,11 @@ extern int scontrol_callerid(int argc, char **argv)
 			!= SLURM_SUCCESS) {
 		fprintf(stderr,
 			"slurm_network_callerid: unable to retrieve callerid data from remote slurmd\n");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	} else if (job_id == NO_VAL) {
 		fprintf(stderr,
 			"slurm_network_callerid: remote job id indeterminate\n");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	} else {
 		printf("%u %s\n", job_id, node_name);
 		return SLURM_SUCCESS;

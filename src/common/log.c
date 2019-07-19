@@ -72,7 +72,6 @@
 #include "src/common/macros.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_time.h"
-#include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/slurmctld/slurmctld.h"
@@ -83,10 +82,22 @@
 
 #define NAMELEN 16
 
+#define LOG_MACRO(level, sched, fmt) {				\
+	if ((level <= highest_log_level) ||			\
+	    (sched && (level <= highest_sched_log_level))) {	\
+		va_list ap;					\
+		va_start(ap, fmt);				\
+		_log_msg(level, sched, fmt, ap);		\
+		va_end(ap);					\
+	}							\
+}
+
 /*
 ** Define slurm-specific aliases for use by plugins, see slurm_xlator.h
 ** for details.
  */
+strong_alias(get_log_level,	slurm_get_log_level);
+strong_alias(get_sched_log_level, slurm_get_sched_log_level);
 strong_alias(log_init,		slurm_log_init);
 strong_alias(log_reinit,	slurm_log_reinit);
 strong_alias(log_fini,		slurm_log_fini);
@@ -98,6 +109,7 @@ strong_alias(log_fatal,		slurm_log_fatal);
 strong_alias(log_oom,		slurm_log_oom);
 strong_alias(log_has_data,	slurm_log_has_data);
 strong_alias(log_flush,		slurm_log_flush);
+strong_alias(log_var,		slurm_log_var);
 strong_alias(fatal,		slurm_fatal);
 strong_alias(fatal_abort,	slurm_fatal_abort);
 strong_alias(error,		slurm_error);
@@ -138,6 +150,9 @@ static pthread_mutex_t  log_lock = PTHREAD_MUTEX_INITIALIZER;
 static log_t            *log = NULL;
 static log_t            *sched_log = NULL;
 
+static volatile log_level_t highest_log_level = LOG_LEVEL_END;
+static volatile log_level_t highest_sched_log_level = LOG_LEVEL_QUIET;
+
 #define LOG_INITIALIZED ((log != NULL) && (log->initialized))
 #define SCHED_LOG_INITIALIZED ((sched_log != NULL) && (sched_log->initialized))
 /* define a default argv0 */
@@ -166,6 +181,14 @@ static bool at_forked = false;
 
 static void _log_flush(log_t *log);
 
+static log_level_t _highest_level(log_level_t a, log_level_t b, log_level_t c)
+{
+	if (a >= b) {
+		return (a >= c) ? a : c;
+	} else {
+		return (b >= c) ? b : c;
+	}
+}
 
 /* Write the current local time into the provided buffer. Returns the
  * number of characters written into the buffer. */
@@ -277,7 +300,7 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
 	int rc = 0;
 
 	if (!log)  {
-		log = (log_t *)xmalloc(sizeof(log_t));
+		log = xmalloc(sizeof(log_t));
 		log->logfp = NULL;
 		log->argv0 = NULL;
 		log->buf   = NULL;
@@ -354,6 +377,10 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
 	if (log->logfp && (fileno(log->logfp) < 0))
 		log->logfp = NULL;
 
+	highest_log_level = _highest_level(log->opt.syslog_level,
+					   log->opt.logfile_level,
+					   log->opt.stderr_level);
+
 	log->initialized = 1;
  out:
 	return rc;
@@ -373,7 +400,7 @@ _sched_log_init(char *prog, log_options_t opt, log_facility_t fac,
 	int rc = 0;
 
 	if (!sched_log) {
-		sched_log = (log_t *)xmalloc(sizeof(log_t));
+		sched_log = xmalloc(sizeof(log_t));
 		atfork_install_handlers();
 	}
 
@@ -440,6 +467,19 @@ _sched_log_init(char *prog, log_options_t opt, log_facility_t fac,
 
 	if (sched_log->logfp && (fileno(sched_log->logfp) < 0))
 		sched_log->logfp = NULL;
+
+	highest_sched_log_level = _highest_level(sched_log->opt.syslog_level,
+						 sched_log->opt.logfile_level,
+						 sched_log->opt.stderr_level);
+
+	/*
+	 * The sched_log_level is (ab)used as a boolean. Force it to the end
+	 * if set so that the LOG_MACRO checks at least stay relatively clean,
+	 * and it's easier for us to introduce the idea of this log level
+	 * varying in the future.
+	 */
+	if (highest_sched_log_level > LOG_LEVEL_QUIET)
+		highest_sched_log_level = LOG_LEVEL_END;
 
 	sched_log->initialized = 1;
  out:
@@ -704,7 +744,6 @@ static char *_jobid2fmt(struct job_record *job_ptr, char *buf, int buf_size)
 	if (job_ptr == NULL)
 		return "%.0sJobId=Invalid";
 
-	xassert(job_ptr->magic == JOB_MAGIC);
 	if (job_ptr->magic != JOB_MAGIC)
 		return "%.0sJobId=CORRUPT";
 
@@ -737,7 +776,6 @@ static char *_stepid2fmt(struct step_record *step_ptr, char *buf, int buf_size)
 	if (step_ptr == NULL)
 		return " StepId=Invalid";
 
-	xassert(step_ptr->magic == STEP_MAGIC);
 	if (step_ptr->magic != STEP_MAGIC)
 		return " StepId=CORRUPT";
 
@@ -1132,7 +1170,7 @@ static void _log_msg(log_level_t level, bool sched, const char *fmt, va_list arg
 	}
 
 	if (SCHED_LOG_INITIALIZED && sched &&
-	    (sched_log->opt.logfile_level > LOG_LEVEL_QUIET)) {
+	    (highest_sched_log_level > LOG_LEVEL_QUIET)) {
 		buf = vxstrfmt(fmt, args);
 		xlogfmtcat(&msgbuf, "[%M] %s%s%s", sched_log->fpfx, pfx, buf);
 		_log_printf(sched_log, sched_log->fbuf, sched_log->logfp,
@@ -1141,9 +1179,7 @@ static void _log_msg(log_level_t level, bool sched, const char *fmt, va_list arg
 		xfree(msgbuf);
 	}
 
-	if ((level > log->opt.syslog_level)  &&
-	    (level > log->opt.logfile_level) &&
-	    (level > log->opt.stderr_level)) {
+	if (level > highest_log_level) {
 		slurm_mutex_unlock(&log_lock);
 		xfree(buf);
 		return;
@@ -1174,7 +1210,7 @@ static void _log_msg(log_level_t level, bool sched, const char *fmt, va_list arg
 
 		case LOG_LEVEL_DEBUG2:
 			priority = LOG_DEBUG;
-			pfx = sched ? "debug: sched: " : "debug2: ";
+			pfx = sched ? "debug2: sched: " : "debug2: ";
 			break;
 
 		case LOG_LEVEL_DEBUG3:
@@ -1284,11 +1320,7 @@ log_flush()
  */
 void fatal(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_FATAL, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_FATAL, false, fmt);
 	log_flush();
 
 	exit(1);
@@ -1299,23 +1331,23 @@ void fatal(const char *fmt, ...)
  */
 void fatal_abort(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_FATAL, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_FATAL, false, fmt);
 	log_flush();
 
 	abort();
 }
 
+/*
+ * Attempt to log message at a variable log level
+ */
+void log_var(const log_level_t log_lvl, const char *fmt, ...)
+{
+	LOG_MACRO(log_lvl, false, fmt);
+}
+
 int error(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_ERROR, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_ERROR, false, fmt);
 
 	/*
 	 *  Return SLURM_ERROR so calling functions can
@@ -1326,47 +1358,27 @@ int error(const char *fmt, ...)
 
 void info(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_INFO, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_INFO, false, fmt);
 }
 
 void verbose(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_VERBOSE, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_VERBOSE, false, fmt);
 }
 
 void debug(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_DEBUG, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_DEBUG, false, fmt);
 }
 
 void debug2(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_DEBUG2, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_DEBUG2, false, fmt);
 }
 
 void debug3(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_DEBUG3, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_DEBUG3, false, fmt);
 }
 
 /*
@@ -1375,29 +1387,17 @@ void debug3(const char *fmt, ...)
  */
 void debug4(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_DEBUG4, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_DEBUG4, false, fmt);
 }
 
 void debug5(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_DEBUG5, false, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_DEBUG5, false, fmt);
 }
 
 int sched_error(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_ERROR, true, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_ERROR, true, fmt);
 
 	/*
 	 *  Return SLURM_ERROR so calling functions can
@@ -1408,47 +1408,27 @@ int sched_error(const char *fmt, ...)
 
 void sched_info(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_INFO, true, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_INFO, true, fmt);
 }
 
 void sched_verbose(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_VERBOSE, true, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_VERBOSE, true, fmt);
 }
 
 void sched_debug(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_DEBUG, true, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_DEBUG, true, fmt);
 }
 
 void sched_debug2(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_DEBUG2, true, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_DEBUG2, true, fmt);
 }
 
 void sched_debug3(const char *fmt, ...)
 {
-	va_list ap;
-
-	va_start(ap, fmt);
-	_log_msg(LOG_LEVEL_DEBUG3, true, fmt, ap);
-	va_end(ap);
+	LOG_MACRO(LOG_LEVEL_DEBUG3, true, fmt);
 }
 
 /* Return the highest LOG_LEVEL_* used for any logging mechanism.
@@ -1456,9 +1436,10 @@ void sched_debug3(const char *fmt, ...)
  * debug type messages will be ignored. */
 extern int get_log_level(void)
 {
-	int level;
+	return highest_log_level;
+}
 
-	level = MAX(log->opt.syslog_level, log->opt.logfile_level);
-	level = MAX(level, log->opt.stderr_level);
-	return level;
+extern int get_sched_log_level(void)
+{
+	return highest_sched_log_level;
 }

@@ -293,7 +293,7 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 	case SORTID_FLAGS:
 		f = parse_resv_flags(new_text, __func__);
 		type = "flags";
-		if (f == NO_VAL)
+		if (f == INFINITE64)
 			goto return_error;
 		resv_msg->flags = f;
 		break;
@@ -673,7 +673,7 @@ static void _update_info_resv(List info_list,
 	set_for_update(model, SORTID_UPDATED);
 
 	itr = list_iterator_create(info_list);
-	while ((sview_resv_info = (sview_resv_info_t*) list_next(itr))) {
+	while ((sview_resv_info = list_next(itr))) {
 		/* This means the tree_store changed (added new column
 		   or something). */
 		if (last_model != model)
@@ -821,7 +821,7 @@ need_refresh:
 	}
 
 	itr = list_iterator_create(info_list);
-	while ((sview_resv_info = (sview_resv_info_t*) list_next(itr))) {
+	while ((sview_resv_info = list_next(itr))) {
 		resv_ptr = sview_resv_info->resv_ptr;
 		if (!xstrcmp(resv_ptr->name, name)) {
 			j=0;

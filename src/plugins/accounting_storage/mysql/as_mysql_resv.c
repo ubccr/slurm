@@ -52,7 +52,7 @@ static int _setup_resv_limits(slurmdb_reservation_rec_t *resv,
 
 		if (strchr(resv->assocs, '-')) {
 			int i = 0, i2 = 0;
-			char * assocs = xmalloc(sizeof(char) * len);
+			char *assocs = xmalloc(len);
 			/* We will remove the negative's here.  This
 			   is here so if we only have negatives in the
 			   reservation we don't want to keep track of
@@ -330,11 +330,16 @@ extern int as_mysql_modify_resv(mysql_conn_t *mysql_conn,
 		goto end_it;
 	}
 	if (!(row = mysql_fetch_row(result))) {
-		rc = SLURM_ERROR;
 		mysql_free_result(result);
-		error("There is no reservation by id %u, "
-		      "time_start %ld, and cluster '%s'", resv->id,
-		      resv->time_start_prev, resv->cluster);
+		error("%s: There is no reservation by id %u, time_start %ld, and cluster '%s', creating it",
+		      __func__, resv->id, resv->time_start_prev, resv->cluster);
+		/*
+		 * Don't set the time_start to time_start_prev as we have no
+		 * idea what the reservation looked like at that time.  Doing so
+		 * will also mess up future updates.
+		 */
+		/* resv->time_start = resv->time_start_prev; */
+		rc = as_mysql_add_resv(mysql_conn, resv);
 		goto end_it;
 	}
 
@@ -569,6 +574,7 @@ extern List as_mysql_get_resvs(mysql_conn_t *mysql_conn, uid_t uid,
 	with_usage = resv_cond->with_usage;
 
 	memset(&job_cond, 0, sizeof(slurmdb_job_cond_t));
+	job_cond.db_flags = SLURMDB_JOB_FLAG_NOTSET;
 	if (resv_cond->nodes) {
 		job_cond.usage_start = resv_cond->time_start;
 		job_cond.usage_end = resv_cond->time_end;

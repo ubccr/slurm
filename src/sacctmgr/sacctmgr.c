@@ -46,8 +46,6 @@
 #include "src/common/proc_args.h"
 #include "src/common/strlcpy.h"
 
-#define BUFFER_SIZE 4096
-
 char *command_name;
 int exit_code;		/* sacctmgr's exit code, =1 on any error at any time */
 int exit_flag;		/* program to terminate if =1 */
@@ -285,7 +283,7 @@ static char *_getline(const char *prompt)
 		buf[len-1] = '\0';
 	else
 		len++;
-	line = malloc(len * sizeof(char));
+	line = malloc(len);
 	if (!line)
 		return NULL;
 	strlcpy(line, buf, len);
@@ -947,7 +945,7 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             GrpNodes=, GrpSubmitJob=, GrpWall=, MaxTRESMins=,\n\
                             MaxTRES=, MaxJobs=, MaxNodes=, MaxSubmitJobs=, \n\
                             MaxWall=, Names=, Organization=, Parent=,      \n\
-                            and QosLevel=                                  \n\
+                            Priority= and QosLevel=                        \n\
        modify account     - (set options) DefaultQOS=, Description=,       \n\
                             Fairshare=, GrpTRESMins=, GrpTRESRunMins=,       \n\
                             GrpTRES=, GrpJobs=, GrpMemory=, GrpNodes=,     \n\
@@ -957,7 +955,7 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             RawUsage= (with admin privileges only)         \n\
                             (where options) Clusters=, DefaultQOS=,        \n\
                             Descriptions=, Names=, Organizations=,         \n\
-                            Parent=, and QosLevel=                         \n\
+                            Parent=,Priority= and QosLevel=                \n\
        delete account     - Clusters=, DefaultQOS=, Descriptions=, Names=, \n\
                             Organizations=, and Parents=                   \n\
                                                                            \n\
@@ -1050,7 +1048,7 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             DefaultAccount=, DefaultQOS=, DefaultWCKey=,   \n\
                             Fairshare=, MaxTRESMins=, MaxTRES=,            \n\
                             MaxJobs=, MaxNodes=, MaxSubmitJobs=, MaxWall=, \n\
-                            Names=, Partitions=, and QosLevel=             \n\
+                            Names=, Partitions=, Priority= and QosLevel=   \n\
        modify user        - (set options) AdminLevel=, DefaultAccount=,    \n\
                             DefaultQOS=, DefaultWCKey=, Fairshare=,        \n\
                             MaxTRESMins=, MaxTRES=, MaxJobs=, MaxNodes=,   \n\
@@ -1059,7 +1057,7 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             RawUsage= (with admin privileges only)         \n\
                             (where options) Accounts=, AdminLevel=,        \n\
                             Clusters=, DefaultAccount=, Names=,            \n\
-                            Partitions=, and QosLevel=                     \n\
+                            Partitions=, Priority= and QosLevel=           \n\
        delete user        - Accounts=, AdminLevel=, Clusters=,             \n\
                             DefaultAccount=, DefaultWCKey=, and Names=     \n\
                                                                            \n\

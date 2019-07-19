@@ -40,27 +40,12 @@ set exit_code   0
 set file_prog   "test$test_id.prog"
 set matches     0
 set fini_cnt    0
-set poe_flag    0
 set usr1cnt     0
 set usr2cnt     0
+set usr1target	1
+set usr2target	1
 
 print_header $test_id
-
-if { [test_alps] } {
-	send_user "\nWARNING: This test is incompatible with Cray systems\n"
-	exit $exit_code
-}
-
-if {[test_launch_poe]} {
-#	SIGUSR2 used by POE to generate checkpoint
-#	SIGUSR2 causes POE to core dump in base configuration
-#	The test program exits after receiving 2 signals of any type
-	set usr1target 2
-	set usr2target 0
-} else {
-	set usr1target 1
-	set usr2target 1
-}
 
 #
 # Delete left-over program and rebuild it

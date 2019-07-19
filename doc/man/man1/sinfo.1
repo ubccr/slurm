@@ -86,7 +86,11 @@ Don't convert units from their original type (e.g. 2048M won't be converted to
 
 .TP
 \fB\-N\fR, \fB\-\-Node\fR
-Print information in a node\-oriented format with one line per node.
+Print information in a node\-oriented format with one line per node
+and partition. That is, if a node belongs to more than one partition, then one
+line for each node\-partition pair will be shown.
+If \fB\-\-partition\fR is also specified, then only one line per node in this
+partition is shown.
 The default is to print information in a partition\-oriented format.
 This is ignored if the \fB\-\-format\fR option is specified.
 
@@ -354,6 +358,9 @@ Groups which may use the nodes.
 \fBgres\fR
 Generic resources (gres) associated with the nodes.
 .TP
+\fBgresused\fR
+Generic resources (gres) currently in use on the nodes.
+.TP
 \fBmaxcpuspernode\fR
 The max number of CPUs per node available to jobs in the partition.
 .TP
@@ -503,7 +510,7 @@ Possible values include (case insensitive): ALLOC, ALLOCATED,
 COMP, COMPLETING, DOWN, DRAIN (for node in DRAINING or DRAINED
 states), DRAINED, DRAINING, FAIL, FUTURE, FUTR,
 IDLE, MAINT, MIX, MIXED, NO_RESPOND, NPC, PERFCTRS,
-POWER_DOWN, POWER_UP, RESV, RESERVED, UNK, and UNKNOWN.
+POWER_DOWN, POWERING_DOWN, POWER_UP, RESV, RESERVED, UNK, and UNKNOWN.
 By default nodes in the specified state are reported whether
 they are responding or not.
 The \fB\-\-dead\fR and \fB\-\-responding\fR options may be
@@ -635,6 +642,9 @@ running at reduced frequency).
 \fB#\fR
 The node is presently being powered up or configured.
 .TP
+\fB%\fR
+The node is presently being powered down.
+.TP
 \fB$\fR
 The node is currently in a reservation with a flag value of "maintenance".
 .TP
@@ -713,6 +723,9 @@ this node as not usable for any other jobs
 .TP
 \fBPOWER_DOWN\fR
 The node is currently powered down and not capable of running any jobs.
+.TP
+\fBPOWERING_DOWN\fR
+The node is currently powering down and not capable of running any jobs.
 .TP
 \fBPOWER_UP\fR
 The node is currently in the process of being powered up.

@@ -38,63 +38,19 @@ set tmp_job      "test$test_id\_tmp_job"
 
 print_header $test_id
 
-#
-# Get the slurm.conf path
-#
-proc get_conf_path { } {
-
-	global scontrol config_path alpha exit_code
-
-	set got_config 0
-	log_user 0
-	spawn $scontrol show config
-	expect {
-		-re "SLURM_CONF.*= (/.*)/($alpha).*SLURM_VERSION" {
-			set config_path $expect_out(1,string)
-			set got_config 1
-			exp_continue
-		}
-		timeout {
-			send_user "\nFAILURE: scontrol is not responding\n"
-			set exit_code 1
-		}
-		eof {
-			wait
-		}
-	}
-	log_user 1
-
-	if {$got_config != 1} {
-		send_user "\nFAILURE: did not get slurm.conf path\n"
-		exit 0
-	}
-}
-
-#
-# Copy slurm.conf file
-#
-proc copy_conf { } {
-	global bin_cp exit_code config_path cwd
-
-	spawn $bin_cp -v $config_path/slurm.conf $cwd/slurm.conf.orig
-	expect {
-		timeout {
-			send_user "\nFAILURE: slurm.conf was not copied\n"
-			set exit_code 1
-		}
-		eof {
-			wait
-		}
-	}
-}
-
 if {[is_super_user] == 0} {
 	send_user "\nWARNING: This test can't be run except as SlurmUser\n"
 	exit 0
 }
 
-get_conf_path
-copy_conf
+set config_path [get_conf_path]
+if { $exit_code != 0 } {
+	exit $exit_code
+}
+copy_conf $config_path $cwd
+if { $exit_code != 0 } {
+	exit $exit_code
+}
 
 send_user "\n---Checking sbatch uses mcs-label only for some jobs (ondemand,select mode)---\n"
 
@@ -181,6 +137,8 @@ if {$job_id == 0} {
 	send_user "\nFAILURE: job was not submitted\n"
 	set exit_code 1
 	exit 1
+} elseif {[wait_for_job $job_id "RUNNING"]} {
+	set exit_code 1
 }
 
 set user_name [get_my_user_name]
@@ -233,9 +191,11 @@ expect {
 if {$job_id == 0} {
 	send_user "\nFAILURE: job was not submitted\n"
 	set exit_code 1
+} elseif {[wait_for_job $job_id "RUNNING"]} {
+	set exit_code 1
 }
+
 set found 0
-sleep 5
 spawn $squeue --jobs=$job_id --noheader -O "mcslabel"
 expect {
 	-re "$user_name" {
@@ -261,8 +221,9 @@ if {$found == 0} {
 	 set exit_code 1
 }
 set found 0
-#test sacct if accounting
+#test sacct if accounting, wait a few seconds for accounting data to reach DB
 if { [test_account_storage] != 0 } {
+	sleep 5
 	spawn $sacct -j $job_id --noheader -o "mcslabel"
 	expect {
 		-re "$user_name" {
@@ -331,6 +292,7 @@ if {$found == 0} {
 	send_user "\nFAILURE: job was submitted with node with bad mcs-label\n"
 	set exit_code 1
 }
+
 cancel_job $job_id
 
 #
@@ -370,10 +332,11 @@ expect {
 if {$job_id == 0} {
 	send_user "\nFAILURE: job was not submitted\n"
 	set exit_code 1
+} elseif {[wait_for_job $job_id "RUNNING"]} {
+	set exit_code 1
 }
 
 set found 0
-sleep 3
 spawn $squeue --jobs=$job_id --noheader -O "mcslabel"
 expect {
 	-re "$user_name" {
@@ -483,10 +446,11 @@ expect {
 if {$job_id == 0} {
 	send_user "\nFAILURE: job was not submitted\n"
 	set exit_code 1
+} elseif {[wait_for_job $job_id "RUNNING"]} {
+	set exit_code 1
 }
 
 set found 0
-sleep 3
 spawn $squeue --jobs=$job_id --noheader -O "mcslabel"
 expect {
 	-re "$user_name" {
@@ -583,8 +547,9 @@ expect {
 if {$job_id == 0} {
 	send_user "\nFAILURE: job was not submitted\n"
 	set exit_code 1
+} elseif {[wait_for_job $job_id "RUNNING"]} {
+	set exit_code 1
 }
-set found 0
 
 set found 0
 spawn $squeue --jobs=$job_id --noheader -O "mcslabel"
@@ -613,7 +578,10 @@ if {$found == 1} {
 }
 
 cancel_job $job_id
-sleep 5
+if {[wait_for_job $job_id "DONE"]} {
+	set exit_code 1
+}
+
 send_user "\n---Checking sbatch uses mcs-label for all jobs (enforced,select mode)---\n"
 
 #
@@ -652,6 +620,8 @@ if {$job_id == 0} {
 	send_user "\nFAILURE: job was not submitted\n"
 	set exit_code 1
 	exit 1
+} elseif {[wait_for_job $job_id "RUNNING"]} {
+	set exit_code 1
 }
 
 set found 0
@@ -682,7 +652,6 @@ if {$found == 0} {
 
 set found 0
 set node 0
-sleep 2
 spawn $squeue --jobs=$job_id --noheader -O "nodelist"
 expect {
 	-re "($alpha_numeric_under)" {

@@ -51,6 +51,7 @@
 #include <sys/types.h>
 
 #include "src/common/bitstring.h"
+#include "src/common/fd.h"
 #include "src/common/list.h"
 #include "src/common/slurmdbd_defs.h"
 #include "src/common/slurm_protocol_defs.h"
@@ -339,8 +340,8 @@ extern trigger_info_msg_t * trigger_get(uid_t uid, trigger_info_msg_t *msg)
 	_dump_trigger_msg("trigger_get", NULL);
 	resp_data = xmalloc(sizeof(trigger_info_msg_t));
 	resp_data->record_count = list_count(trigger_list);
-	resp_data->trigger_array = xmalloc(sizeof(trigger_info_t) *
-					   resp_data->record_count);
+	resp_data->trigger_array = xcalloc(resp_data->record_count,
+					   sizeof(trigger_info_t));
 	trig_iter = list_iterator_create(trigger_list);
 	trig_out = resp_data->trigger_array;
 	while ((trig_in = list_next(trig_iter))) {
@@ -809,7 +810,7 @@ unpack_error:
 	xfree(trig_ptr->program);
 	FREE_NULL_BITMAP(trig_ptr->nodes_bitmap);
 	xfree(trig_ptr);
-	return SLURM_FAILURE;
+	return SLURM_ERROR;
 }
 
 extern int trigger_state_save(void)

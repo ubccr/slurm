@@ -139,7 +139,7 @@ void* entity_get_data_ref(const entity_t* entity, const char* key);
 
 /*
  * entity_set_data - copy the content of the input buffer up to the requested
- *       size into the the buffer associated to a particular key of an entity
+ *       size into the buffer associated to a particular key of an entity
  *       (note that the entity key value's buffer is allocated internally if
  *       necessary)
  *
@@ -256,6 +256,6 @@ void entity_nodes_walk(entity_t* entity,
  *
  * Note: it currently just returns the name of the entity
  */
-const char* entity_hashable_identify(void* item);
+void entity_hashable_identify(void* item, const char** key, uint32_t* key_len);
 
 #endif /* end of include guard: __ENTITY_GDBZJYZL_INC__ */

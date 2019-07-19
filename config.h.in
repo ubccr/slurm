@@ -3,9 +3,6 @@
 /* Define if building universal (internal helper macro) */
 #undef AC_APPLE_UNIVERSAL_BUILD
 
-/* Define BLCR installation home */
-#undef BLCR_HOME
-
 /* Define location of cpuset directory */
 #undef CPUSET_DIR
 
@@ -30,19 +27,10 @@
 /* Define to 1 if 3-dimensional architecture */
 #undef HAVE_3D
 
-/* Define to 1 for Cray XT/XE systems using ALPS */
-#undef HAVE_ALPS_CRAY
-
-/* Define to 1 for emulating a Cray XT/XE system using ALPS */
-#undef HAVE_ALPS_CRAY_EMULATION
-
-/* Define to 1 if running against an ALPS emulation */
-#undef HAVE_ALPS_EMULATION
-
 /* Define to 1 if you have the `cfmakeraw' function. */
 #undef HAVE_CFMAKERAW
 
-/* Define to 1 for systems with a Cray network */
+/* Define to 1 for systems with a Cray Aries network */
 #undef HAVE_CRAY_NETWORK
 
 /* Define to 1 if you have the <curses.h> header file. */
@@ -151,10 +139,6 @@
 /* Define to 1 if you have 'lz4' library (-llz4) */
 #undef HAVE_LZ4
 
-/* Define to 1 if your system has a GNU libc compatible `malloc' function, and
-   to 0 otherwise. */
-#undef HAVE_MALLOC
-
 /* Define to 1 if you have the <mcheck.h> header file. */
 #undef HAVE_MCHECK_H
 
@@ -167,11 +151,8 @@
 /* Define to 1 if using MySQL libaries */
 #undef HAVE_MYSQL
 
-/* Define to 1 for running on a Cray in native mode without ALPS */
+/* Define to 1 for running on a Cray Aries system */
 #undef HAVE_NATIVE_CRAY
-
-/* Define to 1 if alpscomm functions new to CLE 5.2UP01 are defined */
-#undef HAVE_NATIVE_CRAY_GA
 
 /* Define to 1 if you have the <ncurses.h> header file. */
 #undef HAVE_NCURSES_H
@@ -185,20 +166,17 @@
 /* Define to 1 if netloc includes use underscore not subdirectory */
 #undef HAVE_NETLOC_NOSUB
 
-/* define if you have nrt.h */
-#undef HAVE_NRT_H
-
 /* define if numa library installed */
 #undef HAVE_NUMA
+
+/* Define to 1 if NVML library found */
+#undef HAVE_NVML
 
 /* Define to 1 if ofed library found */
 #undef HAVE_OFED
 
 /* Define to 1 if using code with pma_query_via */
 #undef HAVE_OFED_PMA_QUERY_VIA
-
-/* define if you have openssl. */
-#undef HAVE_OPENSSL
 
 /* define if you have the PAM library */
 #undef HAVE_PAM
@@ -233,9 +211,6 @@
 /* Define if you are compiling with readline. */
 #undef HAVE_READLINE
 
-/* Define to 1 for running on a real Cray system */
-#undef HAVE_REAL_CRAY
-
 /* Define to 1 if you have the `sched_setaffinity' function. */
 #undef HAVE_SCHED_SETAFFINITY
 
@@ -250,9 +225,6 @@
 
 /* Define to 1 if you have the <socket.h> header file. */
 #undef HAVE_SOCKET_H
-
-/* Define to 1 if libssh2 found */
-#undef HAVE_SSH2
 
 /* Define to 1 if you have the `statfs' function. */
 #undef HAVE_STATFS
@@ -442,9 +414,6 @@
 /* Defined if libcurl supports TFTP */
 #undef LIBCURL_PROTOCOL_TFTP
 
-/* Define the libnrt.so location */
-#undef LIBNRT_SO
-
 /* Define to 1 for --get-user-env to load user environment without .login */
 #undef LOAD_ENV_NO_LOGIN
 
@@ -508,17 +477,14 @@
 /* Define to 1 to require salloc execution in the foreground. */
 #undef SALLOC_RUN_FOREGROUND
 
-/* Define to 1 if sched_getaffinity takes three arguments. */
-#undef SCHED_GETAFFINITY_THREE_ARGS
-
-/* Define to 1 if sched_getaffinity takes two arguments. */
-#undef SCHED_GETAFFINITY_TWO_ARGS
-
 /* Define if you need setproctitle padding */
 #undef SETPROCTITLE_PS_PADDING
 
 /* Define to the setproctitle() emulation type */
 #undef SETPROCTITLE_STRATEGY
+
+/* The size of `void *', as computed by sizeof. */
+#undef SIZEOF_VOID_P
 
 /* Define path to sleep command */
 #undef SLEEP_CMD
@@ -612,6 +578,3 @@
 
 /* Define curl_free() as free() if our version of curl lacks curl_free. */
 #undef curl_free
-
-/* Define to rpl_malloc if the replacement function should be used. */
-#undef malloc

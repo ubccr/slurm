@@ -42,6 +42,7 @@ enum {
 	SORTID_ACTIVE_FEATURES,
 	SORTID_ARCH,
 	SORTID_AVAIL_FEATURES,
+	SORTID_AVE_WATTS,
 	SORTID_BOARDS,
 	SORTID_BOOT_TIME,
 	SORTID_CAP_WATTS,
@@ -49,14 +50,12 @@ enum {
 	SORTID_COLOR,
 	SORTID_CPUS,
 	SORTID_CPU_LOAD,
-	SORTID_CONSUMED_ENERGY,
 	SORTID_CORES,
 	SORTID_CURRENT_WATTS,
 	SORTID_ERR_CPUS,
 	SORTID_FREE_MEM,
 	SORTID_GRES,
 	SORTID_IDLE_CPUS,
-	SORTID_LOWEST_JOULES,
 	SORTID_MCS_LABEL,
 	SORTID_NAME,
 	SORTID_NODE_ADDR,
@@ -153,11 +152,9 @@ static display_data_t display_data_node[] = {
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_SLURMD_START_TIME, "SlurmdStartTime", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_LOWEST_JOULES, "Lowest Joules", false,
-	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_CONSUMED_ENERGY,"Consumed Joules", false,
-	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_CURRENT_WATTS, "Current Watts", false,
+	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_AVE_WATTS, "Average Watts", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_CAP_WATTS,"Cap Watts", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
@@ -197,8 +194,7 @@ static void _layout_node_record(GtkTreeView *treeview,
 {
 	char tmp_cnt[50];
 	char tmp_current_watts[50];
-	char tmp_base_watts[50];
-	char tmp_consumed_energy[50];
+	char tmp_ave_watts[50];
 	char tmp_cap_watts[50], tmp_owner[32];
 	char tmp_version[50];
 	char *upper = NULL, *lower = NULL;
@@ -404,32 +400,24 @@ static void _layout_node_record(GtkTreeView *treeview,
 	if (node_ptr->energy->current_watts == NO_VAL) {
 		snprintf(tmp_current_watts, sizeof(tmp_current_watts),
 			 "N/A");
-		snprintf(tmp_base_watts, sizeof(tmp_base_watts),
-			 "N/A");
-		snprintf(tmp_consumed_energy, sizeof(tmp_consumed_energy),
+		snprintf(tmp_ave_watts, sizeof(tmp_ave_watts),
 			 "N/A");
 	} else {
 		snprintf(tmp_current_watts, sizeof(tmp_current_watts),
 			 "%u", node_ptr->energy->current_watts);
-		snprintf(tmp_base_watts, sizeof(tmp_base_watts),
-			 "%u", node_ptr->energy->base_watts);
-		snprintf(tmp_consumed_energy, sizeof(tmp_consumed_energy),
-			 "%"PRIu64"", node_ptr->energy->consumed_energy);
+		snprintf(tmp_ave_watts, sizeof(tmp_ave_watts),
+			 "%u", node_ptr->energy->ave_watts);
 	}
-	add_display_treestore_line(update, treestore, &iter,
-				   find_col_name(display_data_node,
-						 SORTID_LOWEST_JOULES),
-				   tmp_base_watts);
-
-	add_display_treestore_line(update, treestore, &iter,
-				   find_col_name(display_data_node,
-						 SORTID_CONSUMED_ENERGY),
-				   tmp_consumed_energy);
 
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
 						 SORTID_CURRENT_WATTS),
 				   tmp_current_watts);
+
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_node,
+						 SORTID_AVE_WATTS),
+				   tmp_ave_watts);
 
 	if (!node_ptr->power || (node_ptr->power->cap_watts == NO_VAL)) {
 		snprintf(tmp_cap_watts, sizeof(tmp_cap_watts), "N/A");
@@ -464,7 +452,7 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 	char tmp_disk[20], tmp_cpus[20], tmp_idle_cpus[20];
 	char tmp_mem[20], tmp_used_memory[20];
 	char tmp_used_cpus[20], tmp_cpu_load[20], tmp_free_mem[20], tmp_owner[32];
-	char tmp_current_watts[50], tmp_base_watts[50], tmp_consumed_energy[50];
+	char tmp_current_watts[50], tmp_ave_watts[50];
 	char tmp_cap_watts[50], tmp_version[50];
 	char *tmp_state_lower, *tmp_state_upper;
 
@@ -472,17 +460,13 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 	if (node_ptr->energy->current_watts == NO_VAL) {
 		snprintf(tmp_current_watts, sizeof(tmp_current_watts),
 			 "N/A");
-		snprintf(tmp_base_watts, sizeof(tmp_base_watts),
-			 "N/A");
-		snprintf(tmp_consumed_energy, sizeof(tmp_consumed_energy),
+		snprintf(tmp_ave_watts, sizeof(tmp_ave_watts),
 			 "N/A");
 	} else {
 		snprintf(tmp_current_watts, sizeof(tmp_current_watts),
 			 "%u ", node_ptr->energy->current_watts);
-		snprintf(tmp_base_watts, sizeof(tmp_base_watts),
-			 "%u", node_ptr->energy->base_watts);
-		snprintf(tmp_consumed_energy, sizeof(tmp_consumed_energy),
-			 "%"PRIu64"", node_ptr->energy->consumed_energy);
+		snprintf(tmp_ave_watts, sizeof(tmp_ave_watts),
+			 "%u", node_ptr->energy->ave_watts);
 	}
 
 	if (!node_ptr->power || (node_ptr->power->cap_watts == NO_VAL)) {
@@ -493,14 +477,14 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 	}
 
 	if (node_ptr->cpu_load == NO_VAL) {
-		strcpy(tmp_cpu_load, "N/A");
+		strlcpy(tmp_cpu_load, "N/A", sizeof(tmp_cpu_load));
 	} else {
 		snprintf(tmp_cpu_load, sizeof(tmp_cpu_load),
 			 "%.2f", (node_ptr->cpu_load / 100.0));
 	}
 
 	if (node_ptr->free_mem == NO_VAL64) {
-		strcpy(tmp_free_mem, "N/A");
+		strlcpy(tmp_free_mem, "N/A", sizeof(tmp_free_mem));
 	} else {
 		snprintf(tmp_free_mem, sizeof(tmp_free_mem),
 		         "%"PRIu64"M", node_ptr->free_mem);
@@ -571,7 +555,7 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 			   SORTID_ACTIVE_FEATURES, node_ptr->features_act,
 			   SORTID_ARCH,      node_ptr->arch,
 			   SORTID_AVAIL_FEATURES,  node_ptr->features,
-			   SORTID_LOWEST_JOULES, tmp_base_watts,
+			   SORTID_AVE_WATTS, tmp_ave_watts,
 			   SORTID_BOARDS,    node_ptr->boards,
 			   SORTID_BOOT_TIME, sview_node_info_ptr->boot_time,
 			   SORTID_CLUSTER_NAME, node_ptr->cluster_name,
@@ -579,7 +563,6 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 			   SORTID_COLOR,
 				sview_colors[sview_node_info_ptr->pos
 				% sview_colors_cnt],
-			   SORTID_CONSUMED_ENERGY, tmp_consumed_energy,
 			   SORTID_CORES,     node_ptr->cores,
 			   SORTID_CPUS,      tmp_cpus,
 			   SORTID_CURRENT_WATTS, tmp_current_watts,
@@ -633,7 +616,7 @@ static void _update_info_node(List info_list, GtkTreeView *tree_view)
 	set_for_update(model, SORTID_UPDATED);
 
 	itr = list_iterator_create(info_list);
-	while ((sview_node_info = (sview_node_info_t*) list_next(itr))) {
+	while ((sview_node_info = list_next(itr))) {
 		/* This means the tree_store changed (added new column
 		 * or something). */
 		if (last_model != model)
@@ -713,7 +696,7 @@ need_refresh:
 	}
 
 	itr = list_iterator_create(info_list);
-	while ((sview_node_info = (sview_node_info_t*) list_next(itr))) {
+	while ((sview_node_info = list_next(itr))) {
 		node_ptr = sview_node_info->node_ptr;
 		i++;
 		if (!xstrcmp(node_ptr->name, name)) {
@@ -829,7 +812,6 @@ extern List create_node_info_list(node_info_msg_t *node_info_ptr,
 	if (last_list)
 		last_list_itr = list_iterator_create(last_list);
 	for (i=0; i<node_info_ptr->record_count; i++) {
-		char *select_reason_str = NULL;
 		node_ptr = &(node_info_ptr->node_array[i]);
 
 		if (!node_ptr->name || (node_ptr->name[0] == '\0'))
@@ -881,21 +863,6 @@ extern List create_node_info_list(node_info_msg_t *node_info_ptr,
 				"%s [%s@%s]", node_ptr->reason, user, time_str);
 		} else if (node_ptr->reason)
 			sview_node_info_ptr->reason = xstrdup(node_ptr->reason);
-
-		slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
-					  SELECT_NODEDATA_EXTRA_INFO,
-					  0, &select_reason_str);
-		if (select_reason_str && select_reason_str[0]) {
-			if (sview_node_info_ptr->reason)
-				xstrfmtcat(sview_node_info_ptr->reason, "\n%s",
-					   select_reason_str);
-			else {
-				sview_node_info_ptr->reason = select_reason_str;
-				select_reason_str = NULL;
-			}
-		}
-		xfree(select_reason_str);
-
 
 		if (node_ptr->boot_time) {
 			slurm_make_time_str(&node_ptr->boot_time,

@@ -5,8 +5,22 @@ The official issue tracker for Slurm is at
   https://bugs.schedmd.com/
 
 We welcome code contributions and patches, but **we do not accept Pull Requests
-through Github at this time.** Please submit patches as attachments to new
+through GitHub at this time.** Please submit patches as attachments to new
 bugs under the "C - Contributions" severity level.
+
+TARGET RELEASES
+---------------
+Changes involving adding new functionality, functional changes to the command
+line tools (either in adding new options, or changing the output formats), any
+RPC protocol changes or state file format modifications, and similar work is
+only considered for inclusion on the master branch (which will become the next
+stable Slurm release).
+
+Bug fixes themselves are considered for inclusion on the most recent stable
+release, although may be deferred to the next major release at the reviewers'
+discretion.
+
+All contributed patches are subject to review by SchedMD.
 
 CODING GUIDELINES
 -----------------
@@ -55,7 +69,7 @@ If you make an automated change (changing a function name, fixing a pervasive
 spelling mistake), please send the command/regex used to generate the changes
 along with the patch, or note it in the commit message.
 
-While not required, we encourage use of `git format-patch` to geneate the
+While not required, we encourage use of `git format-patch` to generate the
 patch. This ensures the relevant author line and commit message stay attached.
 Plain `diff`'d output is also okay. In either case, please attach them to the
 bug for us to review. Spelling corrections or documentation improvements can be

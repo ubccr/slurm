@@ -46,13 +46,17 @@
 
 /* convert a --x11 argument into flags */
 uint16_t x11_str2flags(const char *str);
+/* reverse the above */
+const char *x11_flags2str(uint16_t flags);
 
 /*
- * Get local TCP port for X11 from DISPLAY environment variable.
+ * Get local TCP port for X11 from DISPLAY environment variable, alongside an
+ * xmalloc()'d hostname in *target. If the port returned is 0, *target returns
+ * an xmalloc()'d string pointing to the local UNIX socket.
  *
  * Warning - will call exit(-1) if not able to retrieve.
  */
-extern int x11_get_display_port(void);
+extern void x11_get_display(uint16_t *port, char **target);
 
 /*
  * Retrieve the X11 magic cookie for the local DISPLAY

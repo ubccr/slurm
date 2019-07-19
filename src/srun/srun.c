@@ -159,16 +159,10 @@ static bool _enable_pack_steps(void)
 	bool enabled = true;
 	char *sched_params = slurm_get_sched_params();
 
-	if (sched_params && strstr(sched_params, "disable_hetero_steps"))
+	if (xstrcasestr(sched_params, "disable_hetero_steps"))
 		enabled = false;
-	else if (sched_params && strstr(sched_params, "enable_hetero_steps"))
+	else if (xstrcasestr(sched_params, "enable_hetero_steps"))
 		enabled = true;
-	else {
-		char *select_type = slurm_get_select_type();
-		if (select_type && strstr(select_type, "cray"))
-			enabled = false;
-		xfree(select_type);
-	}
 
 	xfree(sched_params);
 	return enabled;
@@ -357,6 +351,7 @@ static void _launch_app(srun_job_t *job, List srun_job_list, bool got_alloc)
 	bool need_mpir = false;
 	uint16_t *tmp_task_cnt = NULL, *pack_task_cnts = NULL;
 	uint32_t **tmp_tids = NULL, **pack_tids = NULL;
+	uint32_t *pack_tid_offsets = NULL;
 
 	launch_type = slurm_get_launch_type();
 	if (launch_type && strstr(launch_type, "slurm"))
@@ -374,7 +369,7 @@ static void _launch_app(srun_job_t *job, List srun_job_list, bool got_alloc)
 		}
 
 		job_iter = list_iterator_create(srun_job_list);
-		while ((job = (srun_job_t *) list_next(job_iter))) {
+		while ((job = list_next(job_iter))) {
 			char *node_list = NULL;
 			int i, node_inx;
 			total_ntasks += job->ntasks;
@@ -384,6 +379,14 @@ static void _launch_app(srun_job_t *job, List srun_job_list, bool got_alloc)
 			(void) slurm_step_ctx_get(job->step_ctx,
 						  SLURM_STEP_CTX_TASKS,
 						  &tmp_task_cnt);
+			xrealloc(pack_tid_offsets,
+				 sizeof(uint32_t) * total_ntasks);
+
+			for (i = total_ntasks - job->ntasks;
+			     i < total_ntasks;
+			     i++)
+				pack_tid_offsets[i] = job->pack_offset;
+
 			if (!tmp_task_cnt) {
 				fatal("%s: job %u has NULL task array",
 				      __func__, job->jobid);
@@ -435,10 +438,12 @@ static void _launch_app(srun_job_t *job, List srun_job_list, bool got_alloc)
 			mpir_init(total_ntasks);
 
 		opt_iter = list_iterator_create(opt_list);
+
+		/* copy aggregated pack data back into each sub-job */
 		while ((opt_local = list_next(opt_iter))) {
 			srun_opt_t *srun_opt = opt_local->srun_opt;
 			xassert(srun_opt);
-			job = (srun_job_t *) list_next(job_iter);
+			job = list_next(job_iter);
 			if (!job) {
 				slurm_mutex_lock(&step_mutex);
 				while (step_cnt > 0)
@@ -458,17 +463,24 @@ static void _launch_app(srun_job_t *job, List srun_job_list, bool got_alloc)
 			step_cnt++;
 			slurm_mutex_unlock(&step_mutex);
 			job->pack_node_list = xstrdup(pack_node_list);
-			if ((pack_step_cnt > 1) && pack_task_cnts) {
+			if ((pack_step_cnt > 1) && pack_task_cnts &&
+			    pack_tid_offsets) {
 				xassert(node_offset == job->pack_nnodes);
-				job->pack_task_cnts = xmalloc(sizeof(uint16_t) *
-							      job->pack_nnodes);
+				job->pack_task_cnts = xcalloc(job->pack_nnodes,
+							      sizeof(uint16_t));
 				memcpy(job->pack_task_cnts, pack_task_cnts,
 				       sizeof(uint16_t) * job->pack_nnodes);
-				job->pack_tids = xmalloc(sizeof(uint32_t *) *
-							 job->pack_nnodes);
+				job->pack_tids = xcalloc(job->pack_nnodes,
+							 sizeof(uint32_t *));
 				memcpy(job->pack_tids, pack_tids,
 				       sizeof(uint32_t *) * job->pack_nnodes);
+
+				job->pack_tid_offsets = xcalloc(
+					total_ntasks, sizeof(uint32_t));
+				memcpy(job->pack_tid_offsets, pack_tid_offsets,
+				       sizeof(uint32_t) * total_ntasks);
 			}
+
 			opts = xmalloc(sizeof(_launch_app_data_t));
 			opts->got_alloc   = got_alloc;
 			opts->job         = job;
@@ -483,6 +495,7 @@ static void _launch_app(srun_job_t *job, List srun_job_list, bool got_alloc)
 		}
 		xfree(pack_node_list);
 		xfree(pack_task_cnts);
+		xfree(pack_tid_offsets);
 		list_iterator_destroy(job_iter);
 		list_iterator_destroy(opt_iter);
 		slurm_mutex_lock(&step_mutex);
@@ -493,8 +506,39 @@ static void _launch_app(srun_job_t *job, List srun_job_list, bool got_alloc)
 		if (first_job)
 			fini_srun(first_job, got_alloc, &global_rc, 0);
 	} else {
+		int i;
 		if (need_mpir)
 			mpir_init(job->ntasks);
+		if (job->pack_jobid && (job->pack_jobid != NO_VAL)) {
+			(void) slurm_step_ctx_get(job->step_ctx,
+						  SLURM_STEP_CTX_TASKS,
+						  &tmp_task_cnt);
+			job->pack_task_cnts = xcalloc(job->pack_nnodes,
+						      sizeof(uint16_t));
+			memcpy(job->pack_task_cnts, tmp_task_cnt,
+			       sizeof(uint16_t) * job->pack_nnodes);
+			(void) slurm_step_ctx_get(job->step_ctx,
+						  SLURM_STEP_CTX_TIDS,
+						  &tmp_tids);
+			job->pack_tids = xcalloc(job->pack_nnodes,
+						 sizeof(uint32_t *));
+			memcpy(job->pack_tids, tmp_tids,
+			       sizeof(uint32_t *) * job->pack_nnodes);
+			job->pack_node_list = xstrdup(job->nodelist);
+
+			job->pack_tid_offsets = xcalloc(job->ntasks,
+							sizeof(uint32_t));
+			if (job->pack_offset) {
+				/*
+				 * Only starting one hetjob component,
+				 * pack_offset should be zero
+				 */
+				for (i = 0; i < job->ntasks; i++) {
+					job->pack_tid_offsets[i] =
+						job->pack_offset;
+				}
+			}
+		}
 		opts = xmalloc(sizeof(_launch_app_data_t));
 		opts->got_alloc   = got_alloc;
 		opts->job         = job;
@@ -544,7 +588,7 @@ static void _setup_one_job_env(slurm_opt_t *opt_local, srun_job_t *job,
 	env->overcommit = opt_local->overcommit;
 	env->slurmd_debug = srun_opt->slurmd_debug;
 	env->labelio = srun_opt->labelio;
-	env->comm_port = slurmctld_comm_addr.port;
+	env->comm_port = slurmctld_comm_port;
 	if (opt_local->job_name)
 		env->job_name = opt_local->job_name;
 
@@ -622,7 +666,7 @@ static void _setup_job_env(srun_job_t *job, List srun_job_list, bool got_alloc)
 		job_iter  = list_iterator_create(srun_job_list);
 		opt_iter  = list_iterator_create(opt_list);
 		while ((opt_local = list_next(opt_iter))) {
-			job = (srun_job_t *) list_next(job_iter);
+			job = list_next(job_iter);
 			if (!job) {
 				if (first_job) {
 					fini_srun(first_job, got_alloc,
@@ -661,7 +705,7 @@ static int _file_bcast(slurm_opt_t *opt_local, srun_job_t *job)
 		params->dst_fname = xstrdup(srun_opt->bcast_file);
 	} else {
 		xstrfmtcat(params->dst_fname, "%s/slurm_bcast_%u.%u",
-			   opt_local->cwd, job->jobid, job->stepid);
+			   opt_local->chdir, job->jobid, job->stepid);
 	}
 	params->fanout = 0;
 	params->job_id = job->jobid;
@@ -800,37 +844,43 @@ static void _pty_restore(void)
 
 static void _setup_env_working_cluster(void)
 {
-	char *working_env  = NULL;
+	char *working_env, *addr_ptr, *port_ptr, *rpc_ptr, *select_ptr;
 
-	if ((working_env = xstrdup(getenv("SLURM_WORKING_CLUSTER")))) {
-		char *addr_ptr, *port_ptr, *rpc_ptr;
+	if ((working_env = xstrdup(getenv("SLURM_WORKING_CLUSTER"))) == NULL)
+		return;
 
-		if (!(addr_ptr = strchr(working_env,  ':')) ||
-		    !(port_ptr = strchr(addr_ptr + 1, ':')) ||
-		    !(rpc_ptr  = strchr(port_ptr + 1, ':'))) {
-			error("malformed cluster addr and port in SLURM_WORKING_CLUSTER env var: '%s'",
-			      working_env);
-			exit(1);
-		}
-
-		*addr_ptr++ = '\0';
-		*port_ptr++ = '\0';
-		*rpc_ptr++  = '\0';
-
-		if (xstrcmp(slurmctld_conf.cluster_name, working_env)) {
-			working_cluster_rec =
-				xmalloc(sizeof(slurmdb_cluster_rec_t));
-			slurmdb_init_cluster_rec(working_cluster_rec, false);
-
-			working_cluster_rec->control_host = xstrdup(addr_ptr);;
-			working_cluster_rec->control_port = strtol(port_ptr,
-								   NULL, 10);
-			working_cluster_rec->rpc_version  = strtol(rpc_ptr,
-								   NULL, 10);
-			slurm_set_addr(&working_cluster_rec->control_addr,
-				       working_cluster_rec->control_port,
-				       working_cluster_rec->control_host);
-		}
-		xfree(working_env);
+	/* Format is cluster_name:address:port:rpc[:plugin_id_select] */
+	if (!(addr_ptr = strchr(working_env,  ':')) ||
+	    !(port_ptr = strchr(addr_ptr + 1, ':')) ||
+	    !(rpc_ptr  = strchr(port_ptr + 1, ':'))) {
+		error("malformed cluster addr and port in SLURM_WORKING_CLUSTER env var: '%s'",
+		      working_env);
+		exit(1);
 	}
+
+	*addr_ptr++ = '\0';
+	*port_ptr++ = '\0';
+	*rpc_ptr++  = '\0';
+
+	if ((select_ptr = strchr(rpc_ptr, ':')))
+		*select_ptr++ = '\0';
+
+	if (xstrcmp(slurmctld_conf.cluster_name, working_env)) {
+		working_cluster_rec = xmalloc(sizeof(slurmdb_cluster_rec_t));
+		slurmdb_init_cluster_rec(working_cluster_rec, false);
+
+		working_cluster_rec->name = xstrdup(working_env);
+		working_cluster_rec->control_host = xstrdup(addr_ptr);
+		working_cluster_rec->control_port = strtol(port_ptr, NULL, 10);
+		working_cluster_rec->rpc_version  = strtol(rpc_ptr, NULL, 10);
+		slurm_set_addr(&working_cluster_rec->control_addr,
+			       working_cluster_rec->control_port,
+			       working_cluster_rec->control_host);
+
+		if (select_ptr)
+			working_cluster_rec->plugin_id_select =
+				select_get_plugin_id_pos(strtol(select_ptr,
+								NULL, 10));
+	}
+	xfree(working_env);
 }

@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "November 2018" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "May 2019" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -24,6 +24,25 @@ https://slurm.schedmd.com/cpu_management.html
 srun will return the highest exit code of all tasks run or the highest signal
 (with the high-order bit set in an 8-bit integer -- e.g. 128 + signal) of any
 task that exited with a signal.
+
+.SH "EXECUTABLE PATH RESOLUTION"
+
+.nr step 1 1
+The executable is resolved in the following order:
+.br
+.IP \n[step]. 3
+If executable starts with ".", then path is constructed as:
+current working directory / executable
+.IP \n+[step].
+If executable starts with a "/", then path is considered absolute.
+.IP \n+[step].
+If executable can be resolved through PATH. See \fBpath_resolution\fR(7).
+.IP \n+[step].
+If executable is in current working directory.
+.P
+Current working directory is the calling process working directory unless the
+\fB\-\-chdir\fR argument is passed, which will override the current working
+directory.
 
 .SH "OPTIONS"
 .LP
@@ -159,7 +178,7 @@ allocated compute nodes and execute that file. This option applies to step
 allocations.
 
 .TP
-\fB\-\-begin\fR=<\fItime\fR>
+\fB\-b\fR, \fB\-\-begin\fR=<\fItime\fR>
 Defer initiation of this job until the specified time.
 It accepts times of the form \fIHH:MM:SS\fR to run a job at
 a specific time of day (seconds are optional).
@@ -210,15 +229,6 @@ By default, the job step will have no checkpoints created.
 Acceptable time formats include "minutes", "minutes:seconds",
 "hours:minutes:seconds", "days\-hours", "days\-hours:minutes" and
 "days\-hours:minutes:seconds". This option applies to job and step allocations.
-
-.TP
-\fB\-\-checkpoint\-dir\fR=<\fIdirectory\fR>
-Specifies the directory into which the job or job step's checkpoint should
-be written (used by the checkpoint/blcr and checkpoint/xlch plugins only).
-The default value is the current working directory.
-Checkpoint files will be of the form "<job_id>.ckpt" for jobs
-and "<job_id>.<step_id>.ckpt" for job steps. This option applies to job and
-step allocations.
 
 .TP
 \fB\-\-cluster\-constraint\fR=<\fIlist\fR>
@@ -586,6 +596,13 @@ This option applies to job and step allocations.
 .RE
 
 .TP
+\fB\-\-cpus\-per\-gpu\fR=<\fIncpus\fR>
+Advise Slurm that ensuing job steps will require \fIncpus\fR processors per
+allocated GPU.
+Requires the \fB\-\-gpus\fR option.
+Not compatible with the \fB\-\-cpus\-per\-task\fR option.
+
+.TP
 \fB\-c\fR, \fB\-\-cpus\-per\-task\fR=<\fIncpus\fR>
 Request that \fIncpus\fR be allocated \fBper process\fR. This may be
 useful if the job is multithreaded and requires more than one CPU
@@ -790,6 +807,14 @@ variables are always exported to the environment.
 \fIlaunch/slurm\fR, is not used.
 
 .TP
+\fB\-F\fR, \fB\-\-nodefile\fR=<\fInode file\fR>
+Much like \-\-nodelist, but the list is contained in a file of name
+\fInode file\fR.  The node names of the list may also span multiple lines
+in the file.    Duplicate node names in the file will be ignored.
+The order of the node names in the list is not important; the node names
+will be sorted by Slurm.
+
+.TP
 \fB\-\-gid\fR=<\fIgroup\fR>
 If \fBsrun\fR is run as root, and the \fB\-\-gid\fR option is used,
 submit the job with \fIgroup\fR's group access permissions.  \fIgroup\fR
@@ -797,11 +822,136 @@ may be the group name or the numerical group ID. This option applies to
 job allocations.
 
 .TP
+\fB\-G\fR, \fB\-\-gpus\fR=[<\fitype\fR>:]<\fInumber\fR>
+Specify the total number of GPUs required for the job.
+An optional GPU type specification can be supplied.
+For example "\-\-gpus=volta:3".
+Multiple options can be requested in a comma separated list, for example:
+"\-\-gpus=volta:3,kepler:1".
+See also the \fB\-\-gpus\-per\-node\fR, \fB\-\-gpus\-per\-socket\fR and
+\fB\-\-gpus\-per\-task\fR options.
+
+.TP
+\fB\-\-gpu\-bind\fR=<\fItype\fR>
+Bind tasks to specific GPUs.
+By default every spawned task can access every GPU allocated to the job.
+
+Supported \fItype\fR options:
+.RS
+.TP 10
+\fBclosest\fR
+Bind each task to the GPU(s) which are closest.
+In a NUMA environment, each task may be bound to more than one GPU (i.e.
+all GPUs in that NUMA environment).
+.TP
+\fBmap_gpu:<list>\fR
+Bind by setting GPU masks on tasks (or ranks) as specified where <list> is
+<gpu_id_for_task_0>,<gpu_id_for_task_1>,... GPU IDs are interpreted as decimal
+values unless they are preceded with '0x' in which case they interpreted as
+hexadecimal values. If the number of tasks (or ranks) exceeds the number of
+elements in this list, elements in the list will be reused as needed starting
+from the beginning of the list. To simplify support for large task counts,
+the lists may follow a map with an asterisk and repetition count.
+For example "map_cpu:0*4,1*4".
+Not supported unless the entire node is allocated to the job.
+.TP
+\fBmask_gpu:<list>\fR
+Bind by setting GPU masks on tasks (or ranks) as specified where <list> is
+<gpu_mask_for_task_0>,<gpu_mask_for_task_1>,... The mapping is specified for
+a node and identical mapping is applied to the tasks on every node (i.e. the
+lowest task ID on each node is mapped to the first mask specified in the list,
+etc.). GPU masks are always interpreted as hexadecimal values but can be
+preceded with an optional '0x'. Not supported unless the entire node is
+allocated to the job. To simplify support for large task counts, the lists
+may follow a map with an asterisk and repetition count.
+For example "mask_gpu:0x0f*4,0xf0*4".
+Not supported unless the entire node is allocated to the job.
+.RE
+
+.TP
+\fB\-\-gpu\-freq\fR=[<\fItype\fR]=\fIvalue\fR>[,<\fItype\fR=\fIvalue\fR>][,verbose]
+Request that GPUs allocated to the job are configured with specific frequency
+values.
+This option can be used to independently configure the GPU and its memory
+frequencies.
+After the job is completed, the frequencies of all affected GPUs will be reset
+to the highest possible values.
+In some cases, system power caps may override the requested values.
+The field \fItype\fR can be "memory".
+If \fItype\fR is not specified, the GPU frequency is implied.
+The \fIvalue\fR field can either be "low", "medium", "high", "highm1" or
+a numeric value in megahertz (MHz).
+If the specified numeric value is not possible, a value as close as
+possible will be used. See below for definition of the values.
+The \fIverbose\fR option causes current GPU frequency information to be logged.
+Examples of use include "\-\-gpu\-freq=medium,memory=high" and
+"\-\-gpu\-freq=450".
+
+Supported \fIvalue\fR definitions:
+.RS
+.TP 10
+\fBlow\fR
+the lowest available frequency.
+.TP
+\fBmedium\fR
+attempts to set a frequency in the middle of the available range.
+.TP
+\fBhigh\fR
+the highest available frequency.
+.TP
+\fBhighm1\fR
+(high minus one) will select the next highest available frequency.
+.RE
+
+.TP
+\fB\-\-gpus\-per\-node\fR=[<\fitype\fR>:]<\fInumber\fR>
+Specify the number of GPUs required for the job on each node included in
+the job's resource allocation.
+An optional GPU type specification can be supplied.
+For example "\-\-gpus\-per\-node=volta:3".
+Multiple options can be requested in a comma separated list, for example:
+"\-\-gpus\-per\-node=volta:3,kepler:1".
+See also the \fB\-\-gpus\fR, \fB\-\-gpus\-per\-socket\fR and
+\fB\-\-gpus\-per\-task\fR options.
+
+.TP
+\fB\-\-gpus\-per\-socket\fR=[<\fitype\fR>:]<\fInumber\fR>
+Specify the number of GPUs required for the job on each socket included in
+the job's resource allocation.
+An optional GPU type specification can be supplied.
+For example "\-\-gpus\-per\-socket=volta:3".
+Multiple options can be requested in a comma separated list, for example:
+"\-\-gpus\-per\-socket=volta:3,kepler:1".
+Requires job to specify a sockets per node count ( \-\-sockets\-per\-node).
+See also the \fB\-\-gpus\fR, \fB\-\-gpus\-per\-node\fR and
+\fB\-\-gpus\-per\-task\fR options.
+This option applies to job allocations.
+
+.TP
+\fB\-\-gpus\-per\-task\fR=[<\fitype\fR>:]<\fInumber\fR>
+Specify the number of GPUs required for the job on each task to be spawned
+in the job's resource allocation.
+An optional GPU type specification can be supplied.
+This option requires the specification of a task count.
+For example "\-\-gpus\-per\-task=volta:1".
+Multiple options can be requested in a comma separated list, for example:
+"\-\-gpus\-per\-task=volta:3,kepler:1".
+Requires job to specify a task count (\-\-nodes).
+See also the \fB\-\-gpus\fR, \fB\-\-gpus\-per\-socket\fR and
+\fB\-\-gpus\-per\-node\fR options.
+
+.TP
 \fB\-\-gres\fR=<\fIlist\fR>
 Specifies a comma delimited list of generic consumable resources.
 The format of each entry on the list is "name[[:type]:count]".
 The name is that of the consumable resource.
 The count is the number of those resources with a default value of 1.
+The count can have a suffix of
+"k" or "K" (multiple of 1024),
+"m" or "M" (multiple of 1024 x 1024),
+"g" or "G" (multiple of 1024 x 1024 x 1024),
+"t" or "T" (multiple of 1024 x 1024 x 1024 x 1024),
+"p" or "P" (multiple of 1024 x 1024 x 1024 x 1024 x 1024).
 The specified resources will be allocated to the job on each node.
 The available generic consumable resources is configurable by the system
 administrator.
@@ -913,9 +1063,8 @@ properly displaying the contents of the slurm_jobacct.log file when the
 \fB\-\-jobid\fR=<\fIjobid\fR>
 Initiate a job step under an already allocated job with job id \fIid\fR.
 Using this option will cause \fBsrun\fR to behave exactly as if the
-SLURM_JOB_ID environment variable was set. This option applies to job and step
+SLURM_JOB_ID environment variable was set. This option applies to step
 allocations.
-NOTE: For job allocations, this is only valid for users root and SlurmUser.
 
 .TP
 \fB\-K\fR, \fB\-\-kill\-on\-bad\-exit\fR[=0|1]
@@ -932,7 +1081,7 @@ single letter option must be followed immediately with the value and
 not include a space between them. For example "\-K1" and not "\-K 1".
 
 .TP
-\fB\-k\fR, \fB\-\-no\-kill\fR
+\fB\-k\fR, \fB\-\-no\-kill\fR [=off]
 Do not automatically terminate a job if one of the nodes it has been
 allocated fails. This option applies to job and step allocations.
 The job will assume all responsibilities for fault\-tolerance.
@@ -941,18 +1090,11 @@ Tasks launch using this option will not be considered terminated
 \fB\-W\fR, \fB\-\-wait\fR options will have no effect upon the job step).
 The active job step (MPI job) will likely suffer a fatal error,
 but subsequent job steps may be run if this option is specified.
+
+Specify an optional argument of "off" disable the effect of the
+\fBSLURM_NO_KILL\fR environment variable.
+
 The default action is to terminate the job upon node failure.
-
-.TP
-\fB\-\-launch-cmd\fR
-Print external launch command instead of running job normally through
-Slurm. This option is only valid if using something other than the
-\fIlaunch/slurm\fR plugin. This option applies to step allocations.
-
-.TP
-\fB\-\-launcher\-opts\fR=<\fIoptions\fR>
-Options for the external launcher if using something other than the
-\fIlaunch/slurm\fR plugin. This option applies to step allocations.
 
 .TP
 \fB\-l\fR, \fB\-\-label\fR
@@ -1176,14 +1318,15 @@ are allocated to jobs (\fBSelectType=select/linear\fR).
 Specifying a memory limit of zero for a job step will restrict the job step
 to the amount of memory allocated to the job, but not remove any of the job's
 memory allocation from being available to other job steps.
-Also see \fB\-\-mem\-per\-cpu\fR.
-\fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
+Also see fB\-\-mem\-per\-cpu\fR and fB\-\-mem\-per\-gpu\fR.
+The \fB\-\-mem\fR, \fB\-\-mem\-per\-cpu\fR and fB\-\-mem\-per\-gpu\fR
+options are mutually exclusive.
 
 NOTE: A memory size specification of zero is treated as a special case and
 grants the job access to all of the memory on each node for newly submitted jobs
 and all available job memory to a new job steps.
 
-Specificing new memory limits for job steps are only advisory.
+Specifying new memory limits for job steps are only advisory.
 
 If the job is allocated multiple nodes in a heterogeneous cluster, the memory
 limit on each node will be that of the node in the allocation with the smallest
@@ -1221,9 +1364,23 @@ of \fB\-\-mem\-per\-cpu\fR should be adjusted accordingly.
 Specifying a memory limit of zero for a job step will restrict the job step
 to the amount of memory allocated to the job, but not remove any of the job's
 memory allocation from being available to other job steps.
+Also see \fB\-\-mem\fR and fB\-\-mem\-per\-gpu\fR.
+The \fB\-\-mem\fR, \fB\-\-mem\-per\-cpu\fR and fB\-\-mem\-per\-gpu\fR
+options are mutually exclusive.
+
+.TP
+\fB\-\-mem\-per\-gpu\fR=<\fIsize[units]\fR>
+Minimum memory required per allocated GPU.
+Default units are megabytes unless the SchedulerParameters configuration
+parameter includes the "default_gbytes" option for gigabytes.
+Different units can be specified using the suffix [K|M|G|T].
+Default value is \fBDefMemPerGPU\fR and is available on both a global and
+per partition basis.
+If configured, the parameters can be seen using the \fBscontrol show config\fR
+and \fBscontrol show partition\fR commands.
 Also see \fB\-\-mem\fR.
-\fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive. This option
-applies to job and step allocations.
+The \fB\-\-mem\fR, \fB\-\-mem\-per\-cpu\fR and fB\-\-mem\-per\-gpu\fR
+options are mutually exclusive.
 
 .TP
 \fB\-\-mem\-bind\fR=[{\fIquiet,verbose\fR},]\fItype\fR
@@ -1867,16 +2024,6 @@ Allocate resources for the job from the named reservation. This option applies
 to job allocations.
 
 .TP
-\fB\-\-restart\-dir\fR=<\fIdirectory\fR>
-Specifies the directory from which the job or job step's checkpoint should
-be read (used by the checkpoint/blcrm and checkpoint/xlch plugins only). This
-option applies to job allocations.
-
-\fB\-\-share\fR
-The \fB\-\-share\fR option has been replaced by the \fB\-\-oversubscribe\fR
-option described below.
-
-.TP
 \fB\-s\fR, \fB\-\-oversubscribe\fR
 The job allocation can over\-subscribe resources with other running jobs.
 The resources to be over\-subscribed can be nodes, sockets, cores, and/or
@@ -1911,6 +2058,8 @@ be sent up to 60 seconds earlier than specified.
 By default, no signal is sent before the job's end time.
 If a \fIsig_num\fR is specified without any \fIsig_time\fR,
 the default time will be 60 seconds. This option applies to job allocations.
+To have the signal sent at preemption time see
+the \fBpreempt_send_user_signal\fR \fBSlurmctldParameter\R.
 
 .TP
 \fB\-\-slurmd\-debug\fR=<\fIlevel\fR>
@@ -2228,10 +2377,6 @@ be preferable as it avoids moving and storing data that will never be read.
 For OS X, the poll() function does not support stdin, so input from
 a terminal is not possible.
 .PP
-For BGQ srun only supports stdin to 1 task running on the system.  By
-default it is taskid 0 but can be changed with the \-i<taskid> as
-described below, or \-\-launcher\-opts="\-\-stdinrank=<taskid>".
-.PP
 This behavior may be changed with the
 \fB\-\-output\fR, \fB\-\-error\fR, and \fB\-\-input\fR
 (\fB\-o\fR, \fB\-e\fR, \fB\-i\fR) options. Valid format specifications
@@ -2391,9 +2536,6 @@ Same as \fB\-\-bb\fR
 \fBSLURM_CHECKPOINT\fR
 Same as \fB\-\-checkpoint\fR
 .TP
-\fBSLURM_CHECKPOINT_DIR\fR
-Same as \fB\-\-checkpoint\-dir\fR
-.TP
 \fBSLURM_COMPRESS\fR
 Same as \fB\-\-compress\fR
 .TP
@@ -2409,6 +2551,9 @@ Same as \fB\-\-cpu\-bind\fR
 \fBSLURM_CPU_FREQ_REQ\fR
 Same as \fB\-\-cpu\-freq\fR.
 .TP
+\fBSLURM_CPUS_PER_GPU\fR
+Same as \fB\-\-cpus\-per\-gpu\fR
+.TP
 \fBSLURM_CPUS_PER_TASK\fR
 Same as \fB\-c, \-\-cpus\-per\-task\fR
 .TP
@@ -2422,7 +2567,7 @@ Same as \fB\-\-delay\-boot\fR
 Same as \fB\-d, \-\-slurmd\-debug\fR
 .TP
 \fBSLURM_DEPENDENCY\fR
-\fB\-P, \-\-dependency\fR=<\fIjobid\fR>
+Same as \fB\-P, \-\-dependency\fR=<\fIjobid\fR>
 .TP
 \fBSLURM_DISABLE_STATUS\fR
 Same as \fB\-X, \-\-disable\-status\fR
@@ -2453,6 +2598,24 @@ This can be used by a script to distinguish application exit codes from
 various Slurm error conditions.
 Also see \fBSLURM_EXIT_ERROR\fR.
 .TP
+\fBSLURM_EXPORT_ENV\fR
+Same as \-\-export\fR
+.TP
+\fBSLURM_GPUS\fR
+Same as \fB\-G, \-\-gpus\fR
+.TP
+\fBSLURM_GPU_BIND\fR
+Same as \fB\-\-gpu\-bind\fR
+.TP
+\fBSLURM_GPU_FREQ\fR
+Same as \fB\-\-gpu\-freq\fR
+.TP
+\fBSLURM_GPUS_PER_NODE\fR
+Same as \fB\-\-gpus\-per\-node\fR
+.TP
+\fBSLURM_GPUS_PER_TASK\fR
+Same as \fB\-\-gpus\-per\-task\fR
+.TP
 \fBSLURM_GRES_FLAGS\fR
 Same as \-\-gres\-flags\fR
 .TP
@@ -2465,7 +2628,7 @@ Same as \fB\-\-gres\fR. Also see \fBSLURM_STEP_GRES\fR
 \fBSLURM_IMMEDIATE\fR
 Same as \fB\-I, \-\-immediate\fR
 .TP
-\fBSLURM_JOB_ID\fR (and \fBSLURM_JOBID\fR for backwards compatibility)
+\fBSLURM_JOB_ID\fR
 Same as \fB\-\-jobid\fR
 .TP
 \fBSLURM_JOB_NAME\fR
@@ -2489,6 +2652,9 @@ Same as \fB\-\-mem\-bind\fR
 \fBSLURM_MEM_PER_CPU\fR
 Same as \fB\-\-mem\-per\-cpu\fR
 .TP
+\fBSLURM_MEM_PER_GPU\fR
+Same as \fB\-\-mem\-per\-gpu\fR
+.TP
 \fBSLURM_MEM_PER_NODE\fR
 Same as \fB\-\-mem\fR
 .TP
@@ -2497,6 +2663,9 @@ Same as \fB\-\-mpi\fR
 .TP
 \fBSLURM_NETWORK\fR
 Same as \fB\-\-network\fR
+.TP
+\fBSLURM_NO_KILL\fR
+Same as \fB\-k\fR, \fB\-\-no\-kill\fR
 .TP
 \fBSLURM_NTASKS\fR (and \fBSLURM_NPROCS\fR for backwards compatibility)
 Same as \fB\-n, \-\-ntasks\fR
@@ -2549,9 +2718,6 @@ for that number of switches. See \fB\-\-switches\fR
 \fBSLURM_RESERVATION\fR
 Same as \fB\-\-reservation\fR
 .TP
-\fBSLURM_RESTART_DIR\fR
-Same as \fB\-\-restart\-dir\fR
-.TP
 \fBSLURM_RESV_PORTS\fR
 Same as \fB\-\-resv\-ports\fR
 .TP
@@ -2589,8 +2755,9 @@ Same as \fB\-\-task\-epilog\fR
 Same as \fB\-\-task\-prolog
 .TP
 \fBSLURM_TEST_EXEC\fR
-if defined, then verify existence of the executable program on the local
-computer before attempting to launch it on compute nodes.
+If defined, srun will verify existence of the executable program along with user
+execute permission on the node where srun was called before attempting to
+launch it on nodes in the step.
 .TP
 \fBSLURM_THREAD_SPEC\fR
 Same as \fB\-\-thread\-spec\fR
@@ -2618,6 +2785,9 @@ Same as \fB\-W, \-\-wckey\fR
 .TP
 \fBSLURM_WORKING_DIR\fR
 \fB\-D, \-\-chdir\fR
+.TP
+\fBSRUN_EXPORT_ENV\fR
+Same as \-\-export\fR, and will override any setting for \fBSRUN_EXPORT_ENV\fR.
 
 
 .SH "OUTPUT ENVIRONMENT VARIABLES"
@@ -2628,12 +2798,8 @@ These environment variables are:
 
 .TP 22
 \fBSLURM_*_PACK_GROUP_#\fR
-For a heterogenous job allocation, the environment variables are set separately
+For a heterogeneous job allocation, the environment variables are set separately
 for each component.
-.TP
-\fBSLURM_CHECKPOINT_IMAGE_DIR\fR
-Directory into which checkpoint images should be written
-if specified on the execute line.
 .TP
 \fBSLURM_CLUSTER_NAME\fR
 Name of the cluster on which the job is executing.
@@ -2665,6 +2831,10 @@ jobs, so the value indicates the total count of CPUs on the node.
 For the select/cons_res plugin, this number indicates the number of cores
 on this node allocated to the job.
 .TP
+\fBSLURM_CPUS_PER_GPU\fR
+Number of CPUs requested per allocated GPU.
+Only set if the \fB\-\-cpus\-per\-gpu\fR option is specified.
+.TP
 \fBSLURM_CPUS_PER_TASK\fR
 Number of cpus requested per task.
 Only set if the \fB\-\-cpus\-per\-task\fR option is specified.
@@ -2672,6 +2842,30 @@ Only set if the \fB\-\-cpus\-per\-task\fR option is specified.
 \fBSLURM_DISTRIBUTION\fR
 Distribution type for the allocated jobs. Set the distribution
 with \-m, \-\-distribution.
+.TP
+\fBSLURM_GPUS\fR
+Number of GPUs requested.
+Only set if the \fB\-G, \-\-gpus\fR option is specified.
+.TP
+\fBSLURM_GPU_BIND\fR
+Requested binding of tasks to GPU.
+Only set if the \fB\-\-gpu\-bind\fR option is specified.
+.TP
+\fBSLURM_GPU_FREQ\fR
+Requested GPU frequency.
+Only set if the \fB\-\-gpu\-freq\fR option is specified.
+.TP
+\fBSLURM_GPUS_PER_NODE\fR
+Requested GPU count per allocated node.
+Only set if the \fB\-\-gpus\-per\-node\fR option is specified.
+.TP
+\fBSLURM_GPUS_PER_SOCKET\fR
+Requested GPU count per allocated socket.
+Only set if the \fB\-\-gpus\-per\-socket\fR option is specified.
+.TP
+\fBSLURM_GPUS_PER_TASK\fR
+Requested GPU count per allocated task.
+Only set if the \fB\-\-gpus\-per\-task\fR option is specified.
 .TP
 \fBSLURM_GTIDS\fR
 Global task IDs running on this node.
@@ -2730,6 +2924,10 @@ Sort free cache pages (run zonesort on Intel KNL nodes).
 \fBSLURM_MEM_BIND_VERBOSE\fR
 \-\-mem\-bind verbosity (quiet,verbose).
 .TP
+\fBSLURM_MEM_PER_GPU\fR
+Requested memory per allocated GPU.
+Only set if the \fB\-\-mem\-per\-gpu\fR option is specified.
+.TP
 \fBSLURM_JOB_NODES\fR
 Total number of nodes in the job's resource allocation.
 .TP
@@ -2785,7 +2983,8 @@ Number of processes per node within the step.
 The step ID of the current job.
 .TP
 \fBSLURM_SUBMIT_DIR\fR
-The directory from which \fBsrun\fR was invoked.
+The directory from which \fBsrun\fR was invoked or, if applicable, the
+directory specified by the \fB\-D, \-\-chdir\fR option.
 .TP
 \fBSLURM_SUBMIT_HOST\fR
 The hostname of the computer from which \fBsalloc\fR was invoked.

@@ -49,11 +49,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
 
 #include "src/common/hostlist.h"
 #include "src/common/macros.h"
-#include "src/common/slurm_protocol_socket_common.h"
 #include "src/common/slurm_route.h"
 #include "src/common/timers.h"
 #include "src/common/xmalloc.h"
@@ -233,7 +233,7 @@ int _run_test(char** testcase, int lines)
 	if (route_g_split_hostlist(hl, &hll, &hl_count, 0)) {
 		info("Unable to split forward hostlist");
 		_print_test(testcase,lines);
-		rc = SLURM_FAILURE;
+		rc = SLURM_ERROR;
 		goto clean;
 	}
 	if (hl_count != (lines-1)) {
@@ -241,7 +241,7 @@ int _run_test(char** testcase, int lines)
 			hl_count);
 		_print_test(testcase,lines);
 		_print_results(hll, hl_count);
-		rc = SLURM_FAILURE;
+		rc = SLURM_ERROR;
 		goto clean;
 	}
 	for (i = 0; i < hl_count; i++) {
@@ -251,7 +251,7 @@ int _run_test(char** testcase, int lines)
 				testcase[i+1]);
 			_print_test(testcase,lines);
 			xfree(list);
-			rc = SLURM_FAILURE;
+			rc = SLURM_ERROR;
 			goto clean;
 		}
 		xfree(list);
@@ -313,7 +313,7 @@ int main(int argc, char *argv[])
 					et = _measure_api(measure_case);
 				} else {
 					rc = _run_test(testcase, tl);
-					if (rc == SLURM_FAILURE)
+					if (rc == SLURM_ERROR)
 						nfail++;
 				}
 				tl = -1;
@@ -329,7 +329,7 @@ int main(int argc, char *argv[])
 			et = _measure_api(measure_case);
 		} else {
 			rc = _run_test(testcase, tl);
-			if (rc == SLURM_FAILURE)
+			if (rc == SLURM_ERROR)
 				nfail++;
 		}
 	}

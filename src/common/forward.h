@@ -54,7 +54,7 @@ extern void forward_init(forward_t *forward, forward_t *from);
 /*
  * forward_msg	      - logic to forward a message which has been received and
  *			accumulate the return codes from processes getting the
- *			the forwarded message
+ *			forwarded message
  *
  * IN: forward_struct - forward_struct_t *   - holds information about message
  *                                             that needs to be forwarded to
@@ -70,7 +70,7 @@ extern void forward_init(forward_t *forward, forward_t *from);
 
 forward_struct = xmalloc(sizeof(forward_struct_t));
 forward_struct->buf_len = remaining_buf(buffer);
-forward_struct->buf = xmalloc(sizeof(char) * forward_struct->buf_len);
+forward_struct->buf = xmalloc(forward_struct->buf_len);
 memcpy(forward_struct->buf, &buffer->head[buffer->processed],
        forward_struct->buf_len);
 forward_struct->ret_list = ret_list;
@@ -90,7 +90,7 @@ extern int forward_msg(forward_struct_t *forward_struct,
 /*
  * start_msg_tree  - logic to begin the forward tree and
  *                   accumulate the return codes from processes getting the
- *                   the forwarded message
+ *                   forwarded message
  *
  * IN: hl          - hostlist_t   - list of every node to send message to
  * IN: msg         - slurm_msg_t  - message to send.

@@ -568,6 +568,7 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		{ "grp_wall", "int default NULL" },
 		{ "preempt", "text not null default ''" },
 		{ "preempt_mode", "int default 0" },
+		{ "preempt_exempt_time", "int unsigned default NULL" },
 		{ "priority", "int unsigned default 0" },
 		{ "usage_factor", "double default 1.0 not null" },
 		{ "usage_thres", "double default NULL" },
@@ -628,6 +629,7 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		"set @mtpn = ''; "
 		"set @mtmpj = ''; "
 		"set @mtrm = ''; "
+		"set @prio = NULL; "
 		"set @def_qos_id = NULL; "
 		"set @qos = ''; "
 		"set @delta_qos = ''; "
@@ -636,6 +638,7 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		"set @mj = 0; "
 		"set @msj = 0; "
 		"set @mwpj = 0; "
+		"set @prio = 0; "
 		"set @def_qos_id = 0; "
 		"set @qos = 1; "
 		"end if; "
@@ -658,6 +661,9 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		"end if; "
 		"if @mwpj is NULL then set @s = CONCAT("
 		"@s, '@mwpj := max_wall_pj, '); "
+		"end if; "
+		"if @prio is NULL then set @s = CONCAT("
+		"@s, '@prio := priority, '); "
 		"end if; "
 		"if @def_qos_id is NULL then set @s = CONCAT("
 		"@s, '@def_qos_id := def_qos_id, '); "
@@ -820,7 +826,7 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 	   built off this one */
 	if (mysql_db_create_table(mysql_conn, cluster_table,
 				  cluster_table_fields,
-				  ", primary key (name(20)))") == SLURM_ERROR)
+				  ", primary key (name(42)))") == SLURM_ERROR)
 		return SLURM_ERROR;
 
 	/* This table needs to be made before conversions also since
@@ -833,7 +839,7 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 	if (mysql_db_create_table(mysql_conn, tres_table,
 				  tres_table_fields,
 				  ", primary key (id), "
-				  "unique index (type(20), name(20))) "
+				  "unique index udex (type(42), name(42))) "
 				  "auto_increment=1001")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
@@ -958,26 +964,26 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 
 	if (mysql_db_create_table(mysql_conn, acct_coord_table,
 				  acct_coord_table_fields,
-				  ", primary key (acct(20), user(20)), "
-				  "key user (user(20)))")
+				  ", primary key (acct(42), user(42)), "
+				  "key user (user(42)))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
 	if (mysql_db_create_table(mysql_conn, acct_table, acct_table_fields,
-				  ", primary key (name(20)))") == SLURM_ERROR)
+				  ", primary key (name(42)))") == SLURM_ERROR)
 		return SLURM_ERROR;
 
 	if (mysql_db_create_table(mysql_conn, res_table,
 				  res_table_fields,
 				  ", primary key (id), "
-				  "unique index (name(20), server(20), type))")
+				  "unique index udex (name(42), server(42), type))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
 	if (mysql_db_create_table(mysql_conn, clus_res_table,
 				  clus_res_table_fields,
-				  ", primary key (res_id, cluster(20)), "
-				  "unique index (res_id, cluster(20)))")
+				  ", primary key (res_id, cluster(42)), "
+				  "unique index udex (res_id, cluster(42)))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -985,7 +991,7 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 	if (mysql_db_create_table(mysql_conn, qos_table,
 				  qos_table_fields,
 				  ", primary key (id), "
-				  "unique index (name(20)))")
+				  "unique index udex (name(42)))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 	else {
@@ -1049,12 +1055,12 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 
 	/* This must be ran after create_cluster_tables() */
 	if (mysql_db_create_table(mysql_conn, user_table, user_table_fields,
-				  ", primary key (name(20)))") == SLURM_ERROR)
+				  ", primary key (name(42)))") == SLURM_ERROR)
 		return SLURM_ERROR;
 
 	if (mysql_db_create_table(mysql_conn, federation_table,
 				  federation_table_fields,
-				  ", primary key (name(20)))") == SLURM_ERROR)
+				  ", primary key (name(42)))") == SLURM_ERROR)
 		return SLURM_ERROR;
 
 	rc = as_mysql_convert_non_cluster_tables_post_create(mysql_conn);
@@ -1194,6 +1200,7 @@ extern int create_cluster_assoc_table(
 		{ "grp_tres_mins", "text not null default ''" },
 		{ "grp_tres_run_mins", "text not null default ''" },
 		{ "grp_wall", "int default NULL" },
+		{ "priority", "int unsigned default NULL" },
 		{ "def_qos_id", "int default NULL" },
 		{ "qos", "blob not null default ''" },
 		{ "delta_qos", "blob not null default ''" },
@@ -1207,9 +1214,9 @@ extern int create_cluster_assoc_table(
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  assoc_table_fields,
 				  ", primary key (id_assoc), "
-				  "unique index (user(20), acct(20), "
-				  "`partition`(20)), "
-				  "key lft (lft), key account (acct(20)))")
+				  "unique index udex (user(42), acct(42), "
+				  "`partition`(42)), "
+				  "key lft (lft), key account (acct(42)))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -1241,7 +1248,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "cluster_nodes", "text not null default ''" },
 		{ "reason", "tinytext not null" },
 		{ "reason_uid", "int unsigned default 0xfffffffe not null" },
-		{ "state", "smallint unsigned default 0 not null" },
+		{ "state", "int unsigned default 0 not null" },
 		{ "tres", "text not null default ''" },
 		{ NULL, NULL}
 	};
@@ -1266,10 +1273,12 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "array_task_str", "text" },
 		{ "array_max_tasks", "int unsigned default 0 not null" },
 		{ "array_task_pending", "int unsigned default 0 not null" },
+		{ "constraints", "text default ''" },
 		{ "cpus_req", "int unsigned not null" },
 		{ "derived_ec", "int unsigned default 0 not null" },
 		{ "derived_es", "text" },
 		{ "exit_code", "int unsigned default 0 not null" },
+		{ "flags", "int unsigned default 0 not null" },
 		{ "job_name", "tinytext not null" },
 		{ "id_assoc", "int unsigned not null" },
 		{ "id_array_job", "int unsigned default 0 not null" },
@@ -1284,6 +1293,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "pack_job_id", "int unsigned not null" },
 		{ "pack_job_offset", "int unsigned not null" },
 		{ "kill_requid", "int default -1 not null" },
+		{ "state_reason_prev", "int unsigned not null" },
 		{ "mcs_label", "tinytext default ''" },
 		{ "mem_req", "bigint unsigned default 0 not null" },
 		{ "nodelist", "text" },
@@ -1321,7 +1331,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "id_resv", "int unsigned default 0 not null" },
 		{ "deleted", "tinyint default 0 not null" },
 		{ "assoclist", "text not null default ''" },
-		{ "flags", "smallint unsigned default 0 not null" },
+		{ "flags", "bigint unsigned default 0 not null" },
 		{ "nodelist", "text not null default ''" },
 		{ "node_inx", "text not null default ''" },
 		{ "resv_name", "text not null" },
@@ -1461,7 +1471,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  event_table_fields,
-				  ", primary key (node_name(20), time_start))")
+				  ", primary key (node_name(42), time_start))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -1531,8 +1541,8 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  wckey_table_fields,
 				  ", primary key (id_wckey), "
-				  " unique index (wckey_name(20), "
-				  "user(20)))")
+				  " unique index udex (wckey_name(42), "
+				  "user(42)))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -1658,6 +1668,8 @@ extern int setup_assoc_limits(slurmdb_assoc_rec_t *assoc,
 			assoc->max_submit_jobs = INFINITE;
 		if (assoc->max_wall_pj == NO_VAL)
 			assoc->max_wall_pj = INFINITE;
+		if (assoc->priority == NO_VAL)
+			assoc->priority = INFINITE;
 		if (assoc->def_qos_id == NO_VAL)
 			assoc->def_qos_id = INFINITE;
 	}
@@ -1786,6 +1798,17 @@ extern int setup_assoc_limits(slurmdb_assoc_rec_t *assoc,
 		xstrcat(*cols, ", max_wall_pj");
 		xstrfmtcat(*vals, ", %u", assoc->max_wall_pj);
 		xstrfmtcat(*extra, ", max_wall_pj=%u", assoc->max_wall_pj);
+	}
+
+	if (assoc->priority == INFINITE) {
+		xstrcat(*cols, ", priority");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", priority=NULL");
+	} else if ((assoc->priority != NO_VAL)
+		   && ((int32_t)assoc->priority >= 0)) {
+		xstrcat(*cols, ", priority");
+		xstrfmtcat(*vals, ", %u", assoc->priority);
+		xstrfmtcat(*extra, ", priority=%u", assoc->priority);
 	}
 
 	if (assoc->def_qos_id == INFINITE) {
@@ -2143,6 +2166,7 @@ extern int remove_common(mysql_conn_t *mysql_conn,
 				   "grp_tres_run_mins=DEFAULT, "
 				   "grp_wall=DEFAULT, "
 				   "preempt=DEFAULT, "
+				   "preempt_exempt_time=DEFAULT, "
 				   "priority=DEFAULT, "
 				   "usage_factor=DEFAULT, "
 				   "usage_thres=DEFAULT "
@@ -2398,7 +2422,8 @@ just_update:
 			       "grp_tres=DEFAULT, "
 			       "grp_tres_mins=DEFAULT, "
 			       "grp_tres_run_mins=DEFAULT, "
-			       "qos=DEFAULT, delta_qos=DEFAULT "
+			       "qos=DEFAULT, delta_qos=DEFAULT, "
+			       "priority=DEFAULT "
 			       "where (%s);",
 			       cluster_name, assoc_table, now,
 			       loc_assoc_char);

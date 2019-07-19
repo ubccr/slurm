@@ -67,6 +67,7 @@
 strong_alias(preempt_mode_string, slurm_preempt_mode_string);
 strong_alias(preempt_mode_num, slurm_preempt_mode_num);
 strong_alias(job_reason_string, slurm_job_reason_string);
+strong_alias(job_reason_num, slurm_job_reason_num);
 strong_alias(job_share_string, slurm_job_share_string);
 strong_alias(job_state_string, slurm_job_state_string);
 strong_alias(job_state_string_compact, slurm_job_state_string_compact);
@@ -75,7 +76,6 @@ strong_alias(node_state_string, slurm_node_state_string);
 strong_alias(node_state_string_compact, slurm_node_state_string_compact);
 strong_alias(private_data_string, slurm_private_data_string);
 strong_alias(accounting_enforce_string, slurm_accounting_enforce_string);
-strong_alias(node_use_string, slurm_node_use_string);
 strong_alias(cray_nodelist2nids, slurm_cray_nodelist2nids);
 strong_alias(reservation_flags_string, slurm_reservation_flags_string);
 strong_alias(print_multi_line_string, slurm_print_multi_line_string);
@@ -277,16 +277,20 @@ extern int slurm_addto_char_list_with_case(List char_list, char *names,
 			else if ((names[i] == '\"') || (names[i] == '\''))
 				names[i] = '`';
 			else if (names[i] == '[')
-			       /* Make sure there is a open bracket. This
+			       /*
+				* Make sure there is a open bracket. This
 				* check is to allow comma sperated notation
-				* within the bracket ie. linux[0-1,2]  */
+				* within the bracket (e.g. "linux[0-1,2]").
+				*/
 				first_brack = true;
 			else if (names[i] == ',' && !first_brack) {
 				/* Check that the string before , was
 				 * not a [] notation value */
 				if (!brack_not) {
-					/* If there is a comma at the end just
-					 * ignore it */
+					/*
+					 * If there is a comma at the end just
+					 * ignore it
+					 */
 					if (!names[i+1])
 						break;
 
@@ -294,10 +298,11 @@ extern int slurm_addto_char_list_with_case(List char_list, char *names,
 							(i-start));
 					//info("got %s %d", name, i-start);
 
-					/* If we get a duplicate remove the
+					/*
+					 * If we get a duplicate remove the
 					 * first one and tack this on the end.
 					 * This is needed for get associations
-					 * with qos.
+					 * with QOS.
 					 */
 					if (list_find(itr,
 						      slurm_find_char_in_list,
@@ -324,8 +329,10 @@ extern int slurm_addto_char_list_with_case(List char_list, char *names,
 					}
 				} else {
 					brack_not = false;
-					/* Skip over the , so it is
-					 * not included in the char list */
+					/*
+					 * Skip over the "," so it is
+					 * not included in the char list
+					 */
 					start = ++i;
 				}
 			} else if (names[i] == ']') {
@@ -335,20 +342,21 @@ extern int slurm_addto_char_list_with_case(List char_list, char *names,
 				//info("got %s %d", name, i-start);
 
 				if ((host_list = hostlist_create(name))) {
-					/* FIXME: hostlist_shift returns
-					 * a malloc'd string, but we need
-					 * an xmalloc'd string to add to the
-					 * list. cleanup when hostlist uses
-					 * xmalloc */
-					while ((this_node_name =
-						xstrdup((tmp_this_node_name =
-						hostlist_shift (host_list))))) {
+					while ((tmp_this_node_name =
+						hostlist_shift(host_list))) {
+						/*
+						 * Move from malloc-ed to
+						 * xmalloc-ed memory
+						 */
+						this_node_name =
+						    xstrdup(tmp_this_node_name);
 						free(tmp_this_node_name);
-						/* If we get a duplicate
+						/*
+						 * If we get a duplicate
 						 * remove the first one and tack
 						 * this on the end. This is
 						 * needed for get associations
-						 * with qos.
+						 * with QOS.
 						 */
 						if (list_find(
 							itr,
@@ -376,10 +384,10 @@ extern int slurm_addto_char_list_with_case(List char_list, char *names,
 		/* check for empty strings user='' etc */
 		if ((cnt == list_count(char_list)) || (i - start)) {
 			name = xstrndup(names+start, (i-start));
-			/* If we get a duplicate remove the
-			 * first one and tack this on the end.
-			 * This is needed for get associations
-			 * with qos.
+			/*
+			 * If we get a duplicate remove the first one and
+			 * tack this on the end. This is needed for get
+			 * associations with QOS.
 			 */
 			if (list_find(itr, slurm_find_char_in_list, name)) {
 				list_delete_item(itr);
@@ -877,7 +885,7 @@ extern void slurm_free_job_desc_msg(job_desc_msg_t *msg)
 		xfree(msg->wckey);
 		xfree(msg->work_dir);
 		xfree(msg->x11_magic_cookie);
-		/* no x11_target_host, its the same as alloc_node */
+		xfree(msg->x11_target);
 		xfree(msg);
 	}
 }
@@ -907,6 +915,7 @@ extern void slurm_free_prolog_launch_msg(prolog_launch_msg_t * msg)
 
 	if (msg) {
 		xfree(msg->alias_list);
+		FREE_NULL_LIST(msg->job_gres_info);
 		xfree(msg->nodes);
 		xfree(msg->partition);
 		xfree(msg->std_err);
@@ -914,8 +923,9 @@ extern void slurm_free_prolog_launch_msg(prolog_launch_msg_t * msg)
 		xfree(msg->work_dir);
 		xfree(msg->user_name);
 
+		xfree(msg->x11_alloc_host);
 		xfree(msg->x11_magic_cookie);
-		xfree(msg->x11_target_host);
+		xfree(msg->x11_target);
 
 		if (msg->spank_job_env) {
 			for (i = 0; i < msg->spank_job_env_size; i++)
@@ -928,8 +938,7 @@ extern void slurm_free_prolog_launch_msg(prolog_launch_msg_t * msg)
 	}
 }
 
-extern void slurm_free_complete_prolog_msg(
-	complete_prolog_msg_t * msg)
+extern void slurm_free_complete_prolog_msg(complete_prolog_msg_t * msg)
 {
 	xfree(msg);
 }
@@ -1262,6 +1271,7 @@ extern void slurm_free_kill_job_msg(kill_job_msg_t * msg)
 {
 	if (msg) {
 		int i;
+		FREE_NULL_LIST(msg->job_gres_info);
 		xfree(msg->nodes);
 		select_g_select_jobinfo_free(msg->select_jobinfo);
 		msg->select_jobinfo = NULL;
@@ -1330,6 +1340,13 @@ extern void slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg
 	xfree(msg->gids);
 	xfree(msg->pack_node_list);
 	xfree(msg->pack_task_cnts);
+	if ((msg->pack_nnodes != NO_VAL) && msg->pack_tids) {
+		/* pack_tids == NULL if request from pre-v19.05 srun */
+		for (i = 0; i < msg->pack_nnodes; i++)
+			xfree(msg->pack_tids[i]);
+		xfree(msg->pack_tids);
+	}
+	xfree(msg->pack_tid_offsets);
 	xfree(msg->tasks_to_launch);
 	xfree(msg->resp_port);
 	xfree(msg->io_port);
@@ -1357,8 +1374,9 @@ extern void slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg
 
 	xfree(msg->tres_bind);
 	xfree(msg->tres_freq);
+	xfree(msg->x11_alloc_host);
 	xfree(msg->x11_magic_cookie);
-	xfree(msg->x11_target_host);
+	xfree(msg->x11_target);
 
 	xfree(msg);
 }
@@ -1443,6 +1461,14 @@ extern void slurm_free_srun_exec_msg(srun_exec_msg_t *msg)
 extern void slurm_free_srun_ping_msg(srun_ping_msg_t * msg)
 {
 	xfree(msg);
+}
+
+extern void slurm_free_net_forward_msg(net_forward_msg_t *msg)
+{
+	if (msg) {
+		xfree(msg->target);
+		xfree(msg);
+	}
 }
 
 extern void slurm_free_srun_node_fail_msg(srun_node_fail_msg_t * msg)
@@ -2002,6 +2028,409 @@ extern char *job_reason_string(enum job_state_reason inx)
 	}
 }
 
+/* Given a job's reason string for waiting, return enum job_state_reason */
+extern enum job_state_reason job_reason_num(char *reason)
+{
+	if (!xstrcasecmp(reason, "None"))
+		return WAIT_NO_REASON;
+	if (!xstrcasecmp(reason, "Prolog"))
+		return WAIT_PROLOG;
+	if (!xstrcasecmp(reason, "Priority"))
+		return WAIT_PRIORITY;
+	if (!xstrcasecmp(reason, "Dependency"))
+		return WAIT_DEPENDENCY;
+	if (!xstrcasecmp(reason, "Resources"))
+		return WAIT_RESOURCES;
+	if (!xstrcasecmp(reason, "PartitionNodeLimit"))
+		return WAIT_PART_NODE_LIMIT;
+	if (!xstrcasecmp(reason, "PartitionTimeLimit"))
+		return WAIT_PART_TIME_LIMIT;
+	if (!xstrcasecmp(reason, "PartitionDown"))
+		return WAIT_PART_DOWN;
+	if (!xstrcasecmp(reason, "PartitionInactive"))
+		return WAIT_PART_INACTIVE;
+	if (!xstrcasecmp(reason, "JobHeldAdmin"))
+		return WAIT_HELD;
+	if (!xstrcasecmp(reason, "JobHeldUser"))
+		return WAIT_HELD_USER;
+	if (!xstrcasecmp(reason, "BeginTime"))
+		return WAIT_TIME;
+	if (!xstrcasecmp(reason, "Licenses"))
+		return WAIT_LICENSES;
+	if (!xstrcasecmp(reason, "AssociationJobLimit"))
+		return WAIT_ASSOC_JOB_LIMIT;
+	if (!xstrcasecmp(reason, "AssociationResourceLimit"))
+		return WAIT_ASSOC_RESOURCE_LIMIT;
+	if (!xstrcasecmp(reason, "AssociationTimeLimit"))
+		return WAIT_ASSOC_TIME_LIMIT;
+	if (!xstrcasecmp(reason, "Reservation"))
+		return WAIT_RESERVATION;
+	if (!xstrcasecmp(reason, "ReqNodeNotAvail"))
+		return WAIT_NODE_NOT_AVAIL;
+	if (!xstrcasecmp(reason, "FrontEndDown"))
+		return WAIT_FRONT_END;
+	if (!xstrcasecmp(reason, "PartitionDown"))
+		return FAIL_DOWN_PARTITION;
+	if (!xstrcasecmp(reason, "NodeDown"))
+		return FAIL_DOWN_NODE;
+	if (!xstrcasecmp(reason, "BadConstraints"))
+		return FAIL_BAD_CONSTRAINTS;
+	if (!xstrcasecmp(reason, "SystemFailure"))
+		return FAIL_SYSTEM;
+	if (!xstrcasecmp(reason, "JobLaunchFailure"))
+		return FAIL_LAUNCH;
+	if (!xstrcasecmp(reason, "NonZeroExitCode"))
+		return FAIL_EXIT_CODE;
+	if (!xstrcasecmp(reason, "TimeLimit"))
+		return FAIL_TIMEOUT;
+	if (!xstrcasecmp(reason, "InactiveLimit"))
+		return FAIL_INACTIVE_LIMIT;
+	if (!xstrcasecmp(reason, "InvalidAccount"))
+		return FAIL_ACCOUNT;
+	if (!xstrcasecmp(reason, "InvalidQOS"))
+		return FAIL_QOS;
+	if (!xstrcasecmp(reason, "QOSUsageThreshold"))
+		return WAIT_QOS_THRES;
+	if (!xstrcasecmp(reason, "QOSJobLimit"))
+		return WAIT_QOS_JOB_LIMIT;
+	if (!xstrcasecmp(reason, "QOSResourceLimit"))
+		return WAIT_QOS_RESOURCE_LIMIT;
+	if (!xstrcasecmp(reason, "QOSTimeLimit"))
+		return WAIT_QOS_TIME_LIMIT;
+	if (!xstrcasecmp(reason, "BlockMaxError"))
+		return WAIT_BLOCK_MAX_ERR;
+	if (!xstrcasecmp(reason, "BlockFreeAction"))
+		return WAIT_BLOCK_D_ACTION;
+	if (!xstrcasecmp(reason, "Cleaning"))
+		return WAIT_CLEANING;
+	if (!xstrcasecmp(reason, "QOSNotAllowed"))
+		return WAIT_QOS;
+	if (!xstrcasecmp(reason, "AccountNotAllowed"))
+		return WAIT_ACCOUNT;
+	if (!xstrcasecmp(reason, "DependencyNeverSatisfied"))
+		return WAIT_DEP_INVALID;
+	if (!xstrcasecmp(reason, "QOSGrpCpuLimit"))
+		return WAIT_QOS_GRP_CPU;
+	if (!xstrcasecmp(reason, "QOSGrpCPUMinutesLimit"))
+		return WAIT_QOS_GRP_CPU_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpCPURunMinutesLimit"))
+		return WAIT_QOS_GRP_CPU_RUN_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpJobsLimit"))
+		return WAIT_QOS_GRP_JOB;
+	if (!xstrcasecmp(reason, "QOSGrpMemLimit"))
+		return WAIT_QOS_GRP_MEM;
+	if (!xstrcasecmp(reason, "QOSGrpNodeLimit"))
+		return WAIT_QOS_GRP_NODE;
+	if (!xstrcasecmp(reason, "QOSGrpSubmitJobsLimit"))
+		return WAIT_QOS_GRP_SUB_JOB;
+	if (!xstrcasecmp(reason, "QOSGrpWallLimit"))
+		return WAIT_QOS_GRP_WALL;
+	if (!xstrcasecmp(reason, "QOSMaxCpuPerJobLimit"))
+		return WAIT_QOS_MAX_CPU_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxCpuMinutesPerJobLimit"))
+		return WAIT_QOS_MAX_CPU_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxNodePerJobLimit"))
+		return WAIT_QOS_MAX_NODE_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxWallDurationPerJobLimit"))
+		return WAIT_QOS_MAX_WALL_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxCpuPerUserLimit"))
+		return WAIT_QOS_MAX_CPU_PER_USER;
+	if (!xstrcasecmp(reason, "QOSMaxJobsPerUserLimit"))
+		return WAIT_QOS_MAX_JOB_PER_USER;
+	if (!xstrcasecmp(reason, "QOSMaxNodePerUserLimit"))
+		return WAIT_QOS_MAX_NODE_PER_USER;
+	if (!xstrcasecmp(reason, "QOSMaxSubmitJobPerUserLimit"))
+		return WAIT_QOS_MAX_SUB_JOB;
+	if (!xstrcasecmp(reason, "QOSMinCpuNotSatisfied"))
+		return WAIT_QOS_MIN_CPU;
+	if (!xstrcasecmp(reason, "AssocGrpCpuLimit"))
+		return WAIT_ASSOC_GRP_CPU;
+	if (!xstrcasecmp(reason, "AssocGrpCPUMinutesLimit"))
+		return WAIT_ASSOC_GRP_CPU_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpCPURunMinutesLimit"))
+		return WAIT_ASSOC_GRP_CPU_RUN_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpJobsLimit"))
+		return WAIT_ASSOC_GRP_JOB;
+	if (!xstrcasecmp(reason, "AssocGrpMemLimit"))
+		return WAIT_ASSOC_GRP_MEM;
+	if (!xstrcasecmp(reason, "AssocGrpNodeLimit"))
+		return WAIT_ASSOC_GRP_NODE;
+	if (!xstrcasecmp(reason, "AssocGrpSubmitJobsLimit"))
+		return WAIT_ASSOC_GRP_SUB_JOB;
+	if (!xstrcasecmp(reason, "AssocGrpWallLimit"))
+		return WAIT_ASSOC_GRP_WALL;
+	if (!xstrcasecmp(reason, "AssocMaxJobsLimit"))
+		return WAIT_ASSOC_MAX_JOBS;
+	if (!xstrcasecmp(reason, "AssocMaxCpuPerJobLimit"))
+		return WAIT_ASSOC_MAX_CPU_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxCpuMinutesPerJobLimit"))
+		return WAIT_ASSOC_MAX_CPU_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxNodePerJobLimit"))
+		return WAIT_ASSOC_MAX_NODE_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxWallDurationPerJobLimit"))
+		return WAIT_ASSOC_MAX_WALL_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxSubmitJobLimit"))
+		return WAIT_ASSOC_MAX_SUB_JOB;
+	if (!xstrcasecmp(reason, "JobHoldMaxRequeue"))
+		return WAIT_MAX_REQUEUE;
+	if (!xstrcasecmp(reason, "JobArrayTaskLimit"))
+		return WAIT_ARRAY_TASK_LIMIT;
+	if (!xstrcasecmp(reason, "BurstBufferResources"))
+		return WAIT_BURST_BUFFER_RESOURCE;
+	if (!xstrcasecmp(reason, "BurstBufferStageIn"))
+		return WAIT_BURST_BUFFER_STAGING;
+	if (!xstrcasecmp(reason, "BurstBufferOperation"))
+		return FAIL_BURST_BUFFER_OP;
+	if (!xstrcasecmp(reason, "PowerNotAvail"))
+		return WAIT_POWER_NOT_AVAIL;
+	if (!xstrcasecmp(reason, "PowerReserved"))
+		return WAIT_POWER_RESERVED;
+	if (!xstrcasecmp(reason, "AssocGrpUnknown"))
+		return WAIT_ASSOC_GRP_UNK;
+	if (!xstrcasecmp(reason, "AssocGrpUnknownMinutes"))
+		return WAIT_ASSOC_GRP_UNK_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpUnknownRunMinutes"))
+		return WAIT_ASSOC_GRP_UNK_RUN_MIN;
+	if (!xstrcasecmp(reason, "AssocMaxUnknownPerJob"))
+		return WAIT_ASSOC_MAX_UNK_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxUnknownPerNode"))
+		return WAIT_ASSOC_MAX_UNK_PER_NODE;
+	if (!xstrcasecmp(reason, "AssocMaxUnknownMinutesPerJob"))
+		return WAIT_ASSOC_MAX_UNK_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxCpuPerNode"))
+		return WAIT_ASSOC_MAX_CPU_PER_NODE;
+	if (!xstrcasecmp(reason, "AssocGrpMemMinutes"))
+		return WAIT_ASSOC_GRP_MEM_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpMemRunMinutes"))
+		return WAIT_ASSOC_GRP_MEM_RUN_MIN;
+	if (!xstrcasecmp(reason, "AssocMaxMemPerJob"))
+		return WAIT_ASSOC_MAX_MEM_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxMemPerNode"))
+		return WAIT_ASSOC_MAX_MEM_PER_NODE;
+	if (!xstrcasecmp(reason, "AssocMaxMemMinutesPerJob"))
+		return WAIT_ASSOC_MAX_MEM_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocGrpNodeMinutes"))
+		return WAIT_ASSOC_GRP_NODE_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpNodeRunMinutes"))
+		return WAIT_ASSOC_GRP_NODE_RUN_MIN;
+	if (!xstrcasecmp(reason, "AssocMaxNodeMinutesPerJob"))
+		return WAIT_ASSOC_MAX_NODE_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocGrpEnergy"))
+		return WAIT_ASSOC_GRP_ENERGY;
+	if (!xstrcasecmp(reason, "AssocGrpEnergyMinutes"))
+		return WAIT_ASSOC_GRP_ENERGY_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpEnergyRunMinutes"))
+		return WAIT_ASSOC_GRP_ENERGY_RUN_MIN;
+	if (!xstrcasecmp(reason, "AssocMaxEnergyPerJob"))
+		return WAIT_ASSOC_MAX_ENERGY_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxEnergyPerNode"))
+		return WAIT_ASSOC_MAX_ENERGY_PER_NODE;
+	if (!xstrcasecmp(reason, "AssocMaxEnergyMinutesPerJob"))
+		return WAIT_ASSOC_MAX_ENERGY_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocGrpGRES"))
+		return WAIT_ASSOC_GRP_GRES;
+	if (!xstrcasecmp(reason, "AssocGrpGRESMinutes"))
+		return WAIT_ASSOC_GRP_GRES_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpGRESRunMinutes"))
+		return WAIT_ASSOC_GRP_GRES_RUN_MIN;
+	if (!xstrcasecmp(reason, "AssocMaxGRESPerJob"))
+		return WAIT_ASSOC_MAX_GRES_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxGRESPerNode"))
+		return WAIT_ASSOC_MAX_GRES_PER_NODE;
+	if (!xstrcasecmp(reason, "AssocMaxGRESMinutesPerJob"))
+		return WAIT_ASSOC_MAX_GRES_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocGrpLicense"))
+		return WAIT_ASSOC_GRP_LIC;
+	if (!xstrcasecmp(reason, "AssocGrpLicenseMinutes"))
+		return WAIT_ASSOC_GRP_LIC_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpLicenseRunMinutes"))
+		return WAIT_ASSOC_GRP_LIC_RUN_MIN;
+	if (!xstrcasecmp(reason, "AssocMaxLicensePerJob"))
+		return WAIT_ASSOC_MAX_LIC_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxLicenseMinutesPerJob"))
+		return WAIT_ASSOC_MAX_LIC_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocGrpBB"))
+		return WAIT_ASSOC_GRP_BB;
+	if (!xstrcasecmp(reason, "AssocGrpBBMinutes"))
+		return WAIT_ASSOC_GRP_BB_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpBBRunMinutes"))
+		return WAIT_ASSOC_GRP_BB_RUN_MIN;
+	if (!xstrcasecmp(reason, "AssocMaxBBPerJob"))
+		return WAIT_ASSOC_MAX_BB_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxBBPerNode"))
+		return WAIT_ASSOC_MAX_BB_PER_NODE;
+	if (!xstrcasecmp(reason, "AssocMaxBBMinutesPerJob"))
+		return WAIT_ASSOC_MAX_BB_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSGrpUnknown"))
+		return WAIT_QOS_GRP_UNK;
+	if (!xstrcasecmp(reason, "QOSGrpUnknownMinutes"))
+		return WAIT_QOS_GRP_UNK_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpUnknownRunMinutes"))
+		return WAIT_QOS_GRP_UNK_RUN_MIN;
+	if (!xstrcasecmp(reason, "QOSMaxUnknownPerJob"))
+		return WAIT_QOS_MAX_UNK_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxUnknownPerNode"))
+		return WAIT_QOS_MAX_UNK_PER_NODE;
+	if (!xstrcasecmp(reason, "QOSMaxUnknownPerUser"))
+		return WAIT_QOS_MAX_UNK_PER_USER;
+	if (!xstrcasecmp(reason, "QOSMaxUnknownMinutesPerJob"))
+		return WAIT_QOS_MAX_UNK_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMinUnknown"))
+		return WAIT_QOS_MIN_UNK;
+	if (!xstrcasecmp(reason, "QOSMaxCpuPerNode"))
+		return WAIT_QOS_MAX_CPU_PER_NODE;
+	if (!xstrcasecmp(reason, "QOSGrpMemoryMinutes"))
+		return WAIT_QOS_GRP_MEM_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpMemoryRunMinutes"))
+		return WAIT_QOS_GRP_MEM_RUN_MIN;
+	if (!xstrcasecmp(reason, "QOSMaxMemoryPerJob"))
+		return WAIT_QOS_MAX_MEM_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxMemoryPerNode"))
+		return WAIT_QOS_MAX_MEM_PER_NODE;
+	if (!xstrcasecmp(reason, "QOSMaxMemoryPerUser"))
+		return WAIT_QOS_MAX_MEM_PER_USER;
+	if (!xstrcasecmp(reason, "QOSMaxMemoryMinutesPerJob"))
+		return WAIT_QOS_MAX_MEM_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMinMemory"))
+		return WAIT_QOS_MIN_MEM;
+	if (!xstrcasecmp(reason, "QOSGrpNodeMinutes"))
+		return WAIT_QOS_GRP_NODE_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpNodeRunMinutes"))
+		return WAIT_QOS_GRP_NODE_RUN_MIN;
+	if (!xstrcasecmp(reason, "QOSMaxNodeMinutesPerJob"))
+		return WAIT_QOS_MAX_NODE_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMinNode"))
+		return WAIT_QOS_MIN_NODE;
+	if (!xstrcasecmp(reason, "QOSGrpEnergy"))
+		return WAIT_QOS_GRP_ENERGY;
+	if (!xstrcasecmp(reason, "QOSGrpEnergyMinutes"))
+		return WAIT_QOS_GRP_ENERGY_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpEnergyRunMinutes"))
+		return WAIT_QOS_GRP_ENERGY_RUN_MIN;
+	if (!xstrcasecmp(reason, "QOSMaxEnergyPerJob"))
+		return WAIT_QOS_MAX_ENERGY_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxEnergyPerNode"))
+		return WAIT_QOS_MAX_ENERGY_PER_NODE;
+	if (!xstrcasecmp(reason, "QOSMaxEnergyPerUser"))
+		return WAIT_QOS_MAX_ENERGY_PER_USER;
+	if (!xstrcasecmp(reason, "QOSMaxEnergyMinutesPerJob"))
+		return WAIT_QOS_MAX_ENERGY_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMinEnergy"))
+		return WAIT_QOS_MIN_ENERGY;
+	if (!xstrcasecmp(reason, "QOSGrpGRES"))
+		return WAIT_QOS_GRP_GRES;
+	if (!xstrcasecmp(reason, "QOSGrpGRESMinutes"))
+		return WAIT_QOS_GRP_GRES_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpGRESRunMinutes"))
+		return WAIT_QOS_GRP_GRES_RUN_MIN;
+	if (!xstrcasecmp(reason, "QOSMaxGRESPerJob"))
+		return WAIT_QOS_MAX_GRES_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxGRESPerNode"))
+		return WAIT_QOS_MAX_GRES_PER_NODE;
+	if (!xstrcasecmp(reason, "QOSMaxGRESPerUser"))
+		return WAIT_QOS_MAX_GRES_PER_USER;
+	if (!xstrcasecmp(reason, "QOSMaxGRESMinutesPerJob"))
+		return WAIT_QOS_MAX_GRES_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMinGRES"))
+		return WAIT_QOS_MIN_GRES;
+	if (!xstrcasecmp(reason, "QOSGrpLicense"))
+		return WAIT_QOS_GRP_LIC;
+	if (!xstrcasecmp(reason, "QOSGrpLicenseMinutes"))
+		return WAIT_QOS_GRP_LIC_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpLicenseRunMinutes"))
+		return WAIT_QOS_GRP_LIC_RUN_MIN;
+	if (!xstrcasecmp(reason, "QOSMaxLicensePerJob"))
+		return WAIT_QOS_MAX_LIC_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxLicensePerUser"))
+		return WAIT_QOS_MAX_LIC_PER_USER;
+	if (!xstrcasecmp(reason, "QOSMaxLicenseMinutesPerJob"))
+		return WAIT_QOS_MAX_LIC_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMinLicense"))
+		return WAIT_QOS_MIN_LIC;
+	if (!xstrcasecmp(reason, "QOSGrpBB"))
+		return WAIT_QOS_GRP_BB;
+	if (!xstrcasecmp(reason, "QOSGrpBBMinutes"))
+		return WAIT_QOS_GRP_BB_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpBBRunMinutes"))
+		return WAIT_QOS_GRP_BB_RUN_MIN;
+	if (!xstrcasecmp(reason, "QOSMaxBBPerJob"))
+		return WAIT_QOS_MAX_BB_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxBBPerNode"))
+		return WAIT_QOS_MAX_BB_PER_NODE;
+	if (!xstrcasecmp(reason, "QOSMaxBBPerUser"))
+		return WAIT_QOS_MAX_BB_PER_USER;
+	if (!xstrcasecmp(reason, "AssocMaxBBMinutesPerJob"))
+		return WAIT_QOS_MAX_BB_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMinBB"))
+		return WAIT_QOS_MIN_BB;
+	if (!xstrcasecmp(reason, "DeadLine"))
+		return FAIL_DEADLINE;
+	if (!xstrcasecmp(reason, "MaxBBPerAccount"))
+		return WAIT_QOS_MAX_BB_PER_ACCT;
+	if (!xstrcasecmp(reason, "MaxCpuPerAccount"))
+		return WAIT_QOS_MAX_CPU_PER_ACCT;
+	if (!xstrcasecmp(reason, "MaxEnergyPerAccount"))
+		return WAIT_QOS_MAX_ENERGY_PER_ACCT;
+	if (!xstrcasecmp(reason, "MaxGRESPerAccount"))
+		return WAIT_QOS_MAX_GRES_PER_ACCT;
+	if (!xstrcasecmp(reason, "MaxNodePerAccount"))
+		return WAIT_QOS_MAX_NODE_PER_ACCT;
+	if (!xstrcasecmp(reason, "MaxLicensePerAccount"))
+		return WAIT_QOS_MAX_LIC_PER_ACCT;
+	if (!xstrcasecmp(reason, "MaxMemoryPerAccount"))
+		return WAIT_QOS_MAX_MEM_PER_ACCT;
+	if (!xstrcasecmp(reason, "MaxUnknownPerAccount"))
+		return WAIT_QOS_MAX_UNK_PER_ACCT;
+	if (!xstrcasecmp(reason, "MaxJobsPerAccount"))
+		return WAIT_QOS_MAX_JOB_PER_ACCT;
+	if (!xstrcasecmp(reason, "MaxSubmitJobsPerAccount"))
+		return WAIT_QOS_MAX_SUB_JOB_PER_ACCT;
+	if (!xstrcasecmp(reason, "PartitionConfig"))
+		return WAIT_PART_CONFIG;
+	if (!xstrcasecmp(reason, "AccountingPolicy"))
+		return WAIT_ACCOUNT_POLICY;
+	if (!xstrcasecmp(reason, "FedJobLock"))
+		return WAIT_FED_JOB_LOCK;
+	if (!xstrcasecmp(reason, "OutOfMemory"))
+		return FAIL_OOM;
+	if (!xstrcasecmp(reason, "MaxMemPerLimit"))
+		return WAIT_PN_MEM_LIMIT;
+	if (!xstrcasecmp(reason, "AssocGrpBilling"))
+		return WAIT_ASSOC_GRP_BILLING;
+	if (!xstrcasecmp(reason, "AssocGrpBillingMinutes"))
+		return WAIT_ASSOC_GRP_BILLING_MIN;
+	if (!xstrcasecmp(reason, "AssocGrpBillingRunMinutes"))
+		return WAIT_ASSOC_GRP_BILLING_RUN_MIN;
+	if (!xstrcasecmp(reason, "AssocMaxBillingPerJob"))
+		return WAIT_ASSOC_MAX_BILLING_PER_JOB;
+	if (!xstrcasecmp(reason, "AssocMaxBillingPerNode"))
+		return WAIT_ASSOC_MAX_BILLING_PER_NODE;
+	if (!xstrcasecmp(reason, "AssocMaxBillingMinutesPerJob"))
+		return WAIT_ASSOC_MAX_BILLING_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSGrpBilling"))
+		return WAIT_QOS_GRP_BILLING;
+	if (!xstrcasecmp(reason, "QOSGrpBillingMinutes"))
+		return WAIT_QOS_GRP_BILLING_MIN;
+	if (!xstrcasecmp(reason, "QOSGrpBillingRunMinutes"))
+		return WAIT_QOS_GRP_BILLING_RUN_MIN;
+	if (!xstrcasecmp(reason, "QOSMaxBillingPerJob"))
+		return WAIT_QOS_MAX_BILLING_PER_JOB;
+	if (!xstrcasecmp(reason, "QOSMaxBillingPerNode"))
+		return WAIT_QOS_MAX_BILLING_PER_NODE;
+	if (!xstrcasecmp(reason, "QOSMaxBillingPerUser"))
+		return WAIT_QOS_MAX_BILLING_PER_USER;
+	if (!xstrcasecmp(reason, "QOSMaxBillingMinutesPerJob"))
+		return WAIT_QOS_MAX_BILLING_MINS_PER_JOB;
+	if (!xstrcasecmp(reason, "MaxBillingPerAccount"))
+		return WAIT_QOS_MAX_BILLING_PER_ACCT;
+	if (!xstrcasecmp(reason, "QOSMinBilling"))
+		return WAIT_QOS_MIN_BILLING;
+	if (!xstrcasecmp(reason, "ReservationDeleted"))
+		return WAIT_RESV_DELETED;
+
+	return NO_VAL;
+}
+
 /* If the job is held up by a QOS GRP limit return true else return false. */
 extern bool job_state_qos_grp_limit(enum job_state_reason state_reason)
 {
@@ -2202,7 +2631,7 @@ extern char *log_num2string(uint16_t inx)
 }
 
 /* Convert log level string to equivalent number */
-extern uint16_t log_string2num(char *name)
+extern uint16_t log_string2num(const char *name)
 {
 	if (name == NULL)
 		return NO_VAL16;
@@ -2756,10 +3185,10 @@ extern char *priority_flags_string(uint16_t priority_flags)
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "DEPTH_OBLIVIOUS");
 	}
-	if (priority_flags & PRIORITY_FLAGS_FAIR_TREE) {
+	if (!(priority_flags & PRIORITY_FLAGS_FAIR_TREE)) {
 		if (flag_str[0])
 			xstrcat(flag_str, ",");
-		xstrcat(flag_str, "FAIR_TREE");
+		xstrcat(flag_str, "NO_FAIR_TREE");
 	}
 	if (priority_flags & PRIORITY_FLAGS_INCR_ONLY) {
 		if (flag_str[0])
@@ -2770,6 +3199,35 @@ extern char *priority_flags_string(uint16_t priority_flags)
 		if (flag_str[0])
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "MAX_TRES");
+	}
+	if (priority_flags & (PRIORITY_FLAGS_NO_NORMAL_ASSOC |
+			      PRIORITY_FLAGS_NO_NORMAL_PART  |
+			      PRIORITY_FLAGS_NO_NORMAL_QOS   |
+			      PRIORITY_FLAGS_NO_NORMAL_TRES)) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "NO_NORMAL_ALL");
+	} else {
+		if (priority_flags & PRIORITY_FLAGS_NO_NORMAL_ASSOC) {
+			if (flag_str[0])
+				xstrcat(flag_str, ",");
+			xstrcat(flag_str, "NO_NORMAL_ASSOC");
+		}
+		if (priority_flags & PRIORITY_FLAGS_NO_NORMAL_PART) {
+			if (flag_str[0])
+				xstrcat(flag_str, ",");
+			xstrcat(flag_str, "NO_NORMAL_PART");
+		}
+		if (priority_flags & PRIORITY_FLAGS_NO_NORMAL_QOS) {
+			if (flag_str[0])
+				xstrcat(flag_str, ",");
+			xstrcat(flag_str, "NO_NORMAL_QOS");
+		}
+		if (priority_flags & PRIORITY_FLAGS_NO_NORMAL_TRES) {
+			if (flag_str[0])
+				xstrcat(flag_str, ",");
+			xstrcat(flag_str, "NO_NORMAL_TRES");
+		}
 	}
 
 	return flag_str;
@@ -2850,11 +3308,13 @@ extern char *node_state_string(uint32_t inx)
 	bool res_flag        = (inx & NODE_STATE_RES);
 	bool resume_flag     = (inx & NODE_RESUME);
 	bool no_resp_flag    = (inx & NODE_STATE_NO_RESPOND);
-	bool power_down_flag = (inx & NODE_STATE_POWER_SAVE);
+	bool powered_down_flag = (inx & NODE_STATE_POWER_SAVE);
 	bool power_up_flag   = (inx & NODE_STATE_POWER_UP);
+	bool powering_down_flag = (inx & NODE_STATE_POWERING_DOWN);
 
 	if (maint_flag) {
-		if ((base == NODE_STATE_ALLOCATED) ||
+		if (drain_flag ||
+		    (base == NODE_STATE_ALLOCATED) ||
 		    (base == NODE_STATE_DOWN) ||
 		    (base == NODE_STATE_MIXED))
 			;
@@ -2882,7 +3342,9 @@ extern char *node_state_string(uint32_t inx)
 				return "DRAINING@";
 			if (power_up_flag)
 				return "DRAINING#";
-			if (power_down_flag)
+			if (powering_down_flag)
+				return "DRAINING%";
+			if (powered_down_flag)
 				return "DRAINING~";
 			if (no_resp_flag)
 				return "DRAINING*";
@@ -2894,7 +3356,9 @@ extern char *node_state_string(uint32_t inx)
 				return "DRAINED@";
 			if (power_up_flag)
 				return "DRAINED#";
-			if (power_down_flag)
+			if (powering_down_flag)
+				return "DRAINED%";
+			if (powered_down_flag)
 				return "DRAINED~";
 			if (no_resp_flag)
 				return "DRAINED*";
@@ -2915,6 +3379,8 @@ extern char *node_state_string(uint32_t inx)
 
 	if (inx == NODE_STATE_CANCEL_REBOOT)
 		return "CANCEL_REBOOT";
+	if (inx == NODE_STATE_POWERING_DOWN)
+		return "POWERING_DOWN";
 	if (inx == NODE_STATE_POWER_SAVE)
 		return "POWER_DOWN";
 	if (inx == NODE_STATE_POWER_UP)
@@ -2926,7 +3392,9 @@ extern char *node_state_string(uint32_t inx)
 			return "DOWN@";
 		if (power_up_flag)
 			return "DOWN#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "DOWN%";
+		if (powered_down_flag)
 			return "DOWN~";
 		if (no_resp_flag)
 			return "DOWN*";
@@ -2940,7 +3408,9 @@ extern char *node_state_string(uint32_t inx)
 			return "ALLOCATED@";
 		if (power_up_flag)
 			return "ALLOCATED#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "ALLOCATED%";
+		if (powered_down_flag)
 			return "ALLOCATED~";
 		if (no_resp_flag)
 			return "ALLOCATED*";
@@ -2955,7 +3425,9 @@ extern char *node_state_string(uint32_t inx)
 			return "COMPLETING@";
 		if (power_up_flag)
 			return "COMPLETING#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "COMPLETING%";
+		if (powered_down_flag)
 			return "COMPLETING~";
 		if (no_resp_flag)
 			return "COMPLETING*";
@@ -2968,7 +3440,9 @@ extern char *node_state_string(uint32_t inx)
 			return "IDLE@";
 		if (power_up_flag)
 			return "IDLE#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "IDLE%";
+		if (powered_down_flag)
 			return "IDLE~";
 		if (no_resp_flag)
 			return "IDLE*";
@@ -2985,7 +3459,9 @@ extern char *node_state_string(uint32_t inx)
 			return "MIXED@";
 		if (power_up_flag)
 			return "MIXED#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "MIXED%";
+		if (powered_down_flag)
 			return "MIXED~";
 		if (no_resp_flag)
 			return "MIXED*";
@@ -2998,7 +3474,9 @@ extern char *node_state_string(uint32_t inx)
 			return "FUTURE@";
 		if (power_up_flag)
 			return "FUTURE#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "FUTURE%";
+		if (powered_down_flag)
 			return "FUTURE~";
 		if (no_resp_flag)
 			return "FUTURE*";
@@ -3025,13 +3503,15 @@ extern char *node_state_string_compact(uint32_t inx)
 	bool res_flag        = (inx & NODE_STATE_RES);
 	bool resume_flag     = (inx & NODE_RESUME);
 	bool no_resp_flag    = (inx & NODE_STATE_NO_RESPOND);
-	bool power_down_flag = (inx & NODE_STATE_POWER_SAVE);
+	bool powered_down_flag = (inx & NODE_STATE_POWER_SAVE);
 	bool power_up_flag   = (inx & NODE_STATE_POWER_UP);
+	bool powering_down_flag = (inx & NODE_STATE_POWERING_DOWN);
 
 	inx = (inx & NODE_STATE_BASE);
 
 	if (maint_flag) {
-		if ((inx == NODE_STATE_ALLOCATED) ||
+		if (drain_flag ||
+		    (inx == NODE_STATE_ALLOCATED) ||
 		    (inx == NODE_STATE_DOWN) ||
 		    (inx == NODE_STATE_MIXED))
 			;
@@ -3058,7 +3538,9 @@ extern char *node_state_string_compact(uint32_t inx)
 				return "DRNG@";
 			if (power_up_flag)
 				return "DRNG#";
-			if (power_down_flag)
+			if (powering_down_flag)
+				return "DRNG%";
+			if (powered_down_flag)
 				return "DRNG~";
 			if (no_resp_flag)
 				return "DRNG*";
@@ -3070,7 +3552,9 @@ extern char *node_state_string_compact(uint32_t inx)
 				return "DRAIN@";
 			if (power_up_flag)
 				return "DRAIN#";
-			if (power_down_flag)
+			if (powering_down_flag)
+				return "DRAIN%";
+			if (powered_down_flag)
 				return "DRAIN~";
 			if (no_resp_flag)
 				return "DRAIN*";
@@ -3091,6 +3575,8 @@ extern char *node_state_string_compact(uint32_t inx)
 
 	if (inx == NODE_STATE_CANCEL_REBOOT)
 		return "CANC_R";
+	if (inx == NODE_STATE_POWERING_DOWN)
+		return "POWRNG_DN";
 	if (inx == NODE_STATE_POWER_SAVE)
 		return "POW_DN";
 	if (inx == NODE_STATE_POWER_UP)
@@ -3102,7 +3588,9 @@ extern char *node_state_string_compact(uint32_t inx)
 			return "DOWN@";
 		if (power_up_flag)
 			return "DOWN#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "DOWN%";
+		if (powered_down_flag)
 			return "DOWN~";
 		if (no_resp_flag)
 			return "DOWN*";
@@ -3116,7 +3604,9 @@ extern char *node_state_string_compact(uint32_t inx)
 			return "ALLOC@";
 		if (power_up_flag)
 			return "ALLOC#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "ALLOC%";
+		if (powered_down_flag)
 			return "ALLOC~";
 		if (no_resp_flag)
 			return "ALLOC*";
@@ -3131,7 +3621,9 @@ extern char *node_state_string_compact(uint32_t inx)
 			return "COMP@";
 		if (power_up_flag)
 			return "COMP#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "COMP%";
+		if (powered_down_flag)
 			return "COMP~";
 		if (no_resp_flag)
 			return "COMP*";
@@ -3144,7 +3636,9 @@ extern char *node_state_string_compact(uint32_t inx)
 			return "IDLE@";
 		if (power_up_flag)
 			return "IDLE#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "IDLE%";
+		if (powered_down_flag)
 			return "IDLE~";
 		if (no_resp_flag)
 			return "IDLE*";
@@ -3161,7 +3655,9 @@ extern char *node_state_string_compact(uint32_t inx)
 			return "MIX@";
 		if (power_up_flag)
 			return "MIX#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "MIX%";
+		if (powered_down_flag)
 			return "MIX~";
 		if (no_resp_flag)
 			return "MIX*";
@@ -3174,7 +3670,9 @@ extern char *node_state_string_compact(uint32_t inx)
 			return "FUTR@";
 		if (power_up_flag)
 			return "FUTR#";
-		if (power_down_flag)
+		if (powering_down_flag)
+			return "FUTR%";
+		if (powered_down_flag)
 			return "FUTR~";
 		if (no_resp_flag)
 			return "FUTR*";
@@ -3190,7 +3688,7 @@ extern char *node_state_string_compact(uint32_t inx)
 	return "?";
 }
 
-extern uint16_t power_flags_id(char *power_flags)
+extern uint16_t power_flags_id(const char *power_flags)
 {
 	char *tmp, *tok, *save_ptr = NULL;
 	uint16_t rc = 0;
@@ -3325,19 +3823,6 @@ extern void accounting_enforce_string(uint16_t enforce, char *str, int str_len)
 
 	if (str[0] == '\0')
 		strcat(str, "none");
-}
-
-extern char* node_use_string(enum node_use_type node_use)
-{
-	switch (node_use) {
-	case (SELECT_COPROCESSOR_MODE):
-		return "COPROCESSOR";
-	case (SELECT_VIRTUAL_NODE_MODE):
-		return "VIRTUAL";
-	default:
-		break;
-	}
-	return "";
 }
 
 extern char *cray_nodelist2nids(hostlist_t hl_in, char *nodelist)
@@ -4241,7 +4726,6 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		slurm_free_node_registration_status_msg(data);
 		break;
 	case REQUEST_JOB_ALLOCATION_INFO:
-	case DEFUNCT_REQUEST_JOB_ALLOCATION_INFO_LITE:
 	case REQUEST_JOB_END_TIME:
 	case REQUEST_JOB_PACK_ALLOC_INFO:
 		slurm_free_job_alloc_info_msg(data);
@@ -4499,6 +4983,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		break;
 	case SRUN_STEP_MISSING:
 		slurm_free_srun_step_missing_msg(data);
+		break;
+	case SRUN_NET_FORWARD:
+		slurm_free_net_forward_msg(data);
 		break;
 	case PMI_KVS_GET_REQ:
 		slurm_free_get_kvs_msg(data);
@@ -4798,7 +5285,6 @@ rpc_num2string(uint16_t opcode)
 		return "RESPONSE_ASSOC_MGR_INFO";
 	case REQUEST_EVENT_LOG:
 		return "REQUEST_EVENT_LOG";
-	/* case RESPONSE_SICP_INFO_DEFUNCT:			DEFUNCT */
 	case REQUEST_LAYOUT_INFO:
 		return "REQUEST_LAYOUT_INFO";
 	case RESPONSE_LAYOUT_INFO:
@@ -4875,10 +5361,6 @@ rpc_num2string(uint16_t opcode)
 		return "REQUEST_JOB_ALLOCATION_INFO";
 	case RESPONSE_JOB_ALLOCATION_INFO:
 		return "RESPONSE_JOB_ALLOCATION_INFO";
-	case DEFUNCT_REQUEST_JOB_ALLOCATION_INFO_LITE:
-		return "REQUEST_JOB_ALLOCATION_INFO_LITE";
-	case DEFUNCT_RESPONSE_JOB_ALLOCATION_INFO_LITE:
-		return "RESPONSE_JOB_ALLOCATION_INFO_LITE";
 	case REQUEST_JOB_PACK_ALLOCATION:
 		return "REQUEST_JOB_PACK_ALLOCATION";
 	case RESPONSE_JOB_PACK_ALLOCATION:
@@ -4927,7 +5409,6 @@ rpc_num2string(uint16_t opcode)
 		return "RESPONSE_CANCEL_JOB_STEP";
 	case REQUEST_UPDATE_JOB_STEP:
 		return "REQUEST_UPDATE_JOB_STEP";
-	/* case DEFUNCT_RESPONSE_COMPLETE_JOB_STEP:		DEFUNCT */
 	case REQUEST_CHECKPOINT:
 		return "REQUEST_CHECKPOINT";
 	case RESPONSE_CHECKPOINT:				/* 5010 */
@@ -5007,9 +5488,8 @@ rpc_num2string(uint16_t opcode)
 		return "RESPONSE_REATTACH_TASKS";
 	case REQUEST_KILL_TIMELIMIT:
 		return "REQUEST_KILL_TIMELIMIT";
-	case DEFUNCT_REQUEST_SIGNAL_JOB:			/* 6010 */
-		return "REQUEST_SIGNAL_JOB";
-	case REQUEST_TERMINATE_JOB:
+
+	case REQUEST_TERMINATE_JOB:				/* 6011 */
 		return "REQUEST_TERMINATE_JOB";
 	case MESSAGE_EPILOG_COMPLETE:
 		return "MESSAGE_EPILOG_COMPLETE";
@@ -5046,6 +5526,8 @@ rpc_num2string(uint16_t opcode)
 		return "SRUN_REQUEST_SUSPEND";
 	case SRUN_STEP_SIGNAL:
 		return "SRUN_STEP_SIGNAL";
+	case SRUN_NET_FORWARD:
+		return "SRUN_NET_FORWARD";
 
 	case PMI_KVS_PUT_REQ:					/* 7201 */
 		return "PMI_KVS_PUT_REQ";
@@ -5213,7 +5695,7 @@ extern int parse_part_enforce_type(char *enforce_part_type, uint16_t *param)
 		*param = PARTITION_ENFORCE_ALL;
 	} else {
 		error("Bad EnforcePartLimits: %s\n", value);
-		rc = SLURM_FAILURE;
+		rc = SLURM_ERROR;
 	}
 
 	xfree(value);
@@ -5247,7 +5729,7 @@ extern bool cluster_in_federation(void *ptr, char *cluster_name)
 		return status;
 	iter = list_iterator_create(fed->cluster_list);
 	while ((cluster = (slurmdb_cluster_rec_t *) list_next(iter))) {
-		if (!xstrcmp(cluster->name, cluster_name)) {
+		if (!xstrcasecmp(cluster->name, cluster_name)) {
 			status = true;
 			break;
 		}
@@ -5273,7 +5755,8 @@ extern int get_cluster_node_offset(char *cluster_name,
 	return 0;
 }
 
-extern void print_multi_line_string(char *user_msg, int inx)
+extern void print_multi_line_string(char *user_msg, int inx,
+				    log_level_t log_lvl)
 {
 	char *line, *buf, *ptrptr = NULL;
 
@@ -5284,10 +5767,60 @@ extern void print_multi_line_string(char *user_msg, int inx)
 	line = strtok_r(buf, "\n", &ptrptr);
 	while (line) {
 		if (inx == -1)
-			info("%s", line);
+			log_var(log_lvl, "%s", line);
 		else
-			info("%d: %s", inx, line);
+			log_var(log_lvl, "%d: %s", inx, line);
 		line = strtok_r(NULL, "\n", &ptrptr);
 	}
 	xfree(buf);
+}
+
+/*
+ * Given a numeric suffix, return the equivalent multiplier for the numeric
+ * portion. For example: "k" returns 1024, "KB" returns 1000, etc.
+ * The return value for an invalid suffix is NO_VAL64.
+ */
+extern uint64_t suffix_mult(char *suffix)
+{
+	uint64_t multiplier;
+
+	if (!suffix || (suffix[0] == '\0')) {
+		multiplier = 1;
+
+	} else if (!xstrcasecmp(suffix, "k") ||
+		   !xstrcasecmp(suffix, "kib")) {
+		multiplier = 1024;
+	} else if (!xstrcasecmp(suffix, "kb")) {
+		multiplier = 1000;
+
+	} else if (!xstrcasecmp(suffix, "m") ||
+		   !xstrcasecmp(suffix, "mib")) {
+		multiplier = ((uint64_t)1024 * 1024);
+	} else if (!xstrcasecmp(suffix, "mb")) {
+		multiplier = ((uint64_t)1000 * 1000);
+
+	} else if (!xstrcasecmp(suffix, "g") ||
+		   !xstrcasecmp(suffix, "gib")) {
+		multiplier = ((uint64_t)1024 * 1024 * 1024);
+	} else if (!xstrcasecmp(suffix, "gb")) {
+		multiplier = ((uint64_t)1000 * 1000 * 1000);
+
+	} else if (!xstrcasecmp(suffix, "t") ||
+		   !xstrcasecmp(suffix, "tib")) {
+		multiplier = ((uint64_t)1024 * 1024 * 1024 * 1024);
+	} else if (!xstrcasecmp(suffix, "tb")) {
+		multiplier = ((uint64_t)1000 * 1000 * 1000 * 1000);
+
+	} else if (!xstrcasecmp(suffix, "p") ||
+		   !xstrcasecmp(suffix, "pib")) {
+		multiplier = ((uint64_t)1024 * 1024 * 1024 * 1024 * 1024);
+	} else if (!xstrcasecmp(suffix, "pb")) {
+		multiplier = ((uint64_t)1000 * 1000 * 1000 * 1000 * 1000);
+
+	} else {
+		debug("%s: Unrecognized numeric suffix '%s'", __func__, suffix);
+		multiplier = NO_VAL64;
+	}
+
+	return multiplier;
 }

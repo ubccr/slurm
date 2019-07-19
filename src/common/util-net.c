@@ -273,11 +273,10 @@ bool is_full_path(const char *path)
  * Given a relative path in input make it full relative
  * to the current working directory.
  */
-extern char *make_full_path(char *rpath)
+extern char *make_full_path(const char *rpath)
 {
 	char *cwd;
-	char *cwd2;
-	int len;
+	char *cwd2 = NULL;
 
 #ifdef HAVE_GET_CURRENT_DIR_NAME
 	cwd = get_current_dir_name();
@@ -285,11 +284,7 @@ extern char *make_full_path(char *rpath)
 	cwd = malloc(PATH_MAX);
 	cwd = getcwd(cwd, PATH_MAX);
 #endif
-	/* 2 = / + 0
-	 */
-	len = strlen(cwd) + strlen(rpath) + 2;
-	cwd2 = xmalloc(len);
-	sprintf(cwd2, "%s/%s", cwd, rpath);
+	xstrfmtcat(cwd2, "%s/%s", cwd, rpath);
 	free(cwd);
 
 	return cwd2;

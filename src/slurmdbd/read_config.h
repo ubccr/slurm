@@ -53,12 +53,12 @@
 //#define DEFAULT_SLURMDBD_STEP_PURGE	1
 
 /* SlurmDBD configuration parameters */
-typedef struct slurm_dbd_conf {
+typedef struct {
 	time_t		last_update;	/* time slurmdbd.conf read	*/
-	char *		archive_dir;    /* location to localy
-					 * store data if not
-					 * using a script               */
+	char *		archive_dir;    /* location to locally store
+					 * data if not using a script   */
 	char *		archive_script;	/* script to archive old data	*/
+	char *		auth_alt_types;	/* alt authentication plugins	*/
 	char *		auth_info;	/* authentication info		*/
 	char *		auth_type;	/* authentication mechanism	*/
 	uint16_t        commit_delay;   /* On busy systems delay
@@ -112,10 +112,10 @@ typedef struct slurm_dbd_conf {
 	uint16_t        track_ctld;     /* Whether or not track when a
 					 * slurmctld goes down or not   */
 	uint16_t        tcp_timeout;    /* tcp timeout			*/
-} slurm_dbd_conf_t;
+} slurmdbd_conf_t;
 
 extern pthread_mutex_t conf_mutex;
-extern slurm_dbd_conf_t *slurmdbd_conf;
+extern slurmdbd_conf_t *slurmdbd_conf;
 
 
 /*
