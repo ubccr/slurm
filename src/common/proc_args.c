@@ -2,15 +2,15 @@
  *  proc_args.c - helper functions for command argument processing
  *****************************************************************************
  *  Copyright (C) 2007 Hewlett-Packard Development Company, L.P.
- *  Portions Copyright (C) 2010-2015 SchedMD LLC <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2015 SchedMD LLC <https://www.schedmd.com>.
  *  Written by Christopher Holmes <cholmes@hp.com>, who borrowed heavily
- *  from existing SLURM source code, particularly src/srun/opt.c
+ *  from existing Slurm source code, particularly src/srun/opt.c
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,63 +26,49 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#include <string.h>		/* strcpy, strncasecmp */
-
-#ifdef HAVE_STRINGS_H
-#  include <strings.h>
-#endif
+#include "config.h"
 
 #ifndef __USE_ISOC99
 #define __USE_ISOC99
 #endif
 
-#ifdef HAVE_LIMITS_H
-#  include <limits.h>
-#endif
+#define _GNU_SOURCE
 
-#ifndef _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
-
-#ifndef SYSTEM_DIMENSIONS
-#  define SYSTEM_DIMENSIONS 1
-#endif
-
+#include <ctype.h>		/* isdigit    */
 #include <fcntl.h>
+#include <limits.h>
+#include <pwd.h>		/* getpwuid   */
 #include <stdarg.h>		/* va_start   */
 #include <stdio.h>
 #include <stdlib.h>		/* getenv, strtoll */
-#include <pwd.h>		/* getpwuid   */
-#include <ctype.h>		/* isdigit    */
+#include <string.h>		/* strcpy */
 #include <sys/param.h>		/* MAXPATHLEN */
-#include <sys/stat.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
+#include <unistd.h>
 
 #include "src/common/gres.h"
 #include "src/common/list.h"
+#include "src/common/log.h"
 #include "src/common/proc_args.h"
+#include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_acct_gather_profile.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
 
-/* print this version of SLURM */
+/* print this version of Slurm */
 void print_slurm_version(void)
 {
 	printf("%s %s\n", PACKAGE_NAME, SLURM_VERSION_STRING);
@@ -91,13 +77,9 @@ void print_slurm_version(void)
 /* print the available gres options */
 void print_gres_help(void)
 {
-	char help_msg[1024] = "";
-
-	gres_plugin_help_msg(help_msg, sizeof(help_msg));
-	if (help_msg[0])
-		printf("%s", help_msg);
-	else
-		printf("No gres help is available\n");
+	char *msg = gres_plugin_help_msg();
+	printf("%s", msg);
+	xfree(msg);
 }
 
 void set_distribution(task_dist_states_t distribution,
@@ -372,20 +354,20 @@ task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size)
 				result = SLURM_DIST_BLOCK_CFULL_CFULL;
 			}
 		} else if (plane_dist) {
-			if (strncasecmp(tok, "plane", len) == 0) {
+			if (xstrncasecmp(tok, "plane", len) == 0) {
 				result = SLURM_DIST_PLANE;
 			}
 		} else {
-			if (strncasecmp(tok, "cyclic", len) == 0) {
+			if (xstrncasecmp(tok, "cyclic", len) == 0) {
 				result = SLURM_DIST_CYCLIC;
-			} else if (strncasecmp(tok, "block", len) == 0) {
+			} else if (xstrncasecmp(tok, "block", len) == 0) {
 				result = SLURM_DIST_BLOCK;
-			} else if ((strncasecmp(tok, "arbitrary", len) == 0) ||
-				   (strncasecmp(tok, "hostfile", len) == 0)) {
+			} else if ((xstrncasecmp(tok, "arbitrary", len) == 0) ||
+				   (xstrncasecmp(tok, "hostfile", len) == 0)) {
 				result = SLURM_DIST_ARBITRARY;
-			} else if (strncasecmp(tok, "nopack", len) == 0) {
+			} else if (xstrncasecmp(tok, "nopack", len) == 0) {
 				no_pack_nodes = true;
-			} else if (strncasecmp(tok, "pack", len) == 0) {
+			} else if (xstrncasecmp(tok, "pack", len) == 0) {
 				pack_nodes = true;
 			}
 		}
@@ -465,126 +447,10 @@ extern char *format_task_dist_states(task_dist_states_t t)
 	}
 }
 
-static uint16_t _get_conn_type(char *arg, bool bgp)
-{
-	uint16_t len = strlen(arg);
-	if (!len) {
-		/* no input given */
-		error("no conn-type argument given.");
-		return (uint16_t)NO_VAL;
-	} else if (!strncasecmp(arg, "MESH", len))
-		return SELECT_MESH;
-	else if (!strncasecmp(arg, "TORUS", len))
-		return SELECT_TORUS;
-	else if (!strncasecmp(arg, "NAV", len))
-		return SELECT_NAV;
-	else if (!strncasecmp(arg, "SMALL", len))
-		return SELECT_SMALL;
-	else if (bgp) {
-		if (!strncasecmp(arg, "HTC", len) ||
-		    !strncasecmp(arg, "HTC_S", len))
-			return SELECT_HTC_S;
-		else if (!strncasecmp(arg, "HTC_D", len))
-			return SELECT_HTC_D;
-		else if (!strncasecmp(arg, "HTC_V", len))
-			return SELECT_HTC_V;
-		else if (!strncasecmp(arg, "HTC_L", len))
-			return SELECT_HTC_L;
-	}
-
-	error("invalid conn-type argument '%s' ignored.", arg);
-	return (uint16_t)NO_VAL;
-}
-
-/*
- * verify comma separated list of connection types to array of uint16_t
- * connection_types or NO_VAL if not recognized
- */
-extern void verify_conn_type(const char *arg, uint16_t *conn_type)
-{
-	bool got_bgp = 0;
-	int inx = 0;
-	int highest_dims = 1;
-	char *arg_tmp = xstrdup(arg), *tok, *save_ptr = NULL;
-
-	if (working_cluster_rec) {
-		if (working_cluster_rec->flags & CLUSTER_FLAG_BGP)
-			got_bgp = 1;
-		else if (working_cluster_rec->flags & CLUSTER_FLAG_BGQ)
-			highest_dims = 4;
-	} else {
-#ifdef HAVE_BGP
-		got_bgp = 1;
-# elif defined HAVE_BGQ
-		highest_dims = 4;
-#endif
-	}
-
-	tok = strtok_r(arg_tmp, ",", &save_ptr);
-	while (tok) {
-		if (inx >= highest_dims) {
-			error("too many conn-type arguments: %s", arg);
-			break;
-		}
-		conn_type[inx++] = _get_conn_type(tok, got_bgp);
-		tok = strtok_r(NULL, ",", &save_ptr);
-	}
-	if (inx == 0)
-		error("invalid conn-type argument '%s' ignored.", arg);
-	/* Fill the rest in with NO_VALS (use HIGHEST_DIMS here
-	 * instead of highest_dims since that is the size of the
-	 * array. */
-	for ( ; inx < HIGHEST_DIMENSIONS; inx++) {
-		conn_type[inx] = (uint16_t)NO_VAL;
-	}
-
-	xfree(arg_tmp);
-}
-
-/*
- * verify geometry arguments, must have proper count
- * returns -1 on error, 0 otherwise
- */
-int verify_geometry(const char *arg, uint16_t *geometry)
-{
-	char* token, *delimiter = ",x", *next_ptr;
-	int i, rc = 0;
-	char* geometry_tmp = xstrdup(arg);
-	char* original_ptr = geometry_tmp;
-	int dims = slurmdb_setup_cluster_dims();
-
-	token = strtok_r(geometry_tmp, delimiter, &next_ptr);
-	for (i=0; i<dims; i++) {
-		if (token == NULL) {
-			error("insufficient dimensions in --geometry");
-			rc = -1;
-			break;
-		}
-		geometry[i] = (uint16_t)atoi(token);
-		if (geometry[i] == 0 || geometry[i] == (uint16_t)NO_VAL) {
-			error("invalid --geometry argument");
-			rc = -1;
-			break;
-		}
-		geometry_tmp = next_ptr;
-		token = strtok_r(geometry_tmp, delimiter, &next_ptr);
-	}
-	if (token != NULL) {
-		error("too many dimensions in --geometry");
-		rc = -1;
-	}
-
-	if (original_ptr)
-		xfree(original_ptr);
-
-	return rc;
-}
-
 /* return command name from its full path name */
-char * base_name(char* command)
+char *base_name(const char *command)
 {
-	char *char_ptr, *name;
-	int i;
+	const char *char_ptr;
 
 	if (command == NULL)
 		return NULL;
@@ -595,26 +461,24 @@ char * base_name(char* command)
 	else
 		char_ptr++;
 
-	i = strlen(char_ptr);
-	name = xmalloc(i+1);
-	strcpy(name, char_ptr);
-	return name;
+	return xstrdup(char_ptr);
 }
 
-/*
- * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
- * or "T" at end and return the number in mega-bytes
- */
-long str_to_mbytes(const char *arg)
+static uint64_t _str_to_mbytes(const char *arg, int use_gbytes)
 {
-	long result;
+	long long result;
 	char *endptr;
 
 	errno = 0;
-	result = strtol(arg, &endptr, 10);
-	if ((errno != 0) && ((result == LONG_MIN) || (result == LONG_MAX)))
-		result = -1;
-	else if (endptr[0] == '\0')
+	result = strtoll(arg, &endptr, 10);
+	if ((errno != 0) && ((result == LLONG_MIN) || (result == LLONG_MAX)))
+		return NO_VAL64;
+	if (result < 0)
+		return NO_VAL64;
+
+	else if ((endptr[0] == '\0') && (use_gbytes == 1))  /* GB default */
+		result *= 1024;
+	else if (endptr[0] == '\0')	/* MB default */
 		;
 	else if ((endptr[0] == 'k') || (endptr[0] == 'K'))
 		result = (result + 1023) / 1024;	/* round up */
@@ -625,9 +489,70 @@ long str_to_mbytes(const char *arg)
 	else if ((endptr[0] == 't') || (endptr[0] == 'T'))
 		result *= (1024 * 1024);
 	else
-		result = -1;
+		return NO_VAL64;
 
-	return result;
+	return (uint64_t) result;
+}
+
+/*
+ * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
+ * or "T" at end and return the number in mega-bytes. Default units are MB.
+ */
+uint64_t str_to_mbytes(const char *arg)
+{
+	return _str_to_mbytes(arg, 0);
+}
+
+/*
+ * str_to_mbytes2(): verify that arg is numeric with optional "K", "M", "G"
+ * or "T" at end and return the number in mega-bytes. Default units are GB
+ * if "SchedulerParameters=default_gbytes" is configured, otherwise MB.
+ */
+uint64_t str_to_mbytes2(const char *arg)
+{
+	static int use_gbytes = -1;
+
+	if (use_gbytes == -1) {
+		char *sched_params = slurm_get_sched_params();
+		if (xstrcasestr(sched_params, "default_gbytes"))
+			use_gbytes = 1;
+		else
+			use_gbytes = 0;
+		xfree(sched_params);
+	}
+
+	return _str_to_mbytes(arg, use_gbytes);
+}
+
+extern char *mbytes2_to_str(uint64_t mbytes)
+{
+	int i = 0;
+	char *unit = "MGTP?";
+	static int use_gbytes = -1;
+
+	if (mbytes == NO_VAL64)
+		return NULL;
+
+	if (use_gbytes == -1) {
+		char *sched_params = slurm_get_sched_params();
+		if (xstrcasestr(sched_params, "default_gbytes"))
+			use_gbytes = 1;
+		else
+			use_gbytes = 0;
+		xfree(sched_params);
+	}
+
+	for (i = 0; unit[i] != '?'; i++) {
+		if (mbytes && (mbytes % 1024))
+			break;
+		mbytes /= 1024;
+	}
+
+	/* no need to display the default unit */
+	if ((unit[i] == 'G' && use_gbytes) || (unit[i] == 'M' && !use_gbytes))
+		return xstrdup_printf("%"PRIu64, mbytes);
+
+	return xstrdup_printf("%"PRIu64"%c", mbytes, unit[i]);
 }
 
 /* Convert a string into a node count */
@@ -640,7 +565,7 @@ _str_to_nodes(const char *num_str, char **leftover)
 	num = strtol(num_str, &endptr, 10);
 	if (endptr == num_str) { /* no valid digits */
 		*leftover = (char *)num_str;
-		return 0;
+		return -1;
 	}
 	if (*endptr != '\0' && (*endptr == 'k' || *endptr == 'K')) {
 		num *= 1024;
@@ -665,9 +590,11 @@ bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes)
 	char *ptr, *min_str, *max_str;
 	char *leftover;
 
-	/* Does the string contain a "-" character?  If so, treat as a range.
-	 * otherwise treat as an absolute node count. */
-	if ((ptr = index(arg, '-')) != NULL) {
+	/*
+	 * Does the string contain a "-" character?  If so, treat as a range.
+	 * otherwise treat as an absolute node count.
+	 */
+	if ((ptr = xstrchr(arg, '-')) != NULL) {
 		min_str = xstrndup(arg, ptr-arg);
 		*min_nodes = _str_to_nodes(min_str, &leftover);
 		if (!xstring_is_whitespace(leftover)) {
@@ -676,13 +603,8 @@ bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes)
 			return false;
 		}
 		xfree(min_str);
-#ifdef HAVE_ALPS_CRAY
-		if (*min_nodes < 0) {
-#else
-		if (*min_nodes == 0) {
-#endif
+		if (*min_nodes < 0)
 			*min_nodes = 1;
-		}
 
 		max_str = xstrndup(ptr+1, strlen(arg)-((ptr+1)-arg));
 		*max_nodes = _str_to_nodes(max_str, &leftover);
@@ -698,20 +620,14 @@ bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes)
 			error("\"%s\" is not a valid node count", arg);
 			return false;
 		}
-#ifdef HAVE_ALPS_CRAY
 		if (*min_nodes < 0) {
-#else
-		if (*min_nodes == 0) {
-#endif
-			/* whitespace does not a valid node count make */
 			error("\"%s\" is not a valid node count", arg);
 			return false;
 		}
 	}
 
 	if ((*max_nodes != 0) && (*max_nodes < *min_nodes)) {
-		error("Maximum node count %d is less than"
-		      " minimum node count %d",
+		error("Maximum node count %d is less than minimum node count %d",
 		      *max_nodes, *min_nodes);
 		return false;
 	}
@@ -787,7 +703,7 @@ bool get_resource_arg_range(const char *arg, const char *what, int* min,
 		p++;
 	}
 
-	if (((*p != '\0') && (*p != '-')) || (result <= 0L)) {
+	if (((*p != '\0') && (*p != '-')) || (result < 0L)) {
 		error ("Invalid numeric value \"%s\" for %s.", arg, what);
 		if (isFatal)
 			exit(1);
@@ -842,12 +758,16 @@ bool verify_socket_core_thread_count(const char *arg, int *min_sockets,
 				     int *min_cores, int *min_threads,
 				     cpu_bind_type_t *cpu_bind_type)
 {
-	bool tmp_val,ret_val;
+	bool tmp_val, ret_val;
 	int i, j;
 	int max_sockets = 0, max_cores = 0, max_threads = 0;
 	const char *cur_ptr = arg;
 	char buf[3][48]; /* each can hold INT64_MAX - INT64_MAX */
 
+	if (!arg) {
+		error("%s: argument is NULL", __func__);
+		return false;
+	}
 	memset(buf, 0, sizeof(buf));
 	for (j = 0; j < 3; j++) {
 		for (i = 0; i < 47; i++) {
@@ -908,9 +828,9 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 		 cpu_bind_type_t *cpu_bind_type)
 {
 	char *buf, *p, *tok;
-	if (!arg) {
+
+	if (!arg)
 		return true;
-	}
 
 	buf = xstrdup(arg);
 	p = buf;
@@ -932,6 +852,7 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 "        memory_bound    use only one core in each socket\n"
 "        [no]multithread [don't] use extra threads with in-core multi-threading\n"
 "        help            show this help message\n");
+			xfree(buf);
 			return 1;
 		} else if (xstrcasecmp(tok, "compute_bound") == 0) {
 			*min_sockets = NO_VAL;
@@ -981,7 +902,7 @@ uint16_t parse_mail_type(const char *arg)
 	bool none_set = false;
 
 	if (!arg)
-		return (uint16_t)INFINITE;
+		return INFINITE16;
 
 	buf = xstrdup(arg);
 	tok = strtok_r(buf, ",", &save_ptr);
@@ -1018,7 +939,7 @@ uint16_t parse_mail_type(const char *arg)
 	}
 	xfree(buf);
 	if (!rc && !none_set)
-		rc = (uint16_t)INFINITE;
+		rc = INFINITE16;
 
 	return rc;
 }
@@ -1126,58 +1047,124 @@ _create_path_list(void)
 }
 
 /*
+ * Check a specific path to see if the executable exists and is not a directory
+ * IN path - path of executable to check
+ * RET true if path exists and is not a directory; false otherwise
+ */
+static bool _exists(const char *path)
+{
+	struct stat st;
+        if (stat(path, &st)) {
+		debug2("_check_exec: failed to stat path %s", path);
+		return false;
+	}
+	if (S_ISDIR(st.st_mode)) {
+		debug2("_check_exec: path %s is a directory", path);
+		return false;
+	}
+	return true;
+}
+
+/*
+ * Check a specific path to see if the executable is accessible
+ * IN path - path of executable to check
+ * IN access_mode - determine if executable is accessible to caller with
+ *		    specified mode
+ * RET true if path is accessible according to access mode, false otherwise
+ */
+static bool _accessible(const char *path, int access_mode)
+{
+	if (access(path, access_mode)) {
+		debug2("_check_exec: path %s is not accessible", path);
+		return false;
+	}
+	return true;
+}
+
+/*
  * search PATH to confirm the location and access mode of the given command
  * IN cwd - current working directory
  * IN cmd - command to execute
- * IN check_current_dir - if true, search cwd for the command
+ * IN check_cwd_last - if true, search cwd after PATH is checked
+ *                   - if false, search cwd for the command first
  * IN access_mode - required access rights of cmd
  * IN test_exec - if false, do not confirm access mode of cmd if full path
  * RET full path of cmd or NULL if not found
  */
-char *search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode,
+char *search_path(char *cwd, char *cmd, bool check_cwd_last, int access_mode,
 		  bool test_exec)
 {
 	List         l        = NULL;
 	ListIterator i        = NULL;
 	char *path, *fullpath = NULL;
 
-#if defined HAVE_BG && !defined HAVE_BG_L_P
-	/* BGQ's runjob command required a fully qualified path */
-	if (((cmd[0] == '.') || (cmd[0] == '/')) &&
-	    (access(cmd, access_mode) == 0)) {
-		if (cmd[0] == '.')
-			xstrfmtcat(fullpath, "%s/", cwd);
-		xstrcat(fullpath, cmd);
-		goto done;
-	}
-#else
-	if ((cmd[0] == '.') || (cmd[0] == '/')) {
-		if (test_exec && (access(cmd, access_mode) == 0)) {
-			if (cmd[0] == '.')
-				xstrfmtcat(fullpath, "%s/", cwd);
-			xstrcat(fullpath, cmd);
+	/* Relative path */
+	if (cmd[0] == '.') {
+		if (test_exec) {
+			char *cmd1 = xstrdup_printf("%s/%s", cwd, cmd);
+			if (_exists(cmd1) && _accessible(cmd1, access_mode)) {
+				fullpath = xstrdup(cmd1);
+				debug5("%s: relative path found %s -> %s",
+					__func__, cmd, cmd1);
+			} else {
+				debug5("%s: relative path not found %s -> %s",
+					__func__, cmd, cmd1);
+			}
+			xfree(cmd1);
 		}
-		goto done;
+		return fullpath;
 	}
-#endif
-
+	/* Absolute path */
+	if (cmd[0] == '/') {
+		if (test_exec && _exists(cmd) && _accessible(cmd, access_mode)) {
+			fullpath = xstrdup(cmd);
+			debug5("%s: absolute path found %s",
+			       __func__, cmd);
+		} else {
+			debug5("%s: absolute path not found %s",
+			       __func__, cmd);
+		}
+		return fullpath;
+	}
+	/* Otherwise search in PATH */
 	l = _create_path_list();
-	if (l == NULL)
+	if (l == NULL) {
+		debug5("%s: empty PATH environment",
+			__func__);
 		return NULL;
+	}
 
-	if (check_current_dir)
+	if (check_cwd_last)
+		list_append(l, xstrdup(cwd));
+	else
 		list_prepend(l, xstrdup(cwd));
 
 	i = list_iterator_create(l);
 	while ((path = list_next(i))) {
-		xstrfmtcat(fullpath, "%s/%s", path, cmd);
+		if (path[0] == '.')
+			xstrfmtcat(fullpath, "%s/%s/%s", cwd, path, cmd);
+		else
+			xstrfmtcat(fullpath, "%s/%s", path, cmd);
+		/* Use first executable found in PATH */
+		if (_exists(fullpath)) {
+			if (!test_exec) {
+				debug5("%s: env PATH found: %s",
+					__func__, fullpath);
+				break;
+			}
+			if (_accessible(path, access_mode)) {
+				debug5("%s: env PATH found: %s",
+					__func__, fullpath);
+				break;
+			}
+		}
 
-		if (access(fullpath, access_mode) == 0)
-			goto done;
+		debug5("%s: env PATH not found: %s",
+			__func__, fullpath);
 
 		xfree(fullpath);
 	}
-done:
+	list_iterator_destroy(i);
 	FREE_NULL_LIST(l);
 	return fullpath;
 }
@@ -1185,38 +1172,13 @@ done:
 char *print_commandline(const int script_argc, char **script_argv)
 {
 	int i;
-	char tmp[256], *out_buf = NULL, *prefix;
+	char *out_buf = NULL, *prefix = "";
 
 	for (i = 0; i < script_argc; i++) {
-		if (out_buf)
-			prefix = " ";
-		else
-			prefix = "";
-		snprintf(tmp, 256,  "%s%s", prefix, script_argv[i]);
-		xstrcat(out_buf, tmp);
+		xstrfmtcat(out_buf,  "%s%s", prefix, script_argv[i]);
+		prefix = " ";
 	}
 	return out_buf;
-}
-
-char *print_geometry(const uint16_t *geometry)
-{
-	int i;
-	char buf[32], *rc = NULL;
-	int dims = slurmdb_setup_cluster_dims();
-
-	if ((dims == 0) || !geometry[0]
-	    ||  (geometry[0] == (uint16_t)NO_VAL))
-		return NULL;
-
-	for (i=0; i<dims; i++) {
-		if (i > 0)
-			snprintf(buf, sizeof(buf), "x%u", geometry[i]);
-		else
-			snprintf(buf, sizeof(buf), "%u", geometry[i]);
-		xstrcat(rc, buf);
-	}
-
-	return rc;
 }
 
 /* Translate a signal option string "--signal=<int>[@<time>]" into
@@ -1231,7 +1193,7 @@ int get_signal_opts(char *optarg, uint16_t *warn_signal, uint16_t *warn_time,
 	if (optarg == NULL)
 		return -1;
 
-	if (!strncasecmp(optarg, "B:", 2)) {
+	if (!xstrncasecmp(optarg, "B:", 2)) {
 		*warn_flags = KILL_JOB_BATCH;
 		optarg += 2;
 	}
@@ -1260,52 +1222,127 @@ int get_signal_opts(char *optarg, uint16_t *warn_signal, uint16_t *warn_time,
 	return -1;
 }
 
-/* Convert a signal name to it's numeric equivalent.
- * Return -1 on failure */
-int sig_name2num(char *signal_name)
+extern char *signal_opts_to_cmdline(uint16_t warn_signal, uint16_t warn_time,
+				    uint16_t warn_flags)
 {
-	char *sig_name[] = {"HUP", "INT", "QUIT", "KILL", "TERM",
-			    "USR1", "USR2", "CONT", NULL};
-	int sig_num[] = {SIGHUP, SIGINT, SIGQUIT, SIGKILL, SIGTERM,
-			       SIGUSR1, SIGUSR2, SIGCONT};
+	char *cmdline = NULL, *sig_name;
+
+	if (warn_flags == KILL_JOB_BATCH)
+		xstrcat(cmdline, "B:");
+
+	sig_name = sig_num2name(warn_signal);
+	xstrcat(cmdline, sig_name);
+	xfree(sig_name);
+
+	if (warn_time != 60) /* default value above, don't print */
+		xstrfmtcat(cmdline, "@%u", warn_time);
+
+	return cmdline;
+}
+
+static struct {
+	char *name;
+	uint16_t val;
+} signals_mapping[] = {
+	{ "HUP",	SIGHUP	},
+	{ "INT",	SIGINT	},
+	{ "QUIT",	SIGQUIT	},
+	{ "ABRT",	SIGABRT	},
+	{ "KILL",	SIGKILL	},
+	{ "ALRM",	SIGALRM	},
+	{ "TERM",	SIGTERM	},
+	{ "USR1",	SIGUSR1	},
+	{ "USR2",	SIGUSR2	},
+	{ "URG",	SIGURG	},
+	{ "CONT",	SIGCONT	},
+	{ "STOP",	SIGSTOP	},
+	{ "TSTP",	SIGTSTP	},
+	{ "TTIN",	SIGTTIN	},
+	{ "TTOU",	SIGTTOU	},
+	{ NULL,		0	}	/* terminate array */
+};
+
+/* Convert a signal name to it's numeric equivalent.
+ * Return 0 on failure */
+int sig_name2num(const char *signal_name)
+{
 	char *ptr;
 	long tmp;
-	int sig;
 	int i;
 
 	tmp = strtol(signal_name, &ptr, 10);
 	if (ptr != signal_name) { /* found a number */
 		if (xstring_is_whitespace(ptr))
-			sig = (int)tmp;
+			return (int)tmp;
 		else
 			return 0;
-	} else {
-		ptr = (char *)signal_name;
-		while (isspace((int)*ptr))
-			ptr++;
-		if (strncasecmp(ptr, "SIG", 3) == 0)
-			ptr += 3;
-		for (i = 0; ; i++) {
-			if (sig_name[i] == NULL)
-				return 0;
-			if (strncasecmp(ptr, sig_name[i],
-					strlen(sig_name[i])) == 0) {
-				/* found the signal name */
-				if (!xstring_is_whitespace(ptr +
-							   strlen(sig_name[i])))
-					return 0;
-				sig = sig_num[i];
-				break;
-			}
+	}
+
+	/* search the array */
+	ptr = (char *) signal_name;
+	while (isspace((int)*ptr))
+		ptr++;
+	if (xstrncasecmp(ptr, "SIG", 3) == 0)
+		ptr += 3;
+	for (i = 0; ; i++) {
+		int siglen;
+		if (signals_mapping[i].name == NULL)
+			return 0;
+		siglen = strlen(signals_mapping[i].name);
+		if ((!xstrncasecmp(ptr, signals_mapping[i].name, siglen)
+		    && xstring_is_whitespace(ptr + siglen))) {
+			/* found the signal name */
+			return signals_mapping[i].val;
 		}
 	}
 
-	return sig;
+	return 0;	/* not found */
 }
 
+extern char *sig_num2name(int signal)
+{
+	for (int i = 0; signals_mapping[i].name; i++) {
+		if (signal == signals_mapping[i].val)
+			return xstrdup(signals_mapping[i].name);
+	}
+
+	return xstrdup_printf("%d", signal);
+}
 
 /*
- * parse_uint32 - Convert anscii string to a 32 bit unsigned int.
+ * parse_uint16 - Convert ascii string to a 16 bit unsigned int.
+ * IN      aval - ascii string.
+ * IN/OUT  ival - 16 bit pointer.
+ * RET     0 if no error, 1 otherwise.
+ */
+extern int parse_uint16(char *aval, uint16_t *ival)
+{
+	/*
+	 * First,  convert the ascii value it to a
+	 * long long int. If the result is greater then
+	 * or equal to 0 and less than NO_VAL16
+	 * set the value and return. Otherwise
+	 * return an error.
+	 */
+	uint16_t max16uint = NO_VAL16;
+	long long tval;
+	char *p;
+
+	/*
+	 * Return error for invalid value.
+	 */
+	tval = strtoll(aval, &p, 10);
+	if (p[0] || (tval == LLONG_MIN) || (tval == LLONG_MAX) ||
+	    (tval < 0) || (tval >= max16uint))
+		return 1;
+
+	*ival = (uint16_t) tval;
+
+	return 0;
+}
+
+/*
+ * parse_uint32 - Convert ascii string to a 32 bit unsigned int.
  * IN      aval - ascii string.
  * IN/OUT  ival - 32 bit pointer.
  * RET     0 if no error, 1 otherwise.
@@ -1319,12 +1356,12 @@ extern int parse_uint32(char *aval, uint32_t *ival)
 	 * set the value and return. Otherwise return
 	 * an error.
 	 */
-	uint32_t max32uint = (uint32_t) NO_VAL;
+	uint32_t max32uint = NO_VAL;
 	long long tval;
 	char *p;
 
 	/*
- 	 * Return error for invalid value.
+	 * Return error for invalid value.
 	 */
 	tval = strtoll(aval, &p, 10);
 	if (p[0] || (tval == LLONG_MIN) || (tval == LLONG_MAX) ||
@@ -1337,21 +1374,21 @@ extern int parse_uint32(char *aval, uint32_t *ival)
 }
 
 /*
- * parse_uint16 - Convert anscii string to a 16 bit unsigned int.
+ * parse_uint64 - Convert ascii string to a 64 bit unsigned int.
  * IN      aval - ascii string.
- * IN/OUT  ival - 16 bit pointer.
+ * IN/OUT  ival - 64 bit pointer.
  * RET     0 if no error, 1 otherwise.
  */
-extern int parse_uint16(char *aval, uint16_t *ival)
+extern int parse_uint64(char *aval, uint64_t *ival)
 {
 	/*
-	 * First,  convert the ascii value it to a
-	 * long long int. If the result is greater then
-	 * or equal to 0 and less than (uint16_t) NO_VAL
-	 * set the value and return. Otherwise
-	 * return an error.
+	 * First,  convert the ascii value it to an
+	 * unsigned long long. If the result is greater
+	 * than or equal to 0 and less than NO_VAL
+	 * set the value and return. Otherwise return
+	 * an error.
 	 */
-	uint16_t max16uint = (uint16_t) NO_VAL;
+	uint64_t max64uint = NO_VAL64;
 	long long tval;
 	char *p;
 
@@ -1360,10 +1397,10 @@ extern int parse_uint16(char *aval, uint16_t *ival)
 	 */
 	tval = strtoll(aval, &p, 10);
 	if (p[0] || (tval == LLONG_MIN) || (tval == LLONG_MAX) ||
-	    (tval < 0) || (tval >= max16uint))
+	    (tval < 0) || (tval >= max64uint))
 		return 1;
 
-	*ival = (uint16_t) tval;
+	*ival = (uint64_t) tval;
 
 	return 0;
 }
@@ -1372,25 +1409,24 @@ extern int parse_uint16(char *aval, uint16_t *ival)
  *  Get a decimal integer from arg.
  *
  *  Returns the integer on success, exits program on failure.
- *
  */
 extern int parse_int(const char *name, const char *val, bool positive)
 {
 	char *p = NULL;
-	int result = 0;
+	long int result = 0;
 
 	if (val)
 		result = strtol(val, &p, 10);
 
-	if ((p == NULL) || (p[0] != '\0') || (result < 0L)
-	||  (positive && (result <= 0L))) {
+	if ((p == NULL) || (p[0] != '\0') || (result < 0L) ||
+	    (positive && (result <= 0L))) {
 		error ("Invalid numeric value \"%s\" for %s.", val, name);
 		exit(1);
-	} else if (result > INT_MAX) {
-		error ("Numeric argument (%d) to big for %s.", result, name);
+	} else if (result == LONG_MAX) {
+		error ("Numeric argument (%ld) to big for %s.", result, name);
 		exit(1);
-	} else if (result < INT_MIN) {
-		error ("Numeric argument %d to small for %s.", result, name);
+	} else if (result == LONG_MIN) {
+		error ("Numeric argument (%ld) to small for %s.", result, name);
 		exit(1);
 	}
 
@@ -1420,215 +1456,19 @@ void print_db_notok(const char *cname, bool isenv)
 		      cname, isenv ? "SLURM_CLUSTERS" : "--cluster");
 }
 
-static bool _check_is_pow_of_2(int32_t n) {
-	/* Bitwise ANDing a power of 2 number like 16 with its
-	 * negative (-16) gives itself back.  Only integers which are power of
-	 * 2 behave like that.
-	 */
-	return ((n!=0) && (n&(-n))==n);
-}
-
-extern void bg_figure_nodes_tasks(int *min_nodes, int *max_nodes,
-				  int *ntasks_per_node, bool *ntasks_set,
-				  int *ntasks, bool nodes_set,
-				  bool nodes_set_opt, bool overcommit,
-				  bool set_tasks)
-{
-	/* BGQ has certain restrictions to run a job.  So lets validate
-	 * and correct what the user asked for if possible.
-	 */
-	int32_t node_cnt;
-	bool figured = false;
-	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
-
-	if (!(cluster_flags & CLUSTER_FLAG_BGQ))
-		fatal("bg_figure_nodes_tasks is only valid on a BGQ system.");
-
-	if (!(*ntasks_set)
-	    && (*ntasks_per_node) && (*ntasks_per_node != NO_VAL)) {
-		if ((*ntasks_per_node != 1)
-		    && (*ntasks_per_node != 2)
-		    && (*ntasks_per_node != 4)
-		    && (*ntasks_per_node != 8)
-		    && (*ntasks_per_node != 16)
-		    && (*ntasks_per_node != 32)
-		    && (*ntasks_per_node != 64))
-			fatal("You requested --ntasks-per-node=%d, "
-			      "which is not valid, it must be a power of 2.  "
-			      "Please validate your request and try again.",
-			      *ntasks_per_node);
-		else if (!overcommit
-			 && ((*ntasks_per_node == 32)
-			     || (*ntasks_per_node == 64)))
-			fatal("You requested --ntasks-per-node=%d, "
-			      "which is not valid without --overcommit.",
-			      *ntasks_per_node);
-	}
-
-	if (*max_nodes)
-		node_cnt = *max_nodes;
-	else
-		node_cnt = *min_nodes;
-
-	if (*ntasks_set) {
-		int32_t ntpn;
-
-		if (nodes_set) {
-			if (node_cnt > *ntasks) {
-				if (nodes_set_opt)
-					info("You asked for %d nodes, "
-					     "but only %d tasks, resetting "
-					     "node count to %u.",
-					     node_cnt, *ntasks, *ntasks);
-				*max_nodes = *min_nodes = node_cnt
-					= *ntasks;
-			}
-		}
-		/* If nodes not set do not try to set min/max nodes
-		   yet since that would result in an incorrect
-		   allocation.  For a step allocation it is figured
-		   out later in srun_job.c _job_create_structure().
-		*/
-
-		if ((!*ntasks_per_node || (*ntasks_per_node == NO_VAL))) {
-			/* We always want the next larger number if
-			   there is a fraction so we try to stay in
-			   the allocation requested.
-			*/
-			*ntasks_per_node =
-				(*ntasks + node_cnt - 1) / node_cnt;
-			figured = true;
-		}
-
-		/* On a Q we need ntasks_per_node to be a multiple of 2 */
-		ntpn = *ntasks_per_node;
-		while (!_check_is_pow_of_2(ntpn))
-			ntpn++;
-		if (!figured && ntpn > 64)
-			fatal("You requested --ntasks-per-node=%d, "
-			      "which is not a power of 2.  But the next "
-			      "largest power of 2 (%d) is greater than the "
-			      "largest valid power which is 64.  Please "
-			      "validate your request and try again.",
-			      *ntasks_per_node, ntpn);
-		if (!figured && (ntpn != *ntasks_per_node)) {
-			info("You requested --ntasks-per-node=%d, which is not "
-			     "a power of 2.  Setting --ntasks-per-node=%d "
-			     "for you.", *ntasks_per_node, ntpn);
-			figured = true;
-		}
-		*ntasks_per_node = ntpn;
-
-		/* We always want the next larger number if
-		   there is a fraction so we try to stay in
-		   the allocation requested.
-		*/
-		ntpn = ((*ntasks) + (*ntasks_per_node) - 1)
-			/ (*ntasks_per_node);
-		/* Make sure we are requesting the correct number of nodes. */
-		if (node_cnt < ntpn) {
-			*max_nodes = *min_nodes = ntpn;
-			if (nodes_set && !figured) {
-				fatal("You requested -N %d and -n %d "
-				      "with --ntasks-per-node=%d.  "
-				      "This isn't a valid request.",
-				      node_cnt, *ntasks,
-				      *ntasks_per_node);
-			}
-			node_cnt = *max_nodes;
-		}
-
-		/* Do this again to make sure we have a legitimate
-		   ratio. */
-		ntpn = *ntasks_per_node;
-		if ((node_cnt * ntpn) < *ntasks) {
-			ntpn++;
-			while (!_check_is_pow_of_2(ntpn))
-				ntpn++;
-			if (!figured && (ntpn != *ntasks_per_node))
-				info("You requested --ntasks-per-node=%d, "
-				     "which cannot spread across %d nodes "
-				     "correctly.  Setting --ntasks-per-node=%d "
-				     "for you.",
-				     *ntasks_per_node, node_cnt, ntpn);
-			*ntasks_per_node = ntpn;
-		} else if (!overcommit && ((node_cnt * ntpn) > *ntasks)) {
-			ntpn = (*ntasks + node_cnt - 1) / node_cnt;
-			while (!_check_is_pow_of_2(ntpn))
-				ntpn++;
-			if (!figured && (ntpn != *ntasks_per_node))
-				info("You requested --ntasks-per-node=%d, "
-				     "which is more than the tasks you "
-				     "requested.  Setting --ntasks-per-node=%d "
-				     "for you.",
-				     *ntasks_per_node, ntpn);
-			*ntasks_per_node = ntpn;
-		}
-	} else if (set_tasks) {
-		if (*ntasks_per_node && (*ntasks_per_node != NO_VAL))
-			*ntasks = node_cnt * (*ntasks_per_node);
-		else {
-			*ntasks = node_cnt;
-			*ntasks_per_node = 1;
-		}
-		*ntasks_set = true;
-	}
-
-	/* If set_tasks isn't set we are coming in for the
-	   allocation so verify it will work first before we
-	   go any futher.
-	*/
-	if (nodes_set && (*ntasks_per_node && (*ntasks_per_node != NO_VAL))) {
-		if ((*ntasks_per_node != 1)
-		    && (*ntasks_per_node != 2)
-		    && (*ntasks_per_node != 4)
-		    && (*ntasks_per_node != 8)
-		    && (*ntasks_per_node != 16)
-		    && (*ntasks_per_node != 32)
-		    && (*ntasks_per_node != 64)) {
-			if (*ntasks_set)
-				fatal("You requested -N %d and -n %d "
-				      "which gives --ntasks-per-node=%d.  "
-				      "This isn't a valid request.",
-				      node_cnt, *ntasks,
-				      *ntasks_per_node);
-			else
-				fatal("You requested -N %d and "
-				      "--ntasks-per-node=%d.  "
-				      "This isn't a valid request.",
-				      node_cnt, *ntasks_per_node);
-		} else if (!overcommit
-			 && ((*ntasks_per_node == 32)
-			     || (*ntasks_per_node == 64))) {
-			if (*ntasks_set)
-				fatal("You requested -N %d and -n %d "
-				      "which gives --ntasks-per-node=%d.  "
-				      "This isn't a valid request "
-				      "without --overcommit.",
-				      node_cnt, *ntasks,
-				      *ntasks_per_node);
-			else
-				fatal("You requested -N %d and "
-				      "--ntasks-per-node=%d.  "
-				      "This isn't a valid request "
-				      "without --overcommit.",
-				      node_cnt, *ntasks_per_node);
-		}
-	}
-
-	/* If we aren't setting tasks reset ntasks_per_node as well. */
-	if (!set_tasks && figured)
-		*ntasks_per_node = 0;
-
-}
-
-/* parse_resv_flags()
+/*
+ * parse_resv_flags() used to parse the Flags= option.  It handles
+ * daily, weekly, static_alloc, part_nodes, and maint, optionally
+ * preceded by + or -, separated by a comma but no spaces.
+ *
+ * flagstr IN - reservation flag string
+ * msg IN - string to append to error message (e.g. function name)
+ * RET equivalent reservation flag bits
  */
-uint32_t
-parse_resv_flags(const char *flagstr, const char *msg)
+extern uint64_t parse_resv_flags(const char *flagstr, const char *msg)
 {
 	int flip;
-	uint32_t outflags = 0;
+	uint64_t outflags = 0;
 	const char *curr = flagstr;
 	int taglen = 0;
 
@@ -1644,78 +1484,109 @@ parse_resv_flags(const char *flagstr, const char *msg)
 		while (curr[taglen] != ',' && curr[taglen] != '\0')
 			taglen++;
 
-		if (strncasecmp(curr, "Maintenance", MAX(taglen,1)) == 0) {
+		if (xstrncasecmp(curr, "Maintenance", MAX(taglen,1)) == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_MAINT;
 			else
 				outflags |= RESERVE_FLAG_MAINT;
-		} else if ((strncasecmp(curr, "Overlap", MAX(taglen,1))
+		} else if ((xstrncasecmp(curr, "Overlap", MAX(taglen,1))
 			    == 0) && (!flip)) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_OVERLAP;
-			/* "-OVERLAP" is not supported since that's the
+			/*
+			 * "-OVERLAP" is not supported since that's the
 			 * default behavior and the option only applies
-			 * for reservation creation, not updates */
-		} else if (strncasecmp(curr, "Ignore_Jobs", MAX(taglen,1))
+			 * for reservation creation, not updates
+			 */
+		} else if (xstrncasecmp(curr, "Flex", MAX(taglen,1)) == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_FLEX;
+			else
+				outflags |= RESERVE_FLAG_FLEX;
+		} else if (xstrncasecmp(curr, "Ignore_Jobs", MAX(taglen,1))
 			   == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_IGN_JOB;
 			else
 				outflags |= RESERVE_FLAG_IGN_JOBS;
-		} else if (strncasecmp(curr, "Daily", MAX(taglen,1)) == 0) {
+		} else if (xstrncasecmp(curr, "Daily", MAX(taglen,1)) == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_DAILY;
 			else
 				outflags |= RESERVE_FLAG_DAILY;
-		} else if (strncasecmp(curr, "Weekly", MAX(taglen,1)) == 0) {
+		} else if (xstrncasecmp(curr, "Weekday", MAX(taglen,1)) == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_WEEKDAY;
+			else
+				outflags |= RESERVE_FLAG_WEEKDAY;
+		} else if (xstrncasecmp(curr, "Weekend", MAX(taglen,1)) == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_WEEKEND;
+			else
+				outflags |= RESERVE_FLAG_WEEKEND;
+		} else if (xstrncasecmp(curr, "Weekly", MAX(taglen,1)) == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_WEEKLY;
 			else
 				outflags |= RESERVE_FLAG_WEEKLY;
-		} else if (!strncasecmp(curr, "Any_Nodes", MAX(taglen,1)) ||
-			   !strncasecmp(curr, "License_Only", MAX(taglen,1))) {
+		} else if (!xstrncasecmp(curr, "Any_Nodes", MAX(taglen,1)) ||
+			   !xstrncasecmp(curr, "License_Only", MAX(taglen,1))) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_ANY_NODES;
 			else
 				outflags |= RESERVE_FLAG_ANY_NODES;
-		} else if (strncasecmp(curr, "Static_Alloc", MAX(taglen,1))
+		} else if (xstrncasecmp(curr, "Static_Alloc", MAX(taglen,1))
 			   == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_STATIC;
 			else
 				outflags |= RESERVE_FLAG_STATIC;
-		} else if (strncasecmp(curr, "Part_Nodes", MAX(taglen, 2))
+		} else if (xstrncasecmp(curr, "Part_Nodes", MAX(taglen, 2))
 			   == 0) {
 			curr += taglen;
 			if (flip)
 				outflags |= RESERVE_FLAG_NO_PART_NODES;
 			else
 				outflags |= RESERVE_FLAG_PART_NODES;
-		} else if (strncasecmp(curr, "PURGE_COMP", MAX(taglen, 2))
+		} else if (xstrncasecmp(curr, "PURGE_COMP", MAX(taglen, 2))
 			   == 0) {
 			curr += taglen;
-			outflags |= RESERVE_FLAG_PURGE_COMP;
-		} else if (!strncasecmp(curr, "First_Cores", MAX(taglen,1)) &&
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_PURGE_COMP;
+			else
+				outflags |= RESERVE_FLAG_PURGE_COMP;
+		} else if (!xstrncasecmp(curr, "First_Cores", MAX(taglen,1)) &&
 			   !flip) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_FIRST_CORES;
-		} else if (!strncasecmp(curr, "Time_Float", MAX(taglen,1)) &&
+		} else if (!xstrncasecmp(curr, "Time_Float", MAX(taglen,1)) &&
 			   !flip) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_TIME_FLOAT;
-		} else if (!strncasecmp(curr, "Replace", MAX(taglen,1)) &&
+		} else if (!xstrncasecmp(curr, "Replace", MAX(taglen, 1)) &&
 			   !flip) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_REPLACE;
+		} else if (!xstrncasecmp(curr, "Replace_Down", MAX(taglen, 8))
+			   && !flip) {
+			curr += taglen;
+			outflags |= RESERVE_FLAG_REPLACE_DOWN;
+		} else if (!xstrncasecmp(curr, "NO_HOLD_JOBS_AFTER_END",
+					 MAX(taglen, 1)) && !flip) {
+			curr += taglen;
+			outflags |= RESERVE_FLAG_NO_HOLD_JOBS;
 		} else {
 			error("Error parsing flags %s.  %s", flagstr, msg);
-			return 0xffffffff;
+			return INFINITE64;
 		}
 
 		if (*curr == ',') {
@@ -1745,8 +1616,88 @@ uint16_t parse_compress_type(const char *arg)
 		return COMPRESS_ZLIB;
 	else if (!strcasecmp(arg, "lz4"))
 		return COMPRESS_LZ4;
+	else if (!strcasecmp(arg, "none"))
+		return COMPRESS_OFF;
 
 	error("Compression type '%s' unknown, disabling compression support.",
 	      arg);
 	return COMPRESS_OFF;
+}
+
+extern int validate_acctg_freq(char *acctg_freq)
+{
+	int i;
+	char *save_ptr = NULL, *tok, *tmp;
+	bool valid;
+	int rc = SLURM_SUCCESS;
+
+	if (!acctg_freq)
+		return rc;
+
+	tmp = xstrdup(acctg_freq);
+	tok = strtok_r(tmp, ",", &save_ptr);
+	while (tok) {
+		valid = false;
+		for (i = 0; i < PROFILE_CNT; i++)
+			if (acct_gather_parse_freq(i, tok) != -1) {
+				valid = true;
+				break;
+			}
+
+		if (!valid) {
+			error("Invalid --acctg-freq specification: %s", tok);
+			rc = SLURM_ERROR;
+		}
+		tok = strtok_r(NULL, ",", &save_ptr);
+	}
+	xfree(tmp);
+
+	return rc;
+}
+
+/*
+ * Format a tres_per_* argument
+ * dest OUT - resulting string
+ * prefix IN - TRES type (e.g. "gpu")
+ * src IN - user input, can include multiple comma-separated specifications
+ */
+extern void xfmt_tres(char **dest, char *prefix, char *src)
+{
+	char *result = NULL, *save_ptr = NULL, *sep = "", *tmp, *tok;
+
+	if (!src || (src[0] == '\0'))
+		return;
+	if (*dest) {
+		result = xstrdup(*dest);
+		sep = ",";
+	}
+	tmp = xstrdup(src);
+	tok = strtok_r(tmp, ",", &save_ptr);
+	while (tok) {
+		xstrfmtcat(result, "%s%s:%s", sep, prefix, tok);
+		sep = ",";
+		tok = strtok_r(NULL, ",", &save_ptr);
+	}
+	xfree(tmp);
+	*dest = result;
+}
+
+/*
+ * Format a tres_freq argument
+ * dest OUT - resulting string
+ * prefix IN - TRES type (e.g. "gpu")
+ * src IN - user input
+ */
+extern void xfmt_tres_freq(char **dest, char *prefix, char *src)
+{
+	char *result = NULL, *sep = "";
+
+	if (!src || (src[0] == '\0'))
+		return;
+	if (*dest) {
+		result = xstrdup(*dest);
+		sep = ";";
+	}
+	xstrfmtcat(result, "%s%s:%s", sep, prefix, src);
+	*dest = result;
 }

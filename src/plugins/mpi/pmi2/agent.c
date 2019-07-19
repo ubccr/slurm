@@ -8,11 +8,11 @@
  *  Written by Artem Y. Polyakov <artemp@mellanox.com>.
  *  All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,30 +28,25 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if     HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
 #if defined(__FreeBSD__)
-#include <roken.h>
 #include <sys/socket.h>	/* AF_INET */
 #endif
 
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/un.h>
-#include <arpa/inet.h>
 #include <poll.h>
 
 #include "src/common/slurm_xlator.h"
@@ -65,14 +60,13 @@
 #include "pmi.h"
 #include "setup.h"
 
-#define MAX_RETRIES 5
-
 static int *initialized = NULL;
 static int *finalized = NULL;
 
 static eio_handle_t *pmi2_handle;
-static volatile bool agent_running;
 static pthread_mutex_t agent_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t agent_running_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t _agent_tid = 0;
 
 static bool _tree_listen_readable(eio_obj_t *obj);
 static int  _tree_listen_read(eio_obj_t *obj, List objs);
@@ -306,10 +300,6 @@ _agent(void * unused)
 	eio_obj_t *tree_listen_obj, *task_obj;
 	int i;
 
-	slurm_mutex_lock(&agent_mutex);
-	agent_running = true;
-	slurm_mutex_unlock(&agent_mutex);
-
 	pmi2_handle = eio_handle_create(0);
 
 	//fd_set_nonblocking(tree_sock);
@@ -328,26 +318,17 @@ _agent(void * unused)
 		finalized = xmalloc(job_info.ltasks * sizeof(int));
 	}
 
+	slurm_mutex_lock(&agent_mutex);
+	slurm_cond_signal(&agent_running_cond);
+	slurm_mutex_unlock(&agent_mutex);
+
 	eio_handle_mainloop(pmi2_handle);
 
 	debug("mpi/pmi2: agent thread exit");
 
 	eio_handle_destroy(pmi2_handle);
 
-	slurm_mutex_lock(&agent_mutex);
-	agent_running = false;
-	slurm_mutex_unlock(&agent_mutex);
-
 	return NULL;
-}
-
-static bool _agent_running_test(void)
-{
-	bool rc;
-	slurm_mutex_lock(&agent_mutex);
-	rc = agent_running;
-	slurm_mutex_unlock(&agent_mutex);
-	return rc;
 }
 
 /*
@@ -356,29 +337,22 @@ static bool _agent_running_test(void)
 extern int
 pmi2_start_agent(void)
 {
-	int retries = 0;
-	pthread_attr_t attr;
-	pthread_t pmi2_agent_tid = 0;
+	static bool first = true;
 
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&pmi2_agent_tid, &attr,
-				       &_agent, NULL))) {
-		if (++retries > MAX_RETRIES) {
-			error ("mpi/pmi2: pthread_create error %m");
-			slurm_attr_destroy(&attr);
-			return SLURM_ERROR;
-		}
-		sleep(1);
+	slurm_mutex_lock(&agent_mutex);
+	if (!first) {
+		slurm_mutex_unlock(&agent_mutex);
+		return SLURM_SUCCESS;
 	}
-	slurm_attr_destroy(&attr);
-	debug("mpi/pmi2: started agent thread (%lu)",
-	      (unsigned long) pmi2_agent_tid);
+	first = false;
 
-	/* wait for the agent to start */
-	while (!_agent_running_test()) {
-		sched_yield();
-	}
+	slurm_thread_create(&_agent_tid, _agent, NULL);
+
+	slurm_cond_wait(&agent_running_cond, &agent_mutex);
+
+	debug("mpi/pmi2: started agent thread");
+
+	slurm_mutex_unlock(&agent_mutex);
 
 	return SLURM_SUCCESS;
 }
@@ -389,14 +363,17 @@ pmi2_start_agent(void)
 extern int
 pmi2_stop_agent(void)
 {
-	/* brake eio loop */
-	if (pmi2_handle != NULL) {
+	slurm_mutex_lock(&agent_mutex);
+
+	if (_agent_tid) {
 		eio_signal_shutdown(pmi2_handle);
-		/* wait for the agent to finish */
-		while (_agent_running_test()) {
-			sched_yield();
-		}
+		/* wait for the agent thread to stop */
+		pthread_join(_agent_tid, NULL);
+		_agent_tid = 0;
 	}
+
+	slurm_mutex_unlock(&agent_mutex);
+
 	return SLURM_SUCCESS;
 }
 

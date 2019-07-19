@@ -3,16 +3,16 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2017 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,37 +28,26 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \****************************************************************************/
 
 #ifndef _SINFO_H
 #define _SINFO_H
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>
-#else  /* !HAVE_INTTYPES_H */
-#  if HAVE_STDINT_H
-#    include <stdint.h>
-#  endif
-#endif  /* HAVE_INTTYPES_H */
 
 #include "slurm/slurm.h"
 
@@ -72,6 +61,7 @@
 
 /* Collection of data for printing reports. Like data is combined here */
 typedef struct {
+	uint16_t port;
 	uint32_t node_state;
 
 	uint32_t nodes_alloc;
@@ -94,30 +84,31 @@ typedef struct {
 	uint32_t max_threads;
 	uint32_t min_disk;
 	uint32_t max_disk;
-	uint32_t min_mem;
-	uint32_t max_mem;
+	uint64_t min_mem;
+	uint64_t max_mem;
 	uint32_t min_weight;
 	uint32_t max_weight;
 	uint32_t min_cpu_load;
 	uint32_t max_cpu_load;
-	uint32_t min_free_mem;
-	uint32_t max_free_mem;
+	uint64_t min_free_mem;
+	uint64_t max_free_mem;
 
 	uint32_t max_cpus_per_node;
-	uint32_t alloc_memory;
+	uint64_t alloc_memory;
 
-	char *version;
 	char *features;
 	char *features_act;
 	char *gres;
+	char *gres_used;
+	char *cluster_name;
 	char *reason;
 	time_t reason_time;
 	uint32_t reason_uid;
+	char *version;
 
 	hostlist_t hostnames;
 	hostlist_t node_addr;
 	hostlist_t nodes;
-	hostlist_t ionodes;
 
 	/* part_info contains partition, avail, max_time, job_size,
 	 * root, share/oversubscribe, groups, priority */
@@ -140,6 +131,7 @@ struct sinfo_match_flags {
 	bool features_act_flag;
 	bool groups_flag;
 	bool gres_flag;
+	bool gres_used_flag;
 	bool hostnames_flag;
 	bool job_size_flag;
 	bool default_time_flag;
@@ -147,6 +139,7 @@ struct sinfo_match_flags {
 	bool memory_flag;
 	bool node_addr_flag;
 	bool partition_flag;
+	bool port_flag;
 	bool preempt_mode_flag;
 	bool priority_job_factor_flag;
 	bool priority_tier_flag;
@@ -169,10 +162,11 @@ struct sinfo_parameters {
 	List clusters;
 	uint32_t cluster_flags;
 	uint32_t convert_flags;
-	bool bg_flag;
 	bool dead_nodes;
 	bool exact_match;
+	bool federation_flag;
 	bool filtering;
+	bool local;
 	bool long_output;
 	bool no_header;
 	bool node_field_flag;
@@ -199,11 +193,13 @@ struct sinfo_parameters {
 	List  part_list;
 	List  format_list;
 	List  state_list;
+
+	slurmdb_federation_rec_t *fed;
 };
 
 extern struct sinfo_parameters params;
 
-extern void parse_command_line( int argc, char* argv[] );
+extern void parse_command_line( int argc, char* *argv );
 extern int  parse_state( char* str, uint16_t* states );
 extern void sort_sinfo_list( List sinfo_list );
 

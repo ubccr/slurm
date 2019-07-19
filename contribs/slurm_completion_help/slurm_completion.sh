@@ -6,11 +6,11 @@
 #  Copyright (C) 2012 Damien François. <damien.francois@uclouvain.Be>
 #  Written by Damien François. <damien.francois@uclouvain.Be>.
 #
-#  This file is part of SLURM, a resource management program.
-#  For details, see <http://slurm.schedmd.com/>.
+#  This file is part of Slurm, a resource management program.
+#  For details, see <https://slurm.schedmd.com/>.
 #  Please also read the included file: DISCLAIMER.
 #
-#  SLURM is free software; you can redistribute it and/or modify it under
+#  Slurm is free software; you can redistribute it and/or modify it under
 #  the terms of the GNU General Public License as published by the Free
 #  Software Foundation; either version 2 of the License, or (at your option)
 #  any later version.
@@ -26,13 +26,13 @@
 #  version.  If you delete this exception statement from all source files in
 #  the program, then also delete it here.
 #
-#  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+#  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 #  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 #  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 #  details.
 #
 #  You should have received a copy of the GNU General Public License along
-#  with SLURM; if not, write to the Free Software Foundation, Inc.,
+#  with Slurm; if not, write to the Free Software Foundation, Inc.,
 #  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 #
 ###############################################################################
@@ -273,8 +273,7 @@ _sacctmgr()
 		    PartitionTimeLimit"
     local qospreempt="cluster cancel checkpoint requeue suspend"
 
-    local clusflags="aix bgl bgq bluegene crayxt frontend multipleslumd\
-		     sunconstellation xcpu"
+    local clusflags="frontend multipleslurmd"
 
     # Check whether we are in the middle of an option. If so serve them.
     remainings=$(compute_set_diff "$longoptions" "${COMP_WORDS[*]}")
@@ -1302,7 +1301,7 @@ _salloc()
 		       --kill-command=[signal] --no-kill --licenses=<licenses>\
 		       --distribution=<dist> --mail-type=<type>\
 		       --mail-user=<email> --mem=<MB> --mem-per-cpu=<MB>\
-		       --mem_bind=<type> --mincpus=<number>\
+		       --mem-bind=<type> --mincpus=<number>\
 		       --nodes=<minnodes[-maxnodes]> --ntasks=<number>\
 		       --network=<type> --nice=<[adjustment]>\
 		       --ntasks-per-core=<number> --ntasks-per-socket=<ntasks>\
@@ -1358,7 +1357,6 @@ _salloc()
     --wait-all-nodes) offer_list "1 0" ;;
     --conn-type) offer_list "MESH TORUS NAV" ;;
     esac
-    #TODO options for blue gene systems
 }
 complete -F _salloc salloc
 
@@ -1387,7 +1385,7 @@ _sbatch()
 		       --licenses<license> --clusters<string>\
 		       --distribution<dist>\
 		       --mail-type<type> --mail-user<user> --mem<MB>\
-		       --mem-per-cpu<MB> --mem_bind<type> --mincpus<n>\
+		       --mem-per-cpu<MB> --mem-bind<type> --mincpus<n>\
 		       --nodes<minnodes[-maxnodes]> --ntasks<number>\
 		       --network<type> --nice[adjustment] --no-requeue\
 		       --ntasks-per-core<ntasks>  --ntasks-per-socket<ntasks>\
@@ -1399,8 +1397,7 @@ _sbatch()
 		       --propagate<limit> --quiet --qos<qos> --reboot\
 		       --requeue --reservation<name> --share --core-spec<num>\
 		       --sicp --signal<signal> --sockets-per-node<sockets>\
-		       --switches<type> --time<time>\
-		       --tasks-per-node<n> --test-only\
+		       --switches<type> --time<time> --test-only\
 		       --threads-per-core<threads> --time-min<time>\
 		       --tmp<MB> --usage --uid=<user> --version --verbose\
 		       --nodelist<node name list> --wait-all-nodes<value>\
@@ -1433,7 +1430,7 @@ _sbatch()
     --mail-type) offer_list "BEGIN END FAIL REQUEUE ALL STAGE_OUT TIME_LIMIT\
 			     TIME_LIMIT_90 TIME_LIMIT_80 TIME_LIMIT_50" ;;
     --mem-bind) offer "quiet verbose none rank local map_mem: mask_mem:" ;;
-    --mpi) offer "lam mpich1_shmem mpichgm mvapich openmpi none" ;;
+    --mpi) offer "openmpi pmi2 pmix none" ;;
     --propagate) offer_list "all as core cpu data fsize memlock \
 			      nofile nproc rss stack" ;;
     # TODO --network) _configured_interfaces ;;
@@ -1449,7 +1446,6 @@ _sbatch()
     --wait-all-nodes) offer_list "1 0" ;;
     *)  _filedir
     esac
-    #TODO options for blue gene systems
 }
 complete -o filenames -F _sbatch sbatch
 
@@ -1466,7 +1462,7 @@ _srun()
 			--bb<spec> --begin<time> --checkpoint<time>\
 			--checkpoint-dir<directory> --comment<string>\
 			--constraint<list> --contiguous\
-			--cores-per-socket<cores> --cpu_bind=<type>\
+			--cores-per-socket<cores> --cpu-bind=<type>\
 			--cpu-freq<freq> --cpus-per-task<ncpus>\
 			--dependency=<dependency_list> --chdir=<path>\
 			--error<mode> --preserve-env --epilog<executable>\
@@ -1478,7 +1474,7 @@ _srun()
 			--launcher-opts<options> --label --licenses<license>\
 			--distribution<type> --mail-type<type>\
 			--mail-user<user> --mem<MB> --mem-per-cpu<MB>\
-			--mem_bind<type> --mincpus<n> --msg-timeout<seconds>\
+			--mem-bind<type> --mincpus<n> --msg-timeout<seconds>\
 			--mpi<mpi_type> --multi-prog\
 			--nodes<minnodes[-maxnodes]> --ntasks<number>\
 			--network<type> --nice<adjustment>\
@@ -1531,7 +1527,7 @@ _srun()
     --licenses|-L) offer_list "$(_licenses)" ;;
     --mail-type) offer_list "begin end fail requeue all" ;;
     --mem-bind) offer "none rank local map_mem: mask_mem:" ;;
-    --mpi) offer "lam mpich1_shmem mpichgm mvapich openmpi pmi2 none" ;;
+    --mpi) offer "openmpi pmi2 pmix none" ;;
     --partition|-p) offer_list "$(_partitions)" ;;
     --profile) offer_list "all none energy task filesystem network" ;;
     --propagate) offer_list "all as core cpu data fsize memlock \
@@ -1548,7 +1544,6 @@ _srun()
     --conn-type) offer_list "MESH TORUS NAV" ;;
     *)  COMPREPLY=( $( compgen -c -- "$cur" ) ) ; return
     esac
-    #TODO options for blue gene systems
 }
 complete -F _srun srun
 

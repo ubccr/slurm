@@ -6,11 +6,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,37 +26,24 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef __SLURM_AUTHENTICATION_H__
 #define __SLURM_AUTHENTICATION_H__
 
+#include <inttypes.h>
 #include <stdio.h>
-
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif  /* HAVE_INTTYPES_H */
-#else   /* !HAVE_CONFIG_H */
-#  include <inttypes.h>
-#endif  /*  HAVE_CONFIG_H */
 
 #include "src/common/plugrack.h"
 #include "src/common/pack.h"
-#include "src/common/arg_desc.h"
 
 /*
  * This API operates on a global authentication
@@ -67,100 +54,48 @@
  *	slurm_auth_init();
  *
  * The authentication type and other parameters are taken from the
- * system's global configuration.  A typical order of calls is:
- *
- *	void *bar = g_slurm_auth_alloc();
- *	g_slurm_auth_verify( bar );
- *	g_slurm_auth_free( bar );
- *
+ * system's global configuration.
  */
 
 /*
- * General error codes that plugins (or the plugin system) can
- * generate.  Plugins may produce additional codes starting with
- * SLURM_AUTH_FIRST_LOCAL_ERROR.  They are responsible for providing
- * text messages to accompany the codes.  This API resolves string
- * messages for these codes.
+ * This is what the UID and GID accessors return on error.
+ * The value is currently RedHat Linux's ID for the user "nobody".
  */
-enum {
-    SLURM_AUTH_NOPLUGIN,            /* No plugin for this type.          */
-    SLURM_AUTH_BADARG,              /* Bad argument to an API func.      */
-    SLURM_AUTH_MEMORY,              /* Problem allocating memory.        */
-    SLURM_AUTH_NOUSER,              /* User not defined on host.         */
-    SLURM_AUTH_INVALID,             /* Invalid credential.               */
-    SLURM_AUTH_MISMATCH,            /* Credential from another plugin.   */
-    SLURM_AUTH_VERSION,             /* Credential from old plugin.       */
-
-    SLURM_AUTH_FIRST_LOCAL_ERROR    /* Always keep me last. */
-};
-
-/* Arguments passed to plugin functions */
-enum {
-	ARG_HOST_LIST = 0,
-	ARG_TIMEOUT,
-	ARG_COUNT,
-};
+#define SLURM_AUTH_NOBODY 99
 
 /*
- * SLURM authentication context opaque type.
+ * Default auth_index value, corresponds to the primary AuthType used.
  */
-typedef struct slurm_auth_context * slurm_auth_context_t;
-
-/*
- * Create an authentication context.
- *
- * Returns NULL on failure.
- */
-slurm_auth_context_t slurm_auth_context_create( const char *auth_type );
-
-/*
- * Destroy an authentication context.  Any jumptables returned by
- * calls to slurm_auth_get_ops() for this context will silently become
- * invalid, and calls to their functions may result in core dumps and
- * other nasty behavior.
- *
- * Returns a SLURM errno.
- */
-int slurm_auth_context_destroy( slurm_auth_context_t ctxt );
-
-/*
- * This is what the UID and GID accessors return on error.  The value
- * is currently RedHat Linux's ID for the user "nobody".
- */
-#define SLURM_AUTH_NOBODY		99
+#define AUTH_DEFAULT_INDEX 0
 
 /*
  * Prepare the global context.
  * auth_type IN: authentication mechanism (e.g. "auth/munge") or
  *	NULL to select based upon slurm_get_auth_type() results
  */
-extern int slurm_auth_init( char *auth_type );
+extern int slurm_auth_init(char *auth_type);
 
 /*
  * Destroy global context, free memory.
  */
-extern int slurm_auth_fini( void );
+extern int slurm_auth_fini(void);
+
+/*
+ * Retrieve the auth_index corresponding to the authentication
+ * plugin used to create a given credential.
+ */
+extern int slurm_auth_index(void *cred);
 
 /*
  * Static bindings for the global authentication context.
  */
-extern void *	g_slurm_auth_create( void *hosts, int timeout, char *auth_info );
-extern int	g_slurm_auth_destroy( void *cred );
-extern int	g_slurm_auth_verify( void *cred, void *hosts, int timeout,
-				     char *auth_info );
-extern uid_t	g_slurm_auth_get_uid( void *cred, char *auth_info );
-extern gid_t	g_slurm_auth_get_gid( void *cred, char *auth_info );
-extern int	g_slurm_auth_pack( void *cred, Buf buf );
-
-/*
- * WARNING!  The returned auth pointer WILL have pointers
- *           into "buf" so do NOT free "buf" until you are done
- *           with the auth pointer.
- */
-extern void	*g_slurm_auth_unpack( Buf buf );
-
-int	g_slurm_auth_print( void *cred, FILE *fp );
-int	g_slurm_auth_errno( void *cred );
-const char *g_slurm_auth_errstr( int slurm_errno );
+extern void *g_slurm_auth_create(int index, char *auth_info);
+extern int g_slurm_auth_destroy(void *cred);
+extern int g_slurm_auth_verify(void *cred, char *auth_info);
+extern uid_t g_slurm_auth_get_uid(void *cred);
+extern gid_t g_slurm_auth_get_gid(void *cred);
+extern char *g_slurm_auth_get_host(void *cred);
+extern int g_slurm_auth_pack(void *cred, Buf buf, uint16_t protocol_version);
+extern void *g_slurm_auth_unpack(Buf buf, uint16_t protocol_version);
 
 #endif /*__SLURM_AUTHENTICATION_H__*/

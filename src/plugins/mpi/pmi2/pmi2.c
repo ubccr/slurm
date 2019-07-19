@@ -5,11 +5,11 @@
  *  Written by Hongjia Cao <hjcao@nudt.edu.cn>.
  *  All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,29 +25,24 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if     HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
 #if defined(__FreeBSD__)
-#include <roken.h>
 #include <sys/socket.h> /* AF_INET */
 #endif
 
 #include <fcntl.h>
 #include <signal.h>
-#include <sys/types.h>
 #include <stdlib.h>
+#include <sys/types.h>
 
 #include "src/common/slurm_xlator.h"
 #include "src/common/log.h"
@@ -601,6 +596,30 @@ handle_pmi2_cmd(int fd, int lrank)
 	buf[len] = '\0';
 
 	debug2("mpi/pmi2: got client request: %s %s", len_buf, buf);
+
+	if (!len) {
+		/*
+		 * This is an invalid request.
+		 *
+		 * The most likely cause of an invalid client request is a
+		 * second PMI2_Init call from the client end. This arrives
+		 * first as a "cmd=init" call. Ideally, we'd capture that
+		 * request, and respond with "cmd=response_to_init" with the rc
+		 * field set to PMI2_ERR_INIT and expect the client to cleanup
+		 * and die correctly.
+		 *
+		 * However - Slurm's libpmi2 has historically ignored the rc
+		 * value and immediately sends the FULLINIT_CMD regardless, and
+		 * then waits for a response to that. Rather than construct
+		 * two successive error messages, this call will send back
+		 * "cmd=finalize-response" back that will trigger the desired
+		 * error handling paths, and then tears down the connection
+		 * for good measure.
+		 */
+		_handle_finalize(fd, 0, NULL);
+		xfree(buf);
+		return SLURM_ERROR;
+	}
 
 	req = client_req_init(len, buf);
 	if (req == NULL) {

@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.com> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,28 +27,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef __SLURM_JOBCOMP_H__
 #define __SLURM_JOBCOMP_H__
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-#if HAVE_STDINT_H
-#  include <stdint.h>           /* for uint16_t, uint32_t definitions */
-#endif
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>         /* for uint16_t, uint32_t definitions */
-#endif
+#include <inttypes.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -80,6 +72,16 @@ typedef struct {
 	char *geo;
 	char *bg_start_point;
 	char *work_dir;
+	char *resv_name;
+	char *req_gres;
+	char *account;
+	char *qos_name;
+	char *wckey;
+	char *cluster;
+	char *submit_time;
+	char *eligible_time;
+	char *derived_ec;
+	char *exit_code;
 } jobcomp_job_rec_t;
 
 typedef struct slurm_jobcomp_context * slurm_jobcomp_context_t;
@@ -95,12 +97,6 @@ extern int g_slurm_jobcomp_fini(void);
 /* write record of a job's completion */
 extern int g_slurm_jobcomp_write(struct job_record *job_ptr);
 
-/* return error code */
-extern int g_slurm_jobcomp_errno(void);
-
-/* convert job completion logger specific error code to a string */
-extern char *g_slurm_jobcomp_strerror(int errnum);
-
 /*
  * get info from the storage
  * returns List of jobcomp_job_rec_t *
@@ -114,4 +110,3 @@ extern List g_slurm_jobcomp_get_jobs(slurmdb_job_cond_t *job_cond);
 extern int g_slurm_jobcomp_archive(slurmdb_archive_cond_t *arch_cond);
 
 #endif /*__SLURM_JOBCOMP_H__*/
-

@@ -33,7 +33,8 @@ The following configuration parameters are available:
 <li><b>SuspendTime</b>:
 Nodes becomes eligible for power saving mode after being idle
 for this number of seconds.
-The configured value should exceed the time to suspend and resume a node.
+For efficient system utilization, it is recommended that the value of SuspendTime
+be at least as large as the sum of SuspendTimeout plus ResumeTimeout.
 A negative number disables power saving mode.
 The default value is -1 (disabled).</li>
 
@@ -67,12 +68,14 @@ The argument to the program will be the names of nodes to
 be removed from power savings mode (using Slurm's hostlist
 expression format).
 This program may use the <i>scontrol show node</i> command
-to insure that a node has booted and the <i>slurmd</i>
+to ensure that a node has booted and the <i>slurmd</i>
 daemon started.
 If the <i>slurmd</i> daemon fails to respond within the
-configured <b>SlurmdTimeout</b> value, the node will be
-placed in a DOWN state and the job requesting the node
-will be requeued.
+configured <b>SlurmdTimeout</b> value with an updated BootTime,
+the node will be placed in a DOWN state and the job requesting
+the node will be requeued. If the node isn't actually rebooted
+(i.e. when multiple-slurmd is configured) starting slurmd with
+"-b" option might be useful.
 For reasons of reliability, <b>ResumeProgram</b> may execute
 more than once for a node when the <b>slurmctld</b> daemon
 crashes and is restarted.</li>
@@ -85,10 +88,12 @@ as needed for new workload.
 The default value is 30 seconds.</li>
 
 <li><b>ResumeTimeout</b>:
-Maximum time permitted (in second) between when a node resume request
+Maximum time permitted (in seconds) between when a node resume request
 is issued and when the node is actually available for use.
-Nodes which fail to respond in this time frame may be marked DOWN and
+Nodes which fail to respond in this time frame will be marked DOWN and
 the jobs scheduled on the node requeued.
+Nodes which reboot after this time frame will be marked DOWN with a reason of
+"Node unexpectedly rebooted."
 The default value is 60 seconds.</li>
 
 <li><b>SuspendExcNodes</b>:
@@ -113,7 +118,7 @@ be increased above its default value of 10 seconds.</li>
 (primary and backup server nodes).
 Use of <i>sudo</i> may be required for <i>SlurmUser</i>to power down
 and restart nodes.
-If you need to conver. Slurm's hostlist expression into individual node
+If you need to convert Slurm's hostlist expression into individual node
 names, the <i>scontrol show hostnames</i> command may prove useful.
 The commands used to boot or shut down nodes will depend upon your
 cluster management tools.</p>
@@ -200,7 +205,7 @@ command "<i>scontrol wait_job $SLURM_JOB_ID</i>" within the script or by
 adding that command to the system <i>Prolog</i> or <i>PrologSlurmctld</i>
 as configured in <i>slurm.conf</i>, which would create the delay for all jobs
 on the system.
-Insure that the <i>Prolog</i> code is zero to avoid draining the node
+Ensure that the <i>Prolog</i> code is zero to avoid draining the node
 (do not use the scontrol exit code to avoid draining the node on error,
 for example if the job is explicitly cancelled during startup).</p>
 
@@ -234,7 +239,7 @@ may not accurately describe the actual node state.
 In the case of a failed <b>SuspendProgram</b>, the negative impact is
 limited to increased power consumption, so no special action is
 currently taken to execute <b>SuspendProgram</b> multiple times in
-order to insure the node is in a reduced power mode.
+order to ensure the node is in a reduced power mode.
 The case of a failed <b>ResumeProgram</b> is more serious in that the
 node could be placed into a DOWN state and/or jobs could fail.
 In order to minimize this risk, when the <i>slurmctld</i> daemon is

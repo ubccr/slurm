@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Validate that the mcs plugin (mcs/group) is OK with sbatch
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -10,22 +10,22 @@
 # Copyright (C) 2015 CEA/DAM/DIF
 # Written by Aline Roy <aline.roy@cea.fr>
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.
+# with Slurm; if not, write to the Free Software Foundation, Inc.
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -40,83 +40,19 @@ set file_out     "test${test_id}.out"
 
 print_header $test_id
 
-#
-# Get the slurm.conf path
-#
-proc get_conf_path { } {
-
-	global scontrol config_path alpha exit_code
-
-	set got_config 0
-	log_user 0
-	spawn $scontrol show config
-	expect {
-		-re "SLURM_CONF.*= (/.*)/($alpha).*SLURM_VERSION" {
-			set config_path $expect_out(1,string)
-			set got_config 1
-			exp_continue
-		}
-		timeout {
-			send_user "\nFAILURE: scontrol is not responding\n"
-			set exit_code 1
-		}
-		eof {
-			wait
-		}
-	}
-	log_user 1
-
-	if {$got_config != 1} {
-		send_user "\nFAILURE: did not get slurm.conf path\n"
-		exit 0
-	}
-}
-
-#
-# Do an scontrol reconfig to update MCS params
-#
-proc update_conf { } {
-	global scontrol exit_code
-
-	spawn $scontrol reconfigure
-	expect {
-		timeout {
-			send_user "\nFAILURE: scontrol is not responding\n"
-			set exit_code 1
-		}
-		eof {
-			wait
-		}
-	}
-	# Wait for the reconfigure to complete (especially with valgrind)
-	sleep 5
-}
-
-#
-# Copy slurm.conf file
-#
-proc copy_conf { } {
-	global bin_cp exit_code config_path cwd
-
-	spawn $bin_cp -v $config_path/slurm.conf $cwd/slurm.conf.orig
-	expect {
-		timeout {
-			send_user "\nFAILURE: slurm.conf was not copied\n"
-			set exit_code 1
-		}
-		eof {
-			wait
-		}
-	}
-}
-
 if {[is_super_user] == 0} {
 	send_user "\nWARNING: This test can't be run except as SlurmUser\n"
 	exit 0
 }
 
-get_conf_path
-copy_conf
+set config_path [get_conf_path]
+if { $exit_code != 0 } {
+	exit $exit_code
+}
+copy_conf $config_path $cwd
+if { $exit_code != 0 } {
+	exit $exit_code
+}
 
 send_user "\n---Checking sbatch uses mcs-label only for some jobs (ondemand mode)---\n"
 
@@ -136,13 +72,14 @@ expect {
 	}
 }
 
-exec $bin_sed -i /MCS/d $config_path/slurm.conf
-exec $bin_sed -i /mcs/d $config_path/slurm.conf
-exec $bin_sed -i /PrivateData/d $config_path/slurm.conf
-exec $bin_echo MCSPlugin=mcs/group >> $config_path/slurm.conf
+exec $bin_sed -i /^\[\t\s\]*MCSPlugin\[\t\s\]*=/Id $config_path/slurm.conf
+exec $bin_sed -i /^\[\t\s\]*MCSParameters\[\t\s\]*=/Id $config_path/slurm.conf
+exec $bin_sed -i /^\[\t\s\]*PrivateData\[\t\s\]*=/Id $config_path/slurm.conf
+exec $bin_echo -e "\nMCSPlugin=mcs/group" >> $config_path/slurm.conf
 exec $bin_echo MCSParameters=ondemand,select,privatedata:$groups_name >> $config_path/slurm.conf
 exec $bin_echo PrivateData=jobs,nodes >> $config_path/slurm.conf
-update_conf
+reconfigure
+
 
 #
 # verify slurm conf parameters MCS
@@ -358,13 +295,14 @@ cancel_job $job_id
 # test with enforced
 #
 send_user "\n---Checking sbatch uses mcs-label with all jobs (enforced mode)---\n"
-exec $bin_sed -i /MCS/d $config_path/slurm.conf
-exec $bin_sed -i /mcs/d $config_path/slurm.conf
-exec $bin_sed -i /PrivateData/d $config_path/slurm.conf
-exec $bin_echo MCSPlugin=mcs/group >> $config_path/slurm.conf
+exec $bin_sed -i /^\[\t\s\]*MCSPlugin\[\t\s\]*=/Id $config_path/slurm.conf
+exec $bin_sed -i /^\[\t\s\]*MCSParameters\[\t\s\]*=/Id $config_path/slurm.conf
+exec $bin_sed -i /^\[\t\s\]*PrivateData\[\t\s\]*=/Id $config_path/slurm.conf
+exec $bin_echo -e "\nMCSPlugin=mcs/group" >> $config_path/slurm.conf
 exec $bin_echo MCSParameters=enforced,noselect,privatedata:$groups_name >> $config_path/slurm.conf
 exec $bin_echo PrivateData=jobs,nodes >> $config_path/slurm.conf
-update_conf
+reconfigure
+
 
 ###### Check that sbatch uses mcs-label=group ######
 send_user "\n---Checking sbatch uses mcs-label=group---\n"
@@ -468,7 +406,7 @@ cancel_job $job_id
 # Clean up vestigial files and restore original slurm.conf file
 send_user "\nChanging slurm.conf back\n"
 exec $bin_cp -v $cwd/slurm.conf.orig $config_path/slurm.conf
-update_conf
+reconfigure
 
 if {$exit_code == 0} {
 	exec $bin_rm $tmp_job $cwd/slurm.conf.orig

@@ -6,11 +6,11 @@
  *  Copyright (C) 2015 SchedMD LLC
  *  Written by Stephen Trofinoff and Danny Auble
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,29 +26,27 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #include "scontrol.h"
-#include "src/common/slurm_strcasestr.h"
+#include "src/common/xstring.h"
 
 static uint32_t tres_cnt = 0;
 static char **tres_names = NULL;
 static uint32_t req_flags = 0;
 
 static void _print_tres_line(const char *name, uint64_t *limits, uint64_t *used,
-			     uint64_t divider, bool last)
+			     uint64_t divider)
 {
 	int i;
-	char *next_line = last ? "\n" : "\n    ";
-	char *new_line_char = one_liner && !last ? " " : next_line;
 	bool comma = 0;
 
 	xassert(tres_cnt);
@@ -56,7 +54,7 @@ static void _print_tres_line(const char *name, uint64_t *limits, uint64_t *used,
 
 	printf("%s=", name);
 	if (!limits)
-		goto endit;
+		return;
 
 	for (i=0; i<tres_cnt; i++) {
 		/* only print things that have limits or usage */
@@ -80,8 +78,6 @@ static void _print_tres_line(const char *name, uint64_t *limits, uint64_t *used,
 
 		comma = 1;
 	}
-endit:
-	printf("%s", new_line_char);
 }
 
 static int _print_used_acct_limit(slurmdb_used_limits_t *used_limit,
@@ -89,9 +85,10 @@ static int _print_used_acct_limit(slurmdb_used_limits_t *used_limit,
 {
 	char *new_line_char = one_liner ? " " : "\n        ";
 
-	printf("%sAccount %s%s",
-	       one_liner ? " " : "      ",
-	       used_limit->acct, new_line_char);
+	printf("%s%s%s",
+	       one_liner ? " " : "\n      ",
+	       used_limit->acct,
+	       one_liner ? "={" : new_line_char);
 
 	printf("MaxJobsPA=");
 	if (qos_rec->max_jobs_pa != INFINITE)
@@ -99,6 +96,13 @@ static int _print_used_acct_limit(slurmdb_used_limits_t *used_limit,
 	else
 		printf("N");
 	printf("(%u) ", used_limit->jobs);
+
+	printf("MaxJobsAccruePA=");
+	if (qos_rec->max_jobs_accrue_pa != INFINITE)
+		printf("%u", qos_rec->max_jobs_accrue_pa);
+	else
+		printf("N");
+	printf("(%u) ", used_limit->accrue_cnt);
 
 	printf("MaxSubmitJobsPA=");
 	if (qos_rec->max_submit_jobs_pa != INFINITE)
@@ -109,7 +113,10 @@ static int _print_used_acct_limit(slurmdb_used_limits_t *used_limit,
 
 	_print_tres_line("MaxTRESPA",
 			 qos_rec->max_tres_pa_ctld,
-			 used_limit->tres, 0, 1);
+			 used_limit->tres, 0);
+
+	if (one_liner)
+		printf("}");
 
 	/* MaxTRESRunMinsPA doesn't do anything yet, if/when it does
 	 * change the last param in the print_tres_line to 0. */
@@ -128,16 +135,24 @@ static int _print_used_user_limit(slurmdb_used_limits_t *used_limit,
 {
 	char *new_line_char = one_liner ? " " : "\n        ";
 
-	printf("%sUser %d%s",
-	       one_liner ? " " : "      ",
-	       used_limit->uid, new_line_char);
+	printf("%s%d%s",
+	       one_liner ? " " : "\n      ",
+	       used_limit->uid,
+	       one_liner ? "={" : new_line_char);
 
 	printf("MaxJobsPU=");
 	if (qos_rec->max_jobs_pu != INFINITE)
 		printf("%u", qos_rec->max_jobs_pu);
 	else
 		printf("N");
-	printf("(%u)%s", used_limit->jobs, new_line_char);
+	printf("(%u) ", used_limit->jobs);
+
+	printf("MaxJobsAccruePU=");
+	if (qos_rec->max_jobs_accrue_pu != INFINITE)
+		printf("%u", qos_rec->max_jobs_accrue_pu);
+	else
+		printf("N");
+	printf("(%u) ", used_limit->accrue_cnt);
 
 	printf("MaxSubmitJobsPU=");
 	if (qos_rec->max_submit_jobs_pu != INFINITE)
@@ -148,7 +163,10 @@ static int _print_used_user_limit(slurmdb_used_limits_t *used_limit,
 
 	_print_tres_line("MaxTRESPU",
 			 qos_rec->max_tres_pu_ctld,
-			 used_limit->tres, 0, 1);
+			 used_limit->tres, 0);
+
+	if (one_liner)
+		printf("}");
 
 	/* MaxTRESRunMinsPU doesn't do anything yet, if/when it does
 	 * change the last param in the print_tres_line to 0. */
@@ -178,9 +196,11 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 
 	if (!msg->user_list || !list_count(msg->user_list)) {
 		if (req_flags & ASSOC_MGR_INFO_FLAG_USERS)
-			printf("\nNo users currently cached in Slurm.\n\n");
+			printf("%sNo users currently cached in Slurm.%s\n",
+			       one_liner ? "" : "\n", one_liner ? "" : "\n");
 	} else {
-		printf("\nUser Records\n\n");
+		printf("%sUser Records%s\n",
+		       one_liner ? "" : "\n", one_liner ? "" : "\n");
 
 		itr = list_iterator_create(msg->user_list);
 		while ((user_rec = list_next(itr))) {
@@ -197,10 +217,12 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 
 	if (!msg->assoc_list || !list_count(msg->assoc_list)) {
 		if (req_flags & ASSOC_MGR_INFO_FLAG_ASSOC)
-			printf("\nNo associations currently "
-			       "cached in Slurm.\n\n");
+			printf("%sNo associations currently "
+			       "cached in Slurm.%s\n",
+			       one_liner ? "" : "\n", one_liner ? "" : "\n");
 	} else {
-		printf("\nAssociation Records\n\n");
+		printf("%sAssociation Records%s\n",
+		       one_liner ? "" : "\n", one_liner ? "" : "\n");
 
 		itr = list_iterator_create(msg->assoc_list);
 		while ((assoc_rec = list_next(itr))) {
@@ -218,9 +240,9 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 			else
 				printf("UserName= ");
 
-			printf("Partition=%s ID=%u%s",
+			printf("Partition=%s Priority=%u ID=%u%s",
 			       assoc_rec->partition ? assoc_rec->partition : "",
-			       assoc_rec->id,
+			       assoc_rec->priority, assoc_rec->id,
 			       new_line_char);
 
 			printf("SharesRaw/Norm/Level/Factor="
@@ -259,12 +281,19 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 
 
 			if (assoc_rec->grp_jobs != INFINITE)
-				printf("GrpJobs=%u(%u)",
+				printf("GrpJobs=%u(%u) ",
 				       assoc_rec->grp_jobs,
 				       assoc_rec->usage->used_jobs);
 			else
-				printf("GrpJobs=N(%u)",
+				printf("GrpJobs=N(%u) ",
 				       assoc_rec->usage->used_jobs);
+			if (assoc_rec->grp_jobs_accrue != INFINITE)
+				printf("GrpJobsAccrue=%u(%u)",
+				       assoc_rec->grp_jobs_accrue,
+				       assoc_rec->usage->accrue_cnt);
+			else
+				printf("GrpJobsAccrue=N(%u)",
+				       assoc_rec->usage->accrue_cnt);
 			/* NEW LINE */
 			printf("%s", new_line_char);
 
@@ -287,21 +316,31 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 
 			_print_tres_line("GrpTRES",
 					 assoc_rec->grp_tres_ctld,
-					 assoc_rec->usage->grp_used_tres, 0, 0);
+					 assoc_rec->usage->grp_used_tres, 0);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
+
+			memset(tmp64_array, 0, sizeof(tmp64_array));
 			if (assoc_rec->usage->usage_tres_raw)
 				for (i=0; i<tres_cnt; i++)
 					tmp64_array[i] = (uint64_t)
 						assoc_rec->usage->
 						usage_tres_raw[i];
-			else
-				memset(tmp64_array, 0, sizeof(tmp64_array));
 			_print_tres_line("GrpTRESMins",
 					 assoc_rec->grp_tres_mins_ctld,
-					 tmp64_array, 60, 0);
+					 tmp64_array, 60);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
+
 			_print_tres_line("GrpTRESRunMins",
 					 assoc_rec->grp_tres_run_mins_ctld,
 					 assoc_rec->usage->
-					 grp_used_tres_run_secs, 60, 0);
+					 grp_used_tres_run_secs, 60);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
 
 			if (assoc_rec->max_jobs != INFINITE)
 				printf("MaxJobs=%u(%u) ",
@@ -309,6 +348,13 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 				       assoc_rec->usage->used_jobs);
 			else
 				printf("MaxJobs= ");
+
+			if (assoc_rec->max_jobs_accrue != INFINITE)
+				printf("MaxJobsAccrue=%u(%u) ",
+				       assoc_rec->max_jobs_accrue,
+				       assoc_rec->usage->accrue_cnt);
+			else
+				printf("MaxJobsAccrue= ");
 
 			if (assoc_rec->max_submit_jobs != INFINITE)
 				printf("MaxSubmitJobs=%u(%u) ",
@@ -328,29 +374,54 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 
 			_print_tres_line("MaxTRESPJ",
 					 assoc_rec->max_tres_ctld,
-					 NULL, 0, 0);
+					 NULL, 0);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
 
 			_print_tres_line("MaxTRESPN",
 					 assoc_rec->max_tres_pn_ctld,
-					 NULL, 0, 0);
+					 NULL, 0);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
 
 			_print_tres_line("MaxTRESMinsPJ",
 					 assoc_rec->max_tres_mins_ctld,
-					 NULL, 0, 1);
+					 NULL, 0);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
+
+			if (assoc_rec->min_prio_thresh != INFINITE)
+				printf("MinPrioThresh=%u",
+				       assoc_rec->min_prio_thresh);
+			else
+				printf("MinPrioThresh=");
+
+			/* NEW LINE */
+			printf("\n");
 
 			/* Doesn't do anything yet */
 			/* _print_tres_line("MaxTRESRunMins", */
 			/* 		 assoc_rec->max_tres_mins_ctld, */
-			/* 		 NULL, 0, 1); */
+			/* 		 NULL, 0); */
+
+			/* NEW LINE */
+			/* printf("%s", new_line_char); */
+
 		}
 	}
 
 	if (!msg->qos_list || !list_count(msg->qos_list)) {
 		if (req_flags & ASSOC_MGR_INFO_FLAG_QOS)
-			printf("\nNo QOS currently cached in Slurm.\n\n");
+			printf("%sNo QOS currently cached in Slurm.%s\n",
+			       one_liner ? "" : "\n", one_liner ? "" : "\n");
 	} else {
 
-		printf("\nQOS Records\n\n");
+		printf("%sQOS Records%s\n",
+		       one_liner ? "" : "\n", one_liner ? "" : "\n");
+
 
 		itr = list_iterator_create(msg->qos_list);
 		while ((qos_rec = list_next(itr))) {
@@ -371,6 +442,13 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 			else
 				printf("GrpJobs=N(%u) ",
 				       qos_rec->usage->grp_used_jobs);
+			if (qos_rec->grp_jobs_accrue != INFINITE)
+				printf("GrpJobsAccrue=%u(%u) ",
+				       qos_rec->grp_jobs_accrue,
+				       qos_rec->usage->accrue_cnt);
+			else
+				printf("GrpJobsAccrue=N(%u) ",
+				       qos_rec->usage->accrue_cnt);
 			if (qos_rec->grp_submit_jobs != INFINITE)
 				printf("GrpSubmitJobs=%u(%u) ",
 				       qos_rec->grp_submit_jobs,
@@ -390,21 +468,31 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 
 			_print_tres_line("GrpTRES",
 					 qos_rec->grp_tres_ctld,
-					 qos_rec->usage->grp_used_tres, 0, 0);
+					 qos_rec->usage->grp_used_tres, 0);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
+
+			memset(tmp64_array, 0, sizeof(tmp64_array));
 			if (qos_rec->usage->usage_tres_raw)
 				for (i=0; i<tres_cnt; i++)
 					tmp64_array[i] = (uint64_t)
 						qos_rec->usage->
 						usage_tres_raw[i];
-			else
-				memset(tmp64_array, 0, sizeof(tmp64_array));
 			_print_tres_line("GrpTRESMins",
 					 qos_rec->grp_tres_mins_ctld,
-					 tmp64_array, 60, 0);
+					 tmp64_array, 60);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
+
 			_print_tres_line("GrpTRESRunMins",
 					 qos_rec->grp_tres_run_mins_ctld,
 					 qos_rec->usage->
-					 grp_used_tres_run_secs, 60, 0);
+					 grp_used_tres_run_secs, 60);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
 
 			if (qos_rec->max_wall_pj != INFINITE)
 				printf("MaxWallPJ=%u",
@@ -417,67 +505,95 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
 
 			_print_tres_line("MaxTRESPJ",
 					 qos_rec->max_tres_pj_ctld,
-					 NULL, 0, 0);
+					 NULL, 0);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
 
 			_print_tres_line("MaxTRESPN",
 					 qos_rec->max_tres_pn_ctld,
-					 NULL, 0, 0);
+					 NULL, 0);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
 
 			_print_tres_line("MaxTRESMinsPJ",
 					 qos_rec->max_tres_mins_pj_ctld,
-					 NULL, 0, 0);
+					 NULL, 0);
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
 
 			/* Doesn't do anything yet */
 			/* _print_tres_line("MaxTRESRunMinsPA", */
 			/* 		 qos_rec->max_tres_mins_pa_ctld, */
 			/* 		 NULL, 0); */
 
+			/* NEW LINE */
+			/* printf("%s", new_line_char); */
+
 			/* _print_tres_line("MaxTRESRunMinsPU", */
 			/* 		 qos_rec->max_tres_mins_pu_ctld, */
 			/* 		 NULL, 0); */
 
+			/* NEW LINE */
+			/* printf("%s", new_line_char); */
+
+			if (qos_rec->min_prio_thresh != INFINITE)
+				printf("MinPrioThresh=%u ",
+				       qos_rec->min_prio_thresh);
+			else
+				printf("MinPrioThresh= ");
+
+			/* NEW LINE */
+			printf("%s", new_line_char);
+
 			_print_tres_line("MinTRESPJ",
 					 qos_rec->min_tres_pj_ctld,
-					 NULL, 0, 1);
+					 NULL, 0);
 
-			printf("%sPreemptMode=%s%s",
-			       one_liner ? "" : "    ",
-			       preempt_mode_string(
-				       qos_rec->preempt_mode),
-			       one_liner ? "" : "\n");
+			/* NEW LINE */
+			printf("%s", new_line_char);
+
+			printf("PreemptMode=%s%s",
+			       preempt_mode_string(qos_rec->preempt_mode),
+			       one_liner ? " " : "\n    ");
 
 			if (qos_rec->priority == INFINITE ||
 			    qos_rec->priority == NO_VAL)
-				printf("%sPriority=NONE\n",
-				       one_liner ? "" : "    ");
+				printf("Priority=NONE");
 			else
-				printf("%sPriority=%u\n",
-				       one_liner ? "" : "    ",
+				printf("Priority=%u",
 				       qos_rec->priority);
 
-			printf("%sAccount Limits%s",
-			       one_liner ? "" : "    ",
-			       one_liner ? "" : "\n");
+			/* NEW LINE */
+			printf("%s", new_line_char);
+
+			printf("Account Limits%s",
+			       one_liner ? "=" : "");
 			if (qos_rec->usage->acct_limit_list) {
 				list_for_each(qos_rec->usage->acct_limit_list,
 					      (ListForF)_print_used_acct_limit,
 					      qos_rec);
 			} else
-				printf("%sNo Accounts%s",
-				       one_liner ? "" : "        ",
-				       one_liner ? "" : "\n");
+				printf("%sNo Accounts",
+				       one_liner ? "" : "\n        ");
 
-			printf("%sUser Limits%s",
-			       one_liner ? "" : "    ",
-			       one_liner ? "" : "\n");
+			/* NEW LINE */
+			printf("%s", new_line_char);
+
+			printf("User Limits%s",
+			       one_liner ? "=" : "");
 			if (qos_rec->usage->user_limit_list) {
 				list_for_each(qos_rec->usage->user_limit_list,
 					      (ListForF)_print_used_user_limit,
 					      qos_rec);
 			} else
-				printf("%sNo Users%s",
-				       one_liner ? "" : "        ",
-				       one_liner ? "" : "\n");
+				printf("%sNo Users",
+				       one_liner ? "" : "\n        ");
+
+			/* NEW LINE */
+			printf("\n");
 		}
 	}
 }
@@ -489,7 +605,7 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
  *
  */
 
-extern void scontrol_print_assoc_mgr_info(int argc, char *argv[])
+extern void scontrol_print_assoc_mgr_info(int argc, char **argv)
 {
 	char *tag = NULL, *val = NULL;
 	int cc, tag_len, i;
@@ -513,16 +629,16 @@ extern void scontrol_print_assoc_mgr_info(int argc, char *argv[])
 		if (!val || !val[0]) {
 			fprintf(stderr, "No value given for option %s\n", tag);
 			goto endit;
-		} else if (!strncasecmp(tag, "accounts", MAX(tag_len, 1))) {
+		} else if (!xstrncasecmp(tag, "accounts", MAX(tag_len, 1))) {
 			if (!req.acct_list)
 				req.acct_list = list_create(slurm_destroy_char);
 			slurm_addto_char_list(req.acct_list, val);
-		} else if (!strncasecmp(tag, "flags", MAX(tag_len, 1))) {
-			if (slurm_strcasestr(val, "users"))
+		} else if (!xstrncasecmp(tag, "flags", MAX(tag_len, 1))) {
+			if (xstrcasestr(val, "users"))
 				req.flags |= ASSOC_MGR_INFO_FLAG_USERS;
-			if (slurm_strcasestr(val, "assoc"))
+			if (xstrcasestr(val, "assoc"))
 				req.flags |= ASSOC_MGR_INFO_FLAG_ASSOC;
-			if (slurm_strcasestr(val, "qos"))
+			if (xstrcasestr(val, "qos"))
 				req.flags |= ASSOC_MGR_INFO_FLAG_QOS;
 
 			if (!req.flags) {
@@ -532,14 +648,19 @@ extern void scontrol_print_assoc_mgr_info(int argc, char *argv[])
 					val);
 				goto endit;
 			}
-		} else if (!strncasecmp(tag, "qos", MAX(tag_len, 1))) {
+		} else if (!xstrncasecmp(tag, "qos", MAX(tag_len, 1))) {
 			if (!req.qos_list)
 				req.qos_list = list_create(slurm_destroy_char);
 			slurm_addto_char_list(req.qos_list, val);
-		} else if (!strncasecmp(tag, "users", MAX(tag_len, 1))) {
+		} else if (!xstrncasecmp(tag, "users", MAX(tag_len, 1))) {
 			if (!req.user_list)
 				req.user_list = list_create(slurm_destroy_char);
-			slurm_addto_char_list(req.user_list, val);
+			/*
+			 * Since we don't have a real connection to the dbd to
+			 * know if case is enforced or not so we will assume
+			 * it is.
+			 */
+			slurm_addto_char_list_with_case(req.user_list, val, 0);
 		} else {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -559,7 +680,7 @@ extern void scontrol_print_assoc_mgr_info(int argc, char *argv[])
 	/* call the controller to get the meat */
 	cc = slurm_load_assoc_mgr_info(&req, &msg);
 
-	if (cc == SLURM_PROTOCOL_SUCCESS) {
+	if (cc == SLURM_SUCCESS) {
 		/* print the info
 		 */
 		_print_assoc_mgr_info(msg);
@@ -576,4 +697,3 @@ endit:
 
 	return;
 }
-

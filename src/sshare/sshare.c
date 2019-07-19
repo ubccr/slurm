@@ -7,11 +7,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -51,7 +51,7 @@ static int      _get_info(shares_request_msg_t *shares_req,
 static int      _addto_name_char_list(List char_list, char *names, bool gid);
 static int 	_single_cluster(shares_request_msg_t *req_msg);
 static int 	_multi_cluster(shares_request_msg_t *req_msg);
-static char *   _convert_to_name(int id, bool gid);
+static char *   _convert_to_name(uint32_t id, bool is_gid);
 static void     _print_version( void );
 static void	_usage(void);
 static void     _help_format_msg(void);
@@ -63,7 +63,7 @@ uint32_t my_uid = 0;
 List clusters = NULL;
 uint16_t options = 0;
 
-int main (int argc, char *argv[])
+int main (int argc, char **argv)
 {
 	int opt_char;
 	log_options_t opts = LOG_OPTS_STDERR_ONLY;
@@ -101,7 +101,7 @@ int main (int argc, char *argv[])
 	slurm_conf_init(NULL);
 	log_init("sshare", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
-	while((opt_char = getopt_long(argc, argv, "aA:ehlM:no:pPqUu:t:vVm",
+	while ((opt_char = getopt_long(argc, argv, "aA:ehlM:no:pPqUu:t:vVm",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -124,8 +124,6 @@ int main (int argc, char *argv[])
 			break;
 		case 'h':
 			print_fields_have_header = 0;
-			break;
-			exit(exit_code);
 			break;
 		case 'l':
 			long_flag = 1;
@@ -207,18 +205,22 @@ int main (int argc, char *argv[])
 	    && list_count(req_msg.user_list)) {
 		fprintf(stderr, "Users requested:\n");
 		ListIterator itr = list_iterator_create(req_msg.user_list);
-		while((temp = list_next(itr)))
+		while ((temp = list_next(itr)))
 			fprintf(stderr, "\t: %s\n", temp);
 		list_iterator_destroy(itr);
 	} else if (!req_msg.user_list || !list_count(req_msg.user_list)) {
-		struct passwd *pwd = getpwuid(getuid());
-		if (!req_msg.user_list)
-			req_msg.user_list = list_create(slurm_destroy_char);
-		temp = xstrdup(pwd->pw_name);
-		list_append(req_msg.user_list, temp);
-		if (verbosity) {
-			fprintf(stderr, "Users requested:\n");
-			fprintf(stderr, "\t: %s\n", temp);
+		struct passwd *pwd;
+		if ((pwd = getpwuid(getuid()))) {
+			if (!req_msg.user_list) {
+				req_msg.user_list =
+					list_create(slurm_destroy_char);
+			}
+			temp = xstrdup(pwd->pw_name);
+			list_append(req_msg.user_list, temp);
+			if (verbosity) {
+				fprintf(stderr, "Users requested:\n");
+				fprintf(stderr, "\t: %s\n", temp);
+			}
 		}
 	}
 
@@ -226,7 +228,7 @@ int main (int argc, char *argv[])
 		if (verbosity) {
 			fprintf(stderr, "Accounts requested:\n");
 			ListIterator itr = list_iterator_create(req_msg.acct_list);
-			while((temp = list_next(itr)))
+			while ((temp = list_next(itr)))
 				fprintf(stderr, "\t: %s\n", temp);
 			list_iterator_destroy(itr);
 		}
@@ -300,7 +302,8 @@ static int _get_info(shares_request_msg_t *shares_req,
         req_msg.msg_type = REQUEST_SHARE_INFO;
         req_msg.data     = shares_req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					   working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	switch (resp_msg.msg_type) {
@@ -319,7 +322,7 @@ static int _get_info(shares_request_msg_t *shares_req,
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /* returns number of objects added to list */
@@ -345,7 +348,7 @@ static int _addto_name_char_list(List char_list, char *names, bool gid)
 			i++;
 		}
 		start = i;
-		while(names[i]) {
+		while (names[i]) {
 			//info("got %d - %d = %d", i, start, i-start);
 			if (quote && names[i] == quote_c)
 				break;
@@ -357,13 +360,14 @@ static int _addto_name_char_list(List char_list, char *names, bool gid)
 					memcpy(name, names+start, (i-start));
 					//info("got %s %d", name, i-start);
 					if (isdigit((int) *name)) {
-						int id = atoi(name);
+						uint32_t id = strtoul(name,
+								      NULL, 10);
 						xfree(name);
 						name = _convert_to_name(
 							id, gid);
 					}
 
-					while((tmp_char = list_next(itr))) {
+					while ((tmp_char = list_next(itr))) {
 						if (!xstrcasecmp(tmp_char,
 								 name))
 							break;
@@ -392,12 +396,12 @@ static int _addto_name_char_list(List char_list, char *names, bool gid)
 			memcpy(name, names+start, (i-start));
 
 			if (isdigit((int) *name)) {
-				int id = atoi(name);
+				uint32_t id = strtoul(name, NULL, 10);
 				xfree(name);
 				name = _convert_to_name(id, gid);
 			}
 
-			while((tmp_char = list_next(itr))) {
+			while ((tmp_char = list_next(itr))) {
 				if (!xstrcasecmp(tmp_char, name))
 					break;
 			}
@@ -413,21 +417,21 @@ static int _addto_name_char_list(List char_list, char *names, bool gid)
 	return count;
 }
 
-static char *_convert_to_name(int id, bool gid)
+static char *_convert_to_name(uint32_t id, bool is_gid)
 {
 	char *name = NULL;
 
-	if (gid) {
+	if (is_gid) {
 		struct group *grp;
-		if (!(grp=getgrgid(id))) {
-			fprintf(stderr, "Invalid group id: %s\n", name);
+		if (!(grp = getgrgid((gid_t) id))) {
+			fprintf(stderr, "Invalid group id: %u\n", id);
 			exit(1);
 		}
 		name = xstrdup(grp->gr_name);
 	} else {
 		struct passwd *pwd;
-		if (!(pwd=getpwuid(id))) {
-			fprintf(stderr, "Invalid user id: %s\n", name);
+		if (!(pwd = getpwuid((uid_t) id))) {
+			fprintf(stderr, "Invalid user id: %u\n", id);
 			exit(1);
 		}
 		name = xstrdup(pwd->pw_name);
@@ -458,12 +462,11 @@ Usage:  sshare [OPTION]                                                    \n\
                            with the '--format' option                      \n\
     -l or --long           include normalized usage in output              \n\
     -m or --partition      print the partition part of the association     \n\
-    -M or --cluster=name   cluster to issue commands to.  Default is       \n\
-                           current cluster.  cluster with no name will     \n\
-                           reset to default.                               \n\
+    -M or --cluster=names  clusters to issue commands to.                  \n\
+                           NOTE: SlurmDBD must be up.                      \n\
     -n or --noheader       omit header from output                         \n\
-    -o or --format=        Comma separated list of fields. (use            \n\
-                           (\"--helpformat\" for a list of available fields).\n\
+    -o or --format=        Comma separated list of fields (use             \n\
+                           \"--helpformat\" for a list of available fields).\n\
     -p or --parsable       '|' delimited output with a trailing '|'        \n\
     -P or --parsable2      '|' delimited output without a trailing '|'     \n\
     -u or --users=         display specific users (comma separated list)   \n\

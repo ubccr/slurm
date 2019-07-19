@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,35 +27,29 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdlib.h>
 
 #include "slurm/slurm.h"
 #include "src/common/checkpoint.h"
 #include "src/common/slurm_protocol_api.h"
 
-#ifdef HAVE_AIX
-  char *__progname = "PROGRAM";
-#else
-  extern char * __progname;
-#endif
+extern char * __progname;
 
 static int _handle_rc_msg(slurm_msg_t *msg);
 static int _checkpoint_op (uint16_t op, uint16_t data,
@@ -79,6 +73,7 @@ static int _checkpoint_op (uint16_t op, uint16_t data,
 	slurm_msg_t req_msg;
 
 	slurm_msg_t_init(&req_msg);
+	memset(&ckp_req, 0, sizeof(ckp_req));
 	ckp_req.op        = op;
 	ckp_req.data      = data;
 	ckp_req.job_id    = job_id;
@@ -87,7 +82,8 @@ static int _checkpoint_op (uint16_t op, uint16_t data,
 	req_msg.msg_type  = REQUEST_CHECKPOINT;
 	req_msg.data      = &ckp_req;
 
-	if (slurm_send_recv_controller_rc_msg(&req_msg, &rc) < 0)
+	if (slurm_send_recv_controller_rc_msg(&req_msg, &rc,
+					      working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	slurm_seterrno(rc);
@@ -110,6 +106,7 @@ extern int slurm_checkpoint_able (uint32_t job_id, uint32_t step_id,
 	checkpoint_msg_t ckp_req;
 	checkpoint_resp_msg_t *resp;
 
+	memset(&ckp_req, 0, sizeof(ckp_req));
 	ckp_req.op        = CHECK_ABLE;
 	ckp_req.job_id    = job_id;
 	ckp_req.step_id   = step_id;
@@ -119,20 +116,21 @@ extern int slurm_checkpoint_able (uint32_t job_id, uint32_t step_id,
 	req_msg.msg_type  = REQUEST_CHECKPOINT;
 	req_msg.data      = &ckp_req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					   working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
-	switch(resp_msg.msg_type) {
-	 case RESPONSE_CHECKPOINT:
+	switch (resp_msg.msg_type) {
+	case RESPONSE_CHECKPOINT:
 		resp = (checkpoint_resp_msg_t *) resp_msg.data;
 		*start_time = resp->event_time;
 		slurm_free_checkpoint_resp_msg(resp_msg.data);
 		rc = SLURM_SUCCESS;
 		break;
-	 case RESPONSE_SLURM_RC:
+	case RESPONSE_SLURM_RC:
 		rc = _handle_rc_msg(&resp_msg);
 		break;
-	 default:
+	default:
 		*start_time = (time_t) NULL;
 		rc = SLURM_ERROR;
 	}
@@ -239,6 +237,7 @@ extern int slurm_checkpoint_complete (uint32_t job_id, uint32_t step_id,
 	checkpoint_comp_msg_t req;
 
 	slurm_msg_t_init(&msg);
+	memset(&req, 0, sizeof(req));
 	req.job_id       = job_id;
 	req.step_id      = step_id;
 	req.begin_time   = begin_time;
@@ -247,7 +246,8 @@ extern int slurm_checkpoint_complete (uint32_t job_id, uint32_t step_id,
 	msg.msg_type     = REQUEST_CHECKPOINT_COMP;
 	msg.data         = &req;
 
-	if (slurm_send_recv_controller_rc_msg(&msg, &rc) < 0)
+	if (slurm_send_recv_controller_rc_msg(&msg, &rc,
+					      working_cluster_rec) < 0)
 		return SLURM_ERROR;
 	if (rc)
 		slurm_seterrno_ret(rc);
@@ -267,8 +267,8 @@ extern int slurm_checkpoint_complete (uint32_t job_id, uint32_t step_id,
  *	must be freed by the caller to prevent memory leak
  * RET 0 or a slurm error code
  */
-extern int slurm_checkpoint_error ( uint32_t job_id, uint32_t step_id,
-		uint32_t *error_code, char **error_msg)
+extern int slurm_checkpoint_error (uint32_t job_id, uint32_t step_id,
+				   uint32_t *error_code, char **error_msg)
 {
 	int rc;
 	slurm_msg_t msg;
@@ -282,6 +282,7 @@ extern int slurm_checkpoint_error ( uint32_t job_id, uint32_t step_id,
 	/*
 	 * Request message:
 	 */
+	memset(&req, 0, sizeof(req));
 	req.op        = CHECK_ERROR;
 	req.job_id    = job_id;
 	req.step_id   = step_id;
@@ -291,18 +292,19 @@ extern int slurm_checkpoint_error ( uint32_t job_id, uint32_t step_id,
 	msg.msg_type  = REQUEST_CHECKPOINT;
 	msg.data      = &req;
 
-	rc = slurm_send_recv_controller_msg(&msg, &resp_msg);
+	rc = slurm_send_recv_controller_msg(&msg, &resp_msg,
+					    working_cluster_rec);
 
-	if (rc == SLURM_SOCKET_ERROR)
+	if (rc == SLURM_ERROR)
 		return rc;
 
 	switch (resp_msg.msg_type) {
-	 case RESPONSE_SLURM_RC:
+	case RESPONSE_SLURM_RC:
 		*error_code = 0;
 		*error_msg = strdup("");
 		rc = _handle_rc_msg(&resp_msg);
 		break;
-	 case RESPONSE_CHECKPOINT:
+	case RESPONSE_CHECKPOINT:
 		ckpt_resp = (checkpoint_resp_msg_t *) resp_msg.data;
 		*error_code = ckpt_resp->error_code;
 		if (ckpt_resp->error_msg)
@@ -312,7 +314,7 @@ extern int slurm_checkpoint_error ( uint32_t job_id, uint32_t step_id,
 		slurm_free_checkpoint_resp_msg(ckpt_resp);
 		rc = SLURM_SUCCESS;
 		break;
-	 default:
+	default:
 		rc = SLURM_UNEXPECTED_MSG_ERROR;
 	}
 
@@ -353,6 +355,7 @@ extern int slurm_checkpoint_task_complete (uint32_t job_id, uint32_t step_id,
 	checkpoint_task_comp_msg_t req;
 
 	slurm_msg_t_init(&msg);
+	memset(&req, 0, sizeof(req));
 	req.job_id       = job_id;
 	req.step_id      = step_id;
 	req.task_id      = task_id;
@@ -362,7 +365,8 @@ extern int slurm_checkpoint_task_complete (uint32_t job_id, uint32_t step_id,
 	msg.msg_type     = REQUEST_CHECKPOINT_TASK_COMP;
 	msg.data         = &req;
 
-	if (slurm_send_recv_controller_rc_msg(&msg, &rc) < 0)
+	if (slurm_send_recv_controller_rc_msg(&msg, &rc,
+					      working_cluster_rec) < 0)
 		return SLURM_ERROR;
 	if (rc)
 		slurm_seterrno_ret(rc);

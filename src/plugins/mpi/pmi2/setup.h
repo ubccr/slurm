@@ -8,11 +8,11 @@
  *  Written by Artem Y. Polyakov <artemp@mellanox.com>.
  *  All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,47 +28,36 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _SETUP_H
 #define _SETUP_H
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif  /* HAVE_INTTYPES_H */
-#else   /* !HAVE_CONFIG_H */
-#  include <inttypes.h>
-#endif  /*  HAVE_CONFIG_H */
+#include <inttypes.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
+
 #include "src/common/slurm_xlator.h"
 #include "src/common/pack.h"
+#include "src/common/slurm_opt.h"
 #include "src/common/slurm_mpi.h"
 #include "src/common/xstring.h"
-
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
-
 #include "src/srun/libsrun/debugger.h"
 #include "src/srun/libsrun/opt.h"
 
 #include "tree.h"
 
 typedef struct pmi2_job_info {
-	uint32_t jobid;  /* Current SLURM job id                      */
+	uint32_t jobid;  /* Current Slurm job id                      */
 	uint32_t stepid; /* Current step id (or NO_VAL)               */
 	uint32_t nnodes; /* number of nodes in current job step       */
 	uint32_t nodeid; /* relative position of this node in job     */
@@ -85,8 +74,7 @@ typedef struct pmi2_job_info {
 	char **job_env;	     /* environment of job. use in stepd */
 
 	MPIR_PROCDESC *MPIR_proctable;	/* used only in srun */
-	opt_t      *srun_opt;	/* used only in srun */
-	switch_jobinfo_t *switch_job; /* switch-specific job information */
+	slurm_opt_t *srun_opt;		/* used only in srun */
 	char *resv_ports; /* MPI reserved ports */
 } pmi2_job_info_t;
 

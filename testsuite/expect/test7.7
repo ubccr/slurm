@@ -1,288 +1,211 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
-#          Test of sched/wiki2 plugin. This is intended to execute in the
-#          place of Moab or Maui and emulate its actions to confirm proper
-#          operation of the plugin.
+# Purpose: Test of Slurm functionality
+#          Test of resource allocation layout. Specifically make sure that
+#          no excess CPUs are allocate to the job. See bug 6274.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2006-2007 The Regents of the University of California.
-# Copyright (C) 2008-2009 Lawrence Livermore National Security.
-# Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-# Written by Morris Jette <jette1@llnl.gov>
-# CODE-OCEC-09-009. All rights reserved.
+# Copyright (C) 2019 SchedMD LLC
+# Written by Morris Jette
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
+# 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
 ############################################################################
 source ./globals
 
 set test_id     "7.7"
 set exit_code   0
-set file_in     "test$test_id.in"
-set file_out    "test$test_id.out"
-set test_prog   "test$test_id.prog"
+set file_in    "test$test_id.input"
+set file_out   "test$test_id.output"
+set job_name   "test$test_id"
+set job_id      0
+set max_job_state_delay 10
 
-print_header $test_id
+proc test_alloc_size { task_cnt } {
+	global bin_cat bin_rm file_in file_out sbatch job_name number
+	global alloc_unit_num exit_code max_tasks max_job_state_delay
 
-#
-# Check if we have sched/wiki2 configured
-#
-log_user 0
-set agg_time     -1
-set conf_dir     ""
-set control_addr ""
-set sched_port   0
-set sched_wiki   0
-exec $bin_rm -f $file_in $file_out $test_prog
-spawn $scontrol show config
-expect {
-	-re "ControlAddr *= ($alpha_numeric_under)" {
-		set control_addr $expect_out(1,string)
-		exp_continue
+	exec $bin_rm -f $file_out
+	set job_id 0
+	spawn $sbatch -t1 -o $file_out -J $job_name -n $task_cnt $file_in
+	expect {
+		-re "Submitted batch job ($number)" {
+			set job_id $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+		        send_user "\nFAILURE: sbatch not responding\n"
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
 	}
-	-re "SchedulerParameters.*JobAggregationTime=($number)" {
-		set agg_time $expect_out(1,string)
-		exp_continue
+	if {[wait_for_job $job_id "DONE"] != 0} {
+		send_user "\nWARNING: job $job_id did not complete\n"
+		cancel_job $job_id
+		set max_tasks $task_cnt
+		return
 	}
-	-re "SchedulerPort *= ($number)" {
-		set sched_port $expect_out(1,string)
-		exp_continue
-	}
-	-re "SchedulerType *= sched/wiki2" {
-		set sched_wiki 1
-		exp_continue
-	}
-	-re "SLURM_CONF *= (.*)/slurm.conf.*SLURM_VERSION" {
-		set conf_dir $expect_out(1,string)
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: scontrol not responding\n"
+	if {[wait_for_file $file_out] != 0} {
+		send_user "\nFAILURE: no output file\n"
 		set exit_code 1
+		return
 	}
-	eof {
-		wait
-	}
-}
-log_user 1
-if {$sched_wiki == 0} {
-	send_user "\nWARNING: not running sched/wiki2, test is not applicable\n"
-	exit $exit_code
-}
-if {[string compare $control_addr ""] == 0} {
-	send_user "\nFAILURE: ControlAddr not set\n"
-	exit 1
-}
-if {$sched_port == 0} {
-	send_user "\nFAILURE: SchedulerPort = 0\n"
-	exit 1
-}
-if {$agg_time != 0} {
-	send_user "\nWARNING: JobAggregationTime != 0\n"
-	exit 1
-}
-
-#
-# Try to get the AuthKey from wiki.conf
-#
-set auth_key  0
-set e_port    0
-set wiki_file "$conf_dir/wiki.conf"
-if {[file readable $wiki_file] == 0}  {
-	send_user "\nWARNING: Unable to read $wiki_file\n"
-	exit $exit_code
-}
-log_user 0
-spawn $bin_sort $wiki_file
-expect {
-	-re "AuthKey=($number)" {
-		set auth_key $expect_out(1,string)
-		exp_continue
-	}
-	-re "EPort=($number)" {
-		set e_port $expect_out(1,string)
-		exp_continue
-	}
-	-re
-	eof {
-		wait
-	}
-}
-log_user 1
-if {$auth_key == 0} {
-	send_user "\nWARNING: AuthKey not found in $wiki_file\n"
-	exit 1
-}
-if {$e_port == 0} {
-	send_user "\nWARNING: EPort not found in $wiki_file\n"
-	exit 1
-}
-
-#send_user "\nAuthKey=$auth_key\nEPort=$e_port\n"
-
-if { [test_bluegene] } {
-	set is_bluegene 1
-} else {
-	set is_bluegene 0
-}
-
-#
-# Submit a job to work with
-#
-exec $bin_rm -f $file_out
-make_bash_script $file_in "
-  echo BEGIN
-  env
-  $bin_sleep 20
-  echo FINI
-  exit 0"
-set job_id1 0
-set job_id2 0
-set sbatch_pid [spawn $sbatch -N1-1024 --output=$file_out --comment=test -t1 $file_in]
-expect {
-	-re "Submitted batch job ($number)" {
-		set job_id1 $expect_out(1,string)
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: sbatch not responding\n"
-		catch {exec $bin_kill -KILL $sbatch_pid}
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
-if {$job_id1 == 0} {
-	send_user "\nFAILURE: srun job submit failed\n"
-	exit 1
-}
-
-#
-# Start our Moab emulator ($test_prog) to manage the job
-#
-set timeout 60
-exec $bin_rm -f $test_prog
-exec $bin_cc $test_prog.c -o $test_prog
-set success 0
-set moab_pid [spawn $test_prog $auth_key $control_addr $e_port $job_id1 $sched_port $is_bluegene]
-set master_id $spawn_id
-expect {
-	-re "READY" {
-	}
-	timeout {
-		send_user "\nFAILURE: Moab emulator not responding\n"
-		catch {exec $bin_kill -KILL $moab_pid}
-		cancel_job $job_id1
-		exit 1
-	}
-	eof {
-		send_user "\nFAILURE: Test program terminated early\n"
-		cancel_job $job_id1
-		exit 1
-	}
-}
-
-set sbatch_pid [spawn $sbatch --output=/dev/null -t1 $file_in]
-expect {
-	-re "Submitted batch job ($number)" {
-		set job_id2 $expect_out(1,string)
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: sbatch not responding\n"
-		catch {exec $bin_kill -KILL $sbatch_pid}
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
-
-set spawn_id $master_id
-expect {
-	-i $master_id
-	-re "SUCCESS" {
-		set success 1
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: Moab emulator not responding\n"
-		catch {exec $bin_kill -KILL $moab_pid}
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
-if {$success == 0} {
-	send_user "\nFAILURE: Moab emulator failed\n"
-	set exit_code 1
-}
-
-if {[wait_for_job $job_id1 "DONE"] != 0} {
-	send_user "\nFAILURE: waiting for job to complete\n"
-	set exit_code 1
-}
-if {[wait_for_file $file_out] == 0} {
-	set matches 0
+	set num_cpus -1
+	set num_nodes -1
+	set threads_per_core 1
+	set cores_per_socket 1
+	set sockets_per_node 1
 	spawn $bin_cat $file_out
 	expect {
-		-re "BEGIN" {
-			incr matches
+		-re "NumCPUs=($number)" {
+			set num_cpus $expect_out(1,string)
 			exp_continue
 		}
-		-re "TEST_ENV1=test_val1" {
-			incr matches
+		-re "SLURM_NNODES=($number)" {
+			set num_nodes $expect_out(1,string)
 			exp_continue
 		}
-		-re "TEST_ENV2=test_val2" {
-			incr matches
-			exp_continue
-		}
-		-re "FINI" {
-			incr matches
+		-re "ThreadsPerCore=($number)" {
+			if {$threads_per_core < $expect_out(1,string)} {
+				set threads_per_core $expect_out(1,string)
+			}
 			exp_continue
 		}
 		eof {
 			wait
 		}
 	}
-	if {$matches != 4} {
-		send_user "\nFAILURE: Job output not correct ($matches of 4)\n"
+	log_user 0
+	spawn $bin_cat $file_out
+	expect {
+		-re "CoresPerSocket=($number)" {
+			if {$cores_per_socket < $expect_out(1,string)} {
+				set cores_per_socket $expect_out(1,string)
+			}
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	spawn $bin_cat $file_out
+	expect {
+		-re "Sockets=($number)" {
+			if {$sockets_per_node < $expect_out(1,string)} {
+				set sockets_per_node $expect_out(1,string)
+			}
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+
+#	Determine largest allocation unit
+	if {$alloc_unit_num == 4} {
+		set alloc_unit 1
+	} elseif {$alloc_unit_num == 3} {
+		set alloc_unit $threads_per_core
+	} elseif {$alloc_unit_num == 2} {
+		set alloc_unit [expr $threads_per_core * $cores_per_socket]
+	} elseif {$alloc_unit_num == 1} {
+		set alloc_unit [expr $threads_per_core * $cores_per_socket * $sockets_per_node]
+	} else {
+		send_user "\nFAILURE: Invalid allocation unit: $alloc_unit_num\n"
+		set exit_code 1
+		set alloc_unit 0
+	}
+
+	set max_alloc [expr $task_cnt + (($alloc_unit - 1) * $num_nodes)]
+	if {$num_cpus > $max_alloc} {
+		send_user "\nFAILURE: Job with $task_cnt tasks allocated too many CPUs ($num_cpus > $max_alloc)\n"
+		send_user "TASKS:$task_cnt\n"
+		send_user "CPUS:$num_cpus\n"
+		send_user "NODES:$num_nodes\n"
+		send_user "MAX_THREADS_PER_CORE:$threads_per_core\n"
+		send_user "MAX_CORES_PER_SOCKET:$cores_per_socket\n"
+		send_user "MAX_SOCKETS_PER_NODE:$sockets_per_node\n"
+		send_user "ALLOCATION_UNIT:$alloc_unit\n"
 		set exit_code 1
 	}
-} else {
-	send_user "\nFAILURE: Job output missing\n"
-	set exit_code 1
 }
 
-cancel_job $job_id1
-if {$job_id2 != 0} {
-	cancel_job $job_id2
+print_header $test_id
+
+if {[test_select_type_params "CR_ONE_TASK_PER_CORE"]} {
+	send_user "\nWARNING: This test is incompatible SelectTypeParameters=CR_ONE_TASK_PER_CORE\n"
+	exit 0
 }
-if { $exit_code == 0 } {
-	exec $bin_rm -f $file_in $file_out $test_prog
+
+set partition [default_partition]
+set total_cpus [get_total_cpus $partition]
+set select_type_param [get_select_type_params $partition]
+if {[test_linear]} {
+	set alloc_unit_str "NODE"
+	set alloc_unit_num 1
+} elseif { [default_part_exclusive] == 1} {
+	set alloc_unit_str "NODE"
+	set alloc_unit_num 1
+} elseif { [string first "CR_SOCKET" $select_type_param] != -1} {
+	set alloc_unit_str "SOCKET"
+	set alloc_unit_num 2
+} elseif { [string first "CR_CORE" $select_type_param] != -1} {
+	set alloc_unit_str "CORE"
+	set alloc_unit_num 3
+} else {
+	set alloc_unit_str "CPU"
+	set alloc_unit_num 4
+}
+set max_tasks [get_total_cpus $partition]
+send_user "\nResource allocation unit: $alloc_unit_str\n"
+send_user "CPUs in default partition: $max_tasks\n\n"
+if {$max_tasks > 32} {
+	set max_tasks 20
+}
+
+make_bash_script $file_in "
+$scontrol -dd show job \$SLURM_JOB_ID | grep NumCPUs=
+$scontrol -dd show job \$SLURM_JOB_ID | grep CPU_IDs=
+$bin_echo ''
+env | grep SLURM_NNODES=
+env | grep SLURM_TASKS_PER_NODE=
+env | grep SLURM_JOB_CPUS_PER_NODE=
+$bin_echo ''
+$scontrol show node \$SLURM_JOB_NODELIST | grep -v Features | grep -v Gres | \
+grep -v CPUAlloc | grep -v NodeAddr | grep -v OS | grep -v Partitions | \
+grep -v CfgTRES | grep -v AllocTRES | grep -v BootTime | grep -v Watts
+"
+
+for {set inx 1} {$inx < $max_tasks && $exit_code == 0} {incr inx} {
+	test_alloc_size $inx
+}
+
+#
+# Clean up and exit
+#
+if {$exit_code == 0} {
+	exec $bin_rm -f $file_in $file_out
 	send_user "\nSUCCESS\n"
 }
 exit $exit_code
-

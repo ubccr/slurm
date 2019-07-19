@@ -35,14 +35,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-
 #ifndef _FD_H
 #define _FD_H
-
-
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif /* HAVE_CONFIG_H */
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -59,15 +53,6 @@ static inline void closeall(int fd)
 	while (fd < fdlimit)
 		close(fd++);
 }
-
-/* Open a fd with close-on-exec (POSIX 2008, Linux 2.6.23+), emulating
- * it on systems that lack it.  */
-int open_cloexec(const char *pathname, int flags);
-
-/* Create a fd with close-on-exec (POSIX 2008, Linux 2.6.23+),
- * emulating it on systems that lack it.  */
-int creat_cloexec(const char *pathname, mode_t mode);
-
 
 void fd_set_close_on_exec(int fd);
 /*
@@ -89,12 +74,6 @@ void fd_set_blocking(int fd);
  * Sets the file descriptor (fd) for blocking I/O.
  */
 
-int fd_get_read_lock(int fd);
-/*
- *  Obtain a read lock on the file specified by (fd).
- *  Returns 0 on success, or -1 if prevented from obtaining the lock.
- */
-
 int fd_get_readw_lock(int fd);
 /*
  *  Obtain a read lock on the file specified by (fd),
@@ -106,13 +85,6 @@ int fd_get_write_lock(int fd);
 /*
  *  Obtain a write lock on the file specified by (fd).
  *  Returns 0 on success, or -1 if prevented from obtaining the lock.
- */
-
-int fd_get_writew_lock(int fd);
-/*
- *  Obtain a write lock on the file specified by (fd),
- *    blocking until one becomes available.
- *  Returns 0 on success, or -1 on error.
  */
 
 int fd_release_lock(int fd);
@@ -128,25 +100,6 @@ pid_t fd_is_read_lock_blocked(int fd);
  *    returns the pid of the process holding the lock; o/w, returns 0.
  */
 
-pid_t fd_is_write_lock_blocked(int fd);
-/*
- *  If a lock exists the would block a request for a write-lock
- *    (ie, if any lock is already being held on the file),
- *    returns the pid of a process holding the lock; o/w, returns 0.
- */
-
-ssize_t fd_read_n(int fd, void *buf, size_t n);
-/*
- *  Reads up to (n) bytes from (fd) into (buf).
- *  Returns the number of bytes read, 0 on EOF, or -1 on error.
- */
-
-ssize_t fd_write_n(int fd, void *buf, size_t n);
-/*
- *  Writes (n) bytes from (buf) to (fd).
- *  Returns the number of bytes written, or -1 on error.
- */
-
 ssize_t fd_read_line(int fd, void *buf, size_t maxlen);
 /*
  *  Reads at most (maxlen-1) bytes up to a newline from (fd) into (buf).
@@ -155,14 +108,15 @@ ssize_t fd_read_line(int fd, void *buf, size_t maxlen);
  *  Returns the number of bytes read, 0 on EOF, or -1 on error.
  */
 
-int fd_is_blocking(int fd);
-/*
- * Return 1 if the file specified by the file descriptor is blocking.
- * Return 0 otherwise.
- */
-
 extern int wait_fd_readable(int fd, int time_limit);
 /* Wait for a file descriptor to be readable (up to time_limit seconds).
  * Return 0 when readable or -1 on error */
+
+/*
+ * fsync() then close() a file.
+ * Execute fsync() and close() multiple times if necessary and log failures
+ * RET 0 on success or -1 on error
+ */
+extern int fsync_and_close(int fd, const char *file_type);
 
 #endif /* !_FD_H */

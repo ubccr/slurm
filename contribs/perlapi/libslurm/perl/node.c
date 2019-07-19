@@ -24,15 +24,9 @@
  * convert node_info_t to perl HV
  */
 int
-node_info_to_hv(node_info_t *node_info, uint16_t node_scaling, HV *hv)
+node_info_to_hv(node_info_t *node_info, HV *hv)
 {
-	uint16_t err_cpus = 0, alloc_cpus = 0;
-#ifdef HAVE_BG
-	int cpus_per_node = 1;
-
-	if(node_scaling)
-		cpus_per_node = node_info->cpus / node_scaling;
-#endif
+	uint16_t alloc_cpus = 0;
 	if(node_info->arch)
 		STORE_FIELD(hv, node_info, arch, charp);
 	STORE_FIELD(hv, node_info, boot_time, time_t);
@@ -54,7 +48,7 @@ node_info_to_hv(node_info_t *node_info, uint16_t node_scaling, HV *hv)
 	STORE_FIELD(hv, node_info, node_state, uint32_t);
 	if(node_info->os)
 		STORE_FIELD(hv, node_info, os, charp);
-	STORE_FIELD(hv, node_info, real_memory, uint32_t);
+	STORE_FIELD(hv, node_info, real_memory, uint64_t);
 	if(node_info->reason)
 		STORE_FIELD(hv, node_info, reason, charp);
 	STORE_FIELD(hv, node_info, reason_time, time_t);
@@ -69,24 +63,8 @@ node_info_to_hv(node_info_t *node_info, uint16_t node_scaling, HV *hv)
 				  SELECT_NODEDATA_SUBCNT,
 				  NODE_STATE_ALLOCATED,
 				  &alloc_cpus);
-#ifdef HAVE_BG
-	if(!alloc_cpus
-	   && (IS_NODE_ALLOCATED(node_info) || IS_NODE_COMPLETING(node_info)))
-		alloc_cpus = node_info->cpus;
-	else
-		alloc_cpus *= cpus_per_node;
-#endif
-
-	slurm_get_select_nodeinfo(node_info->select_nodeinfo,
-				  SELECT_NODEDATA_SUBCNT,
-				  NODE_STATE_ERROR,
-				  &err_cpus);
-#ifdef HAVE_BG
-	err_cpus *= cpus_per_node;
-#endif
 
 	hv_store_uint16_t(hv, "alloc_cpus", alloc_cpus);
-	hv_store_uint16_t(hv, "err_cpus", err_cpus);
 
 	STORE_PTR_FIELD(hv, node_info, select_nodeinfo, "Slurm::dynamic_plugin_data_t");
 
@@ -113,7 +91,7 @@ hv_to_node_info(HV *hv, node_info_t *node_info)
 	FETCH_FIELD(hv, node_info, name, charp, TRUE);
 	FETCH_FIELD(hv, node_info, node_state, uint32_t, TRUE);
 	FETCH_FIELD(hv, node_info, os, charp, FALSE);
-	FETCH_FIELD(hv, node_info, real_memory, uint32_t, TRUE);
+	FETCH_FIELD(hv, node_info, real_memory, uint64_t, TRUE);
 	FETCH_FIELD(hv, node_info, reason, charp, FALSE);
 	FETCH_FIELD(hv, node_info, reason_time, time_t, TRUE);
 	FETCH_FIELD(hv, node_info, reason_uid, uint32_t, TRUE);
@@ -138,16 +116,18 @@ node_info_msg_to_hv(node_info_msg_t *node_info_msg, HV *hv)
 	AV *av;
 
 	STORE_FIELD(hv, node_info_msg, last_update, time_t);
-	STORE_FIELD(hv, node_info_msg, node_scaling, uint16_t);
-	/* record_count implied in node_array */
+	/*
+	 * node_info_msg->node_array will have node_records with NULL names for
+	 * nodes that are hidden. They are put in the array to preserve the
+	 * node_index which will match up with a partiton's node_inx[]. Add
+	 * empty hashes for nodes that have NULL names -- hidden nodes.
+	 */
 	av = newAV();
 	for(i = 0; i < node_info_msg->record_count; i ++) {
-		if (!node_info_msg->node_array[i].name)
-			continue;
-
 		hv_info =newHV();
-		if (node_info_to_hv(node_info_msg->node_array + i,
-				    node_info_msg->node_scaling, hv_info) < 0) {
+		if (node_info_msg->node_array[i].name &&
+		    node_info_to_hv(node_info_msg->node_array + i,
+				    hv_info) < 0) {
 			SvREFCNT_dec((SV*)hv_info);
 			SvREFCNT_dec((SV*)av);
 			return -1;
@@ -171,7 +151,6 @@ hv_to_node_info_msg(HV *hv, node_info_msg_t *node_info_msg)
 	memset(node_info_msg, 0, sizeof(node_info_msg_t));
 
 	FETCH_FIELD(hv, node_info_msg, last_update, time_t, TRUE);
-	FETCH_FIELD(hv, node_info_msg, node_scaling, uint16_t, TRUE);
 
 	svp = hv_fetch(hv, "node_array", 10, FALSE);
 	if (! (svp && SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVAV)) {

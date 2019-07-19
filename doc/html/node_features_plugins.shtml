@@ -20,13 +20,14 @@ plugin_type[]="<i>node_features/[knl_cray]</i>"</span><br>
 
 <ul>
 <li><b>knl_cray</b> &mdash; Use Cray's capmc command to manage an Intel KNL processor.</li>
+<li><b>knl_generic</b> &mdash; Use Intel commands to manage KNL processor.</li>
 </ul>
 
 <p><span class="commandline">const uint32_t plugin_version=SLURM_VERSION_NUMBER</span><br>
 If specified, identifies the version of Slurm used to build this plugin and
 any attempt to load the plugin from a different version of Slurm will result
 in an error.
-If not specified, then the plugin may be loadeed by Slurm commands and
+If not specified, then the plugin may be loaded by Slurm commands and
 daemons from any version, however this may result in difficult to diagnose
 failures due to changes in the arguments to plugin functions or changes
 in other Slurm functions used by the plugin.</p>
@@ -34,7 +35,6 @@ in other Slurm functions used by the plugin.</p>
 <p>The programmer is urged to study
 <span class="commandline">src/plugins/node_features/knl_cray/node_features_knl_cray.c</span>
 for a sample implementation of a Slurm node features plugin.
-<p class="footer"><a href="#top">top</a>
 
 <h2>API Functions</h2>
 
@@ -61,12 +61,30 @@ The system <span class="commandline">_init()</span> is called before the Slurm
 <span class="commandline">fini()</span> is called before the system's
 <span class="commandline">_fini()</span>.</p>
 
+<p class="commandline"> bool node_features_p_changeable_feature(char *feature)
+<p style="margin-left:.2in"><b>Description</b>:<br>
+  Determine if this (one) specified node feature is under the control of this plugin.
+  The feature must be in a node's available features in order for the node to be
+  reconfigured and the feature become active.
+<p style="margin-left:.2in"><b>Arguments</b>: <br>
+  <span class="commandline"> feature:</span> One node feature.<br>
+<p style="margin-left:.2in"><b>Returns</b>: <br>
+  <span class="commandline">true</span> this feature can be set by this plugin<br>
+  <span class="commandline">false</span> this feature can not be et this plugin.</p>
+
 <p class="commandline"> int node_features_p_reconfig(void)
 <p style="margin-left:.2in"><b>Description</b>:<br>
   Note that the configuration has changed, read configuration parameters again.
 <p style="margin-left:.2in"><b>Returns</b>: <br>
   <span class="commandline">SLURM_SUCCESS</span> on success, or<br>
   <span class="commandline">SLURM_ERROR</span> on failure.</p>
+
+<p class="commandline"> uint32_t node_features_p_boot_time(void)
+<p style="margin-left:.2in"><b>Description</b>:<br>
+  Return the estimated node reboot time in units of seconds.
+  Used as a basis for optimizing scheduling decisions.
+<p style="margin-left:.2in"><b>Returns</b>: <br>
+  Estimated boot time in seconds.</p>
 
 <p class="commandline"> int node_features_p_get_node(char *node_list)
 <p style="margin-left:.2in"><b>Description</b>:<br>
@@ -85,7 +103,7 @@ The system <span class="commandline">_init()</span> is called before the Slurm
   Determine of the user's job constraint string is valid.
   This may be used to limit the type of operators supported (Slurm's active
   feature logic only supports the AND operator) and prevent illegal
-  combintations of node features (e.g. multiple NUMA modes).
+  combinations of node features (e.g. multiple NUMA modes).
   Executed from the slurmctld daemon only when either the job submit or
   modify operation is invoked.
 <p style="margin-left:.2in"><b>Arguments</b>: <br>
@@ -112,6 +130,16 @@ The system <span class="commandline">_init()</span> is called before the Slurm
   A string with it's memory allocated by xmalloc (i.e. the return value
   must be released using Slurm's xfree function).</p>
 
+<p class="commandline"> bitstr_t *node_features_g_get_node_bitmap(void)
+<p style="margin-left:.2in"><b>Description</b>:<br>
+  Return a bitmap of the nodes under this plugin's control. This may be a subset
+  of the nodes on a cluster of heterogeneous nodes (e.g. some KNL and some
+  Haswell nodes on the same cluster).
+<p style="margin-left:.2in"><b>Returns</b>: <br>
+  Bitmap of the nodes under this plugin's control.
+  If no NodeFeatures plugins configured this may be NULL.
+  Use FREE_NULL_BITMAP() function to release returned memory.
+
 <p class="commandline"> bool node_features_p_node_power(void)
 <p style="margin-left:.2in"><b>Description</b>:<br>
   Report if the PowerSave mode is required to boot nodes.
@@ -133,23 +161,68 @@ The system <span class="commandline">_init()</span> is called before the Slurm
   are currently in effect. Value is allocated or appended to as appropriate
   with xmalloc functions.</p>
 
-<p class="commandline"> char *node_features_p_node_xlate(char *new_features, char *orig_features)
+<p class="commandline"> bool node_features_g_node_update_valid(void *node_ptr, update_node_msg_t *update_node_msg)
 <p style="margin-left:.2in"><b>Description</b>:<br>
-  Translate a node's new feature specification as needed to preserve any
+  Determine if this node update request is valid. For example, validate that a
+   non-KNL node does not include any MCDRAM or NUMA modes that are KNL specific.
+<p style="margin-left:.2in"><b>Arguments</b>: <br>
+  <span class="commandline"> node_ptr:</span> Pointer to struct node_record record
+  being updated.<br>
+  <span class="commandline"> update_node_msg:</span> Node update request.</br>
+<p style="margin-left:.2in"><b>Returns</b>: <br>
+  True if the update request is valid, otherwise false.</p>
+
+
+<p class="commandline"> uint32_t node_features_g_reboot_weight(void)
+<p style="margin-left:.2in"><b>Description</b>:<br>
+  Return the node "weight" field if reboot required to change mode.
+<p style="margin-left:.2in"><b>Returns</b>: <br>
+  Node "weight" field if reboot required to change mode.</p>
+
+<p class="commandline"> char *node_features_p_node_xlate(char *new_features, char *orig_features, char *avail_features, int node_inx)
+<p style="margin-left:.2in"><b>Description</b>:<br>
+  Translate a node's new active feature specification as needed to preserve any
   original features (i.e. features outside of the domain of this plugin).
+  Also validate that the new features are a subset of available features.
   For example, a node's new features may be "cache,quad", while it's original
-  features may have been "flat,hemi,knl,rack1".
-  The available features with respect to this plugin are "flat,hemi", while
-  features outside of the domain of this plugin are "knl,rack1".
-  In this case, this function's return value will be "cache,quad,knl,rack1".
+  features may have been "knl,rack1,flat,hemi".
+  The original plugin-specific features are "flat,hemi", while
+  features configured outside of the domain of this plugin are "knl,rack1".
+  In this case, this function's return value will be "knl,rack1,cache,quad".
+  This function may also be used to ensure a specific ordering of features
+  (e.g. on a KNL node, always put the MCDRAM mode before the NUMA mode).
   Executed from the slurmctld daemon only.
 <p style="margin-left:.2in"><b>Arguments</b>: <br>
-  <span class="commandline"> new_features:</span> Node's reported features.<br>
-  <span class="commandline"> orig_features:</span> Node's previous feature state.<br>
+  <span class="commandline"> new_features:</span> Node's new active features.<br>
+  <span class="commandline"> orig_features:</span> Node's previous active feature state.<br>
+  <span class="commandline"> avail_features:</span> Node's available features.<br>
+  <span class="commandline"> node_inx:</span> Node's index in the slurmctld daemon's node record table.<br>
 <p style="margin-left:.2in"><b>Returns</b>: <br>
-  Node's currently features value
+  Node's currently active features, validate and sorted.
   A string with it's memory allocated by xmalloc (i.e. the return value
   must be released using Slurm's xfree function).</p>
+
+<p class="commandline"> char *node_features_p_node_xlate2(char *new_features)
+<p style="margin-left:.2in"><b>Description</b>:<br>
+  Translate a node's newly configured available feature specification as needed
+  to order the entries as desired.
+  For example on a KNL node, always put the MCDRAM mode before the NUMA mode
+  (i.e. an input of "hemi,flat" is translated to "flat,hemi").
+  Executed from the slurmctld daemon only.
+<p style="margin-left:.2in"><b>Arguments</b>: <br>
+  <span class="commandline"> new_features:</span> Node's newly configured features.<br>
+<p style="margin-left:.2in"><b>Returns</b>: <br>
+  Node's currently available features, validate and sorted.
+  A string with it's memory allocated by xmalloc (i.e. the return value
+  must be released using Slurm's xfree function).</p>
+
+<p class="commandline"> void node_features_p_step_config(bool mem_sort, bitstr_t *numa_bitmap)
+<p style="margin-left:.2in"><b>Description</b>:<br>
+  Perform any desired initialization operations prior to launching a job step.
+<p style="margin-left:.2in"><b>Arguments</b>: <br>
+  <span class="commandline"> mem_sort:</span> If true, run zonesort before launching a job step.<br>
+  <span class="commandline"> numa_bitmap:</span> Identify NUMA nodes on which to execute zonesort.
+  If NULL, then execute zonesort on all NUMA nodes</p>
 
 <p class="commandline"> char *node_features_p_user_update(uid_t uid)
 <p style="margin-left:.2in"><b>Description</b>:<br>
@@ -160,8 +233,7 @@ The system <span class="commandline">_init()</span> is called before the Slurm
 <p style="margin-left:.2in"><b>Returns</b>: <br>
   True if user can change node active features to other available features.</p>
 
-<p class="footer"><a href="#top">top</a>
 
-<p style="text-align:center;">Last modified 29 August 2016</p>
+<p style="text-align:center;">Last modified 15 May 2018</p>
 
 <!--#include virtual="footer.txt"-->

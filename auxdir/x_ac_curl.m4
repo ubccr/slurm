@@ -178,7 +178,8 @@ x=CURLOPT_WRITEDATA;
 x=CURLOPT_ERRORBUFFER;
 x=CURLOPT_STDERR;
 x=CURLOPT_VERBOSE;
-if (x) ;
+if (x)
+;
 ]])],libcurl_cv_lib_curl_usable=yes,libcurl_cv_lib_curl_usable=no)
 
            CPPFLAGS=$_libcurl_save_cppflags
@@ -263,6 +264,7 @@ if (x) ;
   if test x$_libcurl_with = xno || test x$libcurl_cv_lib_curl_usable != xyes ; then
      # This is the IF-NO path
      ifelse([$4],,:,[$4])
+     AC_MSG_WARN([unable to locate/link against libcurl-devel installation])
   else
      # This is the IF-YES path
      ifelse([$3],,:,[$3])

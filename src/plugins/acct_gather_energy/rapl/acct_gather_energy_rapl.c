@@ -5,11 +5,11 @@
  *  Written by Bull- Yiannis Georgiou
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
  *  This file is patterned after jobcomp_linux.c, written by Morris Jette and
@@ -65,11 +65,6 @@
 #include <inttypes.h>
 #include <unistd.h>
 #include <math.h>
-
-/* From Linux sys/types.h */
-#if defined(__FreeBSD__)
-typedef unsigned long int	ulong;
-#endif
 
 #define MAX_PKGS        256
 
@@ -109,14 +104,14 @@ union {
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "jobacct" for SLURM job completion logging) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "jobacct" for Slurm job completion logging) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
@@ -177,11 +172,13 @@ static uint64_t _get_package_energy(int pkg)
 {
 	uint64_t result;
 
-	/* MSR_PKG_ENERGY_STATUS
+	/*
+	 * MSR_PKG_ENERGY_STATUS
 	 * Total Energy Consumed - bits 31:0
 	 * Reserved - bits 63:32
 	 * See: Intel 64 and IA-32 Architectures Software Developer's
-	 * Manual, Volume 3 for details */
+	 * Manual, Volume 3 for details
+	 */
 	result = _read_msr(pkg_fd[pkg], MSR_PKG_ENERGY_STATUS);
 	result &= 0xffffffff;
 	if (result < package_energy[pkg].i.low)
@@ -194,11 +191,13 @@ static uint64_t _get_dram_energy(int pkg)
 {
 	uint64_t result;
 
-	/* MSR_DRAM_ENERGY_STATUS
+	/*
+	 * MSR_DRAM_ENERGY_STATUS
 	 * Total Energy Consumed - bits 31:0
 	 * Reserved - bits 63:32
 	 * See: Intel 64 and IA-32 Architectures Software Developer's
-	 * Manual, Volume 3 for details */
+	 * Manual, Volume 3 for details
+	 */
 	result = _read_msr(pkg_fd[pkg], MSR_DRAM_ENERGY_STATUS);
 	result &= 0xffffffff;
 	if (result < dram_energy[pkg].i.low)
@@ -223,9 +222,10 @@ static int _open_msr(int core)
 		} else
 			error("MSR register problem (%s): %m", msr_filename);
 	} else {
-		/* If this is loaded in the slurmd we need to make sure it
-		   gets closed when a slurmstepd launches.
-		*/
+		/*
+		 * If this is loaded in the slurmd we need to make sure it
+		 * gets closed when a slurmstepd launches.
+		 */
 		fd_set_close_on_exec(fd);
 	}
 
@@ -236,25 +236,29 @@ static void _hardware(void)
 {
 	char buf[1024];
 	FILE *fd;
-	int cpu = 0, pkg = 0;
+	int cpu = -1, pkg = -1;
 
 	if ((fd = fopen("/proc/cpuinfo", "r")) == 0)
 		fatal("RAPL: error on attempt to open /proc/cpuinfo");
 	while (fgets(buf, 1024, fd)) {
-		if (xstrncmp(buf, "processor", sizeof("processor") - 1) == 0) {
+		if (!xstrncmp(buf, "processor", sizeof("processor") - 1)) {
 			sscanf(buf, "processor\t: %d", &cpu);
 			continue;
 		}
 		if (!xstrncmp(buf, "physical id", sizeof("physical id") - 1)) {
 			sscanf(buf, "physical id\t: %d", &pkg);
 
-			if (pkg >= MAX_PKGS)
-				fatal("Slurm can only handle %d sockets for "
-				      "rapl, you seem to have more than that.  "
+			if (cpu < 0) {
+				error("%s: No processor ID found", plugin_name);
+			} else if (pkg < 0) {
+				error("%s: No physical ID found", plugin_name);
+			} else if (pkg >= MAX_PKGS) {
+				fatal("%s: Configured for up to %d sockets and you have %d.  "
 				      "Update src/plugins/acct_gather_energy/"
 				      "rapl/acct_gather_energy_rapl.h "
-				      "(MAX_PKGS) and recompile.", MAX_PKGS);
-			if (pkg2cpu[pkg] == -1) {
+				      "(MAX_PKGS) and recompile.",
+				      plugin_name, MAX_PKGS, pkg);
+			} else if (pkg2cpu[pkg] == -1) {
 				nb_pkg++;
 				pkg2cpu[pkg] = cpu;
 			}
@@ -280,7 +284,8 @@ static bool _run_in_daemon(void)
 	return run;
 }
 
-/* _send_drain_request()
+/*
+ * _send_drain_request()
  */
 static void
 _send_drain_request(void)
@@ -311,6 +316,7 @@ static void _get_joules_task(acct_gather_energy_t *energy)
 	double energy_units;
 	uint64_t result;
 	double ret;
+	static uint32_t readings = 0;
 
 	if (pkg_fd[0] < 0) {
 		error("%s: device /dev/cpu/#/msr not opened "
@@ -319,28 +325,32 @@ static void _get_joules_task(acct_gather_energy_t *energy)
 		return;
 	}
 
-	/* MSR_RAPL_POWER_UNIT
+	/*
+	 * MSR_RAPL_POWER_UNIT
 	 * Power Units - bits 3:0
 	 * Energy Status Units - bits 12:8
 	 * Time Units - bits 19:16
 	 * See: Intel 64 and IA-32 Architectures Software Developer's
-	 * Manual, Volume 3 for details */
+	 * Manual, Volume 3 for details
+	 */
 	result = _read_msr(pkg_fd[0], MSR_RAPL_POWER_UNIT);
 	energy_units = pow(0.5, (double)((result>>8)&0x1f));
 
 	if (debug_flags & DEBUG_FLAG_ENERGY) {
 		double power_units = pow(0.5, (double)(result&0xf));
-		ulong max_power;
+		unsigned long max_power;
 
 		info("RAPL powercapture_debug Energy units = %.6f, "
 		     "Power Units = %.6f", energy_units, power_units);
-		/* MSR_PKG_POWER_INFO
+		/*
+		 * MSR_PKG_POWER_INFO
 		 * Thermal Spec Power - bits 14:0
 		 * Minimum Power - bits 30:16
 		 * Maximum Power - bits 46:32
 		 * Maximum Time Window - bits 53:48
 		 * See: Intel 64 and IA-32 Architectures Software Developer's
-		 * Manual, Volume 3 for details */
+		 * Manual, Volume 3 for details
+		 */
 		result = _read_msr(pkg_fd[0], MSR_PKG_POWER_INFO);
 		max_power = power_units * ((result >> 32) & 0x7fff);
 		info("RAPL Max power = %ld w", max_power);
@@ -362,13 +372,18 @@ static void _get_joules_task(acct_gather_energy_t *energy)
 			(uint64_t)ret - energy->base_consumed_energy;
 		energy->current_watts =
 			(uint32_t)ret - energy->previous_consumed_energy;
+		energy->ave_watts =  ((energy->ave_watts * readings) +
+				       energy->current_watts) / (readings + 1);
+
 		interval = time(NULL) - energy->poll_time;
 		if (interval)	/* Prevent divide by zero */
 			energy->current_watts /= (float)interval;
 	} else {
 		energy->consumed_energy = 1;
 		energy->base_consumed_energy = (uint64_t)ret;
+		energy->ave_watts = 0;
 	}
+	readings++;
 	energy->previous_consumed_energy = (uint64_t)ret;
 	energy->poll_time = time(NULL);
 
@@ -505,7 +520,7 @@ extern int acct_gather_energy_p_get_data(enum acct_energy_type data_type,
 	case ENERGY_DATA_JOULES_TASK:
 	case ENERGY_DATA_NODE_ENERGY_UP:
 		if (local_energy->current_watts == NO_VAL)
-			energy->consumed_energy = NO_VAL;
+			energy->consumed_energy = NO_VAL64;
 		else
 			_get_joules_task(energy);
 		break;

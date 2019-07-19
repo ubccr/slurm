@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Validate scontrol show commands for jobs and steps.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -13,41 +13,37 @@
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
 
 set test_id     "2.8"
 set exit_code   0
-set file_in     "test$test_id.input"
-set is_bluegene 0
 set job_id1     0
 set job_id2     0
+set step_id	0
 
 print_header $test_id
 
-set select_type [test_select_type]
 set def_part_name [default_partition]
 set nb_nodes [get_node_cnt_in_part $def_part_name]
-if {![string compare $select_type "bluegene"]} {
-	set is_bluegene 1
-} elseif {![string compare $select_type "linear"]} {
+if {[test_linear]} {
 	if {$nb_nodes < 2} {
 		send_user "\nWARNING: This test is incompatible with select/linear and only one node\n"
 		exit $exit_code
@@ -59,32 +55,26 @@ if {![string compare $select_type "bluegene"]} {
 	}
 }
 
-if {[test_launch_poe]} {
-	set step_id 1
-} else {
-	set step_id 0
-}
+proc end_it {code} {
+	global job_id1 job_id2 bin_rm test_id
 
-if {[test_select_type_params "MEMORY"]} {
-	set job_mem  20
-	set step_mem 10
-} else {
-	set job_mem  1
-	set step_mem 1
+	if {$job_id1} {
+		cancel_job $job_id1
+	}
+	if {$job_id2} {
+		cancel_job $job_id2
+	}
+	exec $bin_rm -f slurm-$job_id1.sh $test_id.sh
+	if {$code == 0} {
+		send_user "\nSUCCESS\n"
+	}
+	exit $code
 }
-
-#
-# Build input script file
-#
-make_bash_script $file_in "
-  $srun --mem=${step_mem} $bin_sleep 60 &
-  $srun --mem=${step_mem} $bin_sleep 60
-"
 
 #
 # Submit a couple jobs so we have something to work with
 #
-set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null -t5 --mem=${job_mem} $file_in]
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null -t5 --wrap "$srun $bin_sleep 60"]
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id1 $expect_out(1,string)
@@ -104,7 +94,7 @@ if {$job_id1 == 0} {
 	exit 1
 }
 
-set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null -t5 --mem=${job_mem} $file_in]
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null -t5 --wrap "$srun $bin_sleep 60"]
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id2 $expect_out(1,string)
@@ -125,8 +115,6 @@ if {$job_id2 == 0} {
 	cancel_job $job_id1
 	exit 1
 }
-
-exec $bin_rm -f $file_in
 
 if {[wait_for_job $job_id1 "RUNNING"] != 0} {
         send_user "\nFAILURE: waiting for job $job_id1 to start\n"
@@ -161,13 +149,9 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "BatchScript=" {
-		incr matches
-		exp_continue
-	}
 	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
@@ -184,13 +168,9 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "BatchScript=" {
-		incr matches
-		exp_continue
-	}
 	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
@@ -198,7 +178,7 @@ expect {
 }
 if {$matches != 2} {
 	send_user "\nFAILURE: scontrol failed to find matching job ($matches != 2)\n"
-	set exit_code 1
+	end_it 1
 }
 
 #
@@ -216,13 +196,9 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "BatchScript=" {
-		incr matches
-		exp_continue
-	}
 	timeout {
 		send_user "\n FAILURE scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
@@ -239,28 +215,19 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "BatchScript=" {
-		incr matches
-		exp_continue
-	}
 	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
 	}
 
 }
-if {$is_bluegene == 0} {
-	set match_target 4
-} else {
-#	No CPU_IDs on Bluegene
-	set match_target 2
-}
+set match_target 4
 if {$matches != $match_target} {
 	send_user "\nFAILURE: scontrol failed to find matching job ($matches != $match_target)\n"
-	set exit_code 1
+	end_it 1
 }
 
 #
@@ -278,13 +245,9 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "BatchScript=" {
-		incr matches
-		exp_continue
-	}
 	timeout {
 		send_user "\n FAILURE scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
@@ -301,28 +264,20 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "BatchScript=" {
-		incr matches
-		exp_continue
-	}
 	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
 	}
 
 }
-if {$is_bluegene == 0} {
-	set match_target 6
-} else {
-#	No CPU_IDs on Bluegene
-	set match_target 4
-}
+
+set match_target 4
 if {$matches != $match_target} {
 	send_user "\nFAILURE: scontrol failed to find matching job ($matches != $match_target)\n"
-	set exit_code 1
+	end_it 1
 }
 
 #
@@ -337,12 +292,12 @@ expect {
 	}
 	-re "JobId=" {
 		send_user "\nFAILURE: scontrol filter by job id\n"
-		set exit_code 1
+		end_it 1
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
@@ -350,7 +305,7 @@ expect {
 }
 if {$matches != 1} {
 	send_user "\nFAILURE: scontrol failed to find requested job\n"
-	set exit_code 1
+	end_it 1
 }
 
 #
@@ -370,15 +325,15 @@ expect {
 	}
 	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
 	}
 }
-if {[test_alps] == 0 && $matches != 1} {
-	send_user "\nFAILURE: scontrol failed to find all job steps\n"
-	set exit_code 1
+if {$matches != 1} {
+	send_user "\nFAILURE: scontrol failed to find job step $job_id1.$step_id\n"
+	end_it 1
 }
 
 #
@@ -393,20 +348,20 @@ expect {
 	}
 	-re "StepId=" {
 		send_user "\nFAILURE: scontrol filter by step id\n"
-		set exit_code 1
+		end_it 1
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
 	}
 }
-if {[test_alps] == 0 && $matches != 1} {
+if {$matches != 1} {
 	send_user "\nFAILURE: scontrol failed to specific job step\n"
-	set exit_code 1
+	end_it 1
 }
 
 #
@@ -419,36 +374,120 @@ spawn $scontrol show step $job_id3.$step_id
 expect {
 	-re "StepId=$job_id3.$step_id " {
 		send_user "\nFAILURE: scontrol found unexpected job step\n"
-		set exit_code 1
+		end_it 1
 		exp_continue
 	}
 	-re "Invalid job id" {
-		send_user "\nNo worries, error expectd\n"
+		send_user "\nNo worries, error expected\n"
 		incr matches
 		exp_continue
 	}
 	-re "StepId=" {
 		send_user "\nFAILURE: scontrol filter by step id\n"
-		set exit_code 1
+		end_it 1
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
+		end_it 1
 	}
 	eof {
 		wait
 	}
 }
-if {[test_alps] == 0 && $matches != 1} {
+if {$matches != 1} {
 	send_user "\nFAILURE: scontrol found unexpected job step\n"
-	set exit_code 1
+	end_it 1
 }
 
-cancel_job $job_id1
-cancel_job $job_id2
-if {$exit_code == 0} {
-	send_user "\nSUCCESS\n"
-}
-exit $exit_code
 
+#
+# write batch_script to file
+#
+set matches 0
+spawn $scontrol write batch_script $job_id1
+expect {
+	-re "batch script for job $job_id1 written to slurm-$job_id1.sh" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		send_user "\nFAILURE: scontrol not responding\n"
+		end_it 1
+	}
+	eof {
+		wait
+	}
+}
+if {$matches != 1} {
+	send_user "\nFAILURE: scontrol failed to write batch script\n"
+	end_it 1
+}
+
+set matches 0
+spawn $scontrol write batch_script $job_id2 $test_id.sh
+expect {
+	-re "batch script for job $job_id2 written to $test_id.sh" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		send_user "\nFAILURE: scontrol not responding\n"
+		end_it 1
+	}
+	eof {
+		wait
+	}
+}
+if {$matches != 1} {
+	send_user "\nFAILURE: scontrol failed to write batch script\n"
+	end_it 1
+}
+
+set matches 0
+spawn ls slurm-$job_id1.sh
+expect {
+	-re "ls: cannot access" {
+		end_it 1
+	}
+	-re "slurm-$job_id1.sh" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		send_user "\nFAILURE: scontrol not responding\n"
+		end_it 1
+	}
+	eof {
+		wait
+	}
+}
+if {$matches != 1} {
+	send_user "\nFAILURE: Could not find file\n"
+	end_it 1
+}
+
+set matches 0
+spawn ls $test_id.sh
+expect {
+	-re "ls: cannot access" {
+		end_it 1
+	}
+	-re "$test_id.sh" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		send_user "\nFAILURE: scontrol not responding\n"
+		end_it 1
+	}
+	eof {
+		wait
+	}
+}
+if {$matches != 1} {
+	send_user "\nFAILURE: Could not find file\n"
+	end_it 1
+}
+
+end_it 0

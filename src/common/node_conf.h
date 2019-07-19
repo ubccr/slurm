@@ -9,11 +9,11 @@
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,37 +29,28 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _HAVE_NODE_CONF_H
 #define _HAVE_NODE_CONF_H
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif			/* HAVE_INTTYPES_H */
-#endif
+#include "config.h"
 
+#include <inttypes.h>
 #include <time.h>
 
 #include "src/common/bitstring.h"
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/slurm_protocol_defs.h"
-#include "src/common/slurm_protocol_socket_common.h"
 #include "src/common/xhash.h"
 
 #define CONFIG_MAGIC	0xc065eded
@@ -71,12 +62,15 @@ struct config_record {
 	char *cpu_spec_list;	/* arbitrary list of specialized cpus */
 	uint16_t boards;	/* count of boards configured */
 	uint16_t sockets;	/* number of sockets per node */
-	uint16_t cores;		/* number of cores per CPU */
+	uint16_t cores;		/* number of cores per socket */
 	uint16_t core_spec_cnt;	/* number of specialized cores */
+	uint32_t cpu_bind;	/* default CPU binding type */
 	uint16_t threads;	/* number of threads per core */
-	uint32_t mem_spec_limit; /* MB real memory for memory specialization */
-	uint32_t real_memory;	/* MB real memory on the node */
+	uint64_t mem_spec_limit; /* MB real memory for memory specialization */
+	uint64_t real_memory;	/* MB real memory on the node */
 	uint32_t tmp_disk;	/* MB total storage in TMP_FS file system */
+	double  *tres_weights;	/* array of TRES weights */
+	char    *tres_weights_str; /* per TRES billing weight string */
 	uint32_t weight;	/* arbitrary priority of node for
 				 * scheduling work on */
 	char *feature;		/* arbitrary list of node's features */
@@ -91,26 +85,29 @@ extern List front_end_list;	/* list of slurm_conf_frontend_t entries */
 struct node_record {
 	uint32_t magic;			/* magic cookie for data integrity */
 	char *name;			/* name of the node. NULL==defunct */
+	uint32_t next_state;		/* state after reboot */
 	char *node_hostname;		/* hostname of the node */
 	uint32_t node_state;		/* enum node_states, ORed with
 					 * NODE_STATE_NO_RESPOND if not
 					 * responding */
 	bool not_responding;		/* set if fails to respond,
 					 * clear after logging this */
+	time_t boot_req_time;		/* Time of node boot request */
 	time_t boot_time;		/* Time of node boot,
 					 * computed from up_time */
+	uint32_t cpu_bind;		/* default CPU binding type */
 	time_t slurmd_start_time;	/* Time of slurmd startup */
 	time_t last_response;		/* last response from the node */
 	time_t last_idle;		/* time node last become idle */
 	uint16_t cpus;			/* count of processors on the node */
 	uint16_t boards; 		/* count of boards configured */
 	uint16_t sockets;		/* number of sockets per node */
-	uint16_t cores;			/* number of cores per CPU */
+	uint16_t cores;			/* number of cores per socket */
 	char *cpu_spec_list;		/* node's specialized cpus */
 	uint16_t core_spec_cnt;		/* number of specialized cores on node*/
 	uint16_t threads;		/* number of threads per core */
-	uint32_t real_memory;		/* MB real memory on the node */
-	uint32_t mem_spec_limit;	/* MB memory limit for specialization */
+	uint64_t real_memory;		/* MB real memory on the node */
+	uint64_t mem_spec_limit;	/* MB memory limit for specialization */
 	uint32_t tmp_disk;		/* MB total disk in TMP_FS */
 	uint32_t up_time;		/* seconds since node boot */
 	struct config_record *config_ptr;  /* configuration spec ptr */
@@ -141,6 +138,8 @@ struct node_record {
 					 * use for scheduling purposes */
 	List gres_list;			/* list of gres state info managed by
 					 * plugins */
+	uint64_t sched_weight;		/* Node's weight for scheduling
+					 * purposes. For cons_tres use */
 	uint32_t weight;		/* orignal weight, used only for state
 					 * save/restore, DO NOT use for
 					 * scheduling purposes. */
@@ -151,11 +150,6 @@ struct node_record {
 					 * or other sequence number used to
 					 * order nodes by location,
 					 * no need to save/restore */
-#ifdef HAVE_ALPS_CRAY
-	uint32_t basil_node_id;		/* Cray-XT BASIL node ID,
-					 * no need to save/restore */
-	time_t down_time;		/* When first set to DOWN state */
-#endif	/* HAVE_ALPS_CRAY */
 	acct_gather_energy_t *energy;	/* power consumption data */
 	ext_sensors_data_t *ext_sensors; /* external sensor data */
 	power_mgmt_data_t *power;	/* power management data */
@@ -164,7 +158,7 @@ struct node_record {
 						 * to access contents */
 	uint32_t cpu_load;		/* CPU load * 100 */
 	time_t cpu_load_time;		/* Time when cpu_load last set */
-	uint32_t free_mem;		/* Free memory in MiB */
+	uint64_t free_mem;		/* Free memory in MiB */
 	time_t free_mem_time;		/* Time when free_mem last set */
 	uint16_t protocol_version;	/* Slurm version number */
 	char *version;			/* Slurm version */
@@ -218,10 +212,12 @@ hostlist_t bitmap2hostlist (bitstr_t *bitmap);
 /*
  * build_all_nodeline_info - get a array of slurm_conf_node_t structures
  *	from the slurm.conf reader, build table, and set values
- * IN set_bitmap - if true, set node_bitmap in config record (used by slurmd)
+ * IN set_bitmap - if true then set node_bitmap in config record (used by
+ *		    slurmd), false is used by slurmctld and testsuite
+ * IN tres_cnt - number of TRES configured on system (used on controller side)
  * RET 0 if no error, error code otherwise
  */
-extern int build_all_nodeline_info (bool set_bitmap);
+extern int build_all_nodeline_info(bool set_bitmap, int tres_cnt);
 
 /*
  * build_all_frontend_info - get a array of slurm_conf_frontend_t structures
@@ -335,10 +331,25 @@ extern uint32_t cr_get_coremap_offset(uint32_t node_index);
  * system it will return a bitmap in cnodes. */
 extern bitstr_t *cr_create_cluster_core_bitmap(int core_mult);
 
-/* Given the number of tasks per core and the actual number of hw threads,
- * compute how many CPUs are "visible" and, hence, usable on the node.
+/*
+ * Determine maximum number of CPUs on this node usable by a job
+ * ntasks_per_core IN - tasks-per-core to be launched by this job
+ * cpus_per_task IN - number of required  CPUs per task for this job
+ * total_cores IN - total number of cores on this node
+ * total_cpus IN - total number of CPUs on this node
+ * RET count of usable CPUs on this node usable by this job
  */
-extern int adjust_cpus_nppcu(uint16_t ntasks_per_core, uint16_t threads,
-			     int cpus);
+extern int adjust_cpus_nppcu(uint16_t ntasks_per_core, int cpus_per_task,
+			     int total_cores, int total_cpus);
+
+/*
+ * find_hostname - Given a position and a string of hosts, return the hostname
+ *                 from that position.
+ * IN pos - position in hosts you want returned.
+ * IN hosts - string representing a hostlist of hosts.
+ * RET - hostname or NULL on error.
+ * NOTE: caller must xfree result.
+ */
+extern char *find_hostname(uint32_t pos, char *hosts);
 
 #endif /* !_HAVE_NODE_CONF_H */

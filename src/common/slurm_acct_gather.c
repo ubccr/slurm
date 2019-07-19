@@ -5,11 +5,11 @@
  *  Copyright (C) 2013 SchedMD LLC.
  *  Written by Danny Auble <da@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,26 +25,31 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #include <sys/stat.h>
 #include <stdlib.h>
 
+#include "src/common/pack.h"
+#include "src/common/parse_config.h"
 #include "src/common/slurm_acct_gather.h"
-#include "src/common/slurm_strcasestr.h"
+#include "slurm_acct_gather_energy.h"
+#include "slurm_acct_gather_interconnect.h"
+#include "slurm_acct_gather_filesystem.h"
 #include "src/common/xstring.h"
 
 static bool acct_gather_suspended = false;
 static pthread_mutex_t suspended_mutex = PTHREAD_MUTEX_INITIALIZER;
-
+static pthread_mutex_t conf_mutex = PTHREAD_MUTEX_INITIALIZER;
+static Buf acct_gather_options_buf = NULL;
 static bool inited = 0;
 
 static int _get_int(const char *my_str)
@@ -63,6 +68,24 @@ static int _get_int(const char *my_str)
 	return value;
 }
 
+extern int _process_tbl(s_p_hashtbl_t *tbl)
+{
+	int rc = 0;
+
+	/* handle acct_gather.conf in each plugin */
+	slurm_mutex_lock(&conf_mutex);
+	rc += acct_gather_energy_g_conf_set(tbl);
+	rc += acct_gather_profile_g_conf_set(tbl);
+	rc += acct_gather_interconnect_g_conf_set(tbl);
+	rc += acct_gather_filesystem_g_conf_set(tbl);
+	/*********************************************************************/
+	/* ADD MORE HERE AND FREE MEMORY IN acct_gather_conf_destroy() BELOW */
+	/*********************************************************************/
+	slurm_mutex_unlock(&conf_mutex);
+
+	return rc;
+}
+
 extern int acct_gather_conf_init(void)
 {
 	s_p_hashtbl_t *tbl = NULL;
@@ -70,6 +93,7 @@ extern int acct_gather_conf_init(void)
 	s_p_options_t *full_options = NULL;
 	int full_options_cnt = 0, i;
 	struct stat buf;
+	int rc = SLURM_SUCCESS;
 
 	if (inited)
 		return SLURM_SUCCESS;
@@ -77,10 +101,14 @@ extern int acct_gather_conf_init(void)
 
 	/* get options from plugins using acct_gather.conf */
 
-	acct_gather_energy_g_conf_options(&full_options, &full_options_cnt);
-	acct_gather_profile_g_conf_options(&full_options, &full_options_cnt);
-	acct_gather_infiniband_g_conf_options(&full_options, &full_options_cnt);
-	acct_gather_filesystem_g_conf_options(&full_options, &full_options_cnt);
+	rc += acct_gather_energy_g_conf_options(&full_options,
+						&full_options_cnt);
+	rc += acct_gather_profile_g_conf_options(&full_options,
+						 &full_options_cnt);
+	rc += acct_gather_interconnect_g_conf_options(&full_options,
+						      &full_options_cnt);
+	rc += acct_gather_filesystem_g_conf_options(&full_options,
+						    &full_options_cnt);
 	/* ADD MORE HERE */
 
 	/* for the NULL at the end */
@@ -109,36 +137,98 @@ extern int acct_gather_conf_init(void)
 		}
 	}
 
+	rc += _process_tbl(tbl);
+
+	acct_gather_options_buf = s_p_pack_hashtbl(
+		tbl, full_options, full_options_cnt);
+
 	for (i=0; i<full_options_cnt; i++)
 		xfree(full_options[i].key);
 	xfree(full_options);
 	xfree(conf_path);
 
-	/* handle acct_gather.conf in each plugin */
-	acct_gather_energy_g_conf_set(tbl);
-	acct_gather_profile_g_conf_set(tbl);
-	acct_gather_infiniband_g_conf_set(tbl);
-	acct_gather_filesystem_g_conf_set(tbl);
-	/*********************************************************************/
-	/* ADD MORE HERE AND FREE MEMORY IN acct_gather_conf_destroy() BELOW */
-	/*********************************************************************/
+	s_p_hashtbl_destroy(tbl);
+
+	return rc;
+}
+
+extern int acct_gather_write_conf(int fd)
+{
+	int len;
+
+	acct_gather_conf_init();
+
+	slurm_mutex_lock(&conf_mutex);
+	len = get_buf_offset(acct_gather_options_buf);
+	safe_write(fd, &len, sizeof(int));
+	safe_write(fd, get_buf_data(acct_gather_options_buf), len);
+	slurm_mutex_unlock(&conf_mutex);
+
+	return 0;
+
+rwfail:
+	slurm_mutex_unlock(&conf_mutex);
+	return -1;
+}
+
+extern int acct_gather_read_conf(int fd)
+{
+	int len;
+	s_p_hashtbl_t *tbl;
+
+	safe_read(fd, &len, sizeof(int));
+
+	acct_gather_options_buf = init_buf(len);
+	safe_read(fd, acct_gather_options_buf->head, len);
+
+	if (!(tbl = s_p_unpack_hashtbl(acct_gather_options_buf)))
+		return SLURM_ERROR;
+
+	/*
+	 * We need to set inited before calling _process_tbl or we will get
+	 * deadlock since the other acct_gather_* plugins will call
+	 * acct_gather_init().
+	 */
+	inited = true;
+	(void)_process_tbl(tbl);
 
 	s_p_hashtbl_destroy(tbl);
+
+	return SLURM_SUCCESS;
+rwfail:
+	return SLURM_ERROR;
+}
+
+extern int acct_gather_reconfig(void)
+{
+	acct_gather_conf_destroy();
+	slurm_mutex_init(&conf_mutex);
+	acct_gather_conf_init();
 
 	return SLURM_SUCCESS;
 }
 
 extern int acct_gather_conf_destroy(void)
 {
-	int rc;
+	int rc, rc2;
 
 	if (!inited)
 		return SLURM_SUCCESS;
 
+	inited = false;
+
 	rc = acct_gather_energy_fini();
-	rc = MAX(rc, acct_gather_filesystem_fini());
-	rc = MAX(rc, acct_gather_infiniband_fini());
-	rc = MAX(rc, acct_gather_profile_fini());
+
+	rc2 = acct_gather_filesystem_fini();
+	rc = MAX(rc, rc2);
+	rc2 = acct_gather_interconnect_fini();
+	rc = MAX(rc, rc2);
+	rc2 = acct_gather_profile_fini();
+	rc = MAX(rc, rc2);
+
+	FREE_NULL_BUFFER(acct_gather_options_buf);
+
+	slurm_mutex_destroy(&conf_mutex);
 	return rc;
 }
 
@@ -147,11 +237,13 @@ extern List acct_gather_conf_values(void)
 	List acct_list = list_create(destroy_config_key_pair);
 
 	/* get acct_gather.conf in each plugin */
+	slurm_mutex_lock(&conf_mutex);
 	acct_gather_profile_g_conf_values(&acct_list);
-	acct_gather_infiniband_g_conf_values(&acct_list);
+	acct_gather_interconnect_g_conf_values(&acct_list);
 	acct_gather_energy_g_conf_values(&acct_list);
 	acct_gather_filesystem_g_conf_values(&acct_list);
 	/* ADD MORE HERE */
+	slurm_mutex_unlock(&conf_mutex);
 	/******************************************/
 
 	list_sort(acct_list, (ListCmpF) sort_key_pairs);
@@ -169,7 +261,7 @@ extern int acct_gather_parse_freq(int type, char *freq)
 
 	switch (type) {
 	case PROFILE_ENERGY:
-		if ((sub_str = slurm_strcasestr(freq, "energy=")))
+		if ((sub_str = xstrcasestr(freq, "energy=")))
 			freq_int = _get_int(sub_str + 7);
 		break;
 	case PROFILE_TASK:
@@ -178,15 +270,15 @@ extern int acct_gather_parse_freq(int type, char *freq)
 		*/
 		freq_int = _get_int(freq);
 		if ((freq_int == -1)
-		    && (sub_str = slurm_strcasestr(freq, "task=")))
+		    && (sub_str = xstrcasestr(freq, "task=")))
 			freq_int = _get_int(sub_str + 5);
 		break;
 	case PROFILE_FILESYSTEM:
-		if ((sub_str = slurm_strcasestr(freq, "filesystem=")))
+		if ((sub_str = xstrcasestr(freq, "filesystem=")))
 			freq_int = _get_int(sub_str + 11);
 		break;
 	case PROFILE_NETWORK:
-		if ((sub_str = slurm_strcasestr(freq, "network=")))
+		if ((sub_str = xstrcasestr(freq, "network=")))
 			freq_int = _get_int(sub_str + 8);
 		break;
 	default:
@@ -198,8 +290,8 @@ extern int acct_gather_parse_freq(int type, char *freq)
 	return freq_int;
 }
 
-extern int acct_gather_check_acct_freq_task(
-	uint32_t job_mem_lim, char *acctg_freq)
+extern int acct_gather_check_acct_freq_task(uint64_t job_mem_lim,
+					    char *acctg_freq)
 {
 	int task_freq;
 	static uint32_t acct_freq_task = NO_VAL;
@@ -213,7 +305,7 @@ extern int acct_gather_check_acct_freq_task(
 		   really high so we don't check this again.
 		*/
 		if (i == -1)
-			acct_freq_task = (uint16_t)NO_VAL;
+			acct_freq_task = NO_VAL16;
 		else
 			acct_freq_task = i;
 	}

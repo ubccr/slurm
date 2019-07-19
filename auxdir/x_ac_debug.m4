@@ -7,8 +7,8 @@
 #
 #  DESCRIPTION:
 #    Add support for the "--enable-debug", "--enable-memory-leak-debug",
-#    "--disable-partial-attach", "--enable-front-end", "--enable-developer" and
-#    "--enable-simulator" configure script options.
+#    "--disable-partial-attach", "--enable-front-end", and "--enable-developer"
+#    configure script options.
 #
 #    options.
 #    If debugging is enabled, CFLAGS will be prepended with the debug flags.
@@ -19,6 +19,22 @@
 ##*****************************************************************************
 
 AC_DEFUN([X_AC_DEBUG], [
+
+  AC_MSG_CHECKING([whether optimizations are enabled])
+  AC_ARG_ENABLE(
+    [optimizations],
+    AS_HELP_STRING(--disable-optimizations, disable optimizations (sets -O0)),
+    [ case "$enableval" in
+        yes) x_ac_optimizations=yes ;;
+         no) x_ac_optimizations=no ;;
+          *) AC_MSG_RESULT([doh!])
+             AC_MSG_ERROR([bad value "$enableval" for --enable-optimizations]) ;;
+      esac
+    ],
+    [x_ac_optimizations=yes]
+  )
+  AC_MSG_RESULT([${x_ac_optimizations}])
+
   AC_MSG_CHECKING([whether or not developer options are enabled])
   AC_ARG_ENABLE(
     [developer],
@@ -32,8 +48,8 @@ AC_DEFUN([X_AC_DEBUG], [
     ]
   )
   if test "$x_ac_developer" = yes; then
-    test "$GCC" = yes && CFLAGS="$CFLAGS -Wno-deprecated-declarations -Werror"
-    test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Wno-deprecated-declarations -Werror"
+    test "$GCC" = yes && CFLAGS="$CFLAGS -Werror"
+    test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Werror"
     # automatically turn on --enable-debug if being a developer
     x_ac_debug=yes
   else
@@ -59,8 +75,12 @@ AC_DEFUN([X_AC_DEBUG], [
   if test "$x_ac_debug" = yes; then
     # you will most likely get a -O2 in you compile line, but the last option
     # is the only one that is looked at.
-    test "$GCC" = yes && CFLAGS="$CFLAGS -Wno-deprecated-declarations -Wall -g -O0 -fno-strict-aliasing"
-    test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Wno-deprecated-declarations -Wall -g -O0 -fno-strict-aliasing"
+    # We used to force this to -O0, but this precludes the use of FSTACK_PROTECT
+    # which is injected into RHEL7/SuSE12 RPM builds rather aggressively.
+    AX_CHECK_COMPILE_FLAG([-ggdb3], [CFLAGS="$CFLAGS -ggdb3"])
+
+    test "$GCC" = yes && CFLAGS="$CFLAGS -Wall -g -O1 -fno-strict-aliasing"
+    test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Wall -g -O1 -fno-strict-aliasing"
   fi
   AC_MSG_RESULT([${x_ac_debug=no}])
 
@@ -155,22 +175,7 @@ AC_DEFUN([X_AC_DEBUG], [
     AC_MSG_RESULT([no])
   fi
 
-  AC_MSG_CHECKING([whether to enable slurm simulator])
-  AC_ARG_ENABLE(
-    [simulator],
-    AS_HELP_STRING(--enable-simulator, enable slurm simulator),
-    [ case "$enableval" in
-        yes) x_ac_simulator=yes ;;
-         no) x_ac_simulator=no ;;
-          *) AC_MSG_RESULT([doh!])
-             AC_MSG_ERROR([bad value "$enableval" for --enable-simulator]) ;;
-      esac
-    ]
-  )
-  if test "$x_ac_simulator" = yes; then
-    AC_DEFINE(SLURM_SIMULATOR, 1, [Define to 1 if running slurm simulator])
+  if test "$x_ac_optimizations" = no; then
+    test "$GCC" = yes && CFLAGS="$CFLAGS -O0"
   fi
-  AC_MSG_RESULT([${x_ac_simulator=no}])
-
-  ]
-)
+])

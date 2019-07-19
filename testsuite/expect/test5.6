@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Test squeue filtering (--jobs, --nodelist, --states, --steps and
 #          --user options).
 #
@@ -13,22 +13,22 @@
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -38,8 +38,10 @@ set exit_code    0
 set file_in      "test$test_id.input"
 set job_id1      0
 set job_id2      0
+set step_id      0
 set job_name1    "test$test_id.job1"
 set job_name2    "test$test_id.job2"
+set node_cnt 1-1
 
 print_header $test_id
 
@@ -48,21 +50,11 @@ if {[job_submit_all_partitions] != 0} {
 	exit 0
 }
 
-if {[test_launch_poe]} {
-	set step_id 1
-} else {
-	set step_id 0
-}
-
 #
 # Build input script file
 #
 make_bash_script $file_in "$srun $bin_sleep $max_job_delay"
-if { [test_bluegene] } {
-	set node_cnt 512-512
-} else {
-	set node_cnt 1-1
-}
+
 #
 # Submit a couple of job so we have something to look at
 #
@@ -161,16 +153,9 @@ expect {
 #
 # Check the squeue user filter option with name
 #
-spawn $bin_id -un
-expect {
-	-re "($alpha_numeric_under)" {
-		set this_user $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
+
+set this_user [get_my_user_name]
+
 spawn $squeue --format=%u --noheader --user=$this_user
 expect {
 	-re "($alpha_numeric_under)" {
@@ -192,16 +177,8 @@ expect {
 #
 # Check the squeue user filter option with id
 #
-spawn $bin_id -u
-expect {
-	-re "($number)" {
-		set this_uid $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
+set this_uid [get_my_uid]
+
 spawn $squeue --format=%u --noheader --user=$this_uid
 expect {
 	-re "($alpha_numeric_under)" {
@@ -334,7 +311,11 @@ expect {
 # Wait long enough to make sure the job step is running and has
 # started its job steps. Check the squeue job step filter option
 #
-wait_for_job $job_id1 "RUNNING"
+if {[wait_for_job $job_id1 "RUNNING"] != 0} {
+	send_user "\nFAILURE: error waiting for job $job_id1 to start\n"
+	cancel_job $job_id1
+	set exit_code 1
+}
 exec $bin_sleep 10
 set job_found 0
 spawn $squeue --format=%i --steps $job_id1.$step_id
@@ -357,7 +338,7 @@ expect {
 		wait
 	}
 }
-if {[test_alps] == 0 && $job_found == 0} {
+if {$job_found == 0} {
 	send_user "\nFAILURE: squeue failed to locate desired job step\n"
 	set exit_code 1
 }

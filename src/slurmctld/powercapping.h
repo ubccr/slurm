@@ -4,11 +4,11 @@
  *  Copyright (C) 2013 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -104,11 +104,13 @@ uint32_t powercap_get_node_bitmap_maxwatts(bitstr_t* select_bitmap);
  * return the cap value of a job taking into account the current cap
  * as well as the power reservations defined on the interval
  *
- * IN struct job_record* job_ptr
- * IN time_t when
- * RET uint32_t - the cap the job is restricted to
+ * IN job_ptr - job under consideration
+ * IN when - time of job start
+ * IN reboot - node reboot required
+ * RET - The power cap this job is restricted to
  */
-uint32_t powercap_get_job_cap(struct job_record *job_ptr, time_t when);
+uint32_t powercap_get_job_cap(struct job_record *job_ptr, time_t when,
+			      bool reboot);
 
 /**
  * power_layout_ready

@@ -10,11 +10,11 @@
  *	Mark Grondona <mgrondona@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -30,21 +30,19 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *****************************************************************************
  * Description:
  *
  * void *xmalloc(size_t size);
- * void *try_xmalloc(size_t size);
  * void xrealloc(void *p, size_t newsize);
- * int  try_xrealloc(void *p, size_t newsize);
  * void xfree(void *p);
  * int  xsize(void *p);
  *
@@ -52,17 +50,11 @@
  * memory. The memory is set to zero. xmalloc() will not return unless
  * there are no errors. The memory must be freed using xfree().
  *
- * try_xmalloc(size) is the same as above, but a NULL pointer is returned
- * when there is an error allocating the memory.
- *
  * xrealloc(p, newsize) changes the size of the block pointed to by p to the
  * value of newsize. Newly allocated memory is zeroed. If p is NULL,
  * xrealloc() performs the same function as  `p = xmalloc(newsize)'. If p
  * is not NULL, it is required to have been initialized with a call to
  * [try_]xmalloc() or [try_]xrealloc().
- *
- * try_xrealloc(p, newsize) is the same as above, but returns <= 0 if the
- * there is an error allocating the requested memory.
  *
  * xfree(p) frees the memory block pointed to by p. The memory must have been
  * initialized with a call to [try_]xmalloc() or [try_]xrealloc().
@@ -76,46 +68,48 @@
 #ifndef _XMALLOC_H
 #define _XMALLOC_H
 
-#if HAVE_SYS_TYPES_H
-#  include <sys/types.h>
-#endif
+#include <stdbool.h>
+#include <sys/types.h>
 
-#include "macros.h"
+#define xcalloc(__cnt, __sz) \
+	slurm_xcalloc(__cnt, __sz, true, false, __FILE__, __LINE__, __func__)
+
+#define try_xcalloc(__cnt, __sz) \
+	slurm_xcalloc(__cnt, __sz, true, true, __FILE__, __LINE__, __func__)
+
+#define xcalloc_nz(__cnt, __sz) \
+	slurm_xcalloc(__cnt, __sz, false, false, __FILE__, __LINE__, __func__)
 
 #define xmalloc(__sz) \
-	slurm_xmalloc (__sz, true, __FILE__, __LINE__, __CURRENT_FUNC__)
-
-#define xmalloc_nz(__sz) \
-	slurm_xmalloc (__sz, false, __FILE__, __LINE__, __CURRENT_FUNC__)
+	slurm_xcalloc(1, __sz, true, false, __FILE__, __LINE__, __func__)
 
 #define try_xmalloc(__sz) \
-	slurm_try_xmalloc(__sz, __FILE__, __LINE__, __CURRENT_FUNC__)
+	slurm_xcalloc(1, __sz, true, true, __FILE__, __LINE__, __func__)
+
+#define xmalloc_nz(__sz) \
+	slurm_xcalloc(1, __sz, false, false, __FILE__, __LINE__, __func__)
 
 #define xfree(__p) \
-	slurm_xfree((void **)&(__p), __FILE__, __LINE__, __CURRENT_FUNC__)
+	slurm_xfree((void **)&(__p), __FILE__, __LINE__, __func__)
+
+#define xrecalloc(__p, __cnt, __sz) \
+        slurm_xrecalloc((void **)&(__p), __cnt, __sz, true, false, __FILE__, __LINE__, __func__)
 
 #define xrealloc(__p, __sz) \
-        slurm_xrealloc((void **)&(__p), __sz, true, \
-                       __FILE__, __LINE__, __CURRENT_FUNC__)
-
-#define xrealloc_nz(__p, __sz) \
-        slurm_xrealloc((void **)&(__p), __sz, false, \
-                       __FILE__, __LINE__, __CURRENT_FUNC__)
+        slurm_xrecalloc((void **)&(__p), 1, __sz, true, false, __FILE__, __LINE__, __func__)
 
 #define try_xrealloc(__p, __sz) \
-	slurm_try_xrealloc((void **)&(__p), __sz, \
-                           __FILE__, __LINE__,  __CURRENT_FUNC__)
+        slurm_xrecalloc((void **)&(__p), 1, __sz, true, true, __FILE__, __LINE__, __func__)
+
+#define xrealloc_nz(__p, __sz) \
+        slurm_xrecalloc((void **)&(__p), 1, __sz, false, false, __FILE__, __LINE__, __func__)
 
 #define xsize(__p) \
-	slurm_xsize((void *)__p, __FILE__, __LINE__, __CURRENT_FUNC__)
+	slurm_xsize((void *)__p, __FILE__, __LINE__, __func__)
 
-void *slurm_xmalloc(size_t, bool, const char *, int, const char *);
-void *slurm_try_xmalloc(size_t , const char *, int , const char *);
+void *slurm_xcalloc(size_t, size_t, bool, bool, const char *, int, const char *);
 void slurm_xfree(void **, const char *, int, const char *);
-void *slurm_xrealloc(void **, size_t, bool, const char *, int, const char *);
-int  slurm_try_xrealloc(void **, size_t, const char *, int, const char *);
+void *slurm_xrecalloc(void **, size_t, size_t, bool, bool, const char *, int, const char *);
 size_t slurm_xsize(void *, const char *, int, const char *);
-
-#define XMALLOC_MAGIC 0x42
 
 #endif /* !_XMALLOC_H */

@@ -11,11 +11,11 @@
 #  CODE-OCEC-09-009. All rights reserved.
 #  Additions by Troy Baer <tbaer@utk.edu>
 #
-#  This file is part of SLURM, a resource management program.
-#  For details, see <http://slurm.schedmd.com/>.
+#  This file is part of Slurm, a resource management program.
+#  For details, see <https://slurm.schedmd.com/>.
 #  Please also read the included file: DISCLAIMER.
 #
-#  SLURM is free software; you can redistribute it and/or modify it under
+#  Slurm is free software; you can redistribute it and/or modify it under
 #  the terms of the GNU General Public License as published by the Free
 #  Software Foundation; either version 2 of the License, or (at your option)
 #  any later version.
@@ -31,13 +31,13 @@
 #  version.  If you delete this exception statement from all source files in
 #  the program, then also delete it here.
 #
-#  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+#  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 #  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 #  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 #  details.
 #
 #  You should have received a copy of the GNU General Public License along
-#  with SLURM; if not, write to the Free Software Foundation, Inc.,
+#  with Slurm; if not, write to the Free Software Foundation, Inc.,
 #  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 #
 #  Based off code with permission copyright 2006, 2007 Cluster Resources, Inc.
@@ -91,7 +91,9 @@ Main:
     # Use sole remaining argument as nodeIds
     my @nodeIds = @ARGV;
     my $slurm = Slurm::new();
-
+    if (!$slurm) {
+        die "Problem loading slurm.\n";
+    }
 
     # handle all of the node update operations
     if ( defined $clear || defined $offline || defined $reset ) {
@@ -123,6 +125,8 @@ Main:
     my $update = $resp->{last_update};
     foreach my $node (@{$resp->{node_array}}) {
             #print STDERR join(",",keys($node))."\n";
+	    next unless (defined $node);
+	    next unless (keys %{$node});
 	    my $nodeId    = $node->{'name'};
 	    my $rCProc    = $node->{'cpus'};
 	    my $rBoards   = $node->{'boards'};
@@ -131,8 +135,7 @@ Main:
             my $rThreads  = $node->{'threads'};
 	    my $features  = $node->{'features'};
 	    my $rAMem     = $node->{'real_memory'};
-	    my $rAProc    = ($node->{'cpus'} -
-		    ($node->{'alloc_cpus'} + $node->{'err_cpus'}));
+	    my $rAProc    = ($node->{'cpus'} - $node->{'alloc_cpus'});
 	    my $state     = lc(Slurm->node_state_string($node->{'node_state'}));
             my $reason    = $node->{'reason'};
 	    my $gres      = $node->{'gres'};
@@ -149,12 +152,22 @@ Main:
 	    if ( defined $gres ) {
                   my @gres = split(/,/,$gres);
                   foreach my $grestype ( @gres ) {
+			  $grestype =~ s/\([^)]*\)//g;
                           my @elt = split(/:/,$grestype);
 			  if ( $#elt>0 && $elt[0] eq "gpu" ) {
-			          $gpus = int($elt[1]);
+				if ( $elt[1] =~ /^[0-9]+$/ ) {
+					$gpus += int($elt[1]);
+			        } else {
+					$gpus += int($elt[2]);
+				}
 			  }
 			  if ( $#elt>0 && $elt[0] eq "mic" ) {
-			          $mics = int($elt[1]);
+				if ( $elt[1] =~ /^[0-9]+$/ ) {
+					$mics += int($elt[1]);
+			        } else {
+					$mics += int($elt[2]);
+				}
+
 			  }
 		  }
 	    }
@@ -165,10 +178,10 @@ Main:
                     # how to get list of jobs on node efficiently?
             }
 
-            # this isn't really defined in SLURM, so I am not sure how to get it
+            # this isn't really defined in Slurm, so I am not sure how to get it
 	    my $load;
 
-	    # mangle SLURM states into PBS equivs
+	    # mangle Slurm states into PBS equivs
 	    my $pbsstate = $state;
 	    $pbsstate =~ s/drained/offline/g;
 	    $pbsstate =~ s/idle/free/g;
@@ -183,7 +196,7 @@ Main:
 
 	    # Filter nodes according to options and arguments
 	    if (@nodeIds) {
-		    next unless grep /^$nodeId/, @nodeIds;
+		    next unless grep /^$nodeId$/, @nodeIds;
 	    }
 
             if ( !defined($shortlist) ) {

@@ -1,4 +1,4 @@
-ETC_FILES = cgroup.release_common.example init.d.slurmdbd init.d.slurm \
+ETC_FILES = init.d.slurmdbd init.d.slurm \
 	    slurmctld.service slurmdbd.service slurmd.service
 
 CLEANFILES = $(ETC_FILES)
@@ -8,12 +8,9 @@ edit = sed \
         -e 's|@libdir[@]|$(libdir)|g' \
         -e 's|@sbindir[@]|$(sbindir)|g' \
         -e 's|@sysconfdir[@]|$(sysconfdir)|g' \
-	-e 's|@BLUEGENE_LOADED_FALSE[@]|$(BLUEGENE_LOADED_FALSE)|g'
+	-e 's|@SYSTEMD_TASKSMAX_OPTION[@]|$(SYSTEMD_TASKSMAX_OPTION)|g'
 
 noinst_DATA = $(ETC_FILES)
-
-cgroup.release_common.example: Makefile $(srcdir)/cgroup.release_common.example.in
-	$(edit) $(srcdir)/cgroup.release_common.example.in > cgroup.release_common.example
 
 init.d.slurmdbd: Makefile $(srcdir)/init.d.slurmdbd.in
 	$(edit) $(srcdir)/init.d.slurmdbd.in > init.d.slurmdbd

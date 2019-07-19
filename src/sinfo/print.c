@@ -3,17 +3,17 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2017 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov> and
  *  Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,13 +29,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -67,12 +67,12 @@ static int   _build_min_max_32_string(char *buffer, int buf_size,
 static int   _build_cpu_load_min_max_32(char *buffer, int buf_size,
 					uint32_t min, uint32_t max,
 					bool range);
-static int   _build_free_mem_min_max_32(char *buffer, int buf_size,
-					uint32_t min, uint32_t max,
+static int   _build_free_mem_min_max_64(char *buffer, int buf_size,
+					uint64_t min, uint64_t max,
 					bool range);
 static void  _print_reservation(reserve_info_t *resv_ptr, int width);
 static int   _print_secs(long time, int width, bool right, bool cut_output);
-static int   _print_str(char *str, int width, bool right, bool cut_output);
+static int   _print_str(const char *str, int width, bool right, bool cut_output);
 static int   _resv_name_width(reserve_info_t *resv_ptr);
 static void  _set_node_field_size(List sinfo_list);
 static void  _set_part_field_size(List sinfo_list);
@@ -102,7 +102,7 @@ int print_sinfo_list(List sinfo_list)
 	if (!params.no_header)
 		print_sinfo_entry(NULL);
 
-	while ((current = list_next(i)) != NULL)
+	while ((current = list_next(i)))
 		 print_sinfo_entry(current);
 
 	list_iterator_destroy(i);
@@ -114,7 +114,7 @@ int print_sinfo_entry(sinfo_data_t *sinfo_data)
 	ListIterator i = list_iterator_create(params.format_list);
 	sinfo_format_t *current;
 
-	while ((current = (sinfo_format_t *) list_next(i)) != NULL) {
+	while ((current = list_next(i))) {
 		if (current->function(sinfo_data, current->width,
 				      current->right_justify, current->suffix)
 		    != SLURM_SUCCESS)
@@ -178,7 +178,7 @@ static void _print_reservation(reserve_info_t *resv_ptr, int width)
 	return;
 }
 
-static int _print_str(char *str, int width, bool right, bool cut_output)
+static int _print_str(const char *str, int width, bool right, bool cut_output)
 {
 	char format[64];
 	int printed = 0;
@@ -250,7 +250,7 @@ _build_min_max_16_string(char *buffer, int buf_size, uint16_t min, uint16_t max,
 	if (max == min)
 		return snprintf(buffer, buf_size, "%s", tmp_max);
 	else if (range) {
-		if (max == (uint16_t) INFINITE)
+		if (max == INFINITE16)
 			return snprintf(buffer, buf_size, "%s-infinite",
 					tmp_min);
 		else
@@ -323,24 +323,24 @@ _build_cpu_load_min_max_32(char *buffer, int buf_size,
 }
 
 static int
-_build_free_mem_min_max_32(char *buffer, int buf_size,
-			    uint32_t min, uint32_t max,
+_build_free_mem_min_max_64(char *buffer, int buf_size,
+			    uint64_t min, uint64_t max,
 			    bool range)
 {
 
 	char tmp_min[16];
 	char tmp_max[16];
 
-	if (min == NO_VAL) {
+	if (min == NO_VAL64) {
 		strcpy(tmp_min, "N/A");
 	} else {
-		snprintf(tmp_min, sizeof(tmp_min), "%u", min);
+		snprintf(tmp_min, sizeof(tmp_min), "%"PRIu64"", min);
 	}
 
-	if (max == NO_VAL) {
+	if (max == NO_VAL64) {
 		strcpy(tmp_max, "N/A");
 	} else {
-		snprintf(tmp_max, sizeof(tmp_max), "%u", max);
+		snprintf(tmp_max, sizeof(tmp_max), "%"PRIu64"", max);
 	}
 
 	if (max == min)
@@ -361,11 +361,8 @@ format_add_function(List list, int width, bool right, char *suffix,
 	tmp->width = width;
 	tmp->right_justify = right;
 	tmp->suffix = suffix;
+	list_append(list, tmp);
 
-	if (list_append(list, tmp) == NULL) {
-		fprintf(stderr, "Memory exhausted\n");
-		exit(1);
-	}
 	return SLURM_SUCCESS;
 }
 
@@ -376,7 +373,7 @@ static void _set_node_field_size(List sinfo_list)
 	sinfo_data_t *current;
 	int max_width = MIN_NODE_FIELD_SIZE, this_width = 0;
 
-	while ((current = (sinfo_data_t *) list_next(i)) != NULL) {
+	while ((current = list_next(i))) {
 		tmp = hostlist_ranged_string_xmalloc(current->nodes);
 		this_width = strlen(tmp);
 		xfree(tmp);
@@ -392,7 +389,7 @@ static void _set_part_field_size(List sinfo_list)
 	sinfo_data_t *current;
 	int max_width = MIN_PART_FIELD_SIZE, this_width = 0;
 
-	while ((current = (sinfo_data_t *) list_next(i)) != NULL) {
+	while ((current = list_next(i))) {
 		if (!current->part_info || !current->part_info->name)
 			continue;
 		this_width = strlen(current->part_info->name);
@@ -471,36 +468,10 @@ int _print_cpus_aiot(sinfo_data_t * sinfo_data, int width,
 		     bool right_justify, char *suffix)
 {
 	char id[FORMAT_STRING_SIZE];
-	char tmpa[8];
-	char tmpi[8];
-	char tmpo[8];
-	char tmpt[8];
 	if (sinfo_data) {
-		if (params.cluster_flags & CLUSTER_FLAG_BG) {
-			convert_num_unit((float)sinfo_data->cpus_alloc,
-					 tmpa, sizeof(tmpa), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-			convert_num_unit((float)sinfo_data->cpus_idle,
-					 tmpi, sizeof(tmpi), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-			convert_num_unit((float)sinfo_data->cpus_other,
-					 tmpo, sizeof(tmpo), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-			convert_num_unit((float)sinfo_data->cpus_total,
-					 tmpt, sizeof(tmpt), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-		} else {
-			snprintf(tmpa, sizeof(tmpa), "%u",
-				 sinfo_data->cpus_alloc);
-			snprintf(tmpi, sizeof(tmpi), "%u",
-				 sinfo_data->cpus_idle);
-			snprintf(tmpo, sizeof(tmpo), "%u",
-				 sinfo_data->cpus_other);
-			snprintf(tmpt, sizeof(tmpt), "%u",
-				 sinfo_data->cpus_total);
-		}
-		snprintf(id, FORMAT_STRING_SIZE, "%s/%s/%s/%s",
-			 tmpa, tmpi, tmpo, tmpt);
+		snprintf(id, FORMAT_STRING_SIZE, "%u/%u/%u/%u",
+			 sinfo_data->cpus_alloc, sinfo_data->cpus_idle,
+			 sinfo_data->cpus_other, sinfo_data->cpus_total);
 		_print_str(id, width, right_justify, true);
 	} else
 		_print_str("CPUS(A/I/O/T)", width, right_justify, true);
@@ -653,6 +624,19 @@ int _print_gres(sinfo_data_t * sinfo_data, int width,
 	return SLURM_SUCCESS;
 }
 
+int _print_gres_used(sinfo_data_t * sinfo_data, int width,
+		     bool right_justify, char *suffix)
+{
+	if (sinfo_data)
+		_print_str(sinfo_data->gres_used, width, right_justify, true);
+	else
+		_print_str("GRES_USED", width, right_justify, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_groups(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
@@ -742,9 +726,6 @@ int _print_node_list(sinfo_data_t * sinfo_data, int width,
 		xfree(tmp);
 	} else {
 		char *title = "NODELIST";
-		if (params.cluster_flags & CLUSTER_FLAG_BG)
-			title = "MIDPLANELIST";
-
 		_print_str(title, width, right_justify, false);
 	}
 
@@ -779,16 +760,9 @@ int _print_nodes_t(sinfo_data_t * sinfo_data, int width,
 		   bool right_justify, char *suffix)
 {
 	char id[FORMAT_STRING_SIZE];
-	char tmp[8];
 	if (sinfo_data) {
-		if (params.cluster_flags & CLUSTER_FLAG_BG)
-			convert_num_unit((float)sinfo_data->nodes_total,
-					 tmp, sizeof(tmp), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-		else
-			snprintf(tmp, sizeof(tmp), "%d",
-				 sinfo_data->nodes_total);
-		snprintf(id, FORMAT_STRING_SIZE, "%s", tmp);
+		snprintf(id, FORMAT_STRING_SIZE, "%d",
+			 sinfo_data->nodes_total);
 		_print_str(id, width, right_justify, true);
 	} else
 		_print_str("NODES", width, right_justify, true);
@@ -802,24 +776,9 @@ int _print_nodes_ai(sinfo_data_t * sinfo_data, int width,
 		    bool right_justify, char *suffix)
 {
 	char id[FORMAT_STRING_SIZE];
-	char tmpa[8];
-	char tmpi[8];
 	if (sinfo_data) {
-		if (params.cluster_flags & CLUSTER_FLAG_BG) {
-			convert_num_unit((float)sinfo_data->nodes_alloc,
-					 tmpa, sizeof(tmpa), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-			convert_num_unit((float)sinfo_data->nodes_idle,
-					 tmpi, sizeof(tmpi), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-		} else {
-			snprintf(tmpa, sizeof(tmpa), "%d",
-				 sinfo_data->nodes_alloc);
-			snprintf(tmpi, sizeof(tmpi), "%d",
-				 sinfo_data->nodes_idle);
-		}
-		snprintf(id, FORMAT_STRING_SIZE, "%s/%s",
-			 tmpa, tmpi);
+		snprintf(id, FORMAT_STRING_SIZE, "%d/%d",
+			 sinfo_data->nodes_alloc, sinfo_data->nodes_idle);
 		_print_str(id, width, right_justify, true);
 	} else
 		_print_str("NODES(A/I)", width, right_justify, true);
@@ -833,36 +792,10 @@ int _print_nodes_aiot(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
 	char id[FORMAT_STRING_SIZE];
-	char tmpa[8];
-	char tmpi[8];
-	char tmpo[8];
-	char tmpt[8];
 	if (sinfo_data) {
-		if (params.cluster_flags & CLUSTER_FLAG_BG) {
-			convert_num_unit((float)sinfo_data->nodes_alloc,
-					 tmpa, sizeof(tmpa), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-			convert_num_unit((float)sinfo_data->nodes_idle,
-					 tmpi, sizeof(tmpi), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-			convert_num_unit((float)sinfo_data->nodes_other,
-					 tmpo, sizeof(tmpo), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-			convert_num_unit((float)sinfo_data->nodes_total,
-					 tmpt, sizeof(tmpt), UNIT_NONE, NO_VAL,
-					 params.convert_flags);
-		} else {
-			snprintf(tmpa, sizeof(tmpa), "%u",
-				 sinfo_data->nodes_alloc);
-			snprintf(tmpi, sizeof(tmpi), "%u",
-				 sinfo_data->nodes_idle);
-			snprintf(tmpo, sizeof(tmpo), "%u",
-				 sinfo_data->nodes_other);
-			snprintf(tmpt, sizeof(tmpt), "%u",
-				 sinfo_data->nodes_total);
-		}
-		snprintf(id, FORMAT_STRING_SIZE, "%s/%s/%s/%s",
-			 tmpa, tmpi, tmpo, tmpt);
+		snprintf(id, FORMAT_STRING_SIZE, "%u/%u/%u/%u",
+			 sinfo_data->nodes_alloc, sinfo_data->nodes_idle,
+			 sinfo_data->nodes_other, sinfo_data->nodes_total);
 		_print_str(id, width, right_justify, true);
 	} else
 		_print_str("NODES(A/I/O/T)", width, right_justify, true);
@@ -920,6 +853,24 @@ int _print_partition_name(sinfo_data_t * sinfo_data, int width,
 	return SLURM_SUCCESS;
 }
 
+int _print_port(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	char id[FORMAT_STRING_SIZE];
+	if (sinfo_data) {
+		_build_min_max_16_string(id, FORMAT_STRING_SIZE,
+				      sinfo_data->port,
+				      sinfo_data->port, false);
+		_print_str(id, width, right_justify, true);
+	} else {
+		_print_str("PORT", width, right_justify, true);
+	}
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_prefix(sinfo_data_t * job, int width, bool right_justify,
 		char* suffix)
 {
@@ -933,7 +884,7 @@ int _print_preempt_mode(sinfo_data_t * sinfo_data, int width,
 {
 	if (sinfo_data) {
 		uint16_t preempt_mode = sinfo_data->part_info->preempt_mode;
-		if (preempt_mode == (uint16_t) NO_VAL)
+		if (preempt_mode == NO_VAL16)
 			preempt_mode =  slurm_get_preempt_mode();
 		_print_str(preempt_mode_string(preempt_mode),
 			   width, right_justify, true);
@@ -1071,7 +1022,7 @@ int _print_state_compact(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
 	char *upper_state, *lower_state;
-	uint16_t my_state;
+	uint32_t my_state;
 
 	if (sinfo_data && sinfo_data->nodes_total) {
 		my_state = sinfo_data->node_state;
@@ -1093,7 +1044,7 @@ int _print_state_long(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
 	char *upper_state, *lower_state;
-	uint16_t my_state;
+	uint32_t my_state;
 
 	if (sinfo_data && sinfo_data->nodes_total) {
 		my_state = sinfo_data->node_state;
@@ -1268,10 +1219,10 @@ int _print_free_mem(sinfo_data_t * sinfo_data, int width,
 	char id[FORMAT_STRING_SIZE];
 
 	if (sinfo_data) {
-		_build_free_mem_min_max_32(id, FORMAT_STRING_SIZE,
-					 sinfo_data->min_free_mem,
-					 sinfo_data->max_free_mem,
-					 true);
+		_build_free_mem_min_max_64(id, FORMAT_STRING_SIZE,
+					   sinfo_data->min_free_mem,
+					   sinfo_data->max_free_mem,
+					   true);
 		_print_str(id, width, right_justify, true);
 	} else {
 		_print_str("FREE_MEM", width, right_justify, true);
@@ -1326,7 +1277,7 @@ int _print_alloc_mem(sinfo_data_t * sinfo_data, int width,
 {
 	char tmp_line[32];
 	if (sinfo_data) {
-		sprintf(tmp_line, "%u", sinfo_data->alloc_memory);
+		sprintf(tmp_line, "%"PRIu64"", sinfo_data->alloc_memory);
 		_print_str(tmp_line, width, right_justify, true);
 	} else {
 		_print_str("ALLOCMEM", width, right_justify, true);
@@ -1335,4 +1286,25 @@ int _print_alloc_mem(sinfo_data_t * sinfo_data, int width,
 		printf ("%s", suffix);
 	}
 	return SLURM_SUCCESS;
+}
+
+
+int _print_cluster_name(sinfo_data_t *sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	if (sinfo_data) {
+		if (sinfo_data->cluster_name == NULL) {
+			_print_str("N/A", width, right_justify, true);
+		} else {
+			_print_str(sinfo_data->cluster_name, width,
+				   right_justify, true);
+		}
+	} else {
+		_print_str("CLUSTER", width, right_justify, true);
+	}
+	if (suffix) {
+		printf ("%s", suffix);
+	}
+	return SLURM_SUCCESS;
+
 }

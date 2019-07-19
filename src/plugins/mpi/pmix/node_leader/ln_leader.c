@@ -15,7 +15,7 @@ extern int errno;
 
 #include "fileops.h"
 
-/* SLURM portability */
+/* Slurm portability */
 #define SLURM_SUCCESS 0
 #define SLURM_ERROR 1
 /* TODO: fix */
@@ -47,9 +47,9 @@ int main(int argc, char **argv)
     }
     my_jobid = atoi(argv[1]);
     my_stepid = atoi(argv[2]);
-    sprintf(linkname, "%s.%d", FILENAME_PREFIX, my_jobid);
-    sprintf(usockname,"%s.%d", linkname, my_stepid);
-    sprintf(lockname, "%s.lock",usockname);
+    snprintf(linkname, FILENAME_MAX, "%s.%d", FILENAME_PREFIX, my_jobid);
+    snprintf(usockname, FILENAME_MAX, "%s.%d", linkname, my_stepid);
+    snprintf(lockname, FILENAME_MAX, "%s.lock",usockname);
 
     if (0 > (lockfd = pmix_create_locked(lockname))) {
         fprintf(stderr,"Can't create lock file %s\n", lockname);
@@ -93,6 +93,14 @@ int prepare_srv_socket(char *path)
     static struct sockaddr_un sa;
     int ret = 0;
 
+    if (strlen(path) >= sizeof(sa.sun_path)) {
+        /*PMIXP_ERROR_STD*/
+        printf("UNIX socket path is too long: %lu, max %lu",
+               (unsigned long)strlen(path),
+               (unsigned long)sizeof(sa.sun_path)-1);
+        return SLURM_ERROR;
+    }
+
     /* Make sure that socket file doesn't exists */
     if (0 == access(path, F_OK)) {
         /* remove old file */
@@ -102,14 +110,6 @@ int prepare_srv_socket(char *path)
                     path);
             return SLURM_ERROR;
         }
-    }
-
-    if (strlen(path) >= sizeof(sa.sun_path)) {
-        /*PMIXP_ERROR_STD*/
-        printf("UNIX socket path is too long: %lu, max %lu",
-                (unsigned long)strlen(path),
-                (unsigned long)sizeof(sa.sun_path)-1);
-        return SLURM_ERROR;
     }
 
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -145,6 +145,15 @@ err_fd:
 int connect_to_server(char *path)
 {
     static struct sockaddr_un sa;
+
+    if (strlen(path) >= sizeof(sa.sun_path)) {
+        /*PMIXP_ERROR_STD*/
+        printf("UNIX socket path is too long: %lu, max %lu",
+               (unsigned long)strlen(path),
+               (unsigned long)sizeof(sa.sun_path)-1);
+        return -1;
+    }
+
     memset(&sa, 0, sizeof(sa));
     sa.sun_family = AF_UNIX;
     strcpy(sa.sun_path, path);

@@ -6,54 +6,38 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \****************************************************************************/
 
 #ifndef _SVIEW_H
 #define _SVIEW_H
 
-#ifndef _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
+#include "config.h"
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>
-#else				/* !HAVE_INTTYPES_H */
-#  if HAVE_STDINT_H
-#    include <stdint.h>
-#  endif
-#endif				/* HAVE_INTTYPES_H */
-
-#if HAVE_GETOPT_H
-#  include <getopt.h>
-#else
-#  include "src/common/getopt.h"
-#endif
+#define _GNU_SOURCE
 
 #include <ctype.h>
+#include <inttypes.h>
+#include <getopt.h>
 #include <pwd.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -61,6 +45,7 @@
 
 #include "slurm/slurmdb.h"
 
+#include "src/common/assoc_mgr.h"
 #include "src/common/bitstring.h"
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
@@ -70,10 +55,10 @@
 #include "src/common/slurmdb_defs.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/strlcpy.h"
 #include "src/common/uid.h"
 #include "src/common/xstring.h"
 
-#include "src/plugins/select/bluegene/bg_enums.h"
 #include "gthread_helper.h"
 
 /* getopt_long options, integers but not characters */
@@ -99,7 +84,6 @@ enum { JOB_PAGE,
        PART_PAGE,
        RESV_PAGE,
        BB_PAGE,
-       BLOCK_PAGE,
        NODE_PAGE,
        FRONT_END_PAGE,
        SUBMIT_PAGE,
@@ -149,10 +133,6 @@ typedef enum {
 	       SEARCH_JOB_ID = 10,
 	       SEARCH_JOB_USER,
 	       SEARCH_JOB_STATE,
-	       SEARCH_BLOCK_NAME,
-	       SEARCH_BLOCK_NODENAME,
-	       SEARCH_BLOCK_SIZE,
-	       SEARCH_BLOCK_STATE,
 	       SEARCH_PARTITION_NAME,
 	       SEARCH_PARTITION_STATE,
 	       SEARCH_NODE_NAME,
@@ -241,6 +221,7 @@ struct popup_positioner {
 
 typedef struct {
 	sview_search_type_t search_type;
+	gchar *cluster_name;
 	gchar *gchar_data;
 	int  int_data;
 	int  int_data2;
@@ -341,14 +322,12 @@ extern int global_row_count;
 extern gint last_event_x;
 extern gint last_event_y;
 extern GdkCursor* in_process_cursor;
-extern int cpus_per_node;
-extern int g_node_scaling;
 extern char *sview_colors[];
 extern int sview_colors_cnt;
-extern uint32_t cluster_flags;
 extern int cluster_dims;
+extern uint32_t cluster_flags;
 extern List cluster_list;
-extern block_info_msg_t *g_block_info_ptr;
+extern char *orig_cluster_name;
 extern front_end_info_msg_t *g_front_end_info_ptr;
 extern job_info_msg_t *g_job_info_ptr;
 extern node_info_msg_t *g_node_info_ptr;
@@ -361,6 +340,7 @@ extern topo_info_response_msg_t *g_topo_info_msg_ptr;
 extern switch_record_bitmaps_t *g_switch_nodes_maps;
 extern popup_positioner_t main_popup_positioner[];
 extern popup_pos_t popup_pos;
+extern char *federation_name;
 
 extern void init_grid(node_info_msg_t *node_info_ptr);
 extern int set_grid(int start, int end, int count);
@@ -386,15 +366,16 @@ extern void change_refresh_popup(GtkAction *action, gpointer user_data);
 extern void change_grid_popup(GtkAction *action, gpointer user_data);
 extern void about_popup(GtkAction *action, gpointer user_data);
 extern void usage_popup(GtkAction *action, gpointer user_data);
+extern void display_fed_disabled_popup(const char *title);
 
 //grid.c
 extern void destroy_grid_button(void *arg);
 extern grid_button_t *create_grid_button_from_another(
 	grid_button_t *grid_button, char *name, int color_inx);
 /* do not free the char * from this function it is static */
-extern char *change_grid_color(List button_list, int start, int end,
-			       int color_inx, bool change_unused,
-			       enum node_states state_override);
+extern void change_grid_color(List button_list, int start, int end,
+			      int color_inx, bool change_unused,
+			      enum node_states state_override);
 extern void change_grid_color_array(List button_list, int array_len,
 				    int *color_inx, bool *color_set_flag,
 				    bool only_change_unused,
@@ -407,9 +388,6 @@ extern void set_grid_used(List button_list, int start, int end,
 extern void get_button_list_from_main(List *button_list, int start, int end,
 				      int color_inx);
 extern List copy_main_button_list(int initial_color);
-extern void add_extra_bluegene_buttons(List *button_list, int inx,
-				       int *color_inx);
-extern void add_extra_cr_buttons(List *button_list, node_info_t *node_ptr);
 extern void put_buttons_in_table(GtkTable *table, List button_list);
 extern int get_system_stats(GtkTable *table);
 extern int setup_grid_table(GtkTable *table, List button_list, List node_list);
@@ -421,7 +399,6 @@ extern void post_setup_popup_grid_list(popup_info_t *popup_win);
 // part_info.c
 extern GtkWidget *create_part_entry(update_part_msg_t *part_msg,
 				    GtkTreeModel *model, GtkTreeIter *iter);
-extern bool visible_part(char* part_name);
 extern bool check_part_includes_node(int node_dx);
 extern void refresh_part(GtkAction *action, gpointer user_data);
 extern GtkListStore *create_model_part(int type);
@@ -448,25 +425,6 @@ extern void admin_edit_accnt(GtkCellRendererText *cell,
 			     const char *new_text,
 			     gpointer data);
 extern void specific_info_accnt(popup_info_t *popup_win);
-
-// block_info.c
-extern void refresh_block(GtkAction *action, gpointer user_data);
-extern int update_state_block(GtkDialog *dialog,
-			      const char *blockid, const char *type);
-extern GtkListStore *create_model_block(int type);
-extern void admin_edit_block(GtkCellRendererText *cell,
-			     const char *path_string,
-			     const char *new_text,
-			     gpointer data);
-extern int get_new_info_block(block_info_msg_t **block_ptr, int force);
-extern void get_info_block(GtkTable *table, display_data_t *display_data);
-extern void specific_info_block(popup_info_t *popup_win);
-extern void set_menus_block(void *arg, void *arg2, GtkTreePath *path, int type);
-extern void popup_all_block(GtkTreeModel *model, GtkTreeIter *iter, int id);
-extern void select_admin_block(GtkTreeModel *model, GtkTreeIter *iter,
-			       display_data_t *display_data,
-			       GtkTreeView *treeview);
-extern void cluster_change_block(void);
 
 // front_end_info.c
 extern void admin_edit_front_end(GtkCellRendererText *cell,
@@ -529,7 +487,7 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data);
 extern void specific_info_node(popup_info_t *popup_win);
 extern void set_menus_node(void *arg, void *arg2, GtkTreePath *path, int type);
 extern void popup_all_node(GtkTreeModel *model, GtkTreeIter *iter, int id);
-extern void popup_all_node_name(char *name, int id);
+extern void popup_all_node_name(char *name, int id, char *cluster_name);
 extern void admin_menu_node_name(char *name, GdkEventButton *event);
 extern void admin_node(GtkTreeModel *model, GtkTreeIter *iter, char *type);
 extern void admin_node_name(char *name, char *old_value, char *type);
@@ -566,7 +524,6 @@ extern int get_new_info_config(slurm_ctl_conf_info_msg_t **info_ptr);
 // common.c
 extern char * replspace (char *str);
 extern char * replus (char *str);
-extern char *delstr(char *str, char *orig);
 extern void set_page_opts(int tab, display_data_t *display_data,
 			  int count, char* initial_opts);
 extern void free_switch_nodes_maps(switch_record_bitmaps_t
@@ -648,7 +605,8 @@ extern void display_edit_note(char *edit_note);
 extern void add_display_treestore_line(int update,
 				       GtkTreeStore *treestore,
 				       GtkTreeIter *iter,
-				       const char *name, char *value);
+				       const char *name,
+				       const char *value);
 extern void add_display_treestore_line_with_font(
 	int update,
 	GtkTreeStore *treestore,
@@ -663,6 +621,14 @@ extern char *page_to_str(int page);
 extern char *tab_pos_to_str(int tab_pos);
 extern char *visible_to_str(sview_config_t *sview_config);
 extern gboolean entry_changed(GtkWidget *widget, void *msg);
+extern void select_admin_common(GtkTreeModel *model, GtkTreeIter *iter,
+				display_data_t *display_data,
+				GtkTreeView *treeview,
+				uint32_t node_col,
+				void (*process_each)(GtkTreeModel *model,
+						     GtkTreePath *path,
+						     GtkTreeIter *iter,
+						     gpointer userdata));
 
 // defaults.c
 extern int load_defaults(void);

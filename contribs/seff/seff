@@ -8,6 +8,7 @@ use strict qw/vars/;
 use Getopt::Std;
 use POSIX qw/pow/;
 use Sys::Hostname;
+use lib "${FindBin::Bin}/../lib/perl";
 use Slurmdb ':all';
 use Slurm ':all';
 #use Data::Dumper;
@@ -46,7 +47,7 @@ my $conf = $slurm->load_ctl_conf();
 my $clustername = $conf->{'cluster_name'};
 
 my %job_cond = ();
-$job_cond{without_usage_truncation} = 1;
+$job_cond{flags} = JOBCOND_FLAG_NO_TRUNC;
 $job_cond{cluster_list} = [$clustername];
 $job_cond{step_list} = $jobid_arg;
 $job_cond{usage_start} = 0;
@@ -125,10 +126,17 @@ for my $step (@{$job->{'steps'}}) {
     $tot_cpu_sec += $step->{'tot_cpu_sec'};
     $tot_cpu_usec += $step->{'tot_cpu_usec'};
 
-    my $lmem = $step->{'stats'}{'rss_max'};
-    if ($mem < $lmem) {
-        $mem = $lmem;
-        $ntasks = $step->{'ntasks'};
+    if (exists $step->{'stats'} && exists $step->{'stats'}{'tres_usage_in_max'}) {
+        my $lmem = Slurmdb::find_tres_count_in_string($step->{'stats'}{'tres_usage_in_max'}, TRES_MEM);
+	if ($lmem == INFINITE64) {
+	        $lmem = 0;
+	} else {
+		$lmem = $lmem / 1024;
+	}
+        if ($mem < $lmem) {
+            $mem = $lmem;
+            $ntasks = $step->{'ntasks'};
+        }
     }
 }
 my $cput = $tot_cpu_sec + int(($tot_cpu_usec / 1000000) + 0.5);
@@ -165,6 +173,7 @@ if ($state ne "PENDING") {
     }
     printf("CPU Utilized: %s\n", time2str($cput));
     printf("CPU Efficiency: %.2f%% of %s core-walltime\n", $cpu_eff, time2str($corewalltime));
+    printf("Job Wall-clock time: %s\n", time2str($walltime));
     if ($ntasks == 1) {
         printf("Memory Utilized: %s\n", kbytes2str($mem));
     } else {
@@ -216,7 +225,8 @@ sub kbytes2str {
     my $mul = 1024;
 
     my $exp = int(log($kbytes) / log($mul));
-    my @pre = qw/ M G T P E /;
-    my $pre = $pre[$exp-1];
-    return sprintf("%.2f %sB", ($kbytes / pow($mul, $exp)), $pre);
+    my @pre = qw/ K M G T P E /;
+    my $pre = $pre[$exp];
+
+    return sprintf("%.2f %sB", ($kbytes / pow($mul, $exp)), $pre ? $pre : "");
 }

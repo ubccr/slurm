@@ -9,11 +9,11 @@
  *
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,36 +29,28 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if     HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
-#include <string.h>
+#include <ctype.h>
+#include <errno.h>
+#include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
-#if 	HAVE_UNISTD_H
-#  include <unistd.h>
-#endif
-
-#ifdef WITH_PTHREADS
-#  include <pthread.h>
-#endif
-
-#include <stdarg.h>
-#include <ctype.h>
-#include <sys/time.h>
+#include <string.h>
 #include <time.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #include "slurm/slurm_errno.h"
 
@@ -81,7 +73,6 @@ static char *_xstrdup_vprintf(const char *_fmt, va_list _ap);
 strong_alias(_xstrcat,		slurm_xstrcat);
 strong_alias(_xstrncat,		slurm_xstrncat);
 strong_alias(_xstrcatchar,	slurm_xstrcatchar);
-strong_alias(_xslurm_strerrorcat, slurm_xslurm_strerrorcat);
 strong_alias(_xstrftimecat,	slurm_xstrftimecat);
 strong_alias(_xstrfmtcat,	slurm_xstrfmtcat);
 strong_alias(_xmemcat,		slurm_xmemcat);
@@ -90,13 +81,17 @@ strong_alias(xstrdup_printf,	slurm_xstrdup_printf);
 strong_alias(xstrndup,		slurm_xstrndup);
 strong_alias(xbasename,		slurm_xbasename);
 strong_alias(_xstrsubstitute,   slurm_xstrsubstitute);
-strong_alias(xstrstrip,         slurm_xstrstrip);
 strong_alias(xshort_hostname,   slurm_xshort_hostname);
 strong_alias(xstring_is_whitespace, slurm_xstring_is_whitespace);
 strong_alias(xstrtolower,       slurm_xstrtolower);
 strong_alias(xstrchr,           slurm_xstrchr);
+strong_alias(xstrrchr,          slurm_xstrrchr);
 strong_alias(xstrcmp,           slurm_xstrcmp);
+strong_alias(xstrncmp,          slurm_xstrncmp);
 strong_alias(xstrcasecmp,       slurm_xstrcasecmp);
+strong_alias(xstrncasecmp,      slurm_xstrncasecmp);
+strong_alias(xstrstr,           slurm_xstrstr);
+strong_alias(xstrcasestr,       slurm_xstrcasestr);
 
 /*
  * Ensure that a string has enough space to add 'needed' characters.
@@ -177,19 +172,6 @@ void _xstrcatchar(char **str, char c)
 	strcatchar(*str, c);
 }
 
-
-/*
- * concatenate slurm_strerror(errno) onto string in buf, expand buf as needed
- *
- */
-void _xslurm_strerrorcat(char **buf)
-{
-
-	char *err = slurm_strerror(errno);
-
-	xstrcat(*buf, err);
-}
-
 /*
  * append strftime of fmt to buffer buf, expand buf as needed
  *
@@ -201,11 +183,6 @@ void _xstrftimecat(char **buf, const char *fmt)
 	struct tm tm;
 
 	const char default_fmt[] = "%m/%d/%Y %H:%M:%S %Z";
-#ifdef DISABLE_LOCALTIME
-	static int disabled=0;
-	if (!buf) disabled=1;
-	if (disabled) return;
-#endif
 
 	if (fmt == NULL)
 		fmt = default_fmt;
@@ -358,7 +335,7 @@ char * xstrdup(const char *str)
 		return NULL;
 	}
 	siz = strlen(str) + 1;
-	result = (char *)xmalloc(siz);
+	result = xmalloc(siz);
 
 	rsiz = strlcpy(result, str, siz);
 	if (rsiz)
@@ -402,7 +379,7 @@ char * xstrndup(const char *str, size_t n)
 	if (n < siz)
 		siz = n;
 	siz++;
-	result = (char *)xmalloc(siz);
+	result = xmalloc(siz);
 
 	(void) strlcpy(result, str, siz);
 
@@ -463,47 +440,6 @@ bool _xstrsubstitute(char **str, const char *pattern, const char *replacement)
 	return 1;
 }
 
-/*
- * Remove first instance of quotes that surround a string in "str",
- *   and return the result without the quotes
- *   str (IN)	        target string (pointer to in case of expansion)
- *   increased (IN/OUT)	current position in "str"
- *   RET char *         str returned without quotes in it. needs to be xfreed
- */
-char *xstrstrip(char *str)
-{
-	int i=0, start=0, found = 0;
-	char *meat = NULL;
-	char quote_c = '\0';
-	int quote = 0;
-
-	if (!str)
-		return NULL;
-
-	/* first strip off the ("|')'s */
-	if (str[i] == '\"' || str[i] == '\'') {
-		quote_c = str[i];
-		quote = 1;
-		i++;
-	}
-	start = i;
-
-	while(str[i]) {
-		if (quote && str[i] == quote_c) {
-			found = 1;
-			break;
-		}
-		i++;
-	}
-	if (found) {
-		meat = xmalloc((i-start)+1);
-		memcpy(meat, str+start, (i-start));
-	} else
-		meat = xstrdup(str);
-	return meat;
-}
-
-
 /* xshort_hostname
  *   Returns an xmalloc'd string containing the hostname
  *   of the local machine.  The hostname contains only
@@ -552,7 +488,7 @@ char *xstrtolower(char *str)
 {
 	if (str) {
 		int j = 0;
-		while(str[j]) {
+		while (str[j]) {
 			str[j] = tolower((int)str[j]);
 			j++;
 		}
@@ -564,6 +500,12 @@ char *xstrtolower(char *str)
 char *xstrchr(const char *s1, int c)
 {
 	return s1 ? strchr(s1, c) : NULL;
+}
+
+/* safe strrchr */
+char *xstrrchr(const char *s1, int c)
+{
+	return s1 ? strrchr(s1, c) : NULL;
 }
 
 /* safe strcmp */
@@ -598,10 +540,61 @@ int xstrcasecmp(const char *s1, const char *s2)
 {
 	if (!s1 && !s2)
 		return 0;
-	else if ((s1 && !s2) || (!s1 && s2))
+	else if (!s1)
+		return -1;
+	else if (!s2)
 		return 1;
 	else
 		return strcasecmp(s1, s2);
+}
+
+/* safe strncasecmp */
+int xstrncasecmp(const char *s1, const char *s2, size_t n)
+{
+	if (!s1 && !s2)
+		return 0;
+	else if (!s1)
+		return -1;
+	else if (!s2)
+		return 1;
+	else
+		return strncasecmp(s1, s2, n);
+}
+
+/* safe xstrstr */
+char *xstrstr(const char *haystack, const char *needle)
+{
+	if (!haystack || !needle)
+		return NULL;
+
+	return strstr(haystack, needle);
+}
+
+char *xstrcasestr(const char *haystack, const char *needle)
+{
+	int hay_inx, hay_size, need_inx, need_size;
+	char *hay_ptr = (char *) haystack;
+
+	if (haystack == NULL || needle == NULL)
+		return NULL;
+
+	hay_size = strlen(haystack);
+	need_size = strlen(needle);
+
+	for (hay_inx=0; hay_inx<hay_size; hay_inx++) {
+		for (need_inx=0; need_inx<need_size; need_inx++) {
+			if (tolower((int) hay_ptr[need_inx]) !=
+			    tolower((int) needle [need_inx]))
+				break;		/* mis-match */
+		}
+
+		if (need_inx == need_size)	/* it matched */
+			return hay_ptr;
+		else				/* keep looking */
+			hay_ptr++;
+	}
+
+	return NULL;	/* no match anywhere in string */
 }
 
 /*
@@ -616,11 +609,9 @@ static char *_xstrdup_vprintf(const char *fmt, va_list ap)
 {
 	/* Start out with a size of 100 bytes. */
 	int n, size = 100;
-	char *p = NULL;
 	va_list our_ap;
+	char *p = xmalloc(size);
 
-	if ((p = xmalloc(size)) == NULL)
-		return NULL;
 	while (1) {
 		/* Try to print in the allocated space. */
 		va_copy(our_ap, ap);
@@ -634,8 +625,7 @@ static char *_xstrdup_vprintf(const char *fmt, va_list ap)
 			size = n + 1;           /* precisely what is needed */
 		else                      /* glibc 2.0 */
 			size *= 2;              /* twice the old size */
-		if ((p = xrealloc(p, size)) == NULL)
-			return NULL;
+		p = xrealloc(p, size);
 	}
 	/* NOTREACHED */
 }

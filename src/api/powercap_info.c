@@ -4,11 +4,11 @@
  *  Copyright (C) 2013 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,31 +24,23 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#ifdef HAVE_SYS_SYSLOG_H
-#  include <sys/syslog.h>
-#endif
-
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <unistd.h>
 
 #include "slurm/slurm.h"
@@ -75,7 +67,8 @@ extern int slurm_load_powercap(powercap_info_msg_t **resp)
 	req_msg.msg_type = REQUEST_POWERCAP_INFO;
 	req_msg.data     = NULL;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					   working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	switch (resp_msg.msg_type) {
@@ -94,7 +87,7 @@ extern int slurm_load_powercap(powercap_info_msg_t **resp)
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -107,40 +100,27 @@ extern int slurm_load_powercap(powercap_info_msg_t **resp)
 extern void slurm_print_powercap_info_msg(FILE * out, powercap_info_msg_t *ptr,
 					  int one_liner)
 {
-	char tmp_line[512];
 	char *out_buf = NULL;
 
 	if (ptr->power_cap == 0) {
 		/****** Line 1 ******/
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "Powercapping disabled by configuration."
-			 " See PowerParameters in `man slurm.conf'");
-		xstrcat(out_buf, tmp_line);
-		xstrcat(out_buf, "\n");
+		xstrcat(out_buf, "Powercapping disabled by configuration."
+			" See PowerParameters in `man slurm.conf'\n");
 		fprintf(out, "%s", out_buf);
 		xfree(out_buf);
 	} else {
 		/****** Line 1 ******/
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "MinWatts=%u CurrentWatts=%u ",
-			 ptr->min_watts, ptr->cur_max_watts);
-		xstrcat(out_buf, tmp_line);
+		xstrfmtcat(out_buf, "MinWatts=%u CurrentWatts=%u ",
+			   ptr->min_watts, ptr->cur_max_watts);
 		if (ptr->power_cap == INFINITE) {
-			snprintf(tmp_line, sizeof(tmp_line),
-				 "PowerCap=INFINITE ");
+			xstrcat(out_buf, "PowerCap=INFINITE ");
 		} else {
-			snprintf(tmp_line, sizeof(tmp_line),
-				 "PowerCap=%u ", ptr->power_cap);
+			xstrfmtcat(out_buf, "PowerCap=%u ", ptr->power_cap);
 		}
-		xstrcat(out_buf, tmp_line);
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "PowerFloor=%u PowerChangeRate=%u",
-			 ptr->power_floor, ptr->power_change);
-		xstrcat(out_buf, tmp_line);
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "AdjustedMaxWatts=%u MaxWatts=%u",
-			 ptr->adj_max_watts, ptr->max_watts);
-		xstrcat(out_buf, tmp_line);
+		xstrfmtcat(out_buf, "PowerFloor=%u PowerChangeRate=%u",
+			   ptr->power_floor, ptr->power_change);
+		xstrfmtcat(out_buf, "AdjustedMaxWatts=%u MaxWatts=%u",
+			   ptr->adj_max_watts, ptr->max_watts);
 
 		xstrcat(out_buf, "\n");
 		fprintf(out, "%s", out_buf);

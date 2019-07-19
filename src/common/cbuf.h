@@ -54,21 +54,7 @@
  *  If set to CBUF_WRAP_MANY, a single write operation will wrap-around the
  *  buffer as many times as needed in order to write all of the data.
  *
- *  If NDEBUG is not defined, internal debug code will be enabled.  This is
- *  intended for development use only and production code should define NDEBUG.
- *
- *  If WITH_LSD_FATAL_ERROR_FUNC is defined, the linker will expect to
- *  find an external lsd_fatal_error(file,line,mesg) function.  By default,
- *  lsd_fatal_error(file,line,mesg) is a macro definition that outputs an
- *  error message to stderr.  This macro may be redefined to invoke another
- *  routine instead.
- *
- *  If WITH_LSD_NOMEM_ERROR_FUNC is defined, the linker will expect to
- *  find an external lsd_nomem_error(file,line,mesg) function.  By default,
- *  lsd_nomem_error(file,line,mesg) is a macro definition that returns NULL.
- *  This macro may be redefined to invoke another routine instead.
- *
- *  If WITH_PTHREADS is defined, these routines will be thread-safe.
+ *  These routines are thread-safe.
  */
 
 

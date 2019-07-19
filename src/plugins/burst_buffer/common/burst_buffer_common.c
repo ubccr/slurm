@@ -3,18 +3,18 @@
  *
  *  NOTE: These functions are designed so they can be used by multiple burst
  *  buffer plugins at the same time (e.g. you might provide users access to
- *  both burst_buffer/cray and burst_buffer/generic on the same system), so
- *  the state information is largely in the individual plugin and passed as
- *  a pointer argument to these functions.
+ *  both burst_buffer/datawarp and burst_buffer/generic on the same system),
+ *  so the state information is largely in the individual plugin and passed
+ *  as a pointer argument to these functions.
  *****************************************************************************
  *  Copyright (C) 2014-2015 SchedMD LLC.
  *  Written by Morris Jette <jette@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -30,19 +30,17 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if     HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
 #define _GNU_SOURCE	/* For POLLRDHUP */
 #include <fcntl.h>
@@ -52,7 +50,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#if defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #define POLLRDHUP POLLHUP
 #include <signal.h>
 #endif
@@ -65,6 +63,7 @@
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/parse_config.h"
+#include "src/common/run_command.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/timers.h"
@@ -81,10 +80,6 @@
 
 /* Maximum poll wait time for child processes, in milliseconds */
 #define MAX_POLL_WAIT 500
-
-static int bb_plugin_shutdown = 0;
-static int child_proc_count = 0;
-static pthread_mutex_t proc_count_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void	_bb_job_del2(bb_job_t *bb_job);
 static uid_t *	_parse_users(char *buf);
@@ -219,6 +214,7 @@ extern void bb_clear_config(bb_config_t *config_ptr, bool fini)
 	xfree(config_ptr->deny_users_str);
 	xfree(config_ptr->destroy_buffer);
 	xfree(config_ptr->get_sys_state);
+	xfree(config_ptr->get_sys_status);
 	config_ptr->granularity = 1;
 	if (fini) {
 		for (i = 0; i < config_ptr->pool_cnt; i++)
@@ -245,7 +241,6 @@ extern bb_alloc_t *bb_find_alloc_rec(bb_state_t *state_ptr,
 				     struct job_record *job_ptr)
 {
 	bb_alloc_t *bb_alloc = NULL;
-	char jobid_buf[32];
 
 	xassert(job_ptr);
 	xassert(state_ptr);
@@ -256,10 +251,8 @@ extern bb_alloc_t *bb_find_alloc_rec(bb_state_t *state_ptr,
 				xassert(bb_alloc->magic == BB_ALLOC_MAGIC);
 				return bb_alloc;
 			}
-			error("%s: Slurm state inconsistent with burst "
-			      "buffer. %s has UserID mismatch (%u != %u)",
-			      __func__,
-			      jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)),
+			error("%s: Slurm state inconsistent with burst buffer. %pJ has UserID mismatch (%u != %u)",
+			      __func__, job_ptr,
 			      bb_alloc->user_id, job_ptr->user_id);
 			/* This has been observed when slurmctld crashed and
 			 * the job state recovered was missing some jobs
@@ -320,7 +313,7 @@ extern bb_user_t *bb_find_user_rec(uint32_t user_id, bb_state_t *state_ptr)
 		user_ptr = user_ptr->next;
 	}
 	user_ptr = xmalloc(sizeof(bb_user_t));
-	xassert((user_ptr->magic = BB_USER_MAGIC));	/* Sets value */
+	user_ptr->magic = BB_USER_MAGIC;
 	user_ptr->next = state_ptr->bb_uhash[inx];
 	/* user_ptr->size = 0;	initialized by xmalloc */
 	user_ptr->user_id = user_id;
@@ -333,22 +326,13 @@ static uint64_t _atoi(char *tok)
 {
 	char *end_ptr = NULL;
 	int64_t size_i;
-	uint64_t size_u = 0;
+	uint64_t mult, size_u = 0;
 
 	size_i = (int64_t) strtoll(tok, &end_ptr, 10);
 	if (size_i > 0) {
 		size_u = (uint64_t) size_i;
-		if ((end_ptr[0] == 'k') || (end_ptr[0] == 'K')) {
-			size_u = size_u * 1024;
-		} else if ((end_ptr[0] == 'm') || (end_ptr[0] == 'M')) {
-			size_u = size_u * 1024 * 1024;
-		} else if ((end_ptr[0] == 'g') || (end_ptr[0] == 'G')) {
-			size_u = size_u * 1024 * 1024 * 1024;
-		} else if ((end_ptr[0] == 't') || (end_ptr[0] == 'T')) {
-			size_u = size_u * 1024 * 1024 * 1024 * 1024;
-		} else if ((end_ptr[0] == 'p') || (end_ptr[0] == 'P')) {
-			size_u = size_u * 1024 * 1024 * 1024 * 1024 * 1024;
-		}
+		if ((mult = suffix_mult(end_ptr)) != NO_VAL64)
+			size_u *= mult;
 	}
 	return size_u;
 }
@@ -368,7 +352,7 @@ extern void bb_set_tres_pos(bb_state_t *state_ptr)
 	inx = assoc_mgr_find_tres_pos(&tres_rec, false);
 	state_ptr->tres_pos = inx;
 	if (inx == -1) {
-		debug("%s: Tres %s not found by assoc_mgr",
+		debug3("%s: Tres %s not found by assoc_mgr",
 		       __func__, state_ptr->name);
 	} else {
 		state_ptr->tres_id  = assoc_mgr_tres_array[inx]->id;
@@ -396,6 +380,7 @@ extern void bb_load_config(bb_state_t *state_ptr, char *plugin_type)
 		{"DestroyBuffer", S_P_STRING},
 		{"Flags", S_P_STRING},
 		{"GetSysState", S_P_STRING},
+		{"GetSysStatus", S_P_STRING},
 		{"Granularity", S_P_STRING},
 		{"OtherTimeout", S_P_UINT32},
 		{"StageInTimeout", S_P_UINT32},
@@ -429,7 +414,7 @@ extern void bb_load_config(bb_state_t *state_ptr, char *plugin_type)
 	state_ptr->bb_config.validate_timeout = DEFAULT_VALIDATE_TIMEOUT;
 
 	/* First look for "burst_buffer.conf" then with "type" field,
-	 * for example "burst_buffer_cray.conf" */
+	 * for example "burst_buffer_datawarp.conf" */
 	bb_conf = get_extra_conf_path("burst_buffer.conf");
 	fd = open(bb_conf, 0);
 	if (fd >= 0) {
@@ -482,6 +467,8 @@ extern void bb_load_config(bb_state_t *state_ptr, char *plugin_type)
 		state_ptr->bb_config.flags &= (~BB_FLAG_DISABLE_PERSISTENT);
 
 	s_p_get_string(&state_ptr->bb_config.get_sys_state, "GetSysState",
+		       bb_hashtbl);
+	s_p_get_string(&state_ptr->bb_config.get_sys_status, "GetSysStatus",
 		       bb_hashtbl);
 	if (s_p_get_string(&tmp, "Granularity", bb_hashtbl)) {
 		state_ptr->bb_config.granularity = bb_get_size_num(tmp, 1);
@@ -553,6 +540,8 @@ extern void bb_load_config(bb_state_t *state_ptr, char *plugin_type)
 		     state_ptr->bb_config.destroy_buffer);
 		info("%s: GetSysState:%s",  __func__,
 		     state_ptr->bb_config.get_sys_state);
+		info("%s: GetSysStatus:%s",  __func__,
+		     state_ptr->bb_config.get_sys_status);
 		info("%s: Granularity:%"PRIu64"",  __func__,
 		     state_ptr->bb_config.granularity);
 		for (i = 0; i < state_ptr->bb_config.pool_cnt; i++) {
@@ -582,7 +571,7 @@ extern void bb_load_config(bb_state_t *state_ptr, char *plugin_type)
 static void _pack_alloc(struct bb_alloc *bb_alloc, Buf buffer,
 			uint16_t protocol_version)
 {
-	if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		packstr(bb_alloc->account,      buffer);
 		pack32(bb_alloc->array_job_id,  buffer);
 		pack32(bb_alloc->array_task_id, buffer);
@@ -591,19 +580,6 @@ static void _pack_alloc(struct bb_alloc *bb_alloc, Buf buffer,
 		packstr(bb_alloc->name,         buffer);
 		packstr(bb_alloc->partition,    buffer);
 		packstr(bb_alloc->pool,   	buffer);
-		packstr(bb_alloc->qos,          buffer);
-		pack64(bb_alloc->size,          buffer);
-		pack16(bb_alloc->state,         buffer);
-		pack32(bb_alloc->user_id,       buffer);
-	} else {
-		packstr(bb_alloc->account,      buffer);
-		pack32(bb_alloc->array_job_id,  buffer);
-		pack32(bb_alloc->array_task_id, buffer);
-		pack_time(bb_alloc->create_time, buffer);
-		pack32((uint32_t)0, buffer);
-		pack32(bb_alloc->job_id,        buffer);
-		packstr(bb_alloc->name,         buffer);
-		packstr(bb_alloc->partition,    buffer);
 		packstr(bb_alloc->qos,          buffer);
 		pack64(bb_alloc->size,          buffer);
 		pack16(bb_alloc->state,         buffer);
@@ -652,7 +628,37 @@ extern void bb_pack_state(bb_state_t *state_ptr, Buf buffer,
 	bb_config_t *config_ptr = &state_ptr->bb_config;
 	int i;
 
-	if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
+
+	if (protocol_version >= SLURM_18_08_PROTOCOL_VERSION) {
+		packstr(config_ptr->allow_users_str, buffer);
+		packstr(config_ptr->create_buffer,   buffer);
+		packstr(config_ptr->default_pool,    buffer);
+		packstr(config_ptr->deny_users_str,  buffer);
+		packstr(config_ptr->destroy_buffer,  buffer);
+		pack32(config_ptr->flags,            buffer);
+		packstr(config_ptr->get_sys_state,   buffer);
+		packstr(config_ptr->get_sys_status,   buffer);
+		pack64(config_ptr->granularity,      buffer);
+		pack32(config_ptr->pool_cnt,         buffer);
+		for (i = 0; i < config_ptr->pool_cnt; i++) {
+			packstr(config_ptr->pool_ptr[i].name, buffer);
+			pack64(config_ptr->pool_ptr[i].total_space, buffer);
+			pack64(config_ptr->pool_ptr[i].granularity, buffer);
+			pack64(config_ptr->pool_ptr[i].unfree_space, buffer);
+			pack64(config_ptr->pool_ptr[i].used_space, buffer);
+		}
+		pack32(config_ptr->other_timeout,    buffer);
+		packstr(config_ptr->start_stage_in,  buffer);
+		packstr(config_ptr->start_stage_out, buffer);
+		packstr(config_ptr->stop_stage_in,   buffer);
+		packstr(config_ptr->stop_stage_out,  buffer);
+		pack32(config_ptr->stage_in_timeout, buffer);
+		pack32(config_ptr->stage_out_timeout,buffer);
+		pack64(state_ptr->total_space,       buffer);
+		pack64(state_ptr->unfree_space,      buffer);
+		pack64(state_ptr->used_space,        buffer);
+		pack32(config_ptr->validate_timeout, buffer);
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		packstr(config_ptr->allow_users_str, buffer);
 		packstr(config_ptr->create_buffer,   buffer);
 		packstr(config_ptr->default_pool,    buffer);
@@ -666,6 +672,7 @@ extern void bb_pack_state(bb_state_t *state_ptr, Buf buffer,
 			packstr(config_ptr->pool_ptr[i].name, buffer);
 			pack64(config_ptr->pool_ptr[i].total_space, buffer);
 			pack64(config_ptr->pool_ptr[i].granularity, buffer);
+			pack64(config_ptr->pool_ptr[i].unfree_space, buffer);
 			pack64(config_ptr->pool_ptr[i].used_space, buffer);
 		}
 		pack32(config_ptr->other_timeout,    buffer);
@@ -676,31 +683,9 @@ extern void bb_pack_state(bb_state_t *state_ptr, Buf buffer,
 		pack32(config_ptr->stage_in_timeout, buffer);
 		pack32(config_ptr->stage_out_timeout,buffer);
 		pack64(state_ptr->total_space,       buffer);
+		pack64(state_ptr->unfree_space,      buffer);
 		pack64(state_ptr->used_space,        buffer);
 		pack32(config_ptr->validate_timeout, buffer);
-	} else {
-		packstr(config_ptr->allow_users_str, buffer);
-		packstr(config_ptr->create_buffer,   buffer);
-		packstr(config_ptr->default_pool,    buffer);
-		packstr(config_ptr->deny_users_str,  buffer);
-		packstr(config_ptr->destroy_buffer,  buffer);
-		pack32(config_ptr->flags,            buffer);
-		packstr(config_ptr->get_sys_state,   buffer);
-		pack64(config_ptr->granularity,      buffer);
-		pack32(config_ptr->pool_cnt,         buffer);
-		for (i = 0; i < config_ptr->pool_cnt; i++) {
-			packstr(config_ptr->pool_ptr[i].name, buffer);
-			pack64(config_ptr->pool_ptr[i].total_space, buffer);
-			pack64(config_ptr->pool_ptr[i].used_space, buffer);
-		}
-		packstr(config_ptr->start_stage_in,  buffer);
-		packstr(config_ptr->start_stage_out, buffer);
-		packstr(config_ptr->stop_stage_in,   buffer);
-		packstr(config_ptr->stop_stage_out,  buffer);
-		pack32(config_ptr->stage_in_timeout, buffer);
-		pack32(config_ptr->stage_out_timeout,buffer);
-		pack64(state_ptr->total_space,       buffer);
-		pack64(state_ptr->used_space,        buffer);
 	}
 }
 
@@ -741,32 +726,31 @@ extern int bb_pack_usage(uid_t uid, bb_state_t *state_ptr, Buf buffer,
 }
 
 /* Translate a burst buffer size specification in string form to numeric form,
- * recognizing various sufficies (MB, GB, TB, PB, and Nodes). Default units
- * are bytes. */
+ * recognizing various (case insensitive) sufficies:
+ * K/KiB, M/MiB, G/GiB, T/TiB, P/PiB for powers of 1024
+ * KB, MB, GB, TB, PB for powers of 1000
+ * N/Node/Nodes will consider the size in nodes
+ * Default units are bytes. */
 extern uint64_t bb_get_size_num(char *tok, uint64_t granularity)
 {
-	char *end_ptr = NULL;
-	int64_t bb_size_i;
+	char *tmp = NULL, *unit;
+	uint64_t bb_size_i, mult;
 	uint64_t bb_size_u = 0;
 
-	bb_size_i = (int64_t) strtoll(tok, &end_ptr, 10);
-	if (bb_size_i > 0) {
-		bb_size_u = (uint64_t) bb_size_i;
-		if ((end_ptr[0] == 'k') || (end_ptr[0] == 'K')) {
-			bb_size_u *= 1024;
-		} else if ((end_ptr[0] == 'm') || (end_ptr[0] == 'M')) {
-			bb_size_u *= ((uint64_t)1024 * 1024);
-		} else if ((end_ptr[0] == 'g') || (end_ptr[0] == 'G')) {
-			bb_size_u *= ((uint64_t)1024 * 1024 * 1024);
-		} else if ((end_ptr[0] == 't') || (end_ptr[0] == 'T')) {
-			bb_size_u *= ((uint64_t)1024 * 1024 * 1024 * 1024);
-		} else if ((end_ptr[0] == 'p') || (end_ptr[0] == 'P')) {
-			bb_size_u *= ((uint64_t)1024 * 1024 * 1024 * 1024
-				      * 1024);
-		} else if ((end_ptr[0] == 'n') || (end_ptr[0] == 'N')) {
+	bb_size_i = (uint64_t) strtoull(tok, &tmp, 10);
+	if ((bb_size_i > 0) && tmp) {
+		bb_size_u = bb_size_i;
+		unit = xstrdup(tmp);
+		strtok(unit, " ");
+		if (!xstrcasecmp(unit, "n") ||
+		    !xstrcasecmp(unit, "node") ||
+		    !xstrcasecmp(unit, "nodes")) {
 			bb_size_u |= BB_SIZE_IN_NODES;
 			granularity = 1;
+		} else if ((mult = suffix_mult(unit)) != NO_VAL64) {
+			bb_size_u *= mult;
 		}
+		xfree(unit);
 	}
 
 	if (granularity > 1) {
@@ -778,7 +762,7 @@ extern uint64_t bb_get_size_num(char *tok, uint64_t granularity)
 }
 
 /* Translate a burst buffer size specification in numeric form to string form,
- * recognizing various sufficies (MB, GB, TB, PB, and Nodes). Default units
+ * appending various sufficies (KiB, MiB, GB, TB, PB, and Nodes). Default units
  * are bytes. */
 extern char *bb_get_size_str(uint64_t size)
 {
@@ -789,21 +773,42 @@ extern char *bb_get_size_str(uint64_t size)
 	} else if (size & BB_SIZE_IN_NODES) {
 		size &= (~BB_SIZE_IN_NODES);
 		snprintf(size_str, sizeof(size_str), "%"PRIu64"N", size);
+
 	} else if ((size % ((uint64_t)1024 * 1024 * 1024 * 1024 * 1024)) == 0) {
 		size /= ((uint64_t)1024 * 1024 * 1024 * 1024 * 1024);
+		snprintf(size_str, sizeof(size_str), "%"PRIu64"PiB", size);
+	} else if ((size % ((uint64_t)1000 * 1000 * 1000 * 1000 * 1000)) == 0) {
+		size /= ((uint64_t)1000 * 1000 * 1000 * 1000 * 1000);
 		snprintf(size_str, sizeof(size_str), "%"PRIu64"PB", size);
+
 	} else if ((size % ((uint64_t)1024 * 1024 * 1024 * 1024)) == 0) {
 		size /= ((uint64_t)1024 * 1024 * 1024 * 1024);
+		snprintf(size_str, sizeof(size_str), "%"PRIu64"TiB", size);
+	} else if ((size % ((uint64_t)1000 * 1000 * 1000 * 1000)) == 0) {
+		size /= ((uint64_t)1000 * 1000 * 1000 * 1000);
 		snprintf(size_str, sizeof(size_str), "%"PRIu64"TB", size);
+
 	} else if ((size % ((uint64_t)1024 * 1024 * 1024)) == 0) {
 		size /= ((uint64_t)1024 * 1024 * 1024);
+		snprintf(size_str, sizeof(size_str), "%"PRIu64"GiB", size);
+	} else if ((size % ((uint64_t)1000 * 1000 * 1000)) == 0) {
+		size /= ((uint64_t)1000 * 1000 * 1000);
 		snprintf(size_str, sizeof(size_str), "%"PRIu64"GB", size);
+
 	} else if ((size % ((uint64_t)1024 * 1024)) == 0) {
 		size /= ((uint64_t)1024 * 1024);
+		snprintf(size_str, sizeof(size_str), "%"PRIu64"MiB", size);
+	} else if ((size % ((uint64_t)1000 * 1000)) == 0) {
+		size /= ((uint64_t)1000 * 1000);
 		snprintf(size_str, sizeof(size_str), "%"PRIu64"MB", size);
+
 	} else if ((size % ((uint64_t)1024)) == 0) {
 		size /= ((uint64_t)1024);
+		snprintf(size_str, sizeof(size_str), "%"PRIu64"KiB", size);
+	} else if ((size % ((uint64_t)1000)) == 0) {
+		size /= ((uint64_t)1000);
 		snprintf(size_str, sizeof(size_str), "%"PRIu64"KB", size);
+
 	} else {
 		snprintf(size_str, sizeof(size_str), "%"PRIu64, size);
 	}
@@ -874,8 +879,7 @@ extern void bb_set_use_time(bb_state_t *state_ptr)
 				job_ptr = find_job_record(bb_alloc->job_id);
 				if (!job_ptr && !bb_alloc->orphaned) {
 					bb_alloc->orphaned = true;
-					error("%s: Job %u not found for "
-					      "allocated burst buffer",
+					error("%s: JobId=%u not found for allocated burst buffer",
 					      __func__, bb_alloc->job_id);
 					bb_alloc->use_time = now + 24 * 60 * 60;
 				} else if (!job_ptr) {
@@ -923,8 +927,8 @@ extern void bb_sleep(bb_state_t *state_ptr, int add_secs)
 	ts.tv_nsec = tv.tv_usec * 1000;
 	slurm_mutex_lock(&state_ptr->term_mutex);
 	if (!state_ptr->term_flag) {
-		pthread_cond_timedwait(&state_ptr->term_cond,
-				       &state_ptr->term_mutex, &ts);
+		slurm_cond_timedwait(&state_ptr->term_cond,
+				     &state_ptr->term_mutex, &ts);
 	}
 	slurm_mutex_unlock(&state_ptr->term_mutex);
 }
@@ -944,7 +948,7 @@ extern bb_alloc_t *bb_alloc_name_rec(bb_state_t *state_ptr, char *name,
 	state_ptr->last_update_time = now;
 	bb_alloc = xmalloc(sizeof(bb_alloc_t));
 	i = user_id % BB_HASH_SIZE;
-	xassert((bb_alloc->magic = BB_ALLOC_MAGIC));	/* Sets value */
+	bb_alloc->magic = BB_ALLOC_MAGIC;
 	bb_alloc->next = state_ptr->bb_ahash[i];
 	state_ptr->bb_ahash[i] = bb_alloc;
 	bb_alloc->array_task_id = NO_VAL;
@@ -976,7 +980,7 @@ extern bb_alloc_t *bb_alloc_job_rec(bb_state_t *state_ptr,
 	bb_alloc->array_task_id = job_ptr->array_task_id;
 	bb_alloc->assoc_ptr = job_ptr->assoc_ptr;
 	bb_alloc->job_id = job_ptr->job_id;
-	xassert((bb_alloc->magic = BB_ALLOC_MAGIC));	/* Sets value */
+	bb_alloc->magic = BB_ALLOC_MAGIC;
 	i = job_ptr->user_id % BB_HASH_SIZE;
 	xstrfmtcat(bb_alloc->name, "%u", job_ptr->job_id);
 	bb_alloc->next = state_ptr->bb_ahash[i];
@@ -1002,8 +1006,6 @@ extern bb_alloc_t *bb_alloc_job(bb_state_t *state_ptr,
 	bb_alloc_t *bb_alloc;
 
 	bb_alloc = bb_alloc_job_rec(state_ptr, job_ptr, bb_job);
-	bb_limit_add(bb_alloc->user_id, bb_alloc->size, bb_alloc->pool,
-		     state_ptr, true);
 
 	return bb_alloc;
 }
@@ -1054,190 +1056,6 @@ extern bool bb_free_alloc_rec(bb_state_t *state_ptr, bb_alloc_t *bb_alloc)
 	return false;
 }
 
-/*
- * Return time in msec since "start time"
- */
-static int _tot_wait (struct timeval *start_time)
-{
-	struct timeval end_time;
-	int msec_delay;
-
-	gettimeofday(&end_time, NULL);
-	msec_delay =   (end_time.tv_sec  - start_time->tv_sec ) * 1000;
-	msec_delay += ((end_time.tv_usec - start_time->tv_usec + 500) / 1000);
-	return msec_delay;
-}
-
-/* Terminate any child processes */
-extern void bb_shutdown(void)
-{
-	bb_plugin_shutdown = 1;
-}
-
-/* Return count of child processes */
-extern int bb_proc_count(void)
-{
-	int cnt;
-
-	slurm_mutex_lock(&proc_count_mutex);
-	cnt = child_proc_count;
-	slurm_mutex_unlock(&proc_count_mutex);
-
-	return cnt;
-}
-
-/* Execute a script, wait for termination and return its stdout.
- * script_type IN - Type of program being run (e.g. "StartStageIn")
- * script_path IN - Fully qualified pathname of the program to execute
- * script_args IN - Arguments to the script
- * max_wait IN - Maximum time to wait in milliseconds,
- *		 -1 for no limit (asynchronous)
- * status OUT - Job exit code
- * Return stdout+stderr of spawned program, value must be xfreed. */
-extern char *bb_run_script(char *script_type, char *script_path,
-			   char **script_argv, int max_wait, int *status)
-{
-	int i, new_wait, resp_size = 0, resp_offset = 0;
-	pid_t cpid;
-	char *resp = NULL;
-	int pfd[2] = { -1, -1 };
-
-	if ((script_path == NULL) || (script_path[0] == '\0')) {
-		error("%s: no script specified", __func__);
-		*status = 127;
-		resp = xstrdup("Slurm burst buffer configuration error");
-		return resp;
-	}
-	if (script_path[0] != '/') {
-		error("%s: %s is not fully qualified pathname (%s)",
-		      __func__, script_type, script_path);
-		*status = 127;
-		resp = xstrdup("Slurm burst buffer configuration error");
-		return resp;
-	}
-	if (access(script_path, R_OK | X_OK) < 0) {
-		error("%s: %s can not be executed (%s) %m",
-		      __func__, script_type, script_path);
-		*status = 127;
-		resp = xstrdup("Slurm burst buffer configuration error");
-		return resp;
-	}
-	if (max_wait != -1) {
-		if (pipe(pfd) != 0) {
-			error("%s: pipe(): %m", __func__);
-			*status = 127;
-			resp = xstrdup("System error");
-			return resp;
-		}
-	}
-	slurm_mutex_lock(&proc_count_mutex);
-	child_proc_count++;
-	slurm_mutex_unlock(&proc_count_mutex);
-	if ((cpid = fork()) == 0) {
-		int cc;
-
-		cc = sysconf(_SC_OPEN_MAX);
-		if (max_wait != -1) {
-			dup2(pfd[1], STDERR_FILENO);
-			dup2(pfd[1], STDOUT_FILENO);
-			for (i = 0; i < cc; i++) {
-				if ((i != STDERR_FILENO) &&
-				    (i != STDOUT_FILENO))
-					close(i);
-			}
-		} else {
-			for (i = 0; i < cc; i++)
-				close(i);
-			if ((cpid = fork()) < 0)
-				exit(127);
-			else if (cpid > 0)
-				exit(0);
-		}
-#ifdef SETPGRP_TWO_ARGS
-		setpgrp(0, 0);
-#else
-		setpgrp();
-#endif
-		execv(script_path, script_argv);
-		error("%s: execv(%s): %m", __func__, script_path);
-		exit(127);
-	} else if (cpid < 0) {
-		if (max_wait != -1) {
-			close(pfd[0]);
-			close(pfd[1]);
-		}
-		error("%s: fork(): %m", __func__);
-		slurm_mutex_lock(&proc_count_mutex);
-		child_proc_count--;
-		slurm_mutex_unlock(&proc_count_mutex);
-	} else if (max_wait != -1) {
-		struct pollfd fds;
-		struct timeval tstart;
-		resp_size = 1024;
-		resp = xmalloc(resp_size);
-		close(pfd[1]);
-		gettimeofday(&tstart, NULL);
-		while (1) {
-			if (bb_plugin_shutdown) {
-				error("%s: killing %s operation on shutdown",
-				      __func__, script_type);
-				break;
-			}
-			fds.fd = pfd[0];
-			fds.events = POLLIN | POLLHUP | POLLRDHUP;
-			fds.revents = 0;
-			if (max_wait <= 0) {
-				new_wait = MAX_POLL_WAIT;
-			} else {
-				new_wait = max_wait - _tot_wait(&tstart);
-				if (new_wait <= 0) {
-					error("%s: %s poll timeout @ %d msec",
-					      __func__, script_type, max_wait);
-					break;
-				}
-				new_wait = MIN(new_wait, MAX_POLL_WAIT);
-			}
-			i = poll(&fds, 1, new_wait);
-			if (i == 0) {
-				continue;
-			} else if (i < 0) {
-				error("%s: %s poll:%m", __func__, script_type);
-				break;
-			}
-			if ((fds.revents & POLLIN) == 0)
-				break;
-			i = read(pfd[0], resp + resp_offset,
-				 resp_size - resp_offset);
-			if (i == 0) {
-				break;
-			} else if (i < 0) {
-				if (errno == EAGAIN)
-					continue;
-				error("%s: read(%s): %m", __func__,
-				      script_path);
-				break;
-			} else {
-				resp_offset += i;
-				if (resp_offset + 1024 >= resp_size) {
-					resp_size *= 2;
-					resp = xrealloc(resp, resp_size);
-				}
-			}
-		}
-		killpg(cpid, SIGTERM);
-		usleep(10000);
-		killpg(cpid, SIGKILL);
-		waitpid(cpid, status, 0);
-		close(pfd[0]);
-		slurm_mutex_lock(&proc_count_mutex);
-		child_proc_count--;
-		slurm_mutex_unlock(&proc_count_mutex);
-	} else {
-		waitpid(cpid, status, 0);
-	}
-	return resp;
-}
-
 /* Allocate a bb_job_t record, hashed by job_id, delete with bb_job_del() */
 extern bb_job_t *bb_job_alloc(bb_state_t *state_ptr, uint32_t job_id)
 {
@@ -1245,7 +1063,7 @@ extern bb_job_t *bb_job_alloc(bb_state_t *state_ptr, uint32_t job_id)
 	bb_job_t *bb_job = xmalloc(sizeof(bb_job_t));
 
 	xassert(state_ptr);
-	xassert((bb_job->magic = BB_JOB_MAGIC));	/* Sets value */
+	bb_job->magic = BB_JOB_MAGIC;
 	bb_job->next = state_ptr->bb_jhash[inx];
 	bb_job->job_id = job_id;
 	state_ptr->bb_jhash[inx] = bb_job;
@@ -1327,7 +1145,7 @@ extern void bb_job_log(bb_state_t *state_ptr, bb_job_t *bb_job)
 	int i;
 
 	if (bb_job) {
-		xstrfmtcat(out_buf, "%s: Job:%u UserID:%u ",
+		xstrfmtcat(out_buf, "%s: JobId=%u UserID:%u ",
 			   state_ptr->name, bb_job->job_id, bb_job->user_id);
 		xstrfmtcat(out_buf, "Swap:%ux%u ", bb_job->swap_size,
 			   bb_job->swap_nodes);
@@ -1410,9 +1228,11 @@ extern void bb_limit_rem(uint32_t user_id, uint64_t bb_size, char *pool,
 		if (state_ptr->unfree_space >= bb_size) {
 			state_ptr->unfree_space -= bb_size;
 		} else {
-			/* This will happen if we reload burst buffer state
+			/*
+			 * This will happen if we reload burst buffer state
 			 * after making a claim against resources, but before
-			 * the buffer actually gets created */
+			 * the buffer actually gets created.
+			 */
 			debug2("%s: unfree_space underflow (%"PRIu64" < %"PRIu64")",
 			        __func__, state_ptr->unfree_space, bb_size);
 			state_ptr->unfree_space = 0;
@@ -1432,8 +1252,13 @@ extern void bb_limit_rem(uint32_t user_id, uint64_t bb_size, char *pool,
 			if (pool_ptr->unfree_space >= bb_size) {
 				pool_ptr->unfree_space -= bb_size;
 			} else {
-				error("%s: unfree_space underflow for pool %s",
-				      __func__, pool);
+				/*
+				 * This will happen if we reload burst buffer
+				 * state after making a claim against resources,
+				 * but before the buffer actually gets created.
+				 */
+				debug2("%s: unfree_space underflow for pool %s",
+				       __func__, pool);
 				pool_ptr->unfree_space = 0;
 			}
 			break;
@@ -1476,7 +1301,7 @@ extern int bb_post_persist_create(struct job_record *job_ptr,
 
 	memset(&resv, 0, sizeof(slurmdb_reservation_rec_t));
 	resv.assocs = bb_alloc->assocs;
-	resv.cluster = slurmctld_cluster_name;
+	resv.cluster = slurmctld_conf.cluster_name;
 	resv.name = bb_alloc->name;
 	resv.id = bb_alloc->id;
 	resv.time_start = bb_alloc->create_time;
@@ -1490,7 +1315,7 @@ extern int bb_post_persist_create(struct job_record *job_ptr,
 		while (assoc_ptr) {
 			assoc_ptr->usage->grp_used_tres[state_ptr->tres_pos] +=
 				size_mb;
-			debug2("%s: after adding persistant bb %s(%u), "
+			debug2("%s: after adding persistent bb %s(%u), "
 			       "assoc %u(%s/%s/%s) grp_used_tres(%s) "
 			       "is %"PRIu64,
 			       __func__, bb_alloc->name, bb_alloc->id,
@@ -1503,7 +1328,7 @@ extern int bb_post_persist_create(struct job_record *job_ptr,
 			/* FIXME: should grp_used_tres_run_secs be
 			 * done some how? Same for QOS below.
 			 */
-			/* debug2("%s: after adding persistant bb %s(%u), " */
+			/* debug2("%s: after adding persistent bb %s(%u), " */
 			/*        "assoc %u(%s/%s/%s) grp_used_tres_run_secs(%s) " */
 			/*        "is %"PRIu64, */
 			/*        __func__, bb_alloc->name, bb_alloc->id, */
@@ -1544,7 +1369,7 @@ extern int bb_post_persist_delete(bb_alloc_t *bb_alloc, bb_state_t *state_ptr)
 
 	memset(&resv, 0, sizeof(slurmdb_reservation_rec_t));
 	resv.assocs = bb_alloc->assocs;
-	resv.cluster = slurmctld_cluster_name;
+	resv.cluster = slurmctld_conf.cluster_name;
 	resv.name = bb_alloc->name;
 	resv.id = bb_alloc->id;
 	resv.time_end = time(NULL);
@@ -1562,7 +1387,7 @@ extern int bb_post_persist_delete(bb_alloc_t *bb_alloc, bb_state_t *state_ptr)
 			    >= size_mb) {
 				assoc_ptr->usage->grp_used_tres[
 					state_ptr->tres_pos] -= size_mb;
-				debug2("%s: after removing persistant "
+				debug2("%s: after removing persistent "
 				       "bb %s(%u), assoc %u(%s/%s/%s) "
 				       "grp_used_tres(%s) is %"PRIu64,
 				       __func__, bb_alloc->name, bb_alloc->id,
@@ -1573,7 +1398,7 @@ extern int bb_post_persist_delete(bb_alloc_t *bb_alloc, bb_state_t *state_ptr)
 				       assoc_ptr->usage->
 				       grp_used_tres[state_ptr->tres_pos]);
 			} else {
-				error("%s: underflow removing persistant "
+				error("%s: underflow removing persistent "
 				      "bb %s(%u), assoc %u(%s/%s/%s) "
 				      "grp_used_tres(%s) had %"PRIu64
 				      " but we are trying to remove %"PRIu64,
@@ -1591,7 +1416,7 @@ extern int bb_post_persist_delete(bb_alloc_t *bb_alloc, bb_state_t *state_ptr)
 
 			/* FIXME: should grp_used_tres_run_secs be
 			 * done some how? Same for QOS below. */
-			/* debug2("%s: after removing persistant bb %s(%u), " */
+			/* debug2("%s: after removing persistent bb %s(%u), " */
 			/*        "assoc %u(%s/%s/%s) grp_used_tres_run_secs(%s) " */
 			/*        "is %"PRIu64, */
 			/*        __func__, bb_alloc->name, bb_alloc->id, */

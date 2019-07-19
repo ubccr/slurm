@@ -1,14 +1,14 @@
 /*****************************************************************************\
- *  slurm_xlator.h - Definitions required to translate SLURM function names
+ *  slurm_xlator.h - Definitions required to translate Slurm function names
  *  to aliases containing  a prefix of "slurm_".
  *
- *  This is required because some SLURM functions have common names
+ *  This is required because some Slurm functions have common names
  *  (e.g. "debug" and "info"). If a user application defines these functions
- *  and uses SLURM APIs, they could link to the user function rather than
- *  the SLURM function. By renaming the functions, inappropriate linking
+ *  and uses Slurm APIs, they could link to the user function rather than
+ *  the Slurm function. By renaming the functions, inappropriate linking
  *  should be avoided.
  *
- *  All SLURM functions referenced from the switch, auth, and mpi plugins should
+ *  All Slurm functions referenced from the switch, auth, and mpi plugins should
  *  have aliases established. Functions not referenced from the plugins
  *  need not be aliased.
  *
@@ -33,11 +33,11 @@
  *             Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -53,29 +53,22 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef __SLURM_XLATOR_H__
 #define __SLURM_XLATOR_H__
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
 #if USE_ALIAS
-
-/* arg_desc.[ch] functions*/
-#define	arg_count		slurm_arg_count
-#define	arg_idx_by_name		slurm_arg_idx_by_name
-#define	arg_name_by_inx		slurm_arg_name_by_inx
 
 /* bitstring.[ch] functions*/
 #define	bit_alloc		slurm_bit_alloc
@@ -98,7 +91,6 @@
 #define	bit_set_count_range	slurm_bit_set_count_range
 #define	bit_clear_count		slurm_bit_clear_count
 #define	bit_nset_max_count	slurm_bit_nset_max_count
-#define	bit_and_set_count	slurm_bit_and_set_count
 #define	bit_rotate_copy		slurm_bit_rotate_copy
 #define	bit_rotate		slurm_bit_rotate
 #define	bit_fmt			slurm_bit_fmt
@@ -119,8 +111,6 @@
 #define bit_copybits		slurm_bit_copybits
 
 /* fd.[ch] functions */
-#define fd_read_n		slurm_fd_read_n
-#define fd_write_n		slurm_fd_write_n
 #define fd_set_blocking		slurm_fd_set_blocking
 #define fd_set_nonblocking	slurm_fd_set_nonblocking
 
@@ -169,6 +159,22 @@
 #define	hostset_shift_range	slurm_hostset_shift_range
 #define	hostset_within		slurm_hostset_within
 
+/* gres.[ch] functions */
+#define gres_gresid_to_gresname	slurm_gres_gresid_to_gresname
+#define gres_get_node_used	slurm_gres_get_node_used
+#define gres_get_system_cnt	slurm_gres_get_system_cnt
+#define gres_get_value_by_type	slurm_gres_get_value_by_type
+#define gres_get_job_info	slurm_gres_get_job_info
+#define gres_build_job_details	slurm_gres_build_job_details
+#define gres_get_step_info	slurm_gres_get_step_info
+#define gres_get_step_state	slurm_gres_get_step_state
+#define gres_get_job_state	slurm_gres_get_job_state
+#define gres_2_tres_str		slurm_gres_2_tres_str
+#define gres_set_job_tres_cnt	slurm_gres_set_job_tres_cnt
+#define gres_set_node_tres_cnt	slurm_gres_set_node_tres_cnt
+#define gres_device_major	slurm_gres_device_major
+#define destroy_gres_device	slurm_destroy_gres_device
+
 /* list.[ch] functions */
 #define	list_create		slurm_list_create
 #define	list_destroy		slurm_list_destroy
@@ -196,6 +202,8 @@
 #define	list_install_fork_handlers slurm_list_install_fork_handlers
 
 /* log.[ch] functions */
+#define get_log_level		slurm_get_log_level
+#define get_sched_log_level	slurm_get_sched_log_level
 #define	log_init		slurm_log_init
 #define	log_reinit		slurm_log_reinit
 #define	log_fini		slurm_log_fini
@@ -205,12 +213,8 @@
 #define	log_fp			slurm_log_fp
 #define	log_has_data		slurm_log_has_data
 #define	log_flush		slurm_log_flush
-#define	dump_cleanup_list	slurm_dump_cleanup_list
-#define	fatal_add_cleanup	slurm_fatal_add_cleanup
-#define	fatal_add_cleanup_job	slurm_fatal_add_cleanup_job
-#define	fatal_remove_cleanup	slurm_fatal_remove_cleanup
-#define	fatal_remove_cleanup_job slurm_fatal_remove_cleanup_job
-#define	fatal_cleanup		slurm_fatal_cleanup
+#define log_var			slurm_log_var
+#define	fatal_abort		slurm_fatal_abort
 #define	fatal			slurm_fatal
 #define	error			slurm_error
 #define	info			slurm_info
@@ -227,7 +231,6 @@
 
 /* net.[ch] functions */
 #define net_stream_listen	slurm_net_stream_listen
-#define net_accept_stream	slurm_net_accept_stream
 #define net_set_low_water	slurm_net_set_low_water
 
 /* pack.[ch] functions */
@@ -257,6 +260,8 @@
 #define	unpackmem_ptr		slurm_unpackmem_ptr
 #define	unpackmem_xmalloc	slurm_unpackmem_xmalloc
 #define	unpackmem_malloc	slurm_unpackmem_malloc
+#define	unpackstr_xmalloc_escaped slurm_unpackstr_xmalloc_escaped
+#define	unpackstr_xmalloc_chooser slurm_unpackstr_xmalloc_chooser
 #define	packstr_array		slurm_packstr_array
 #define	unpackstr_array		slurm_unpackstr_array
 #define	packmem_array		slurm_packmem_array
@@ -282,6 +287,7 @@
 #define env_array_append_fmt	slurm_env_array_append_fmt
 #define env_array_overwrite	slurm_env_array_overwrite
 #define env_array_overwrite_fmt slurm_env_array_overwrite_fmt
+#define env_array_overwrite_pack_fmt  slurm_env_array_overwrite_pack_fmt
 
 /* read_config.[ch] functions */
 #define destroy_config_key_pair	slurm_destroy_config_key_pair
@@ -315,7 +321,6 @@
 #define	_xstrcat		slurm_xstrcat
 #define	_xstrncat		slurm_xstrncat
 #define	_xstrcatchar		slurm_xstrcatchar
-#define	_xslurm_strerrorcat	slurm_xslurm_strerrorcat
 #define	_xstrftimecat		slurm_xstrftimecat
 #define	_xiso8601timecat	slurm_xiso8601timecat
 #define	_xrfc5424timecat	slurm_xrfc5424timecat
@@ -325,13 +330,16 @@
 #define	xstrdup_printf		slurm_xstrdup_printf
 #define	xbasename		slurm_xbasename
 #define	_xstrsubstitute		slurm_xstrsubstitute
-#define	xstrstrip		slurm_xstrstrip
 #define	xshort_hostname		slurm_xshort_hostname
 #define xstring_is_whitespace   slurm_xstring_is_whitespace
 #define	xstrtolower		slurm_xstrtolower
 #define xstrchr			slurm_xstrchr
+#define xstrrchr		slurm_xstrrchr
 #define xstrcmp			slurm_xstrcmp
+#define xstrncmp		slurm_xstrncmp
 #define xstrcasecmp		slurm_xstrcasecmp
+#define xstrncasecmp		slurm_xstrncasecmp
+#define xstrcasestr		slurm_xstrcasestr
 
 /* slurm_protocol_api.[ch] functions */
 #define convert_num_unit2       slurm_convert_num_unit2
@@ -351,16 +359,20 @@
 #define node_state_string_compact slurm_node_state_string_compact
 #define private_data_string	slurm_private_data_string
 #define accounting_enforce_string slurm_accounting_enforce_string
-#define conn_type_string	slurm_conn_type_string
-#define node_use_string		slurm_node_use_string
-#define bg_block_state_string	slurm_bg_block_state_string
 #define reservation_flags_string slurm_reservation_flags_string
+#define print_multi_line_string slurm_print_multi_line_string
 
 /* slurmdbd_defs.[ch] functions */
-#define slurmdbd_free_list_msg	slurmdb_slurmdbd_free_list_msg
-#define slurmdbd_free_rc_msg    slurmdb_slurmdbd_free_rc_msg
-#define slurmdbd_free_usage_msg slurmdb_slurmdbd_free_usage_msg
-#define slurmdbd_free_id_rc_msg slurmdb_slurmdbd_free_id_rc_msg
+#define slurmdbd_defs_init      slurm_slurmdbd_defs_init
+#define slurmdbd_defs_fini      slurm_slurmdbd_defs_fini
+#define slurmdbd_free_buffer	slurm_slurmdbd_free_buffer
+#define slurmdbd_free_list_msg	slurm_slurmdbd_free_list_msg
+#define slurmdbd_free_usage_msg slurm_slurmdbd_free_usage_msg
+#define slurmdbd_free_id_rc_msg slurm_slurmdbd_free_id_rc_msg
+
+/* slurmdbd_pack.[ch] functions */
+#define pack_slurmdbd_msg	slurm_pack_slurmdbd_msg
+#define unpack_slurmdbd_msg	slurm_unpack_slurmdbd_msg
 
 /* plugin.[ch] functions */
 #define plugin_get_syms         slurm_plugin_get_syms
@@ -373,16 +385,12 @@
 #define plugrack_destroy        slurm_plugrack_destroy
 #define plugrack_read_dir       slurm_plugrack_read_dir
 #define plugrack_set_major_type slurm_plugrack_set_major_type
-#define plugrack_set_paranoia   slurm_plugrack_set_paranoia
 #define plugrack_use_by_type    slurm_plugrack_use_by_type
 
 #define jobacctinfo_pack	slurm_jobacctinfo_pack
 #define jobacctinfo_unpack	slurm_jobacctinfo_unpack
 #define jobacctinfo_create      slurm_jobacctinfo_create
 #define jobacctinfo_destroy     slurm_jobacctinfo_destroy
-
-/* node_select.[ch] functions */
-#define destroy_select_ba_request	slurm_destroy_select_ba_request
 
 /* parse_config.[ch] functions */
 #define s_p_hashtbl_create	slurm_s_p_hashtbl_create
@@ -395,6 +403,7 @@
 #define s_p_get_long		slurm_s_p_get_long
 #define s_p_get_uint16		slurm_s_p_get_uint16
 #define s_p_get_uint32		slurm_s_p_get_uint32
+#define s_p_get_uint64		slurm_s_p_get_uint64
 #define s_p_get_pointer		slurm_s_p_get_pointer
 #define s_p_get_array		slurm_s_p_get_array
 #define s_p_get_boolean		slurm_s_p_get_boolean
@@ -430,12 +439,21 @@
 #define stepd_connect			slurm_stepd_connect
 #define stepd_get_uid			slurm_stepd_get_uid
 #define stepd_add_extern_pid		slurm_stepd_add_extern_pid
+#define stepd_get_x11_display		slurm_stepd_get_x11_display
+#define stepd_get_info			slurm_stepd_get_info
+#define stepd_getpw			slurm_stepd_getpw
+#define xfree_struct_passwd		slurm_xfree_struct_passwd
+#define stepd_getgr			slurm_stepd_getgr
+#define xfree_struct_group_array	slurm_xfree_struct_group_array
 
+/* xcgroup_read_config.[ch] */
+#define xcgroup_config_read_mutex       slurm_xcgroup_config_read_mutex
+#define xcgroup_get_slurm_cgroup_conf   slurm_xcgroup_get_slurm_cgroup_conf
+#define xcgroup_fini_slurm_cgroup_conf  slurm_xcgroup_fini_slurm_cgroup_conf
 
 #endif /* USE_ALIAS */
 
 /* Include the function definitions after redefining their names. */
-#include "src/common/arg_desc.h"
 #include "src/common/bitstring.h"
 #include "src/common/callerid.h"
 #include "src/common/eio.h"
@@ -457,6 +475,7 @@
 #include "src/common/switch.h"
 #include "src/common/working_cluster.h"
 #include "src/common/xassert.h"
+#include "src/common/xcgroup_read_config.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"

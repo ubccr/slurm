@@ -1,4 +1,4 @@
-.TH "slurmdbd.conf" "5" "Slurm Configuration File" "April 2015" "Slurm Configuration File"
+.TH "slurmdbd.conf" "5" "Slurm Configuration File" "May 2019" "Slurm Configuration File"
 
 .SH "NAME"
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file
@@ -34,6 +34,11 @@ element is set to true.  Default is /tmp.  The format for this files name is
 .na
 $ArchiveDir/$ClusterName_$ArchiveObject_archive_$BeginTimeStamp_$endTimeStamp
 .ad
+We limit archive files to 50000 records per file. If more than 50000 records
+exist during that time period, they will be written to a new file.  Subsequent
+archive files during the same time period will have ".<number>" appended
+to the file, for example .2, with the number increasing by one for each file in
+the same time period.
 
 .TP
 \fBArchiveEvents\fR
@@ -81,6 +86,12 @@ Time of last step start to archive.
 \fBSLURM_ARCHIVE_SUSPEND\fR
 1 for archive suspend data 0 otherwise.
 .TP
+\fBSLURM_ARCHIVE_TXN\fR
+1 for archive transaction data 0 otherwise.
+.TP
+\fBSLURM_ARCHIVE_USAGE\fR
+1 for archive usage data 0 otherwise.
+.TP
 \fBSLURM_ARCHIVE_LAST_SUSPEND\fR
 Time of last suspend start to archive.
 .TP
@@ -97,6 +108,16 @@ When purging suspend data also archive it.  Boolean, yes to archive
 suspend data, no otherwise.  Default is no.
 
 .TP
+\fBArchiveTXN\fR
+When purging transaction data also archive it.  Boolean, yes to archive
+transaction data, no otherwise.  Default is no.
+
+.TP
+\fBArchiveUsage\fR
+When purging usage data (Cluster, Association and WCKey) also archive it.
+Boolean, yes to archive transaction data, no otherwise.  Default is no.
+
+.TP
 \fBAuthInfo\fR
 Additional information to be used for authentication of communications
 with the Slurm control daemon (slurmctld) on each cluster.
@@ -109,18 +130,20 @@ this value is left unspecified, which results in the default authentication
 mechanism being used.
 
 .TP
+\fBAuthAltTypes\fR
+Command separated list of alternative authentication plugins that the slurmdbd
+will permit for communication.
+
+.TP
 \fBAuthType\fR
 Define the authentication method for communications between Slurm
 components.
-Acceptable values at present include "auth/none"
-and "auth/munge".
-The default value is "auth/none", which means the UID included in
-communication messages is not verified.
-This may be fine for testing purposes, but
-\fBdo not use "auth/none" if you desire any security\fR.
-"auth/munge" indicates that LLNL's Munge system is to be used
-(this is the best supported authentication mechanism for Slurm,
-see "https://code.google.com/p/munge/" for more information).
+Acceptable values at present include "auth/none" and "auth/munge".
+The default value is "auth/munge".
+\fBDo not use "auth/none" if you desire any security\fR.
+"auth/munge" indicates that LLNL's MUNGE system is to be used
+(this is the supported authentication mechanism for Slurm;
+see "https://dun.github.io/munge/" for more information).
 SlurmDBD must be terminated prior to changing the value of \fBAuthType\fR
 and later restarted.
 
@@ -162,7 +185,7 @@ This value must be specified.
 \fBDbdPort\fR
 The port number that the Slurm Database Daemon (slurmdbd) listens
 to for work. The default value is SLURMDBD_PORT as established at system
-build time. If none is explicitly specified, it will be set to 6819.
+build time. If no value is explicitly specified, it will be set to 6819.
 This value must be equal to the \fBAccountingStoragePort\fR parameter in the
 slurm.conf file.
 
@@ -209,6 +232,9 @@ in the database.
 .TP
 \fBDB_WCKEY\fR
 SQL statements/queries when dealing with wckeys in the database.
+.TP
+\fBFEDERATION\fR
+SQL statements/queries when dealing with federations in the database.
 .RE
 
 .TP
@@ -249,6 +275,50 @@ Log errors and verbose informational messages and even more debugging messages
 .RE
 
 .TP
+\fBDebugLevelSyslog\fR
+The slurmdbd daemon will log events to the syslog file at the specified
+level of detail. If not set, the slurmdbd daemon will log to syslog at
+level \fBfatal\fR, unless there is no \fBLogFile\fR and it is running
+in the background, in which case it will log to syslog at the level specified
+by \fBDebugLevel\fR (at \fBfatal\fR in the case that \fBDebugLevel\fR
+is set to \fBquiet\fR) or it is run in the foreground, when it will be set to
+quiet.
+
+.RS
+.TP 10
+\fBquiet\fR
+Log nothing
+.TP
+\fBfatal\fR
+Log only fatal errors
+.TP
+\fBerror\fR
+Log only errors
+.TP
+\fBinfo\fR
+Log errors and general informational messages
+.TP
+\fBverbose\fR
+Log errors and verbose informational messages
+.TP
+\fBdebug\fR
+Log errors and verbose informational messages and debugging messages
+.TP
+\fBdebug2\fR
+Log errors and verbose informational messages and more debugging messages
+.TP
+\fBdebug3\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug4\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug5\fR
+Log errors and verbose informational messages and even more debugging messages
+.RE
+
+
+.TP
 \fBDefaultQOS\fR
 When adding a new cluster this will be used as the qos for the cluster
 unless something is explicitly set by the admin with the create.
@@ -277,9 +347,29 @@ in the C standard ctime() function form without the year but
 including the microseconds, the daemon's process ID and the current thread ID.
 
 .TP
+\fBMaxQueryTimeRange\fR
+Return an error if a query is against too large of a time span, to prevent
+ill-formed queries from causing performance problems within SlurmDBD.
+Default value is INFINITE which allows any queries to proceed.
+Accepted time formats are the same as the MaxTime option in slurm.conf.
+User \fBSlurmUser\fR and \fBroot\fR are exempt from this restriction.
+Note that queries which attempt to return over 3GB of data will still
+fail to complete with ESLURM_RESULT_TOO_LARGE.
+
+.TP
 \fBMessageTimeout\fR
 Time permitted for a round\-trip communication to complete
 in seconds. Default value is 10 seconds.
+
+.TP
+\fBParameters\fR
+Contains arbitrary comma separated parameters used to alter the behavior of
+the slurmdbd.
+.RS
+.TP
+\fBPreserveCaseUser\fR
+When defining users do not force lower case which is the default behavior.
+.RE
 
 .TP
 \fBPidFile\fR
@@ -307,6 +397,10 @@ Acceptable values include:
 \fBaccounts\fR
 prevents users from viewing any account definitions unless they are
 coordinators of them.
+.TP
+\fBevents\fR
+prevents users from viewing event information unless they have operator status
+or above.
 .TP
 \fBjobs\fR
 prevents users from viewing job records belonging
@@ -345,7 +439,7 @@ If not set (default), then job step records are never purged.
 .TP
 \fBPurgeJobAfter\fR
 Individual job records over this age are purged from the database.
-Aggregated information will be preserved indefinitely.
+Aggregated information will be preserved to "PurgeUsageAfter".
 The time is a numeric value and is a number of months.  If you want to purge
 more often you can include "hours", or "days" behind the numeric value to get
 those more frequent purges (i.e. a value of "12hours" would purge
@@ -358,7 +452,7 @@ If not set (default), then job records are never purged.
 .TP
 \fBPurgeResvAfter\fR
 Individual reservation records over this age are purged from the database.
-Aggregated information will be preserved indefinitely.
+Aggregated information will be preserved to "PurgeUsageAfter".
 The time is a numeric value and is a number of months.  If you want to purge
 more often you can include "hours", or "days" behind the numeric value to get
 those more frequent purges (i.e. a value of "12hours" would purge
@@ -371,7 +465,7 @@ If not set (default), then reservation records are never purged.
 .TP
 \fBPurgeStepAfter\fR
 Individual job step records over this age are purged from the database.
-Aggregated information will be preserved indefinitely.
+Aggregated information will be preserved to "PurgeUsageAfter".
 The time is a numeric value and is a number of months.  If you want to purge
 more often you can include "hours", or "days" behind the numeric value to get
 those more frequent purges (i.e. a value of "12hours" would purge
@@ -385,7 +479,32 @@ If not set (default), then job step records are never purged.
 \fBPurgeSuspendAfter\fR
 Records of individual suspend times for jobs over this age are purged from the
 database.
-Aggregated information will be preserved indefinitely.
+Aggregated information will be preserved to "PurgeUsageAfter".
+The time is a numeric value and is a number of months.  If you want to purge
+more often you can include "hours", or "days" behind the numeric value to get
+those more frequent purges (i.e. a value of "12hours" would purge
+everything older than 12 hours).
+The purge takes place at the start of the each purge interval.
+For example, if the purge time is 2 months, the purge would happen at the
+beginning of each month.
+If not set (default), then job step records are never purged.
+
+.TP
+\fBPurgeTXNAfter\fR
+Records of individual transaction times for transactions over this age are purged from the database.
+The time is a numeric value and is a number of months.  If you want to purge
+more often you can include "hours", or "days" behind the numeric value to get
+those more frequent purges (i.e. a value of "12hours" would purge
+everything older than 12 hours).
+The purge takes place at the start of the each purge interval.
+For example, if the purge time is 2 months, the purge would happen at the
+beginning of each month.
+If not set (default), then job step records are never purged.
+
+.TP
+\fBPurgeUsageAfter\fR
+Usage Records (Cluster, Association and WCKey) over this age are purged from the
+database.
 The time is a numeric value and is a number of months.  If you want to purge
 more often you can include "hours", or "days" behind the numeric value to get
 those more frequent purges (i.e. a value of "12hours" would purge
@@ -397,11 +516,15 @@ If not set (default), then job step records are never purged.
 
 .TP
 \fBSlurmUser\fR
-The name of the user that the \fBslurmctld\fR daemon executes as.
+The name of the user that the \fBslurmdbd\fR daemon executes as.
 This user must exist on the machine executing the Slurm Database Daemon
-and have the same user ID as the hosts on which \fBslurmctld\fR execute.
+and have the same UID as the hosts on which \fBslurmctld\fR execute.
 For security purposes, a user other than "root" is recommended.
-The default value is "root".
+The default value is "root". This name should also be the same SlurmUser
+on all clusters reporting to the SlurmDBD.
+NOTE: If this user is different from the one set for \fBslurmctld\fR and is not
+root, it must be added to accounting with AdminLevel=Admin and \fBslurmctld\fR
+must be restarted.
 
 .TP
 \fBStorageHost\fR
@@ -421,12 +544,12 @@ Default is none.
 .TP
 \fBStorageLoc\fR
 Specify the name of the database as the location where accounting
-records are written.
+records are written. Defaults to "slurm_acct_db".
 
 .TP
 \fBStoragePass\fR
 Define the password used to gain access to the database to store
-the job accounting data.
+the job accounting data. The '#' character is not permitted in a password.
 
 .TP
 \fBStoragePort\fR
@@ -477,11 +600,15 @@ ArchiveEvents=yes
 .br
 ArchiveJobs=yes
 .br
-ArchiveResv=yes
+ArchiveResvs=yes
 .br
 ArchiveSteps=no
 .br
 ArchiveSuspend=no
+.br
+ArchiveTXN=no
+.br
+ArchiveUsage=no
 .br
 #ArchiveScript=/usr/sbin/slurm.dbd.archive
 .br
@@ -491,7 +618,7 @@ AuthType=auth/munge
 .br
 DbdHost=db_host
 .br
-DebugLevel=4
+DebugLevel=info
 .br
 PurgeEventAfter=1month
 .br
@@ -502,6 +629,10 @@ PurgeResvAfter=1month
 PurgeStepAfter=1month
 .br
 PurgeSuspendAfter=1month
+.br
+PurgeTXNAfter=12month
+.br
+PurgeUsageAfter=24month
 .br
 LogFile=/var/log/slurmdbd.log
 .br

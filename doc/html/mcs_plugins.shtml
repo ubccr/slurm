@@ -1,7 +1,6 @@
 <!--#include virtual="header.txt"-->
 
-<h1><a name="top">Multi-Category Security (MCS) Plugin Programmer Guide
-</a></h1>
+<h1><a name="top">Multi-Category Security (MCS) Plugin Programmer Guide</a></h1>
 
 <h2> Overview</h2>
 <p> This document describes Slurm's MCS plugins and the API that
@@ -23,6 +22,7 @@ The major type must be &quot;mcs.&quot;
 The minor type can be any suitable name
 for the MCS. We recommend, for example :
 <ul>
+<li><b>account</b> &mdash; Use user account as the category to associate jobs to.
 <li><b>none</b> &mdash; Default. No category associated to jobs.
 <li><b>user</b> &mdash; Use user name as the category to associate jobs to.
 <li><b>group</b> &mdash; Use a user group as the category to associate jobs to.
@@ -42,7 +42,6 @@ in other Slurm functions used by the plugin.</p>
 <span class="commandline">src/plugins/mcs/group</span> and
 <span class="commandline">src/common/slurm_mcs.c</span>
 for an example implementation of a Slurm MCS plugin.
-<p class="footer"><a href="#top">top</a>
 
 <h2>API Functions</h2>
 <p>All of the following functions are required. Functions which are not
@@ -64,8 +63,8 @@ implemented must be stubbed.
 <p><b>Note</b>: These init and fini functions are not the same as those
 described in the <span class="commandline">dlopen (3)</span> system library.
 The C run-time system co-opts those symbols for its own initialization.
-The system <span class="commandline">_init()</span> is called before the SLURM
-<span class="commandline">init()</span>, and the SLURM
+The system <span class="commandline">_init()</span> is called before the Slurm
+<span class="commandline">init()</span>, and the Slurm
 <span class="commandline">fini()</span> is called before the system's
 <span class="commandline">_fini()</span>.</p>
 
@@ -101,7 +100,6 @@ MCS_label of user and MCS_label of jobs/nodes.<br>
 <dt><span class="commandline">MCSParameters</span>
 <dd>If MCSPlugin!=mcs/none, specifies options
 
-<p class="footer"><a href="#top">top</a>
 
 <p style="text-align:center;">Last modified 12 October 2015</p>
 

@@ -3,11 +3,11 @@
  *****************************************************************************
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -23,15 +23,29 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
+
+#ifdef HAVE_CONFIG_H
+#  include "config.h"
+#endif
+
+#define _GNU_SOURCE
+
+#ifndef __USE_GNU
+#  define  __USE_GNU
+#endif
+
+#ifdef HAVE_NUMA
+#  include <numa.h>
+#endif
 
 /*
  * FreeBSD and Linux affinity functions have a slightly different interface
@@ -39,55 +53,34 @@
  * affinity.c.
  */
 #ifdef __FreeBSD__
-#include <sys/param.h>
-#include <sys/cpuset.h>
-typedef cpuset_t cpu_set_t;
-#endif
-
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#ifdef HAVE_NUMA
-#  include <numa.h>
-#endif
-
-#ifdef HAVE_SYS_TYPES_H
-#  include <sys/types.h>
+#  include <sys/param.h>
+#  include <sys/cpuset.h>
+   typedef cpuset_t cpu_set_t;
 #endif
 
 #ifdef HAVE_SYS_PRCTL_H
 #  include <sys/prctl.h>
 #endif
 
-#include <sys/wait.h>
-#include <sys/stat.h>
-#include <sys/param.h>
-#include <poll.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-#include <pwd.h>
 #include <grp.h>
+#include <poll.h>
+#include <pwd.h>
+#include <sched.h> /* SMB */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
-#ifndef   _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
-#ifndef   __USE_GNU
-#define   __USE_GNU
-#endif
-
-#include <sched.h> /* SMB */
-
-#ifdef HAVE_STDLIB_H
-#  include <stdlib.h>
-#endif
-
 #include "slurm/slurm_errno.h"
+
 #include "src/common/slurm_xlator.h"
+#include "src/slurmd/common/task_plugin.h"
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
@@ -97,7 +90,6 @@ typedef cpuset_t cpu_set_t;
 #include "src/common/log.h"
 #include "src/common/node_select.h"
 #include "src/common/fd.h"
-#include "src/common/safeopen.h"
 #include "src/common/switch.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
@@ -134,8 +126,6 @@ uint16_t slurm_get_numa_node(uint16_t cpuid);
 #endif
 
 /*** from schedutils.c ***/
-int	char_to_val(int c);
 int	str_to_cpuset(cpu_set_t *mask, const char* str);
 int	str_to_cnt(const char* str);
 char *	cpuset_to_str(const cpu_set_t *mask, char *str);
-int	val_to_char(int v);

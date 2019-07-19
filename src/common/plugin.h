@@ -6,11 +6,11 @@
  *  Written by Jay Windlay <jwindley@lnxi.com>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,35 +26,24 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef __GENERIC_PLUGIN_H__
 #define __GENERIC_PLUGIN_H__
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif /* HAVE_INTTYPES_H */
-#  if HAVE_SYS_TYPES_H
-#    include <sys/types.h>
-#  endif
-#else /* ! HAVE_CONFIG_H_ */
-#  include <inttypes.h>
-#endif /* HAVE_CONFIG_H */
+#include <inttypes.h>
+#include <sys/types.h>
+#include <dirent.h>
 
+#include "src/common/list.h"
 #include "slurm/slurm_errno.h"
 
 /*
@@ -96,7 +85,7 @@ typedef enum {
 	EPLUGIN_INIT_FAILED,     /* Plugin's init() callback failed     */
 	EPLUGIN_MISSING_NAME,    /* plugin_name/type/version missing    */
 	EPLUGIN_MISSING_SYMBOL,  /* some symbol needed isn't found      */
-	EPLUGIN_BAD_VERSION,     /* incompatable plugin version         */
+	EPLUGIN_BAD_VERSION,     /* incompatible plugin version         */
 } plugin_err_t;
 
 const char *plugin_strerror(plugin_err_t err);
@@ -117,7 +106,7 @@ const char *plugin_strerror(plugin_err_t err);
  *	be NULL to indicate that the caller is not interested in the
  *	plugin version.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 int plugin_peek( const char *fq_path,
 		 char *plugin_type,
@@ -220,5 +209,13 @@ extern plugin_context_t *plugin_context_create(
  * Destroy a context created from plugin_context_create.
  */
 extern int plugin_context_destroy(plugin_context_t *c);
+
+/*
+ * Return a list of plugin names that match the given type.
+ *
+ * IN plugin_type - Type of plugin to search for in the plugin_dir.
+ * RET list of plugin names, NULL if none found.
+ */
+extern List plugin_get_plugins_of_type(char *plugin_type);
 
 #endif /*__GENERIC_PLUGIN_H__*/

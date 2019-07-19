@@ -9,11 +9,11 @@
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,25 +29,22 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
 
 #include <ctype.h>
 #include <regex.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -77,6 +74,7 @@ strong_alias(s_p_get_string,		slurm_s_p_get_string);
 strong_alias(s_p_get_long,		slurm_s_p_get_long);
 strong_alias(s_p_get_uint16,		slurm_s_p_get_uint16);
 strong_alias(s_p_get_uint32,		slurm_s_p_get_uint32);
+strong_alias(s_p_get_uint64,		slurm_s_p_get_uint64);
 strong_alias(s_p_get_float,		slurm_s_p_get_float);
 strong_alias(s_p_get_double,		slurm_s_p_get_double);
 strong_alias(s_p_get_long_double,	slurm_s_p_get_long_double);
@@ -99,6 +97,23 @@ static char *keyvalue_pattern =
 					    * or unquoted and no whitespace */
 	"([[:space:]]|$)";
 static bool keyvalue_initialized = false;
+static bool pthread_atfork_set = false;
+
+/* The following mutex and atfork() handler protect against receiving
+ * a corrupted keyvalue_re state in a forked() child. While regexec() itself
+ * appears to be thread-safe (due to internal locking), a process fork()'d
+ * while a regexec() is running in a separate thread will inherit an internally
+ * locked keyvalue_re leading to deadlock. This appears to have been fixed in
+ * glibc with a release in 2013, although I do not know the exact version.
+ */
+static pthread_mutex_t s_p_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void _s_p_atfork_child(void)
+{
+	slurm_mutex_init(&s_p_lock);
+	keyvalue_initialized = false;
+	pthread_atfork_set = false;
+}
 
 struct s_p_values {
 	char *key;
@@ -170,10 +185,8 @@ s_p_hashtbl_t *s_p_hashtbl_create(const s_p_options_t options[])
 	s_p_values_t *value = NULL;
 	s_p_hashtbl_t *hashtbl = NULL;
 	_expline_values_t* expdata;
-	int len;
 
-	len = CONF_HASH_LEN * sizeof(s_p_values_t *);
-	hashtbl = (s_p_hashtbl_t *)xmalloc(len);
+	hashtbl = xcalloc(CONF_HASH_LEN, sizeof(s_p_values_t *));
 
 	for (op = options; op->key != NULL; op++) {
 		value = xmalloc(sizeof(s_p_values_t));
@@ -188,11 +201,11 @@ s_p_hashtbl_t *s_p_hashtbl_create(const s_p_options_t options[])
 		if (op->type == S_P_LINE || op->type == S_P_EXPLINE) {
 			/* line_options mandatory for S_P_*LINE */
 			xassert(op->line_options);
-			expdata = (_expline_values_t*)
-				xmalloc(sizeof(_expline_values_t));
+			expdata = xmalloc(sizeof(_expline_values_t));
 			expdata->template =
 				s_p_hashtbl_create(op->line_options);
-			expdata->index = (s_p_hashtbl_t*)xmalloc(len);
+			expdata->index = xcalloc(CONF_HASH_LEN,
+						 sizeof(s_p_values_t *));
 			expdata->values = NULL;
 			value->data = expdata;
 		}
@@ -277,10 +290,22 @@ void s_p_hashtbl_destroy(s_p_hashtbl_t *hashtbl) {
 		}
 	}
 	xfree(hashtbl);
+
+	/*
+	 * Now clear the global variables to free their memory as well.
+	 */
+	slurm_mutex_lock(&s_p_lock);
+	if (keyvalue_initialized) {
+		regfree(&keyvalue_re);
+		keyvalue_initialized = false;
+	}
+	slurm_mutex_unlock(&s_p_lock);
+
 }
 
 static void _keyvalue_regex_init(void)
 {
+	slurm_mutex_lock(&s_p_lock);
 	if (!keyvalue_initialized) {
 		if (regcomp(&keyvalue_re, keyvalue_pattern,
 			    REG_EXTENDED) != 0) {
@@ -289,6 +314,11 @@ static void _keyvalue_regex_init(void)
 		}
 		keyvalue_initialized = true;
 	}
+	if (!pthread_atfork_set) {
+		pthread_atfork(NULL, NULL, _s_p_atfork_child);
+		pthread_atfork_set = true;
+	}
+	slurm_mutex_unlock(&s_p_lock);
 }
 
 /*
@@ -458,7 +488,7 @@ static void _compute_hash_val(uint32_t *hash_val, char *line)
 /*
  * Reads the next line from the "file" into buffer "buf".
  *
- * Concatonates together lines that are continued on
+ * Concatenates together lines that are continued on
  * the next line by a trailing "\".  Strips out comments,
  * replaces escaped "\#" with "#", and replaces "\\" with "\".
  */
@@ -513,7 +543,7 @@ s_p_hashtbl_t* _hashtbl_copy_keys(const s_p_hashtbl_t* from_hashtbl,
 	xassert(from_hashtbl);
 
 	len = CONF_HASH_LEN * sizeof(s_p_values_t *);
-	to_hashtbl = (s_p_hashtbl_t *)xmalloc(len);
+	to_hashtbl = xmalloc(len);
 
 	for (i = 0; i < CONF_HASH_LEN; ++i) {
 		for (val_ptr = from_hashtbl[i]; val_ptr;
@@ -546,8 +576,9 @@ static int _handle_common(s_p_values_t *v,
 			  void* (*convert)(const char* key, const char* value))
 {
 	if (v->data_count != 0) {
-		error("%s specified more than once, latest value used",
-		      v->key);
+		if (run_in_daemon("slurmctld,slurmd,slurmdbd"))
+			error("%s 1 specified more than once, latest value used",
+			      v->key);
 		xfree(v->data);
 		v->data_count = 0;
 	}
@@ -570,62 +601,70 @@ static int _handle_common(s_p_values_t *v,
 	return 1;
 }
 
-static void* _handle_string(const char* key, const char* value)
+static void *_handle_string(const char *key, const char *value)
 {
 	return xstrdup(value);
 }
 
-static void* _handle_long(const char* key, const char* value)
+static void *_handle_long(const char *key, const char *value)
 {
-	long* data = (long*)xmalloc(sizeof(long));
+	long *data = xmalloc(sizeof(*data));
 	if (s_p_handle_long(data, key, value) == SLURM_ERROR)
 		return NULL;
 	return data;
 }
 
-static void* _handle_uint16(const char* key, const char* value)
+static void *_handle_uint16(const char *key, const char *value)
 {
-	uint16_t* data = (uint16_t*)xmalloc(sizeof(uint16_t));
+	uint16_t *data = xmalloc(sizeof(*data));
 	if (s_p_handle_uint16(data, key, value) == SLURM_ERROR)
 		return NULL;
 	return data;
 }
 
-static void* _handle_uint32(const char* key, const char* value)
+static void *_handle_uint32(const char *key, const char *value)
 {
-	uint32_t* data = (uint32_t*)xmalloc(sizeof(uint32_t));
+	uint32_t *data = xmalloc(sizeof(*data));
 	if (s_p_handle_uint32(data, key, value) == SLURM_ERROR)
 		return NULL;
 	return data;
 }
 
-static void* _handle_boolean(const char* key, const char* value)
+static void *_handle_uint64(const char *key, const char *value)
 {
-	bool* data = (bool*)xmalloc(sizeof(bool));
+	uint64_t *data = xmalloc(sizeof(*data));
+	if (s_p_handle_uint64(data, key, value) == SLURM_ERROR)
+		return NULL;
+	return data;
+}
+
+static void *_handle_boolean(const char *key, const char *value)
+{
+	bool *data = xmalloc(sizeof(*data));
 	if (s_p_handle_boolean(data, key, value) == SLURM_ERROR)
 		return NULL;
 	return data;
 }
 
-static void* _handle_float(const char* key, const char* value)
+static void *_handle_float(const char *key, const char *value)
 {
-	float* data = (float*)xmalloc(sizeof(float));
+	float *data = xmalloc(sizeof(*data));
 	if (s_p_handle_float(data, key, value) == SLURM_ERROR)
 		return NULL;
 	return data;
 }
 
-static void* _handle_double(const char* key, const char* value)
+static void *_handle_double(const char *key, const char *value)
 {
-	double* data = (double*)xmalloc(sizeof(double));
+	double *data = xmalloc(sizeof(*data));
 	if (s_p_handle_double(data, key, value) == SLURM_ERROR)
 		return NULL;
 	return data;
 }
 
-static void* _handle_ldouble(const char* key, const char* value)
+static void *_handle_ldouble(const char *key, const char *value)
 {
-	long double* data = (long double*)xmalloc(sizeof(long double));
+	long double *data = xmalloc(sizeof(*data));
 	if (s_p_handle_long_double(data, key, value) == SLURM_ERROR)
 		return NULL;
 	return data;
@@ -643,8 +682,9 @@ static int _handle_pointer(s_p_values_t *v, const char *value,
 			return rc == 0 ? 0 : -1;
 	} else {
 		if (v->data_count != 0) {
-			error("%s specified more than once, "
-			      "latest value used", v->key);
+			if (run_in_daemon("slurmctld,slurmd,slurmdbd"))
+				error("%s 2 specified more than once, latest value used",
+				      v->key);
 			xfree(v->data);
 			v->data_count = 0;
 		}
@@ -701,7 +741,7 @@ static void _handle_expline_sc(s_p_hashtbl_t* index_tbl,
 			(s_p_hashtbl_t*)matchp_index->data, tbl);
 		s_p_hashtbl_destroy(tbl);
 	} else {
-		index_value = (s_p_values_t*)xmalloc(sizeof(s_p_values_t));
+		index_value = xmalloc(sizeof(s_p_values_t));
 		index_value->key = xstrdup(master_value);
 		index_value->destroy = _empty_destroy;
 		index_value->data = tbl;
@@ -724,6 +764,10 @@ static int _handle_expline_cmp_uint16(const void* v1, const void* v2)
 static int _handle_expline_cmp_uint32(const void* v1, const void* v2)
 {
 	return *((uint32_t*)v1) != *((uint32_t*)v2);
+}
+static int _handle_expline_cmp_uint64(const void* v1, const void* v2)
+{
+	return *((uint64_t*)v1) != *((uint64_t*)v2);
 }
 static int _handle_expline_cmp_float(const void* v1, const void* v2)
 {
@@ -775,7 +819,7 @@ static void _handle_expline_ac(s_p_hashtbl_t* tbl,
 }
 
 /*
- * merge a feshly generated s_p_hashtbl_t from the line/expline processing
+ * merge a freshly generated s_p_hashtbl_t from the line/expline processing
  * with the already added s_p_hashtbl_t elements of the previously processed
  * siblings
  */
@@ -808,6 +852,11 @@ static void _handle_expline_merge(_expline_values_t* v_data,
 	case S_P_UINT32:
 		_handle_expline_ac(current_tbl, master_key, matchp->data,
 				   _handle_expline_cmp_uint32, &v_data->values,
+				   tables_count);
+		break;
+	case S_P_UINT64:
+		_handle_expline_ac(current_tbl, master_key, matchp->data,
+				   _handle_expline_cmp_uint64, &v_data->values,
 				   tables_count);
 		break;
 	case S_P_FLOAT:
@@ -899,6 +948,9 @@ static void _handle_keyvalue_match(s_p_values_t *v,
 	case S_P_UINT32:
 		_handle_common(v, value, line, leftover, _handle_uint32);
 		break;
+	case S_P_UINT64:
+		_handle_common(v, value, line, leftover, _handle_uint64);
+		break;
 	case S_P_POINTER:
 		_handle_pointer(v, value, line, leftover);
 		break;
@@ -971,6 +1023,7 @@ int s_p_parse_line(s_p_hashtbl_t *hashtbl, const char *line, char **leftover)
 			error("Parsing error at unrecognized key: %s", key);
 			xfree(key);
 			xfree(value);
+			slurm_seterrno(EINVAL);
 			return 0;
 		}
 		xfree(key);
@@ -1010,6 +1063,7 @@ static int _parse_next_key(s_p_hashtbl_t *hashtbl,
 			xfree(key);
 			xfree(value);
 			*leftover = (char *)line;
+			slurm_seterrno(EINVAL);
 			return 0;
 		}
 		xfree(key);
@@ -1055,66 +1109,15 @@ static char *_parse_for_format(s_p_hashtbl_t *f_hashtbl, char *path)
 				break;
 			}
 			xstrtolower(tmp_str);
-
-#if 0
-	char hostname[BUFFER_SIZE] = "";
-	char ip_str[BUFFER_SIZE] = "";
-	slurm_addr_t ip_addr;
-	char *ip, *port;
-
-/* Disable modifiers for hostname and IP address as doing offers little benefit,
- * but provides ample opportunity for failures due to bad configurations which
- * would be very difficult to diagnose.
- */
-		} else if ((format = strstr(filename, "%h"))) { /* Hostname */
-			if (gethostname_short(hostname, sizeof(hostname))) {
-				error("%s: Did not get hostname for include "
-				      "path", __func__);
-				xfree(filename);
-				break;
-			}
-			tmp_str = hostname;
-
-		} else if ((format = strstr(filename, "%i"))) { /* IP Address */
-			if (gethostname(hostname, sizeof(hostname))) {
-				error("%s: Did not get IP address for include "
-				      "path", __func__);
-				xfree(filename);
-				break;
-			}
-			_slurm_set_addr_char(&ip_addr, 0, hostname);
-			_slurm_print_slurm_addr(&ip_addr, ip_str,
-						sizeof(ip_str));
-			if (!xstrncmp(ip_str, "127.0.0.1", 9) ||
-			    !xstrncmp(ip_str, "127.0.1.1", 9)) {
-				/* Got address for loopback */
-				error("%s: Could not get unique IP address for "
-				      "include path (hostname=%s)",
-				      __func__, hostname);
-				xfree(filename);
-				break;
-			}
-			ip = strrchr(ip_str, '.');
-			port = strstr(ip, ":");
-			if (!ip || !port) {
-				error("%s: Did not get IP address for include "
-				      "path (hostname=%s)", __func__, hostname);
-				xfree(filename);
-				break;
-			}
-			port[0] = '\0';	/* Exclude the port number */
-			tmp_str = ip + 1;
-#endif
-
 		} else {	/* No special characters */
 			break;
 		}
 
 		/* Build the new path if tmp_str is not NULL*/
-		if (tmp_str != NULL) {
+		if (tmp_str) {
 			format[0] = '\0';
 			xstrfmtcat(filename, "%s%s", tmp_str, format+2);
-			tmp_str = NULL;
+			xfree(tmp_str);
 		} else {
 			error("%s: Value for include modifier %s could "
 			      "not be found", __func__, format);
@@ -1143,7 +1146,7 @@ static int _parse_include_directive(s_p_hashtbl_t *hashtbl, uint32_t *hash_val,
 	int rc;
 
 	*leftover = NULL;
-	if (strncasecmp("include", line, strlen("include")) == 0) {
+	if (xstrncasecmp("include", line, strlen("include")) == 0) {
 		ptr = (char *)line + strlen("include");
 
 		if (!isspace((int)*ptr))
@@ -1216,7 +1219,7 @@ int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename,
 	}
 
 	/* Buffer needs one extra byte for trailing '\0' */
-	line = xmalloc(sizeof(char) * stat_buf.st_size + 1);
+	line = xmalloc(stat_buf.st_size + 1);
 	line_number = 1;
 	while ((merged_lines = _get_next_line(
 			line, stat_buf.st_size + 1, hash_val, f)) > 0) {
@@ -1500,12 +1503,11 @@ static s_p_hashtbl_t* _parse_expline_adapt_table(const s_p_hashtbl_t* hashtbl)
 {
 	s_p_hashtbl_t* to_hashtbl = NULL;
 	s_p_values_t *val_ptr,* val_copy;
-	int len, i;
+	int i;
 
 	xassert(hashtbl);
 
-	len = CONF_HASH_LEN * sizeof(s_p_values_t *);
-	to_hashtbl = (s_p_hashtbl_t *)xmalloc(len);
+	to_hashtbl = xcalloc(CONF_HASH_LEN, sizeof(s_p_values_t *));
 
 	for (i = 0; i < CONF_HASH_LEN; ++i) {
 		for (val_ptr = hashtbl[i]; val_ptr; val_ptr = val_ptr->next) {
@@ -1618,12 +1620,12 @@ static int _parse_expline_doexpand(s_p_hashtbl_t** tables,
 		   ((item_count % tables_count) == 0)) {
 		items_per_record = (int) (item_count / tables_count);
 	} else {
-		item_str = hostlist_ranged_string_malloc(item_hl);
+		item_str = hostlist_ranged_string_xmalloc(item_hl);
 		error("parsing %s=%s : count is not coherent with the"
 		      " amount of records or there must be no more than"
 		      " one (%d vs %d)", item->key, item_str,
 		      item_count, tables_count);
-		free(item_str);
+		xfree(item_str);
 		return 0;
 	}
 
@@ -1726,8 +1728,7 @@ int s_p_parse_line_expanded(const s_p_hashtbl_t *hashtbl,
 	 *  {key: value2, attr1: val1.2, attr2: val2.2}
 	 * ]
 	 */
-	tables = (s_p_hashtbl_t**)xmalloc(tables_count *
-					  sizeof(s_p_hashtbl_t*));
+	tables = xcalloc(tables_count, sizeof(s_p_hashtbl_t *));
 	for (i = 0; i < tables_count; i++) {
 		free(value_str);
 		value_str = hostlist_shift(value_hl);
@@ -1792,10 +1793,12 @@ int s_p_parse_pair_with_op(s_p_hashtbl_t *hashtbl, const char *key,
 	if ((p = _conf_hashtbl_lookup(hashtbl, key)) == NULL) {
 		error("%s: Parsing error at unrecognized key: %s",
 		      __func__, key);
+		slurm_seterrno(EINVAL);
 		return 0;
 	}
 	if (!value) {
 		error("%s: Value pointer is NULL for key %s", __func__, key);
+		slurm_seterrno(EINVAL);
 		return 0;
 	}
 	p-> operator = opt;
@@ -1807,6 +1810,7 @@ int s_p_parse_pair_with_op(s_p_hashtbl_t *hashtbl, const char *key,
 		leftover = strchr(v, '"');
 		if (leftover == NULL) {
 			error("Parse error in data for key %s: %s", key, value);
+			slurm_seterrno(EINVAL);
 			return 0;
 		}
 	} else { /* unqouted value */
@@ -1902,6 +1906,19 @@ int s_p_get_uint32(uint32_t *num, const char *key,
 
 	if (p) {
 		*num = *(uint32_t *)p->data;
+		return 1;
+	}
+
+	return 0;
+}
+
+int s_p_get_uint64(uint64_t *num, const char *key,
+		   const s_p_hashtbl_t *hashtbl)
+{
+	s_p_values_t *p = _get_check(S_P_UINT64, key, hashtbl);
+
+	if (p) {
+		*num = *(uint64_t *)p->data;
 		return 1;
 	}
 
@@ -2042,6 +2059,7 @@ void s_p_dump_values(const s_p_hashtbl_t *hashtbl,
 	long num;
 	uint16_t num16;
 	uint32_t num32;
+	uint64_t num64;
 	float numf;
 	double numd;
 	long double numld;
@@ -2077,6 +2095,12 @@ void s_p_dump_values(const s_p_hashtbl_t *hashtbl,
 		case S_P_UINT32:
 			if (s_p_get_uint32(&num32, op->key, hashtbl))
 				verbose("%s = %u", op->key, num32);
+			else
+				verbose("%s", op->key);
+			break;
+		case S_P_UINT64:
+			if (s_p_get_uint64(&num64, op->key, hashtbl))
+				verbose("%s = %"PRIu64"", op->key, num64);
 			else
 				verbose("%s", op->key);
 			break;
@@ -2140,6 +2164,175 @@ void s_p_dump_values(const s_p_hashtbl_t *hashtbl,
 			break;
 		}
 	}
+}
+
+/*
+ * Given an "options" array, pack the key, type of options along with values and
+ * op of the hashtbl.
+ *
+ * Primarily for sending a table across the network so you don't have to read a
+ * file in.
+ */
+extern Buf s_p_pack_hashtbl(const s_p_hashtbl_t *hashtbl,
+			   const s_p_options_t options[],
+			   const uint32_t cnt)
+{
+	Buf buffer = init_buf(0);
+	s_p_values_t *p;
+	int i;
+
+	pack32(cnt, buffer);
+
+	for (i = 0; i < cnt; i++) {
+		p = _conf_hashtbl_lookup(hashtbl, options[i].key);
+
+		xassert(p);
+
+		pack16((uint16_t)options[i].type, buffer);
+		packstr(options[i].key, buffer);
+
+		pack16((uint16_t)p->operator, buffer);
+		pack32((uint32_t)p->data_count, buffer);
+
+		if (!p->data_count)
+			continue;
+
+		switch (options[i].type) {
+		case S_P_STRING:
+		case S_P_PLAIN_STRING:
+			packstr((char *)p->data, buffer);
+			break;
+		case S_P_UINT32:
+		case S_P_LONG:
+			pack32(*(uint32_t *)p->data, buffer);
+			break;
+		case S_P_UINT16:
+			pack16(*(uint16_t *)p->data, buffer);
+			break;
+		case S_P_UINT64:
+			pack64(*(uint64_t *)p->data, buffer);
+			break;
+		case S_P_BOOLEAN:
+			packbool(*(bool *)p->data, buffer);
+			break;
+		case S_P_FLOAT:
+			packfloat(*(float *)p->data, buffer);
+			break;
+		case S_P_DOUBLE:
+			packdouble(*(double *)p->data, buffer);
+			break;
+		case S_P_LONG_DOUBLE:
+			packlongdouble(*(long double *)p->data, buffer);
+			break;
+		case S_P_IGNORE:
+			break;
+		default:
+			fatal("%s: unsupported pack type %d",
+			      __func__, options[i].type);
+			break;
+		}
+	}
+
+	return buffer;
+}
+
+/*
+ * Given a buffer, unpack key, type, op and value into a hashtbl.
+ */
+extern s_p_hashtbl_t *s_p_unpack_hashtbl(Buf buffer)
+{
+	s_p_values_t *value = NULL;
+	s_p_hashtbl_t *hashtbl = NULL;
+	int i;
+	bool bool_tmp;
+	uint16_t uint16_tmp;
+	uint32_t cnt, uint32_tmp;
+	uint64_t uint64_tmp;
+	float float_tmp;
+	double double_tmp;
+	long double ldouble_tmp;
+	char *tmp_char;
+
+	safe_unpack32(&cnt, buffer);
+
+	hashtbl = xcalloc(CONF_HASH_LEN, sizeof(s_p_values_t *));
+
+	for (i = 0; i < cnt; i++) {
+		value = xmalloc(sizeof(s_p_values_t));
+
+		safe_unpack16(&uint16_tmp, buffer);
+		value->type = uint16_tmp;
+		safe_unpackstr_xmalloc(&value->key, &uint32_tmp, buffer);
+		safe_unpack16(&uint16_tmp, buffer);
+		value->operator = uint16_tmp;
+		safe_unpack32(&uint32_tmp, buffer);
+		value->data_count = uint32_tmp;
+
+		_conf_hashtbl_insert(hashtbl, value);
+
+		if (!value->data_count)
+			continue;
+
+		switch (value->type) {
+		case S_P_STRING:
+		case S_P_PLAIN_STRING:
+			safe_unpackstr_xmalloc(&tmp_char, &uint32_tmp, buffer);
+			value->data = tmp_char;
+			break;
+		case S_P_UINT32:
+			safe_unpack32(&uint32_tmp, buffer);
+			value->data = xmalloc(sizeof(uint32_t));
+			*(uint32_t *)value->data = uint32_tmp;
+			break;
+		case S_P_LONG:
+			safe_unpack32(&uint32_tmp, buffer);
+			value->data = xmalloc(sizeof(long));
+			*(long *)value->data = (long)uint32_tmp;
+			break;
+		case S_P_UINT16:
+			safe_unpack16(&uint16_tmp, buffer);
+			value->data = xmalloc(sizeof(uint16_t));
+			*(uint16_t *)value->data = uint16_tmp;
+			break;
+		case S_P_UINT64:
+			safe_unpack64(&uint64_tmp, buffer);
+			value->data = xmalloc(sizeof(uint64_t));
+			*(uint64_t *)value->data = uint64_tmp;
+			break;
+		case S_P_BOOLEAN:
+			safe_unpackbool(&bool_tmp, buffer);
+			value->data = xmalloc(sizeof(bool));
+			*(bool *)value->data = bool_tmp;
+			break;
+		case S_P_FLOAT:
+			safe_unpackfloat(&float_tmp, buffer);
+			value->data = xmalloc(sizeof(float));
+			*(float *)value->data = float_tmp;
+			break;
+		case S_P_DOUBLE:
+			safe_unpackdouble(&double_tmp, buffer);
+			value->data = xmalloc(sizeof(double));
+			*(double *)value->data = double_tmp;
+			break;
+		case S_P_LONG_DOUBLE:
+			safe_unpacklongdouble(&ldouble_tmp, buffer);
+			value->data = xmalloc(sizeof(long double));
+			*(long double *)value->data = ldouble_tmp;
+			break;
+		case S_P_IGNORE:
+			break;
+		default:
+			fatal("%s: unsupported pack type %d",
+			      __func__, value->type);
+			break;
+		}
+	}
+
+	return hashtbl;
+unpack_error:
+	s_p_hashtbl_destroy(hashtbl);
+	error("%s: failed", __func__);
+	return NULL;
 }
 
 extern void transfer_s_p_options(s_p_options_t **full_options,

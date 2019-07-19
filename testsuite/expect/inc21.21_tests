@@ -4,22 +4,22 @@
 # Copyright (C) 2015 SchedMD LLC.
 # Written by Nathan Yee <nyee32@schedmd.com>
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 
@@ -53,6 +53,12 @@ proc inc21_21_good { test_type limit } {
 		send_user "\nWARNING: Unable to perform test with exclusive node allocations\n"
 		return $exit_code
 	}	
+	set partition [default_partition]
+	set select_type_param [get_select_type_params $partition]
+	if { [string first "CR_SOCKET" $select_type_param] != -1} {
+		send_user "\nWARNING: This test can't be run SelectTypeParameters=CR_SOCKET\n"
+		return $exit_code
+	}
 	if { [string compare $test_type "maxnode"] == 0 } {
 		set add "--exclusive"
 	} else {
@@ -61,7 +67,7 @@ proc inc21_21_good { test_type limit } {
 
 	set matches 0
 	spawn $srun -v -t1 $add [lindex $limit 0][lindex $limit 1] \
-	    --account=$ta -I $bin_id
+	    --account=$ta $bin_id
 	expect {
 		-re "launching ($number)" {
 			set job_id $expect_out(1,string)
@@ -86,7 +92,7 @@ proc inc21_21_good { test_type limit } {
 	}
 
 	if { $matches != 1 } {
-		send_user "\nFAILURE: job dion't launch with correct limit "
+		send_user "\nFAILURE: job did not launch with correct limit "
 		print_err $test_type "inc21_21_good"
 		set exit_code 1
 	}
@@ -171,6 +177,13 @@ proc inc21_21_grp_test { test_type limit } {
 		return $exit_code
 	}
 
+	set partition [default_partition]
+	set select_type_param [get_select_type_params $partition]
+	if { [string first "CR_SOCKET" $select_type_param] != -1} {
+		send_user "\nWARNING: This test can't be run SelectTypeParameters=CR_SOCKET\n"
+		return $exit_code
+	}
+
 	# Check and see if it is a CPU test
 	if { [string compare $test_type "grpcpus"] == 0 ||
 	     [string compare $test_type "grpcpumins"] == 0 ||
@@ -224,7 +237,7 @@ sleep 10"
 	#
 	# Wait for squeue to update
 	#
-	sleep 2
+	sleep 5
 
 	set pending 0
 	set running 0

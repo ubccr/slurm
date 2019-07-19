@@ -7,11 +7,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -79,31 +79,45 @@ static int _preemption_loop(mysql_conn_t *mysql_conn, int begin_qosid,
 			    bitstr_t *preempt_bitstr)
 {
 	slurmdb_qos_rec_t qos_rec;
-	int rc = 0, i=0;
+	int rc = 0, i = 0;
 
 	xassert(preempt_bitstr);
 
+	if (bit_test(preempt_bitstr, begin_qosid)) {
+		error("QOS ID %d has an internal loop", begin_qosid);
+		return 1;
+	}
+
 	/* check in the preempt list for all qos's preempted */
-	for(i=0; i<bit_size(preempt_bitstr); i++) {
+	for (i = 0; i < bit_size(preempt_bitstr); i++) {
 		if (!bit_test(preempt_bitstr, i))
 			continue;
 
 		memset(&qos_rec, 0, sizeof(qos_rec));
 		qos_rec.id = i;
-		assoc_mgr_fill_in_qos(mysql_conn, &qos_rec,
-				      ACCOUNTING_ENFORCE_QOS,
-				      NULL, 0);
-		/* check if the begin_qosid is preempted by this qos
-		 * if so we have a loop */
+		if (assoc_mgr_fill_in_qos(mysql_conn, &qos_rec,
+					  ACCOUNTING_ENFORCE_QOS, NULL, 0) !=
+		    SLURM_SUCCESS) {
+			error("QOS ID %d not found", i);
+			rc = 1;
+			break;
+		}
+		/*
+		 * check if the begin_qosid is preempted by this qos
+		 * if so we have a loop
+		 */
 		if (qos_rec.preempt_bitstr
-		    && bit_test(qos_rec.preempt_bitstr, begin_qosid)) {
-			error("QOS id %d has a loop at QOS %s",
+		    && (bit_test(qos_rec.preempt_bitstr, begin_qosid) ||
+			bit_test(qos_rec.preempt_bitstr, i))) {
+			error("QOS ID %d has a loop at QOS %s",
 			      begin_qosid, qos_rec.name);
 			rc = 1;
 			break;
 		} else if (qos_rec.preempt_bitstr) {
-			/* check this qos' preempt list and make sure
-			   no loops exist there either */
+			/*
+			 * check this qos' preempt list and make sure
+			 * no loops exist there either
+			 */
 			if ((rc = _preemption_loop(mysql_conn, begin_qosid,
 						   qos_rec.preempt_bitstr)))
 				break;
@@ -136,6 +150,8 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 			qos->grace_time = 0;
 		if (qos->grp_jobs == NO_VAL)
 			qos->grp_jobs = INFINITE;
+		if (qos->grp_jobs_accrue == NO_VAL)
+			qos->grp_jobs_accrue = INFINITE;
 		if (qos->grp_submit_jobs == NO_VAL)
 			qos->grp_submit_jobs = INFINITE;
 		if (qos->grp_wall == NO_VAL)
@@ -144,13 +160,21 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 			qos->max_jobs_pa = INFINITE;
 		if (qos->max_jobs_pu == NO_VAL)
 			qos->max_jobs_pu = INFINITE;
+		if (qos->max_jobs_accrue_pa == NO_VAL)
+			qos->max_jobs_accrue_pa = INFINITE;
+		if (qos->max_jobs_accrue_pu == NO_VAL)
+			qos->max_jobs_accrue_pu = INFINITE;
+		if (qos->min_prio_thresh == NO_VAL)
+			qos->min_prio_thresh = INFINITE;
 		if (qos->max_submit_jobs_pa == NO_VAL)
 			qos->max_submit_jobs_pa = INFINITE;
 		if (qos->max_submit_jobs_pu == NO_VAL)
 			qos->max_submit_jobs_pu = INFINITE;
 		if (qos->max_wall_pj == NO_VAL)
 			qos->max_wall_pj = INFINITE;
-		if (qos->preempt_mode == (uint16_t)NO_VAL)
+		if (qos->preempt_exempt_time == NO_VAL)
+			qos->preempt_exempt_time = INFINITE;
+		if (qos->preempt_mode == NO_VAL16)
 			qos->preempt_mode = 0;
 		if (qos->priority == NO_VAL)
 			qos->priority = 0;
@@ -210,6 +234,18 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 		xstrfmtcat(*extra, ", grp_jobs=%u", qos->grp_jobs);
 	}
 
+	if (qos->grp_jobs_accrue == INFINITE) {
+		xstrcat(*cols, ", grp_jobs_accrue");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", grp_jobs_accrue=NULL");
+	} else if ((qos->grp_jobs_accrue != NO_VAL)
+		   && ((int32_t)qos->grp_jobs_accrue >= 0)) {
+		xstrcat(*cols, ", grp_jobs_accrue");
+		xstrfmtcat(*vals, ", %u", qos->grp_jobs_accrue);
+		xstrfmtcat(*extra, ", grp_jobs_accrue=%u",
+			   qos->grp_jobs_accrue);
+	}
+
 	if (qos->grp_submit_jobs == INFINITE) {
 		xstrcat(*cols, ", grp_submit_jobs");
 		xstrcat(*vals, ", NULL");
@@ -253,6 +289,42 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 		xstrcat(*cols, ", max_jobs_per_user");
 		xstrfmtcat(*vals, ", %u", qos->max_jobs_pu);
 		xstrfmtcat(*extra, ", max_jobs_per_user=%u", qos->max_jobs_pu);
+	}
+
+	if (qos->max_jobs_accrue_pa == INFINITE) {
+		xstrcat(*cols, ", max_jobs_accrue_pa");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", max_jobs_accrue_pa=NULL");
+	} else if ((qos->max_jobs_accrue_pa != NO_VAL)
+		   && ((int32_t)qos->max_jobs_accrue_pa >= 0)) {
+		xstrcat(*cols, ", max_jobs_accrue_pa");
+		xstrfmtcat(*vals, ", %u", qos->max_jobs_accrue_pa);
+		xstrfmtcat(*extra, ", max_jobs_accrue_pa=%u",
+			   qos->max_jobs_accrue_pa);
+	}
+
+	if (qos->max_jobs_accrue_pu == INFINITE) {
+		xstrcat(*cols, ", max_jobs_accrue_pu");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", max_jobs_accrue_pu=NULL");
+	} else if ((qos->max_jobs_accrue_pu != NO_VAL)
+		   && ((int32_t)qos->max_jobs_accrue_pu >= 0)) {
+		xstrcat(*cols, ", max_jobs_accrue_pu");
+		xstrfmtcat(*vals, ", %u", qos->max_jobs_accrue_pu);
+		xstrfmtcat(*extra, ", max_jobs_accrue_pu=%u",
+			   qos->max_jobs_accrue_pu);
+	}
+
+	if (qos->min_prio_thresh == INFINITE) {
+		xstrcat(*cols, ", min_prio_thresh");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", min_prio_thresh=NULL");
+	} else if ((qos->min_prio_thresh != NO_VAL)
+		   && ((int32_t)qos->min_prio_thresh >= 0)) {
+		xstrcat(*cols, ", min_prio_thresh");
+		xstrfmtcat(*vals, ", %u", qos->min_prio_thresh);
+		xstrfmtcat(*extra, ", min_prio_thresh=%u",
+			   qos->min_prio_thresh);
 	}
 
 	if (qos->max_submit_jobs_pa == INFINITE) {
@@ -349,7 +421,18 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 		xfree(preempt_val);
 	}
 
-	if ((qos->preempt_mode != (uint16_t)NO_VAL)
+	if (qos->preempt_exempt_time == INFINITE) {
+		xstrcat(*cols, ", preempt_exempt_time");
+		xstrfmtcat(*vals, ", NULL");
+		xstrfmtcat(*extra, ", preempt_exempt_time=NULL");
+	} else if (qos->preempt_exempt_time != NO_VAL) {
+		xstrcat(*cols, ", preempt_exempt_time");
+		xstrfmtcat(*vals, ", %u", qos->preempt_exempt_time);
+		xstrfmtcat(*extra, ", preempt_exempt_time=%u",
+			   qos->preempt_exempt_time);
+	}
+
+	if ((qos->preempt_mode != NO_VAL16)
 	    && ((int16_t)qos->preempt_mode >= 0)) {
 		qos->preempt_mode &= (~PREEMPT_MODE_GANG);
 		xstrcat(*cols, ", preempt_mode");
@@ -599,7 +682,8 @@ extern int as_mysql_add_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 
 		if (debug_flags & DEBUG_FLAG_DB_QOS)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-		object->id = mysql_db_insert_ret_id(mysql_conn, query);
+		object->id = (uint32_t)mysql_db_insert_ret_id(
+			mysql_conn, query);
 		xfree(query);
 		if (!object->id) {
 			error("Couldn't add qos %s", object->name);
@@ -814,6 +898,7 @@ extern List as_mysql_modify_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 			     qos_rec->id, 0);
 
 		qos_rec->grp_jobs = qos->grp_jobs;
+		qos_rec->grp_jobs_accrue = qos->grp_jobs_accrue;
 		qos_rec->grp_submit_jobs = qos->grp_submit_jobs;
 		qos_rec->grp_wall = qos->grp_wall;
 
@@ -843,6 +928,9 @@ extern List as_mysql_modify_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 
 		qos_rec->max_jobs_pa  = qos->max_jobs_pa;
 		qos_rec->max_jobs_pu  = qos->max_jobs_pu;
+		qos_rec->max_jobs_accrue_pa  = qos->max_jobs_accrue_pa;
+		qos_rec->max_jobs_accrue_pu  = qos->max_jobs_accrue_pu;
+		qos_rec->min_prio_thresh  = qos->min_prio_thresh;
 		qos_rec->max_submit_jobs_pa  = qos->max_submit_jobs_pa;
 		qos_rec->max_submit_jobs_pu  = qos->max_submit_jobs_pu;
 		qos_rec->max_wall_pj = qos->max_wall_pj;
@@ -888,6 +976,8 @@ extern List as_mysql_modify_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 			}
 			list_iterator_destroy(new_preempt_itr);
 		}
+
+		qos_rec->preempt_exempt_time = qos->preempt_exempt_time;
 
 		qos_rec->usage_factor = qos->usage_factor;
 		qos_rec->usage_thres = qos->usage_thres;
@@ -1088,15 +1178,21 @@ extern List as_mysql_remove_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 	user_name = uid_to_string((uid_t) uid);
 
 	slurm_mutex_lock(&as_mysql_cluster_list_lock);
-	itr = list_iterator_create(as_mysql_cluster_list);
-	while ((object = list_next(itr))) {
-		if ((rc = remove_common(mysql_conn, DBD_REMOVE_QOS, now,
-					user_name, qos_table, name_char,
-					assoc_char, object, NULL, NULL))
-		    != SLURM_SUCCESS)
-			break;
-	}
-	list_iterator_destroy(itr);
+	if (list_count(as_mysql_cluster_list)) {
+		itr = list_iterator_create(as_mysql_cluster_list);
+		while ((object = list_next(itr))) {
+			if ((rc = remove_common(mysql_conn, DBD_REMOVE_QOS, now,
+						user_name, qos_table, name_char,
+						assoc_char, object, NULL, NULL))
+			    != SLURM_SUCCESS)
+				break;
+		}
+		list_iterator_destroy(itr);
+	} else
+		rc = remove_common(mysql_conn, DBD_REMOVE_QOS, now,
+				   user_name, qos_table, name_char,
+				   assoc_char, NULL, NULL, NULL);
+
 	slurm_mutex_unlock(&as_mysql_cluster_list_lock);
 
 	xfree(assoc_char);
@@ -1138,6 +1234,7 @@ extern List as_mysql_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		"grp_tres_run_mins",
 		"grp_tres",
 		"grp_jobs",
+		"grp_jobs_accrue",
 		"grp_submit_jobs",
 		"grp_wall",
 		"max_tres_mins_pj",
@@ -1149,11 +1246,15 @@ extern List as_mysql_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		"max_tres_pu",
 		"max_jobs_pa",
 		"max_jobs_per_user",
+		"max_jobs_accrue_pa",
+		"max_jobs_accrue_pu",
+		"min_prio_thresh",
 		"max_submit_jobs_pa",
 		"max_submit_jobs_per_user",
 		"max_wall_duration_per_job",
 		"substr(preempt, 1, length(preempt) - 1)",
 		"preempt_mode",
+		"preempt_exempt_time",
 		"priority",
 		"usage_factor",
 		"usage_thres",
@@ -1169,6 +1270,7 @@ extern List as_mysql_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		QOS_REQ_GTRM,
 		QOS_REQ_GT,
 		QOS_REQ_GJ,
+		QOS_REQ_GJA,
 		QOS_REQ_GSJ,
 		QOS_REQ_GW,
 		QOS_REQ_MTMPJ,
@@ -1180,11 +1282,15 @@ extern List as_mysql_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		QOS_REQ_MTPU,
 		QOS_REQ_MJPA,
 		QOS_REQ_MJPU,
+		QOS_REQ_MJAPA,
+		QOS_REQ_MJAPU,
+		QOS_REQ_MPT,
 		QOS_REQ_MSJPA,
 		QOS_REQ_MSJPU,
 		QOS_REQ_MWPJ,
 		QOS_REQ_PREE,
 		QOS_REQ_PREEM,
+		QOS_REQ_PREXMPT,
 		QOS_REQ_PRIO,
 		QOS_REQ_UF,
 		QOS_REQ_UT,
@@ -1306,6 +1412,10 @@ empty:
 			qos->grp_jobs = slurm_atoul(row[QOS_REQ_GJ]);
 		else
 			qos->grp_jobs = INFINITE;
+		if (row[QOS_REQ_GJA])
+			qos->grp_jobs_accrue = slurm_atoul(row[QOS_REQ_GJA]);
+		else
+			qos->grp_jobs_accrue = INFINITE;
 		if (row[QOS_REQ_GSJ])
 			qos->grp_submit_jobs = slurm_atoul(row[QOS_REQ_GSJ]);
 		else
@@ -1324,6 +1434,23 @@ empty:
 			qos->max_jobs_pu = slurm_atoul(row[QOS_REQ_MJPU]);
 		else
 			qos->max_jobs_pu = INFINITE;
+
+		if (row[QOS_REQ_MJAPA])
+			qos->max_jobs_accrue_pa =
+				slurm_atoul(row[QOS_REQ_MJAPA]);
+		else
+			qos->max_jobs_accrue_pa = INFINITE;
+
+		if (row[QOS_REQ_MJAPU])
+			qos->max_jobs_accrue_pu =
+				slurm_atoul(row[QOS_REQ_MJAPU]);
+		else
+			qos->max_jobs_accrue_pu = INFINITE;
+
+		if (row[QOS_REQ_MPT])
+			qos->min_prio_thresh = slurm_atoul(row[QOS_REQ_MPT]);
+		else
+			qos->min_prio_thresh = INFINITE;
 
 		if (row[QOS_REQ_MSJPA])
 			qos->max_submit_jobs_pa =
@@ -1370,6 +1497,11 @@ empty:
 		}
 		if (row[QOS_REQ_PREEM])
 			qos->preempt_mode = slurm_atoul(row[QOS_REQ_PREEM]);
+		if (row[QOS_REQ_PREXMPT])
+			qos->preempt_exempt_time =
+				slurm_atoul(row[QOS_REQ_PREXMPT]);
+		else
+			qos->preempt_exempt_time = INFINITE;
 		if (row[QOS_REQ_PRIO])
 			qos->priority = slurm_atoul(row[QOS_REQ_PRIO]);
 

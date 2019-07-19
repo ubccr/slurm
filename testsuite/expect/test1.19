@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Test srun stdout/err file name formatting (--output and --error
 #          options with %j, %J, %n, %s and %t specifications).
 #
@@ -13,22 +13,22 @@
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -47,43 +47,15 @@ set file_out_u       "test$test_id.u.%u.output"
 set file_err_u       "test$test_id.u.%u.error"
 set user_name        ""
 set job_id           0
+set task_cnt         5
 
 print_header $test_id
-
-
-if {[test_bluegene]} {
-	# We never launch more than one task on emulated Bluegene
-	set task_cnt 1
-} elseif {[test_alps]} {
-	send_user "\nWARNING: This test is incompatible with Cray systems\n"
-	exit $exit_code
-} elseif {[test_launch_poe]} {
-	send_user "\nWARNING: This test is incompatible with POE systems\n"
-	exit $exit_code
-} elseif {[test_serial]} {
-	set task_cnt 1
-} else {
-	set task_cnt 5
-}
-
-if {[test_launch_poe]} {
-	set node_name_env MP_I_UPMD_HOSTNAME
-} else {
-	set node_name_env SLURMD_NODENAME
-}
 
 #
 # Gets current user
 #
-spawn $bin_id -un
-expect {
-	-re "($alpha_numeric_under)" {
-		set user_name $expect_out(1,string)
-	}
-	eof {
-		wait
-	}
-}
+
+set user_name [get_my_user_name]
 
 #
 # Spawn a program that generates "task_id" (%t) in stdout file names
@@ -176,7 +148,7 @@ if {[wait_for_file $file_err_j_glob] == 0} {
 #  file name and confirm it is created
 #
 set job_id   0
-set srun_pid [spawn $srun --output=$file_out_perc -N1 -v -t1 $bin_printenv $node_name_env]
+set srun_pid [spawn $srun --output=$file_out_perc -N1 -v -t1 $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "jobid ($number).*" {
 		set job_id $expect_out(1,string)
@@ -207,7 +179,7 @@ if {[wait_for_file $file_out_perc_result] != 0} {
 #  file name and confirm it is created
 #
 set job_id   0
-set srun_pid [spawn $srun --output=$file_out_J -N1 -v -t1 $bin_printenv $node_name_env]
+set srun_pid [spawn $srun --output=$file_out_J -N1 -v -t1 $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "jobid ($number).*" {
 		set job_id $expect_out(1,string)
@@ -240,7 +212,7 @@ if {[wait_for_file $file_out_J_glob] != 0} {
 # it is created
 #
 set job_id 0
-set srun_pid [spawn $srun --output=$file_out_u -v sleep 10]
+set srun_pid [spawn $srun --output=$file_out_u -v -t1 sleep 10]
 expect {
 	-re "jobid ($number)" {
 		set job_id $expect_out(1,string)
@@ -278,7 +250,7 @@ if {[wait_for_file $file_out_u_glob]==0} {
 # it is created
 #
 set job_id 0
-set srun_pid [spawn $srun --error=$file_err_u --output=/dev/null -v sleep aaa]
+set srun_pid [spawn $srun --error=$file_err_u --output=/dev/null -v -t1 sleep aaa]
 expect {
 	-re "jobid ($number)" {
 		set job_id $expect_out(1,string)
@@ -325,7 +297,7 @@ set file_out_n_glob  "test$test_id.n.$node_id.output"
 exec $bin_rm -f $file_out_n_glob
 
 set job_id   0
-set srun_pid [spawn $srun --output=$file_out_n -N1 -n$task_cnt -O -v -t1 $bin_printenv $node_name_env]
+set srun_pid [spawn $srun --output=$file_out_n -N1 -n$task_cnt -O -v -t1 $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "jobid ($number).*" {
 		set job_id $expect_out(1,string)
@@ -371,8 +343,8 @@ if {$file_cnt != 1} {
 #
 exec $bin_rm -f $file_in
 make_bash_script $file_in "
-  $srun -n4 -O --output=$file_out_s $bin_printenv $node_name_env
-  $srun -n4 -O --output=$file_out_s $bin_printenv $node_name_env
+  $srun -n4 -O --output=$file_out_s -t1 $bin_printenv SLURMD_NODENAME
+  $srun -n4 -O --output=$file_out_s -t1 $bin_printenv SLURMD_NODENAME
 "
 
 for {set step_id 0} {$step_id < 4} {incr step_id} {
@@ -380,19 +352,8 @@ for {set step_id 0} {$step_id < 4} {incr step_id} {
 	exec $bin_rm -f $file_out_s_glob
 }
 
-if { [test_bluegene] } {
-	set node_cnt 32-2048
-	set task_cnt 32
-} elseif { [test_serial] } {
-	set node_cnt 1-1
-	set task_cnt 1
-} elseif { [test_xcpu] } {
-	set node_cnt 1-1
-	set task_cnt 4
-} else {
-	set node_cnt 1-4
-	set task_cnt 4
-}
+set node_cnt 1-4
+set task_cnt 4
 
 # Note: Task count is in the script for each srun
 #	There is not oversubscribe option for sbatch.

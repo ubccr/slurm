@@ -13,11 +13,11 @@
 #define xfree(__p) \
 	slurm_xfree((void **)&(__p), __FILE__, __LINE__, __func__)
 #define xmalloc(__sz) \
-	slurm_xmalloc (__sz, true, __FILE__, __LINE__, __func__)
+	slurm_xcalloc(1, __sz, true, false, __FILE__, __LINE__, __func__)
 #endif
 
 extern void slurm_xfree(void **, const char *, int, const char *);
-extern void *slurm_xmalloc(size_t, bool, const char *, int, const char *);
+extern void *slurm_xcalloc(size_t, size_t, bool, bool, const char *, int, const char *);
 
 extern void slurm_api_clear_config(void);
 
@@ -37,9 +37,6 @@ extern void  slurm_private_data_string(uint16_t private_data,
 				       char *str, int str_len);
 extern void  slurm_accounting_enforce_string(uint16_t enforce,
 					     char *str, int str_len);
-extern char *slurm_conn_type_string(enum connection_type conn_type);
-extern char *slurm_node_use_string(enum node_use_type node_use);
-extern char *slurm_bg_block_state_string(uint16_t state);
 
 
 /********** resource allocation related conversion functions **********/
@@ -47,8 +44,6 @@ extern int hv_to_job_desc_msg(HV *hv, job_desc_msg_t *job_desc);
 extern void free_job_desc_msg_memory(job_desc_msg_t *msg);
 extern int resource_allocation_response_msg_to_hv(
     resource_allocation_response_msg_t *resp_msg, HV *hv);
-extern int job_alloc_info_response_msg_to_hv(job_alloc_info_response_msg_t
-					     *resp_msg, HV *hv);
 extern int submit_response_msg_to_hv(submit_response_msg_t *resp_msg, HV *hv);
 extern int job_sbcast_cred_msg_to_hv(job_sbcast_cred_msg_t *msg, HV *hv);
 extern int srun_job_complete_msg_to_hv(srun_job_complete_msg_t *msg, HV *hv);
@@ -82,19 +77,11 @@ extern int job_step_stat_response_msg_to_hv(job_step_stat_response_msg_t
 		*stat_msg, HV *hv);
 
 /********** node info conversion functions **********/
-extern int node_info_to_hv(node_info_t *node_info, uint16_t node_scaling, HV *hv);
+extern int node_info_to_hv(node_info_t *node_info, HV *hv);
 extern int hv_to_node_info(HV *hv, node_info_t *node_info);
 extern int node_info_msg_to_hv(node_info_msg_t *node_info_msg, HV *hv);
 extern int hv_to_node_info_msg(HV *hv, node_info_msg_t *node_info_msg);
 extern int hv_to_update_node_msg(HV *hv, update_node_msg_t *update_msg);
-
-/********** block info conversion functions **********/
-extern int block_info_to_hv(block_info_t *block_info, HV *hv);
-extern int hv_to_block_info(HV *hv, block_info_t *block_info);
-extern int block_info_msg_to_hv(block_info_msg_t *block_info_msg, HV *hv);
-extern int hv_to_block_info_msg(HV *hv, block_info_msg_t *block_info_msg);
-extern int hv_to_update_block_msg(HV *hv, update_block_msg_t *update_msg);
-
 
 /********** partition info conversion functions **********/
 extern int partition_info_to_hv(partition_info_t *part_info, HV *hv);

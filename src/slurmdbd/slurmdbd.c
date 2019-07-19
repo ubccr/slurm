@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,22 +27,22 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
+
 #if HAVE_SYS_PRCTL_H
 #  include <sys/prctl.h>
 #endif
+
 #include <grp.h>
 #include <pthread.h>
 #include <signal.h>
@@ -60,6 +60,7 @@
 #include "src/common/read_config.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_auth.h"
+#include "src/common/slurm_rlimits_info.h"
 #include "src/common/slurm_time.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
@@ -74,7 +75,10 @@
 /* Global variables */
 time_t shutdown_time = 0;		/* when shutdown request arrived */
 List registered_clusters = NULL;
+pthread_mutex_t rpc_mutex = PTHREAD_MUTEX_INITIALIZER;
+slurmdb_stats_rec_t rpc_stats;
 pthread_mutex_t registered_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_t signal_handler_thread;	/* thread ID for signal hander */
 
 /* Local variables */
 static int    dbd_sigarray[] = {	/* blocked signals for this process */
@@ -86,10 +90,9 @@ static int    foreground = 0;		/* run process as a daemon */
 static log_options_t log_opts = 	/* Log to stderr & syslog */
 	LOG_OPTS_INITIALIZER;
 static int	 new_nice = 0;
-static pthread_t rpc_handler_thread;	/* thread ID for RPC hander */
-static pthread_t signal_handler_thread;	/* thread ID for signal hander */
-static pthread_t rollup_handler_thread;	/* thread ID for rollup hander */
-static pthread_t commit_handler_thread;	/* thread ID for commit hander */
+static pthread_t rpc_handler_thread = 0; /* thread ID for RPC hander */
+static pthread_t rollup_handler_thread = 0; /* thread ID for rollup hander */
+static pthread_t commit_handler_thread = 0; /* thread ID for commit hander */
 static pthread_mutex_t rollup_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool running_rollup = 0;
 static bool running_commit = 0;
@@ -99,29 +102,30 @@ static List lft_rgt_list = NULL;
 
 /* Local functions */
 static void  _become_slurm_user(void);
+static void  _commit_handler_cancel(void);
+static void *_commit_handler(void *no_data);
 static void  _daemonize(void);
 static void  _default_sigaction(int sig);
+static void  _free_dbd_stats(void);
 static void  _init_config(void);
+static void  _init_dbd_stats(void);
 static void  _init_pidfile(void);
 static void  _kill_old_slurmdbd(void);
-static void  _parse_commandline(int argc, char *argv[]);
+static void  _parse_commandline(int argc, char **argv);
+static void  _restart_self(int argc, char **argv);
 static void  _request_registrations(void *db_conn);
-static void  _rollup_handler_cancel();
+static void  _rollup_handler_cancel(void);
 static void *_rollup_handler(void *no_data);
-static void  _commit_handler_cancel();
-static void *_commit_handler(void *no_data);
 static int   _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec);
 static void  _set_work_dir(void);
 static void *_signal_handler(void *no_data);
 static void  _update_logging(bool startup);
 static void  _update_nice(void);
 static void  _usage(char *prog_name);
-static void  _restart_self(int argc, char **argv);
 
 /* main - slurmctld main function, start various threads and process RPCs */
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
-	pthread_attr_t thread_attr;
 	char node_name_short[128];
 	char node_name_long[128];
 	void *db_conn = NULL;
@@ -135,14 +139,6 @@ int main(int argc, char *argv[])
 	_update_logging(true);
 	_update_nice();
 
-	if (slurm_auth_init(NULL) != SLURM_SUCCESS) {
-		fatal("Unable to initialize %s authentication plugin",
-		      slurmdbd_conf->auth_type);
-	}
-	if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS) {
-		fatal("Unable to initialize %s accounting storage plugin",
-		      slurmdbd_conf->storage_type);
-	}
 	_kill_old_slurmdbd();
 	if (foreground == 0)
 		_daemonize();
@@ -152,14 +148,28 @@ int main(int argc, char *argv[])
 	 * (init_pidfile() exits if it can't initialize pid file).
 	 * On Linux we also need to make this setuid job explicitly
 	 * able to write a core dump.
-	 * This also has to happen after daemon(), which closes all fd's,
-	 * so we keep the write lock of the pidfile.
 	 */
 	_init_pidfile();
+
+	/*
+	 * Do plugin init's after _init_pidfile so systemd is happy as
+	 * slurm_acct_storage_init() could take a long time to finish if running
+	 * for the first time after an upgrade.
+	 */
+	if (slurm_auth_init(NULL) != SLURM_SUCCESS) {
+		fatal("Unable to initialize %s authentication plugin",
+		      slurmdbd_conf->auth_type);
+	}
+	if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS) {
+		fatal("Unable to initialize %s accounting storage plugin",
+		      slurmdbd_conf->storage_type);
+	}
+
 	_become_slurm_user();
 	if (foreground == 0)
 		_set_work_dir();
 	log_config();
+	_init_dbd_stats();
 
 #ifdef PR_SET_DUMPABLE
 	if (prctl(PR_SET_DUMPABLE, 1) < 0)
@@ -170,30 +180,24 @@ int main(int argc, char *argv[])
 		error("Unable to block signals");
 
 	/* Create attached thread for signal handling */
-	slurm_attr_init(&thread_attr);
-	if (pthread_create(&signal_handler_thread, &thread_attr,
-			   _signal_handler, NULL))
-		fatal("pthread_create %m");
-	slurm_attr_destroy(&thread_attr);
+	slurm_thread_create(&signal_handler_thread, _signal_handler, NULL);
 
 	registered_clusters = list_create(NULL);
 
-	slurm_attr_init(&thread_attr);
-	if (pthread_create(&commit_handler_thread, &thread_attr,
-			   _commit_handler, NULL))
-		fatal("pthread_create %m");
-	slurm_attr_destroy(&thread_attr);
+	slurm_thread_create(&commit_handler_thread, _commit_handler, NULL);
 
 	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
 
-	/* If we are tacking wckey we need to cache
-	   wckeys, if we aren't only cache the users, qos */
+	/*
+	 * If we are tracking wckey we need to cache wckeys,
+	 * if we aren't only cache the users, qos, and tres.
+	 */
 	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_USER |
 		ASSOC_MGR_CACHE_QOS | ASSOC_MGR_CACHE_TRES;
 	if (slurmdbd_conf->track_wckey)
 		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
 
-	db_conn = acct_storage_g_get_connection(NULL, 0, true, NULL);
+	db_conn = acct_storage_g_get_connection(NULL, 0, NULL, true, NULL);
 	if (assoc_mgr_init(db_conn, &assoc_init_arg, errno) == SLURM_ERROR) {
 		error("Problem getting cache of data");
 		acct_storage_g_close_connection(&db_conn);
@@ -246,21 +250,13 @@ int main(int argc, char *argv[])
 
 		if (!shutdown_time) {
 			/* Create attached thread to process incoming RPCs */
-			slurm_attr_init(&thread_attr);
-			if (pthread_create(&rpc_handler_thread, &thread_attr,
-					   rpc_mgr, NULL))
-				fatal("pthread_create error %m");
-			slurm_attr_destroy(&thread_attr);
+			slurm_thread_create(&rpc_handler_thread, rpc_mgr, NULL);
 		}
 
 		if (!shutdown_time) {
 			/* Create attached thread to do usage rollup */
-			slurm_attr_init(&thread_attr);
-			if (pthread_create(&rollup_handler_thread,
-					   &thread_attr,
-					   _rollup_handler, db_conn))
-				fatal("pthread_create error %m");
-			slurm_attr_destroy(&thread_attr);
+			slurm_thread_create(&rollup_handler_thread,
+					    _rollup_handler, db_conn);
 		}
 
 		/* Daemon is fully operational here */
@@ -276,10 +272,14 @@ int main(int argc, char *argv[])
 		acct_storage_g_commit(db_conn, 1);
 
 		/* this is only ran if not backup */
-		if (rollup_handler_thread)
+		if (rollup_handler_thread) {
 			pthread_join(rollup_handler_thread, NULL);
-		if (rpc_handler_thread)
+			rollup_handler_thread = 0;
+		}
+		if (rpc_handler_thread) {
 			pthread_join(rpc_handler_thread, NULL);
+			rpc_handler_thread = 0;
+		}
 
 		if (backup && primary_resumed && !restart_backup) {
 			shutdown_time = 0;
@@ -316,15 +316,16 @@ end_it:
 		_restart_self(argc, argv);
 	}
 
-	assoc_mgr_fini(NULL);
+	assoc_mgr_fini(0);
 	slurm_acct_storage_fini();
 	slurm_auth_fini();
 	log_fini();
 	free_slurmdbd_conf();
+	_free_dbd_stats();
 	exit(0);
 }
 
-extern void reconfig()
+extern void reconfig(void)
 {
 	read_slurmdbd_conf();
 	assoc_mgr_set_missing_uids();
@@ -332,7 +333,7 @@ extern void reconfig()
 	_update_logging(false);
 }
 
-extern void shutdown_threads()
+extern void shutdown_threads(void)
 {
 	shutdown_time = time(NULL);
 	/* End commit before rpc_mgr_wake.  It will do the final
@@ -343,15 +344,62 @@ extern void shutdown_threads()
 	_rollup_handler_cancel();
 }
 
+/* Allocate storage for statistics data structure,
+ * Free storage using _free_dbd_stats() */
+static void _init_dbd_stats(void)
+{
+	slurm_mutex_lock(&rpc_mutex);
+	rpc_stats.rollup_count    =
+		xmalloc(sizeof(uint16_t) * ROLLUP_COUNT);
+	rpc_stats.rollup_time     =
+		xmalloc(sizeof(uint64_t) * ROLLUP_COUNT);
+	rpc_stats.rollup_max_time =
+		xmalloc(sizeof(uint64_t) * ROLLUP_COUNT);
+
+	rpc_stats.type_cnt = 200;  /* Capture info for first 200 RPC types */
+	rpc_stats.rpc_type_id   =
+		xmalloc(sizeof(uint16_t) * rpc_stats.type_cnt);
+	rpc_stats.rpc_type_cnt  =
+		xmalloc(sizeof(uint32_t) * rpc_stats.type_cnt);
+	rpc_stats.rpc_type_time =
+		xmalloc(sizeof(uint64_t) * rpc_stats.type_cnt);
+
+	rpc_stats.user_cnt = 200;  /* Capture info for first 200 RPC users */
+	rpc_stats.rpc_user_id   =
+		xmalloc(sizeof(uint32_t) * rpc_stats.user_cnt);
+	rpc_stats.rpc_user_cnt  =
+		xmalloc(sizeof(uint32_t) * rpc_stats.user_cnt);
+	rpc_stats.rpc_user_time =
+		xmalloc(sizeof(uint64_t) * rpc_stats.user_cnt);
+	slurm_mutex_unlock(&rpc_mutex);
+}
+
+/* Free storage from statistics data structure */
+static void _free_dbd_stats(void)
+{
+	slurm_mutex_lock(&rpc_mutex);
+	xfree(rpc_stats.rollup_count);
+	xfree(rpc_stats.rollup_time);
+	xfree(rpc_stats.rollup_max_time);
+
+	rpc_stats.type_cnt = 0;
+	xfree(rpc_stats.rpc_type_id);
+	xfree(rpc_stats.rpc_type_cnt);
+	xfree(rpc_stats.rpc_type_time);
+
+	rpc_stats.user_cnt = 0;
+	xfree(rpc_stats.rpc_user_id);
+	xfree(rpc_stats.rpc_user_cnt);
+	xfree(rpc_stats.rpc_user_time);
+	slurm_mutex_unlock(&rpc_mutex);
+}
+
 /* Reset some of the processes resource limits to the hard limits */
 static void  _init_config(void)
 {
 	struct rlimit rlim;
 
-	if (getrlimit(RLIMIT_NOFILE, &rlim) == 0) {
-		rlim.rlim_cur = rlim.rlim_max;
-		(void) setrlimit(RLIMIT_NOFILE, &rlim);
-	}
+	rlimits_maximize_nofile();
 	if (getrlimit(RLIMIT_CORE, &rlim) == 0) {
 		rlim.rlim_cur = rlim.rlim_max;
 		(void) setrlimit(RLIMIT_CORE, &rlim);
@@ -376,7 +424,7 @@ static void  _init_config(void)
  * IN argv - the command line arguments
  * IN/OUT conf_ptr - pointer to current configuration, update as needed
  */
-static void _parse_commandline(int argc, char *argv[])
+static void _parse_commandline(int argc, char **argv)
 {
 	int c = 0;
 	char *tmp_char;
@@ -444,7 +492,7 @@ static void _usage(char *prog_name)
 		"Print version information and exit.\n");
 }
 
-/* Reset slurmctld logging based upon configuration parameters */
+/* Reset slurmdbd logging based upon configuration parameters */
 static void _update_logging(bool startup)
 {
 	/* Preserve execute line arguments (if any) */
@@ -454,17 +502,22 @@ static void _update_logging(bool startup)
 			(LOG_LEVEL_END - 1));
 	}
 
-	log_opts.stderr_level  = slurmdbd_conf->debug_level;
 	log_opts.logfile_level = slurmdbd_conf->debug_level;
-	log_opts.syslog_level  = slurmdbd_conf->debug_level;
 
 	if (foreground)
-		log_opts.syslog_level = LOG_LEVEL_QUIET;
-	else {
+		log_opts.stderr_level  = slurmdbd_conf->debug_level;
+	else
 		log_opts.stderr_level = LOG_LEVEL_QUIET;
-		if (slurmdbd_conf->log_file)
-			log_opts.syslog_level = LOG_LEVEL_QUIET;
-	}
+
+	if (slurmdbd_conf->syslog_debug != LOG_LEVEL_END) {
+		log_opts.syslog_level =	slurmdbd_conf->syslog_debug;
+	} else if (foreground) {
+		log_opts.syslog_level = LOG_LEVEL_QUIET;
+	} else if ((slurmdbd_conf->debug_level > LOG_LEVEL_QUIET)
+		   && !slurmdbd_conf->log_file) {
+		log_opts.syslog_level = slurmdbd_conf->debug_level;
+	} else
+		log_opts.syslog_level = LOG_LEVEL_FATAL;
 
 	log_alter(log_opts, SYSLOG_FACILITY_DAEMON, slurmdbd_conf->log_file);
 	log_set_timefmt(slurmdbd_conf->log_fmt);
@@ -481,6 +534,8 @@ static void _update_logging(bool startup)
 			      (int) slurm_user_gid);
 		}
 	}
+
+	debug("Log file re-opened");
 }
 
 /* Reset slurmd nice value */
@@ -543,7 +598,7 @@ static void _init_pidfile(void)
  * "cd" to the LogFile directory (if one is configured) */
 static void _daemonize(void)
 {
-	if (daemon(1, 1))
+	if (xdaemon())
 		error("daemon(): %m");
 	log_alter(log_opts, LOG_DAEMON, slurmdbd_conf->log_file);
 }
@@ -559,7 +614,7 @@ static void _set_work_dir(void)
 		slash_ptr = strrchr(work_dir, '/');
 		if (slash_ptr == work_dir)
 			work_dir[1] = '\0';
-		else
+		else if (slash_ptr)
 			slash_ptr[0] = '\0';
 		if ((access(work_dir, W_OK) != 0) || (chdir(work_dir) < 0))
 			error("chdir(%s): %m", work_dir);
@@ -599,7 +654,7 @@ static void _request_registrations(void *db_conn)
 	FREE_NULL_LIST(cluster_list);
 }
 
-static void _rollup_handler_cancel()
+static void _rollup_handler_cancel(void)
 {
 	if (running_rollup) {
 		if (backup && running_rollup && primary_resumed)
@@ -627,6 +682,8 @@ static void *_rollup_handler(void *db_conn)
 	time_t next_time;
 /* 	int sigarray[] = {SIGUSR1, 0}; */
 	struct tm tm;
+	rollup_stats_t rollup_stats;
+	int i;
 
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
@@ -641,13 +698,27 @@ static void *_rollup_handler(void *db_conn)
 		if (!db_conn)
 			break;
 		/* run the roll up */
+		memset(&rollup_stats, 0, sizeof(rollup_stats_t));
 		slurm_mutex_lock(&rollup_lock);
 		running_rollup = 1;
 		debug2("running rollup at %s", slurm_ctime2(&start_time));
-		acct_storage_g_roll_usage(db_conn, 0, 0, 1);
+		acct_storage_g_roll_usage(db_conn, 0, 0, 1, &rollup_stats);
 		acct_storage_g_commit(db_conn, 1);
 		running_rollup = 0;
 		slurm_mutex_unlock(&rollup_lock);
+
+		slurm_mutex_lock(&rpc_mutex);
+		for (i = 0; i < ROLLUP_COUNT; i++) {
+			if (rollup_stats.rollup_time[i] == 0)
+				continue;
+			rpc_stats.rollup_count[i]++;
+			rpc_stats.rollup_time[i] +=
+				rollup_stats.rollup_time[i];
+			rpc_stats.rollup_max_time[i] =
+				MAX(rpc_stats.rollup_max_time[i],
+				    rollup_stats.rollup_time[i]);
+		}
+		slurm_mutex_unlock(&rpc_mutex);
 
 		/* get the time now we have rolled usage */
 		start_time = time(NULL);
@@ -662,7 +733,6 @@ static void *_rollup_handler(void *db_conn)
 		tm.tm_sec = 0;
 		tm.tm_min = 0;
 		tm.tm_hour++;
-		tm.tm_isdst = -1;
 		next_time = slurm_mktime(&tm);
 
 		sleep((next_time - start_time));
@@ -706,7 +776,7 @@ static void *_commit_handler(void *db_conn)
 			itr = list_iterator_create(registered_clusters);
 			while ((slurmdbd_conn = list_next(itr))) {
 				debug4("running commit for %s",
-				       slurmdbd_conn->cluster_name);
+				       slurmdbd_conn->conn->cluster_name);
 				acct_storage_g_commit(
 					slurmdbd_conn->db_conn, 1);
 			}
@@ -735,7 +805,7 @@ static void *_commit_handler(void *db_conn)
 static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec)
 {
 	slurm_addr_t ctld_address;
-	slurm_fd_t fd;
+	int fd;
 	int rc = SLURM_SUCCESS;
 
 	slurm_set_addr_char(&ctld_address, cluster_rec->control_port,
@@ -754,7 +824,7 @@ static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec)
 		 * for an arbitray fd or should these be fire
 		 * and forget?  For this, that we can probably
 		 * forget about it */
-		slurm_close(fd);
+		close(fd);
 	}
 	return rc;
 }
@@ -763,7 +833,7 @@ static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec)
 static void *_signal_handler(void *no_data)
 {
 	int rc, sig;
-	int sig_array[] = {SIGINT, SIGTERM, SIGHUP, SIGABRT, 0};
+	int sig_array[] = {SIGINT, SIGTERM, SIGHUP, SIGABRT, SIGUSR2, 0};
 	sigset_t set;
 
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -774,6 +844,7 @@ static void *_signal_handler(void *no_data)
 	_default_sigaction(SIGTERM);
 	_default_sigaction(SIGHUP);
 	_default_sigaction(SIGABRT);
+	_default_sigaction(SIGUSR2);
 
 	while (1) {
 		xsignal_sigset_create(sig_array, &set);
@@ -795,6 +866,10 @@ static void *_signal_handler(void *no_data)
 			abort();	/* Should terminate here */
 			shutdown_threads();
 			return NULL;
+		case SIGUSR2:
+			info("Logrotate signal (SIGUSR2) received");
+			_update_logging(false);
+			break;
 		default:
 			error("Invalid signal (%d) received", sig);
 		}

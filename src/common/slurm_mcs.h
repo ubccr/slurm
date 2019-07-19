@@ -4,11 +4,11 @@
  *  Copyright (C) 2015 CEA/DAM/DIF
  *  Written by Aline Roy <aline.roy@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,30 +24,26 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _SLURM_MCS_H
 #define _SLURM_MCS_H
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-#if HAVE_STDINT_H
-#  include <stdint.h>           /* for uint16_t, uint32_t definitions */
-#endif
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>         /* for uint16_t, uint32_t definitions */
-#endif
+#include <inttypes.h>
 
 #include "src/slurmctld/slurmctld.h"
+
+#define MCS_SELECT_NOSELECT		0x00
+#define MCS_SELECT_ONDEMANDSELECT	0x01
+#define MCS_SELECT_SELECT		0x02
 
 extern int slurm_mcs_init(void);
 extern int slurm_mcs_fini(void);

@@ -6,11 +6,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,21 +26,22 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#include <strings.h>
+#include <fcntl.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <fcntl.h>
+
 #include "src/common/env.h"
 #include "src/common/slurmdbd_defs.h"
 #include "src/common/slurm_auth.h"
@@ -60,6 +61,10 @@ extern char *cluster_month_table;
 extern char *wckey_day_table;
 extern char *wckey_hour_table;
 extern char *wckey_month_table;
+
+#ifndef NDEBUG
+extern __thread bool drop_priv;
+#endif
 
 /*
  * We want SLURMDB_MODIFY_ASSOC always to be the last
@@ -135,7 +140,7 @@ static void _dump_slurmdb_res_records(List res_list)
  * RET: error code
  *
  * NOTE: This function will take the object given and free it later so it
- *       needed to be removed from a list if in one before.
+ *       needs to be removed from a existing lists prior.
  */
 extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 			     void *object)
@@ -143,7 +148,13 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 	slurmdb_update_object_t *update_object = NULL;
 	slurmdb_assoc_rec_t *assoc = object;
 	slurmdb_qos_rec_t *qos = object;
+#ifndef NDEBUG
+	slurmdb_tres_rec_t *tres = object;
+	slurmdb_res_rec_t *res = object;
+	slurmdb_wckey_rec_t *wckey = object;
+#endif
 	ListIterator itr = NULL;
+
 	if (!update_list) {
 		error("no update list given");
 		return SLURM_ERROR;
@@ -160,7 +171,11 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 		/* here we prepend primarly for remove association
 		   since parents need to be removed last, and they are
 		   removed first in the calling code */
-		list_prepend(update_object->objects, object);
+		if (type == SLURMDB_UPDATE_FEDS) {
+			FREE_NULL_LIST(update_object->objects);
+			update_object->objects = object;
+		} else
+			list_prepend(update_object->objects, object);
 		return SLURM_SUCCESS;
 	}
 
@@ -181,7 +196,7 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 		update_object->objects = list_create(slurmdb_destroy_user_rec);
 		break;
 	case SLURMDB_ADD_TRES:
-		xassert(((slurmdb_tres_rec_t *)object)->id);
+		xassert(tres->id);
 		update_object->objects = list_create(slurmdb_destroy_tres_rec);
 		break;
 	case SLURMDB_ADD_ASSOC:
@@ -197,13 +212,18 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 
 		if (assoc->max_jobs == NO_VAL)
 			assoc->max_jobs = INFINITE;
+		if (assoc->max_jobs_accrue == NO_VAL)
+			assoc->max_jobs_accrue = INFINITE;
+		if (assoc->min_prio_thresh == NO_VAL)
+			assoc->min_prio_thresh = INFINITE;
 		if (assoc->max_submit_jobs == NO_VAL)
 			assoc->max_submit_jobs = INFINITE;
 		if (assoc->max_wall_pj == NO_VAL)
 			assoc->max_wall_pj = INFINITE;
+		/* fall through */
 	case SLURMDB_MODIFY_ASSOC:
 	case SLURMDB_REMOVE_ASSOC:
-		xassert(((slurmdb_assoc_rec_t *)object)->cluster);
+		xassert(assoc->cluster);
 		update_object->objects = list_create(
 			slurmdb_destroy_assoc_rec);
 		break;
@@ -224,6 +244,7 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 			qos->max_submit_jobs_pu = INFINITE;
 		if (qos->max_wall_pj == NO_VAL)
 			qos->max_wall_pj = INFINITE;
+		/* fall through */
 	case SLURMDB_MODIFY_QOS:
 	case SLURMDB_REMOVE_QOS:
 		update_object->objects = list_create(
@@ -232,7 +253,7 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 	case SLURMDB_ADD_WCKEY:
 	case SLURMDB_MODIFY_WCKEY:
 	case SLURMDB_REMOVE_WCKEY:
-		xassert(((slurmdb_wckey_rec_t *)object)->cluster);
+		xassert(wckey->cluster);
 		update_object->objects = list_create(
 			slurmdb_destroy_wckey_rec);
 		break;
@@ -244,14 +265,18 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 		update_object->objects = list_create(slurm_destroy_char);
 		break;
 	case SLURMDB_ADD_RES:
-		xassert(((slurmdb_res_rec_t *)object)->name);
-		xassert(((slurmdb_res_rec_t *)object)->server);
+		xassert(res->name);
+		xassert(res->server);
+		/* fall through */
 	case SLURMDB_MODIFY_RES:
 	case SLURMDB_REMOVE_RES:
-		xassert(((slurmdb_res_rec_t *)object)->id != NO_VAL);
+		xassert(res->id != NO_VAL);
 		update_object->objects = list_create(
 			slurmdb_destroy_res_rec);
 		break;
+	case SLURMDB_UPDATE_FEDS:
+		update_object->objects = object;
+		return SLURM_SUCCESS;
 	case SLURMDB_UPDATE_NOTSET:
 	default:
 		error("unknown type set in update_object: %d", type);
@@ -296,6 +321,9 @@ extern void dump_update_list(List update_list)
 			debug3("\tASSOC RECORDS");
 			_dump_slurmdb_assoc_records(object->objects);
 			break;
+		case SLURMDB_UPDATE_FEDS:
+			debug3("\tFEDERATION RECORDS");
+			break;
 		case SLURMDB_ADD_QOS:
 		case SLURMDB_MODIFY_QOS:
 		case SLURMDB_REMOVE_QOS:
@@ -336,7 +364,7 @@ extern void dump_update_list(List update_list)
 extern int cluster_first_reg(char *host, uint16_t port, uint16_t rpc_version)
 {
 	slurm_addr_t ctld_address;
-	slurm_fd_t fd;
+	int fd;
 	int rc = SLURM_SUCCESS;
 
 	info("First time to register cluster requesting "
@@ -366,7 +394,7 @@ extern int cluster_first_reg(char *host, uint16_t port, uint16_t rpc_version)
 		 * for an arbitray fd or should these be fire
 		 * and forget?  For this, that we can probably
 		 * forget about it */
-		slurm_close(fd);
+		close(fd);
 	}
 	return rc;
 }
@@ -407,7 +435,6 @@ extern int set_usage_information(char **usage_table,
 	}
 	end_tm.tm_sec = 0;
 	end_tm.tm_min = 0;
-	end_tm.tm_isdst = -1;
 	end = slurm_mktime(&end_tm);
 
 	if (!start) {
@@ -427,7 +454,6 @@ extern int set_usage_information(char **usage_table,
 	}
 	start_tm.tm_sec = 0;
 	start_tm.tm_min = 0;
-	start_tm.tm_isdst = -1;
 	start = slurm_mktime(&start_tm);
 
 	if (end-start < 3600) {
@@ -531,6 +557,10 @@ extern bool is_user_min_admin_level(void *db_conn, uid_t uid,
 	 * THERE IS NO AUTHENTICATION WHEN RUNNNING OUT OF THE
 	 * SLURMDBD!
 	 */
+#ifndef NDEBUG
+	if (drop_priv)
+		return false;
+#endif
 	if (slurmdbd_conf) {
 		/* We have to check the authentication here in the
 		 * plugin since we don't know what accounts are being
@@ -539,7 +569,7 @@ extern bool is_user_min_admin_level(void *db_conn, uid_t uid,
 		if ((uid != slurmdbd_conf->slurm_user_id && uid != 0)
 		   && assoc_mgr_get_admin_level(db_conn, uid) < min_level)
 			is_admin = 0;
-	} else if (uid != 0)
+	} else if ((uid != 0) && (uid != slurmctld_conf.slurm_user_id))
 		is_admin = 0;
 
 	return is_admin;
@@ -568,7 +598,8 @@ extern bool is_user_coord(slurmdb_user_rec_t *user, char *account)
 extern bool is_user_any_coord(void *db_conn, slurmdb_user_rec_t *user)
 {
 	xassert(user);
-	if (assoc_mgr_fill_in_user(db_conn, user, 1, NULL) != SLURM_SUCCESS) {
+	if (assoc_mgr_fill_in_user(db_conn, user, 1, NULL, false)
+	    != SLURM_SUCCESS) {
 		error("couldn't get information for this user %s(%d)",
 		      user->name, user->uid);
 		return 0;
@@ -649,7 +680,6 @@ extern time_t archive_setup_end_time(time_t last_submit, uint32_t purge)
 		return 0;
 	}
 
-	time_tm.tm_isdst = -1;
 	return (slurm_mktime(&time_tm) - 1);
 }
 
@@ -664,7 +694,6 @@ extern int archive_run_script(slurmdb_archive_cond_t *arch_cond,
 	time_t curr_end;
 
 	if (stat(arch_cond->archive_script, &st) < 0) {
-		errno = errno;
 		error("archive_run_script: failed to stat %s: %m",
 		      arch_cond->archive_script);
 		return SLURM_ERROR;
@@ -758,6 +787,34 @@ extern int archive_run_script(slurmdb_archive_cond_t *arch_cond,
 				     (long)curr_end);
 	}
 
+	if (arch_cond->purge_txn != NO_VAL) {
+		if (!(curr_end = archive_setup_end_time(
+			     last_submit, arch_cond->purge_txn))) {
+			error("Parsing purge txn");
+			return SLURM_ERROR;
+		}
+
+		env_array_append_fmt(&env, "SLURM_ARCHIVE_TXN", "%u",
+				     SLURMDB_PURGE_ARCHIVE_SET(
+					     arch_cond->purge_txn));
+		env_array_append_fmt(&env, "SLURM_ARCHIVE_LAST_TXN", "%ld",
+				     (long)curr_end);
+	}
+
+	if (arch_cond->purge_usage != NO_VAL) {
+		if (!(curr_end = archive_setup_end_time(
+			     last_submit, arch_cond->purge_usage))) {
+			error("Parsing purge usage");
+			return SLURM_ERROR;
+		}
+
+		env_array_append_fmt(&env, "SLURM_ARCHIVE_USAGE", "%u",
+				     SLURMDB_PURGE_ARCHIVE_SET(
+					     arch_cond->purge_usage));
+		env_array_append_fmt(&env, "SLURM_ARCHIVE_LAST_USAGE", "%ld",
+				     (long)curr_end);
+	}
+
 #ifdef _PATH_STDPATH
 	env_array_append (&env, "PATH", _PATH_STDPATH);
 #else
@@ -774,13 +831,16 @@ static char *_make_archive_name(time_t period_start, time_t period_end,
 				char *cluster_name, char *arch_dir,
 				char *arch_type, uint32_t archive_period)
 {
+	char *name = NULL, *fullname = NULL;
 	struct tm time_tm;
-	char start_char[32];
-	char end_char[32];
+	uint32_t num = 2;
 
 	slurm_localtime_r((time_t *)&period_start, &time_tm);
 	time_tm.tm_sec = 0;
 	time_tm.tm_min = 0;
+
+	xstrfmtcat(name, "%s/%s_%s_archive_", arch_dir, cluster_name,
+		   arch_type);
 
 	/* set up the start time based off the period we are purging */
 	if (SLURMDB_PURGE_IN_HOURS(archive_period)) {
@@ -791,31 +851,29 @@ static char *_make_archive_name(time_t period_start, time_t period_end,
 		time_tm.tm_mday = 1;
 	}
 
-	snprintf(start_char, sizeof(start_char),
-		 "%4.4u-%2.2u-%2.2u"
-		 "T%2.2u:%2.2u:%2.2u",
-		 (time_tm.tm_year + 1900),
-		 (time_tm.tm_mon+1),
-		 time_tm.tm_mday,
-		 time_tm.tm_hour,
-		 time_tm.tm_min,
-		 time_tm.tm_sec);
+	/* Add start time to file name. */
+	xstrfmtcat(name, "%4.4u-%2.2u-%2.2uT%2.2u:%2.2u:%2.2u_",
+		   (time_tm.tm_year + 1900), (time_tm.tm_mon + 1),
+		   time_tm.tm_mday, time_tm.tm_hour, time_tm.tm_min,
+		   time_tm.tm_sec);
 
 	slurm_localtime_r((time_t *)&period_end, &time_tm);
-	snprintf(end_char, sizeof(end_char),
-		 "%4.4u-%2.2u-%2.2u"
-		 "T%2.2u:%2.2u:%2.2u",
-		 (time_tm.tm_year + 1900),
-		 (time_tm.tm_mon+1),
-		 time_tm.tm_mday,
-		 time_tm.tm_hour,
-		 time_tm.tm_min,
-		 time_tm.tm_sec);
+	/* Add end time to file name. */
+	xstrfmtcat(name, "%4.4u-%2.2u-%2.2uT%2.2u:%2.2u:%2.2u",
+		   (time_tm.tm_year + 1900), (time_tm.tm_mon + 1),
+		   time_tm.tm_mday, time_tm.tm_hour, time_tm.tm_min,
+		   time_tm.tm_sec);
 
-	/* write the buffer to file */
-	return xstrdup_printf("%s/%s_%s_archive_%s_%s",
-			      arch_dir, cluster_name, arch_type,
-			      start_char, end_char);
+	/* If the file already exists, generate a new file name. */
+	fullname = xstrdup(name);
+
+	while (!access(fullname, F_OK)) {
+		xfree(fullname);
+		xstrfmtcat(fullname, "%s.%u", name, num++);
+	}
+
+	xfree(name);
+	return fullname;
 }
 
 extern int archive_write_file(Buf buffer, char *cluster_name,
@@ -825,8 +883,7 @@ extern int archive_write_file(Buf buffer, char *cluster_name,
 {
 	int fd = 0;
 	int rc = SLURM_SUCCESS;
-	char *old_file = NULL, *new_file = NULL, *reg_file = NULL;
-	static int high_buffer_size = (1024 * 1024);
+	char *new_file = NULL;
 	static pthread_mutex_t local_file_lock = PTHREAD_MUTEX_INITIALIZER;
 
 	xassert(buffer);
@@ -834,23 +891,25 @@ extern int archive_write_file(Buf buffer, char *cluster_name,
 	slurm_mutex_lock(&local_file_lock);
 
 	/* write the buffer to file */
-	reg_file = _make_archive_name(period_start, period_end,
+	new_file = _make_archive_name(period_start, period_end,
 				      cluster_name, arch_dir,
 				      arch_type, archive_period);
+	if (!new_file) {
+		error("%s: Unable to make archive file name.", __func__);
+		return SLURM_ERROR;
+	}
 
 	debug("Storing %s archive for %s at %s",
-	      arch_type, cluster_name, reg_file);
-	old_file = xstrdup_printf("%s.old", reg_file);
-	new_file = xstrdup_printf("%s.new", reg_file);
+	      arch_type, cluster_name, new_file);
 
 	fd = creat(new_file, 0600);
 	if (fd < 0) {
 		error("Can't save archive, create file %s error %m", new_file);
 		rc = SLURM_ERROR;
 	} else {
-		int pos = 0, nwrite = get_buf_offset(buffer), amount;
+		int amount;
+		uint32_t pos = 0, nwrite = get_buf_offset(buffer);
 		char *data = (char *)get_buf_data(buffer);
-		high_buffer_size = MAX(nwrite, high_buffer_size);
 		while (nwrite > 0) {
 			amount = write(fd, &data[pos], nwrite);
 			if ((amount < 0) && (errno != EINTR)) {
@@ -865,19 +924,6 @@ extern int archive_write_file(Buf buffer, char *cluster_name,
 		close(fd);
 	}
 
-	if (rc)
-		(void) unlink(new_file);
-	else {			/* file shuffle */
-		(void) unlink(old_file);
-		if (link(reg_file, old_file))
-			debug4("Link(%s, %s): %m", reg_file, old_file);
-		(void) unlink(reg_file);
-		if (link(new_file, reg_file))
-			debug4("Link(%s, %s): %m", new_file, reg_file);
-		(void) unlink(new_file);
-	}
-	xfree(old_file);
-	xfree(reg_file);
 	xfree(new_file);
 	slurm_mutex_unlock(&local_file_lock);
 

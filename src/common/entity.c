@@ -5,11 +5,11 @@
  *  at Bull for slurm-2.6.
  *  Adapted by Matthieu Hautreux <matthieu.hautreux@cea.fr> for slurm-14.11.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -51,10 +51,12 @@
  *                                 HELPERS                                   *
 \*****************************************************************************/
 
-static const char* _entity_data_identify(void* item)
+static void _entity_data_identify(void* item, const char** key,
+				  uint32_t* key_len)
 {
 	entity_data_t* data_item = (entity_data_t*)item;
-	return data_item->key;
+	*key = data_item->key;
+	*key_len = strlen(data_item->key);
 }
 
 static void _entity_data_destroy(void* x)
@@ -85,7 +87,7 @@ static int _entity_add_data(const entity_t* entity, const char* key,
 	if (!key || !*key || !value)
 		return SLURM_ERROR;
 
-	result = (entity_data_t*)xhash_get(entity->data, key);
+	result = (entity_data_t*)xhash_get_str(entity->data, key);
 	if (result != NULL) {
 		/* update existing value by ref or by override */
 		if (byreference) {
@@ -124,9 +126,7 @@ void entity_init(entity_t* entity, const char* name, const char* type)
 {
 	entity->name = xstrdup(name);
 	entity->type = xstrdup(type);
-	entity->data = xhash_init(_entity_data_identify,
-				  (xhash_freefunc_t)_entity_data_destroy,
-				  NULL, 0);
+	entity->data = xhash_init(_entity_data_identify, _entity_data_destroy);
 	entity->nodes = list_create(_entity_node_destroy);
 	entity->ptr = NULL;
 }
@@ -165,7 +165,7 @@ int entity_get_data(const entity_t* entity, const char* key,
 
 void* entity_get_data_ref(const entity_t* entity, const char* key)
 {
-	entity_data_t* data = (entity_data_t*)xhash_get(entity->data, key);
+	entity_data_t* data = (entity_data_t*)xhash_get_str(entity->data, key);
 	if (data) {
 		return data->value;
 	}
@@ -186,7 +186,7 @@ int entity_set_data_ref(const entity_t* entity, const char* key, void* value,
 
 void entity_delete_data(entity_t* entity, const char* key)
 {
-	xhash_delete(entity->data, key);
+	xhash_delete_str(entity->data, key);
 }
 
 void entity_clear_data(entity_t* entity)
@@ -290,8 +290,9 @@ void entity_nodes_walk(entity_t* entity,
 	list_for_each(entity->nodes, _entity_nodes_walkfunc, &real_arg);
 }
 
-const char* entity_hashable_identify(void* item)
+void entity_hashable_identify(void* item, const char** key, uint32_t* key_len)
 {
 	entity_t* entity = (entity_t*)item;
-	return entity->name;
+	*key = entity->name;
+	*key_len = strlen(entity->name);
 }

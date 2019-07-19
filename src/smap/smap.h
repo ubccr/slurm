@@ -7,11 +7,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,40 +27,22 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \****************************************************************************/
 
 #ifndef _SMAP_H
 #define _SMAP_H
 
-#ifndef _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
+#include "config.h"
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>
-#else				/* !HAVE_INTTYPES_H */
-#  if HAVE_STDINT_H
-#    include <stdint.h>
-#  endif
-#endif				/* HAVE_INTTYPES_H */
-
-#if HAVE_GETOPT_H
-#  include <getopt.h>
-#else
-#  include "src/common/getopt.h"
-#endif
+#define _GNU_SOURCE
 
 /*
  * The following define is necessary for OS X 10.6. The apple supplied
@@ -81,23 +63,12 @@
 #  endif
 #endif
 
-/*
- * On some systems (read AIX), curses.h includes term.h which does this
- *    #define lines cur_term-> _c3
- * This makes the symbol "lines" unusable. There is a similar #define
- * "columns", "bell", "tone", "pulse", "hangup" and many, many more!!
- */
-#ifdef lines
-#  undef lines
-#endif
-#ifndef SYSTEM_DIMENSIONS
-#  define SYSTEM_DIMENSIONS 1
-#endif
-
-#include <stdlib.h>
-#include <pwd.h>
 #include <ctype.h>
+#include <getopt.h>
+#include <inttypes.h>
+#include <pwd.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -112,16 +83,11 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
-#include "src/plugins/select/bluegene/bg_enums.h"
-#include "src/plugins/select/bluegene/ba_common.h"
-#include "src/plugins/select/bluegene/configure_api.h"
-
 /* getopt_long options, integers but not characters */
 #define OPT_LONG_HELP	0x100
 #define OPT_LONG_USAGE	0x101
-#define OPT_LONG_HIDE	0x102
 
-enum { JOBS, RESERVATIONS, SLURMPART, BGPART, COMMANDS };
+enum { JOBS, RESERVATIONS, PARTITION };
 
 /* Input parameters */
 typedef struct {
@@ -131,13 +97,10 @@ typedef struct {
 	uint16_t cluster_dims;
 	uint32_t cluster_flags;
 	bool commandline;
-	char *command;
 	int display;
 	int iterate;
-	bitstr_t *io_bit;
 	bool no_header;
 	hostlist_t hl;
-	char *resolve;
 	int verbose;
 } smap_parameters_t;
 
@@ -156,8 +119,6 @@ typedef struct {
 	/* letter used in smap */
 	char letter;
 	uint32_t state;
-	/* set if using this midplane in a block */
-	uint16_t used;
 } smap_node_t;
 
 typedef struct {
@@ -178,8 +139,6 @@ extern int main_ycord;
 extern smap_parameters_t params;
 extern int text_line_cnt;
 
-extern void parse_command_line(int argc, char *argv[]);
-
 extern smap_system_t *smap_system_ptr;
 extern int quiet_flag;
 
@@ -189,19 +148,15 @@ extern void clear_grid(void);
 extern void free_grid(void);
 extern int *get_cluster_dims(node_info_msg_t *node_info_ptr);
 extern void set_grid_inx(int start, int end, int count);
-extern int set_grid_bg(int *start, int *end, int count, int set);
 extern void print_grid(void);
 bitstr_t *get_requested_node_bitmap(void);
 
-extern void parse_command_line(int argc, char *argv[]);
+extern void parse_command_line(int argc, char **argv);
 extern void print_date(void);
 extern void clear_window(WINDOW *win);
-extern char *resolve_mp(char *desc, node_info_msg_t *node_info_ptr);
 
 extern void get_slurm_part(void);
-extern void get_bg_part(void);
 extern void get_job(void);
-extern void get_command(void);
 extern void get_reservation(void);
 
 #endif

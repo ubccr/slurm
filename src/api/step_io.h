@@ -6,22 +6,22 @@
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #ifndef _HAVE_STEP_IO_H
@@ -44,7 +44,10 @@ struct client_io {
 	int num_tasks;
 	int num_nodes;
 	bool label;
-	int label_width;
+	int taskid_width;	/* characters needed for task_id label */
+	uint32_t pack_offset;	/* offset within a pack-job or NO_VAL */
+	uint32_t task_offset;	/* task offset within a pack-job or NO_VAL */
+
 	char *io_key;
 
 	/* internal variables */
@@ -100,11 +103,10 @@ typedef struct client_io client_io_t;
  *	back to the client when it establishes the IO connection as a sort
  *	of validity check.
  */
-client_io_t *client_io_handler_create(slurm_step_io_fds_t fds,
-				      int num_tasks,
-				      int num_nodes,
-				      slurm_cred_t *cred,
-				      bool label);
+client_io_t *client_io_handler_create(slurm_step_io_fds_t fds, int num_tasks,
+				      int num_nodes, slurm_cred_t *cred,
+				      bool label, uint32_t pack_offset,
+				      uint32_t task_offset);
 
 int client_io_handler_start(client_io_t *cio);
 

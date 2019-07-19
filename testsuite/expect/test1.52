@@ -13,22 +13,22 @@
 # Written by Danny Auble <da@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -37,7 +37,7 @@ set test_id     "1.52"
 set exit_code   0
 set num_nodes   2
 set num_tasks   2
-set node_count  0
+set idle_nodes  0
 set max_nodes   0
 set task_count  0
 set hostfile    "test$test_id.hostfile"
@@ -46,12 +46,6 @@ print_header $test_id
 
 if { [test_front_end] } {
 	send_user "\nWARNING: This test incompatible with front-end systems\n"
-	exit $exit_code
-} elseif {[test_launch_poe]} {
-	send_user "\nWARNING: This test is incompatible with POE systems\n"
-	exit $exit_code
-} elseif {[test_serial]} {
-	send_user "\nWARNING: This test is incompatible with serial systems\n"
 	exit $exit_code
 }
 
@@ -71,10 +65,6 @@ expect {
 		set max_nodes 999999
 		exp_continue
 	}
-	-re "TotalNodes=($number)" {
-		set node_count $expect_out(1,string)
-		exp_continue
-	}
 	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
 		exit 1
@@ -83,8 +73,14 @@ expect {
 		wait
 	}
 }
-if { ($node_count < 3) || ($max_nodes < 3) } {
-	send_user "WARNING: system must have at least 3 nodes to run this test on. $node_count $max_nodes\n"
+
+set idle_nodes [available_nodes $def_part idle]
+if { ($idle_nodes < 3) || ($max_nodes < 3) } {
+	if { $max_nodes == 999999 } {
+		send_user "WARNING: partition $def_part must have at least 3 idle nodes and MaxNodes >= 3 to run this test on. IDLE:$idle_nodes MaxNodes:UNLIMITED\n"
+	} else {
+		send_user "WARNING: partition $def_part must have at least 3 idle nodes and MaxNodes >= 3 to run this test on. IDLE:$idle_nodes MaxNodes:$max_nodes\n"
+	}
 	exit $exit_code
 }
 

@@ -1,16 +1,15 @@
 /*****************************************************************************\
  *  mysql_common.c - common functions for the mysql storage plugin.
  *****************************************************************************
- *
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,20 +25,23 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
  *  This file is patterned after jobcomp_linux.c, written by Morris Jette and
  *  Copyright (C) 2002 The Regents of the University of California.
 \*****************************************************************************/
 
+#include "config.h"
+
 #include "mysql_common.h"
+#include "src/common/log.h"
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
 #include "src/common/timers.h"
@@ -64,7 +66,7 @@ static void _destroy_db_key(void *arg)
 	}
 }
 
-/* NOTE: Insure that mysql_conn->lock is set on function entry */
+/* NOTE: Ensure that mysql_conn->lock is set on function entry */
 static int _clear_results(MYSQL *db_conn)
 {
 	MYSQL_RES *result = NULL;
@@ -89,7 +91,7 @@ static int _clear_results(MYSQL *db_conn)
 	return SLURM_SUCCESS;
 }
 
-/* NOTE: Insure that mysql_conn->lock is set on function entry */
+/* NOTE: Ensure that mysql_conn->lock is set on function entry */
 static MYSQL_RES *_get_first_result(MYSQL *db_conn)
 {
 	MYSQL_RES *result = NULL;
@@ -108,7 +110,7 @@ static MYSQL_RES *_get_first_result(MYSQL *db_conn)
 	return NULL;
 }
 
-/* NOTE: Insure that mysql_conn->lock is set on function entry */
+/* NOTE: Ensure that mysql_conn->lock is set on function entry */
 static MYSQL_RES *_get_last_result(MYSQL *db_conn)
 {
 	MYSQL_RES *result = NULL;
@@ -129,7 +131,7 @@ static MYSQL_RES *_get_last_result(MYSQL *db_conn)
 	return last_result;
 }
 
-/* NOTE: Insure that mysql_conn->lock is set on function entry */
+/* NOTE: Ensure that mysql_conn->lock is set on function entry */
 static int _mysql_query_internal(MYSQL *db_conn, char *query)
 {
 	int rc = SLURM_SUCCESS;
@@ -169,10 +171,17 @@ static int _mysql_query_internal(MYSQL *db_conn, char *query)
 		rc = SLURM_ERROR;
 	}
 end_it:
+	/*
+	 * Starting in MariaDB 10.2 many of the api commands started
+	 * setting errno erroneously.
+	 */
+	if (!rc)
+		errno = 0;
+
 	return rc;
 }
 
-/* NOTE: Insure that mysql_conn->lock is NOT set on function entry */
+/* NOTE: Ensure that mysql_conn->lock is NOT set on function entry */
 static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 				     storage_field_t *fields, char *ending)
 {
@@ -218,6 +227,7 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 			       table_name);
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
+		xfree(old_index);
 		return SLURM_ERROR;
 	}
 	xfree(query);
@@ -268,17 +278,20 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 
 
 	itr = list_iterator_create(columns);
-#ifdef NO_ALTER_IGNORE_MYSQL
 	/* In MySQL 5.7.4 we lost the ability to run 'alter ignore'.  This was
 	 * needed when converting old tables to new schemas.  If people convert
 	 * in the future from an older version of Slurm that needed the ignore
 	 * to work they will have to downgrade mysql to <= 5.7.3 to make things
 	 * work correctly or manually edit the database to get things to work.
 	 */
+	/*
+	 * `query` is compared against the current table_defs_table.definition
+	 * and run if they are different. `correct_query` is inserted into the
+	 * table, so it must be what future `query` schemas will be.
+	 * In other words, `query` transitions the table to the new schema,
+	 * `correct_query` represents the new schema
+	 */
 	query = xstrdup_printf("alter table %s", table_name);
-#else
-	query = xstrdup_printf("alter ignore table %s", table_name);
-#endif
 	correct_query = xstrdup(query);
 	START_TIMER;
 	while (fields[i].name) {
@@ -355,10 +368,9 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 		if (temp[end]) {
 			end++;
 			primary_key = xstrndup(temp, end);
-			if (old_primary) {
+			if (old_primary)
 				xstrcat(query, " drop primary key,");
-				xstrcat(correct_query, " drop primary key,");
-			}
+			xstrcat(correct_query, " drop primary key,");
 			xstrfmtcat(query, " add %s,",  primary_key);
 			xstrfmtcat(correct_query, " add %s,",  primary_key);
 
@@ -366,10 +378,34 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 		}
 	}
 
-	if ((temp = strstr(ending, "unique index ("))) {
-		int open = 0, close =0;
-		int end = 0;
+	if ((temp = strstr(ending, "unique index"))) {
+		int open = 0, close = 0;
+		/* sizeof includes NULL, and end should start 1 back */
+		int end = sizeof("unique index") - 2;
+		char *udex_name = NULL, *name_marker = NULL;
 		while (temp[end++]) {
+			/*
+			 * Extracts the index name, which is given explicitly
+			 * or is the name of the first field included in the
+			 * index.
+			 * "unique index indexname (field1, field2)"
+			 * "unique index (indexname, field2)"
+			 * indexname is started by the first non '(' or ' '
+			 *     after "unique index"
+			 * indexname is terminated by '(' ')' ' ' or ','
+			 */
+			if (name_marker) {
+				if (!udex_name && (temp[end] == '(' ||
+						   temp[end] == ')' ||
+						   temp[end] == ' ' ||
+						   temp[end] == ','))
+					udex_name = xstrndup(name_marker,
+						temp + end - name_marker);
+			} else if (temp[end] != '(' && temp[end] != ' ') {
+				name_marker = temp + end;
+			}
+
+			/* find the end of the parenthetical expression */
 			if (temp[end] == '(')
 				open++;
 			else if (temp[end] == ')')
@@ -382,16 +418,14 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 		if (temp[end]) {
 			end++;
 			unique_index = xstrndup(temp, end);
-			if (old_index) {
-				xstrfmtcat(query, " drop index %s,",
-					   old_index);
-				xstrfmtcat(correct_query, " drop index %s,",
-					   old_index);
-			}
+			if (old_index)
+				xstrfmtcat(query, " drop index %s,", old_index);
+			xstrfmtcat(correct_query, " drop index %s,", udex_name);
 			xstrfmtcat(query, " add %s,", unique_index);
 			xstrfmtcat(correct_query, " add %s,", unique_index);
 			xfree(unique_index);
 		}
+		xfree(udex_name);
 	}
 	xfree(old_index);
 
@@ -430,15 +464,12 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 			if (db_key) {
 				xstrfmtcat(query,
 					   " drop key %s,", db_key->name);
-				xstrfmtcat(correct_query,
-					   " drop key %s,", db_key->name);
 				_destroy_db_key(db_key);
-			} else {
-				xstrfmtcat(correct_query,
-					   " drop key %s,", new_key_name);
+			} else
 				info("adding %s to table %s",
 				     new_key, table_name);
-			}
+			xstrfmtcat(correct_query,
+				   " drop key %s,", new_key_name);
 
 			xstrfmtcat(query, " add %s,",  new_key);
 			xstrfmtcat(correct_query, " add %s,",  new_key);
@@ -533,10 +564,9 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 	return SLURM_SUCCESS;
 }
 
-/* NOTE: Insure that mysql_conn->lock is set on function entry */
+/* NOTE: Ensure that mysql_conn->lock is set on function entry */
 static int _create_db(char *db_name, mysql_db_info_t *db_info)
 {
-	char create_line[50];
 	MYSQL *mysql_db = NULL;
 	int rc = SLURM_ERROR;
 
@@ -567,13 +597,14 @@ static int _create_db(char *db_name, mysql_db_info_t *db_info)
 		}
 
 		if (db_ptr) {
-			snprintf(create_line, sizeof(create_line),
-				 "create database %s", db_name);
+			char *create_line = NULL;
+			xstrfmtcat(create_line, "create database %s", db_name);
 			if (mysql_query(mysql_db, create_line)) {
-				fatal("mysql_real_query failed: %d %s\n%s",
+				fatal("mysql_query failed: %d %s\n%s",
 				      mysql_errno(mysql_db),
 				      mysql_error(mysql_db), create_line);
 			}
+			xfree(create_line);
 			if (mysql_thread_safe())
 				mysql_thread_end();
 			mysql_close(mysql_db);
@@ -672,7 +703,10 @@ extern int mysql_db_get_db_connection(mysql_conn_t *mysql_conn, char *db_name,
 	int rc = SLURM_SUCCESS;
 	bool storage_init = false;
 	char *db_host = db_info->host;
-
+	unsigned int my_timeout = 30;
+#ifdef MYSQL_OPT_RECONNECT
+	my_bool reconnect = 1;
+#endif
 	xassert(mysql_conn);
 
 	slurm_mutex_lock(&mysql_conn->lock);
@@ -681,59 +715,60 @@ extern int mysql_db_get_db_connection(mysql_conn_t *mysql_conn, char *db_name,
 		slurm_mutex_unlock(&mysql_conn->lock);
 		fatal("mysql_init failed: %s",
 		      mysql_error(mysql_conn->db_conn));
-	} else {
-		/* If this ever changes you will need to alter
-		 * src/common/slurmdbd_defs.c function _send_init_msg to
-		 * handle a different timeout when polling for the
-		 * response.
-		 */
-		unsigned int my_timeout = 30;
-#ifdef MYSQL_OPT_RECONNECT
-		my_bool reconnect = 1;
-		/* make sure reconnect is on */
-		mysql_options(mysql_conn->db_conn, MYSQL_OPT_RECONNECT,
-			      &reconnect);
-#endif
-		mysql_options(mysql_conn->db_conn, MYSQL_OPT_CONNECT_TIMEOUT,
-			      (char *)&my_timeout);
-		while (!storage_init) {
-			if (!mysql_real_connect(mysql_conn->db_conn, db_host,
-					        db_info->user, db_info->pass,
-					        db_name, db_info->port, NULL,
-					        CLIENT_MULTI_STATEMENTS)) {
-				int err = mysql_errno(mysql_conn->db_conn);
-				if (err == ER_BAD_DB_ERROR) {
-					debug("Database %s not created.  "
-					      "Creating", db_name);
-					rc = _create_db(db_name, db_info);
-				} else {
-					const char *err_str = mysql_error(
-						mysql_conn->db_conn);
-					error("mysql_real_connect failed: "
-					      "%d %s",
-					      err, err_str);
-					if ((db_host == db_info->host)
-					    && db_info->backup) {
-						db_host = db_info->backup;
-						continue;
-					}
+	}
 
-					rc = ESLURM_DB_CONNECTION;
-					mysql_close(mysql_conn->db_conn);
-					mysql_conn->db_conn = NULL;
-					break;
-				}
-			} else {
-				storage_init = true;
-				if (mysql_conn->rollback)
-					mysql_autocommit(
-						mysql_conn->db_conn, 0);
-				rc = _mysql_query_internal(
-					mysql_conn->db_conn,
-					"SET session sql_mode='ANSI_QUOTES,"
-					"NO_ENGINE_SUBSTITUTION';");
+	/* If this ever changes you will need to alter
+	 * src/common/slurmdbd_defs.c function _send_init_msg to
+	 * handle a different timeout when polling for the
+	 * response.
+	 */
+#ifdef MYSQL_OPT_RECONNECT
+	/* make sure reconnect is on */
+	mysql_options(mysql_conn->db_conn, MYSQL_OPT_RECONNECT,
+		      &reconnect);
+#endif
+	mysql_options(mysql_conn->db_conn, MYSQL_OPT_CONNECT_TIMEOUT,
+		      (char *)&my_timeout);
+	while (!storage_init) {
+		debug2("Attempting to connect to %s:%d", db_host,
+		       db_info->port);
+		if (!mysql_real_connect(mysql_conn->db_conn, db_host,
+					db_info->user, db_info->pass,
+					db_name, db_info->port, NULL,
+					CLIENT_MULTI_STATEMENTS)) {
+			const char *err_str = NULL;
+			int err = mysql_errno(mysql_conn->db_conn);
+
+			if (err == ER_BAD_DB_ERROR) {
+				debug("Database %s not created.  Creating",
+				      db_name);
+				rc = _create_db(db_name, db_info);
+				continue;
 			}
+
+			err_str = mysql_error(mysql_conn->db_conn);
+
+			if ((db_host == db_info->host) && db_info->backup) {
+				debug2("mysql_real_connect failed: %d %s",
+				       err, err_str);
+				db_host = db_info->backup;
+				continue;
+			}
+
+			error("mysql_real_connect failed: %d %s",
+			      err, err_str);
+			rc = ESLURM_DB_CONNECTION;
+			mysql_close(mysql_conn->db_conn);
+			mysql_conn->db_conn = NULL;
+			break;
 		}
+
+		storage_init = true;
+		if (mysql_conn->rollback)
+			mysql_autocommit(mysql_conn->db_conn, 0);
+		rc = _mysql_query_internal(mysql_conn->db_conn,
+					   "SET session sql_mode='ANSI_QUOTES,"
+					   "NO_ENGINE_SUBSTITUTION';");
 	}
 	slurm_mutex_unlock(&mysql_conn->lock);
 	errno = rc;
@@ -810,6 +845,12 @@ extern int mysql_db_ping(mysql_conn_t *mysql_conn)
 	slurm_mutex_lock(&mysql_conn->lock);
 	_clear_results(mysql_conn->db_conn);
 	rc = mysql_ping(mysql_conn->db_conn);
+	/*
+	 * Starting in MariaDB 10.2 many of the api commands started
+	 * setting errno erroneously.
+	 */
+	if (!rc)
+		errno = 0;
 	slurm_mutex_unlock(&mysql_conn->lock);
 	return rc;
 }
@@ -851,6 +892,12 @@ extern int mysql_db_rollback(mysql_conn_t *mysql_conn)
 		      mysql_error(mysql_conn->db_conn));
 		errno = mysql_errno(mysql_conn->db_conn);
 		rc = SLURM_ERROR;
+	} else {
+		/*
+		 * Starting in MariaDB 10.2 many of the api commands started
+		 * setting errno erroneously.
+		 */
+		errno = 0;
 	}
 	slurm_mutex_unlock(&mysql_conn->lock);
 	return rc;
@@ -870,6 +917,11 @@ extern MYSQL_RES *mysql_db_query_ret(mysql_conn_t *mysql_conn,
 			result = _get_last_result(mysql_conn->db_conn);
 		else
 			result = _get_first_result(mysql_conn->db_conn);
+		/*
+		 * Starting in MariaDB 10.2 many of the api commands started
+		 * setting errno erroneously.
+		 */
+		errno = 0;
 		if (!result && mysql_field_count(mysql_conn->db_conn)) {
 			/* should have returned data */
 			error("We should have gotten a result: '%m' '%s'",
@@ -894,9 +946,9 @@ extern int mysql_db_query_check_after(mysql_conn_t *mysql_conn, char *query)
 	return rc;
 }
 
-extern int mysql_db_insert_ret_id(mysql_conn_t *mysql_conn, char *query)
+extern uint64_t mysql_db_insert_ret_id(mysql_conn_t *mysql_conn, char *query)
 {
-	int new_id = 0;
+	uint64_t new_id = 0;
 
 	slurm_mutex_lock(&mysql_conn->lock);
 	if (_mysql_query_internal(mysql_conn->db_conn, query) != SLURM_ERROR)  {

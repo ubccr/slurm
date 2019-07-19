@@ -9,11 +9,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,32 +29,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _SLURM_PROTOCOL_API_H
 #define _SLURM_PROTOCOL_API_H
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif			/* HAVE_INTTYPES_H */
-#else				/* !HAVE_CONFIG_H */
-#  include <inttypes.h>
-#endif				/*  HAVE_CONFIG_H */
-
+#include <inttypes.h>
 #include <sys/types.h>
 #include <stdarg.h>
 
@@ -71,11 +59,7 @@
 
 #define CONVERT_NUM_UNIT_EXACT 0x00000001
 #define CONVERT_NUM_UNIT_NO    0x00000002
-
-enum controller_id {
-	PRIMARY_CONTROLLER = 1,
-	SECONDARY_CONTROLLER = 2
-};
+#define CONVERT_NUM_UNIT_RAW   0x00000004
 
 /* unit types */
 enum {
@@ -94,9 +78,23 @@ enum {
 
 /* slurm_get_auth_info
  * returns the auth_info from slurmctld_conf object (AuthInfo parameter)
- * cache value in local buffer for best performance
+ * RET char * - AuthInfo value,  MUST be xfreed by caller
  */
 char *slurm_get_auth_info(void);
+
+/*
+ * slurm_auth_opts_to_socket
+ * Convert AuthInfo to a socket path. Accepts two input formats:
+ * 1) <path>           (Old format)
+ * 2) socket=<path>[,] (New format)
+ * RET char * - socket path,	MUST be xfreed by caller
+ */
+char *slurm_auth_opts_to_socket(char *opts);
+
+/* slurm_get_sbcast_parameters
+ * RET char * - SbcastParameters from slurm.conf,  MUST be xfreed by caller
+ */
+char *slurm_get_sbcast_parameters(void);
 
 /* slurm_get_auth_ttl
  * returns the credential Time To Live option from the AuthInfo parameter
@@ -105,22 +103,24 @@ char *slurm_get_auth_info(void);
  */
 int slurm_get_auth_ttl(void);
 
-/* slurm_set_api_config
- * sets the slurm_protocol_config object
- * IN protocol_conf		-  slurm_protocol_config object
- */
-extern int slurm_set_api_config(slurm_protocol_config_t * protocol_conf);
-
-/* slurm_get_api_config
- * returns a pointer to the current slurm_protocol_config object
- * RET slurm_protocol_config_t	- current slurm_protocol_config object
- */
-extern slurm_protocol_config_t *slurm_get_api_config(void);
-
 /* slurm_get_batch_start_timeout
  * RET BatchStartTimeout value from slurm.conf
  */
 uint16_t slurm_get_batch_start_timeout(void);
+
+/* slurm_get_cli_filter_plugins
+ * get cli_filter_plugins from slurmctld_conf object from
+ * slurmctld_conf object
+ * RET char *   - cli_filter_plugins, MUST be xfreed by caller
+ */
+char *slurm_get_cli_filter_plugins(void);
+
+/*
+ * slurm_get_control_cnt
+ * RET Count of SlurmctldHost records from slurm.conf
+ * (slurmctld server count, primary plus backups)
+ */
+uint32_t slurm_get_control_cnt(void);
 
 /* slurm_get_suspend_timeout
  * RET SuspendTimeout value from slurm.conf
@@ -169,7 +169,7 @@ void slurm_set_debug_flags(uint64_t debug_flags);
 /* slurm_get_def_mem_per_cpu
  * RET DefMemPerCPU/Node value from slurm.conf
  */
-uint32_t slurm_get_def_mem_per_cpu(void);
+uint64_t slurm_get_def_mem_per_cpu(void);
 
 /* slurm_get_kill_on_bad_exit
  * RET KillOnBadExit value from slurm.conf
@@ -179,7 +179,7 @@ uint16_t slurm_get_kill_on_bad_exit(void);
 /* slurm_get_max_mem_per_cpu
  * RET MaxMemPerCPU/Node value from slurm.conf
  */
-uint32_t slurm_get_max_mem_per_cpu(void);
+uint64_t slurm_get_max_mem_per_cpu(void);
 
 /* slurm_get_epilog_msg_time
  * RET EpilogMsgTime value from slurm.conf
@@ -220,17 +220,22 @@ char *slurm_get_msg_aggr_params(void);
  */
 extern uint16_t slurm_get_msg_timeout(void);
 
+/* slurm_get_reboot_program
+ * RET char * - RebootProgram from slurm.conf, MUST be xfreed by caller
+ */
+extern char *slurm_get_reboot_program(void);
+
 /* slurm_get_tcp_timeout
  * get default tcp timeout value from slurmctld_conf object
  */
 extern uint16_t slurm_get_tcp_timeout(void);
 
 /* slurm_api_set_default_config
- *	called by the send_controller_msg function to insure that at least
+ *	called by the send_controller_msg function to ensure that at least
  *	the compiled in default slurm_protocol_config object is initialized
  * RET int 		- return code
  */
-extern int slurm_api_set_default_config();
+extern int slurm_api_set_default_config(void);
 
 /* slurm_api_clear_config
  * execute this only at program termination to free all memory */
@@ -283,12 +288,12 @@ char *slurm_get_node_features_plugins(void);
  */
 char *slurm_get_slurmctld_plugstack(void);
 
-/* slurm_get_slurmd_plugstack
- * get slurmd_plugstack from slurmctld_conf object from
- * slurmd_conf object
- * RET char *   - slurmd_plugstack, MUST be xfreed by caller
+/* slurm_get_slurmctld_timeout
+ * get slurmctld_timeout from slurmctld_conf object from
+ * slurmctld_conf object
+ * RET uint16_t - slurmctld timeout in seconds
  */
-char *slurm_get_slurmd_plugstack(void);
+uint16_t slurm_get_slurmctld_timeout(void);
 
 /* slurm_get_plugin_dir
  * get plugin directory from slurmctld_conf object from slurmctld_conf object
@@ -314,6 +319,12 @@ uint32_t slurm_get_priority_calc_period(void);
  */
 bool slurm_get_priority_favor_small(void);
 
+/* slurm_get_priority_flags
+ * returns the priority flags bitmap from slurmctld_conf object
+ * RET uint16_t - priority flags
+ */
+uint16_t slurm_get_priority_flags(void);
+
 /* slurm_get_priority_max_age
  * returns the priority age max in seconds from slurmctld_conf object
  * RET uint32_t - max_age in secs.
@@ -330,6 +341,18 @@ char *slurm_get_priority_params(void);
  */
 uint16_t slurm_get_priority_reset_period(void);
 
+/* slurm_get_priority_site_factor_params
+ * returns the site_factor_params value from slurmctld_conf object
+ * RET char *    - site_factor_params, MUST be xfreed by caller
+ */
+char *slurm_get_priority_site_factor_params(void);
+
+/* slurm_get_priority_site_factor_plugin
+ * returns the site_factor_plugin value from slurmctld_conf object
+ * RET char *    - site_factor_plugin, MUST be xfreed by caller
+ */
+char *slurm_get_priority_site_factor_plugin(void);
+
 /* slurm_get_priority_type
  * returns the priority type from slurmctld_conf object
  * RET char *    - priority type, MUST be xfreed by caller
@@ -342,6 +365,12 @@ char *slurm_get_priority_type(void);
  */
 uint32_t slurm_get_priority_weight_age(void);
 
+/* slurm_get_priority_weight_assoc
+ * returns the priority weight for association from slurmctld_conf object
+ * RET uint32_t - factor weight.
+ */
+uint32_t slurm_get_priority_weight_assoc(void);
+
 /* slurm_get_priority_weight_fairshare
  * returns the priority weight for fairshare from slurmctld_conf object
  * RET uint32_t - factor weight.
@@ -353,6 +382,11 @@ uint32_t slurm_get_priority_weight_fairshare(void);
  * RET uint32_t - factor.
  */
 uint16_t slurm_get_fs_dampening_factor(void);
+
+/* slurm_set_fs_dampening_factor
+ * sets the value of fs_dampening in slurmctld_conf object
+ */
+void slurm_set_fs_dampening_factor(uint16_t);
 
 /* slurm_get_priority_weight_job_size
  * returns the priority weight for job size from slurmctld_conf object
@@ -378,19 +412,26 @@ uint32_t slurm_get_priority_weight_qos(void);
  */
 char *slurm_get_priority_weight_tres(void);
 
-/* slurm_get_priority_weight_tres_array
+/* slurm_get_tres_weight_array
  * IN weights_str - string of tres and weights to be parsed.
  * IN tres_cnt - count of how many tres' are on the system (e.g.
  * 		slurmctld_tres_cnt).
+ * IN fail - whether to fatal or not if there are parsing errors.
  * RET double* of tres weights.
  */
-double *slurm_get_tres_weight_array(char *weights_str, int tres_cnt);
+double *slurm_get_tres_weight_array(char *weights_str, int tres_cnt, bool fail);
 
 /* slurm_get_private_data
  * get private data from slurmctld_conf object
  * RET uint16_t   - private_data
  */
 uint16_t slurm_get_private_data(void);
+
+/* slurm_get_resume_fail_program
+ * returns the ResumeFailProgram from slurmctld_conf object
+ * RET char *    - ResumeFailProgram, MUST be xfreed by caller
+ */
+char *slurm_get_resume_fail_program(void);
 
 /* slurm_get_resume_program
  * returns the ResumeProgram from slurmctld_conf object
@@ -404,11 +445,23 @@ char *slurm_get_resume_program(void);
  */
 char *slurm_get_state_save_location(void);
 
+/* slurm_get_stepd_loc
+ * get path to the slurmstepd
+ * RET char * - absolute path to the slurmstepd, MUST be xfreed by caller
+ */
+extern char *slurm_get_stepd_loc(void);
+
 /* slurm_get_tmp_fs
  * returns the TmpFS configuration parameter from slurmctld_conf object
  * RET char *    - tmp_fs, MUST be xfreed by caller
  */
-extern char *slurm_get_tmp_fs(void);
+extern char *slurm_get_tmp_fs(char *node_name);
+
+/* slurm_get_auth_alt_types
+ * returns the alternate authentication types from slurmctld_conf object
+ * RET char *    - auth alternate types, MUST be xfreed by caller
+ */
+extern char *slurm_get_auth_alt_types(void);
 
 /* slurm_get_auth_type
  * returns the authentication type from slurmctld_conf object
@@ -422,12 +475,6 @@ extern char *slurm_get_auth_type(void);
  * RET 0 or error code
  */
 extern int slurm_set_auth_type(char *auth_type);
-
-/* slurm_get_auth_type
- * returns the authentication type from slurmctld_conf object
- * RET char *    - auth type, MUST be xfreed by caller
- */
-extern char *slurm_get_auth_type(void);
 
 /* slurm_get_bb_params
  * returns the BurstBufferParameters (bb_params) from slurmctld_conf object
@@ -459,11 +506,17 @@ extern char *slurm_get_checkpoint_dir(void);
  */
 char *slurm_get_cluster_name(void);
 
-/* slurm_get_crypto_type
- * returns the crypto_type from slurmctld_conf object
- * RET char *    - crypto type, MUST be xfreed by caller
+/* slurm_get_comm_parameters
+ * returns the value of comm_param in slurmctld_conf object
+ * RET char *    - comm parameters, MUST be xfreed by caller
  */
-extern char *slurm_get_crypto_type(void);
+extern char *slurm_get_comm_parameters(void);
+
+/* slurm_get_cred_type
+ * returns the cred_type from slurmctld_conf object
+ * RET char *    - cred type, MUST be xfreed by caller
+ */
+extern char *slurm_get_cred_type(void);
 
 /* slurm_get_fast_schedule
  * returns the value of fast_schedule in slurmctld_conf object
@@ -657,6 +710,13 @@ char *slurm_get_jobacct_gather_type(void);
  */
 char *slurm_get_jobacct_gather_params(void);
 
+/* slurm_get_job_acct_oom_kill
+ * returns the job_acct_oom_kill setting from the slurmctld_conf object
+ * which represents the value of the OverMemoryKill flag.
+ * RET bool *    - job_acct_oom_kill parameter
+ */
+bool slurm_get_job_acct_oom_kill(void);
+
 /* slurm_get_jobacct_gather_freq
  * returns the job accounting poll frequency from the slurmctld_conf object
  * RET int    - job accounting frequency
@@ -746,11 +806,11 @@ char *slurm_get_acct_gather_energy_type(void);
  */
 char *slurm_get_acct_gather_profile_type(void);
 
-/* slurm_get_acct_infiniband_profile_type
- * get InfinibandAccountingType from slurmctld_conf object
- * RET char *   - acct_gather_infiniband_type, MUST be xfreed by caller
+/* slurm_get_acct_interconnect_profile_type
+ * get InterconnectAccountingType from slurmctld_conf object
+ * RET char *   - acct_gather_interconnect_type, MUST be xfreed by caller
  */
-char *slurm_get_acct_gather_infiniband_type(void);
+char *slurm_get_acct_gather_interconnect_type(void);
 
 /* slurm_get_acct_filesystem_profile_type
  * get FilesystemAccountingType from slurmctld_conf object
@@ -779,10 +839,6 @@ char *slurm_get_ext_sensors_type(void);
  */
 extern uint16_t slurm_get_ext_sensors_freq(void);
 
-/* slurm_get_root_filter
- * RET uint16_t  - Value of SchedulerRootFilter */
-extern uint16_t slurm_get_root_filter(void);
-
 /* slurm_get_route_plugin
  * returns the value of route_plugin in slurmctld_conf object
  * RET char *    - routing type, MUST be xfreed by caller
@@ -793,9 +849,12 @@ extern char * slurm_get_route_plugin(void);
  * RET char * - Value of SchedulerParameters, MUST be xfreed by caller */
 extern char *slurm_get_sched_params(void);
 
-/* slurm_get_sched_port
- * RET uint16_t  - Value of SchedulerPort */
-extern uint16_t slurm_get_sched_port(void);
+/*
+ * slurm_get_slurmctld_parmams
+ * returns slurmctld_params
+ * RET char * - slurmctld_params
+ */
+char *slurm_get_slurmctld_params(void);
 
 /* slurm_get_slurmd_port
  * returns slurmd port from slurmctld_conf object
@@ -815,6 +874,13 @@ uint32_t slurm_get_slurm_user_id(void);
  */
 uint32_t slurm_get_slurmd_user_id(void);
 
+/*
+ * slurm_get_slurmd_parmams
+ * returns slurmd_params
+ * RET char * - slurmd_params
+ */
+char *slurm_get_slurmd_params(void);
+
 /* slurm_get_sched_type
  * get sched type from slurmctld_conf object
  * RET char *   - sched type, MUST be xfreed by caller
@@ -832,6 +898,12 @@ char *slurm_get_select_type(void);
  * RET uint16_t   - select_type_param
  */
 uint16_t slurm_get_select_type_param(void);
+
+/* slurm_set_select_type_param
+ * set select_type_param for slurmctld_conf object
+ * IN uint16_t   - select_type_param
+ */
+void slurm_set_select_type_param(uint16_t select_type_param);
 
 /** Return true if (remote) system runs Cray XT/XE */
 bool is_cray_select_type(void);
@@ -895,7 +967,7 @@ char *slurm_get_job_container_plugin(void);
 
 /* slurm_get_slurmd_spooldir
  * RET slurmd_spooldir name, must be xfreed by caller */
-char *slurm_get_slurmd_spooldir(void);
+char *slurm_get_slurmd_spooldir(char *node_name);
 
 /* slurm_get_layouts
  * RET comma seperated list of layouts in a string, must be xfreed by caller
@@ -914,6 +986,13 @@ int16_t slurm_get_srun_eio_timeout(void);
  */
 extern uint16_t slurm_get_prolog_timeout(void);
 
+/*
+ * slurm_get_jobcomp_type
+ * returns the configured GpuFreqDef value
+ * RET char *    - GpuFreqDef value,  MUST be xfreed by caller
+ */
+char *slurm_get_gpu_freq_def(void);
+
 /**********************************************************************\
  * general message management functions used by slurmctld, slurmd
 \**********************************************************************/
@@ -924,7 +1003,7 @@ extern uint16_t slurm_get_prolog_timeout(void);
  * IN port		- port to bind the msg server to
  * RET slurm_fd		- file descriptor of the connection created
  */
-extern slurm_fd_t slurm_init_msg_engine_port(uint16_t port);
+extern int slurm_init_msg_engine_port(uint16_t port);
 
 /* Creates a TCP socket and binds to a port in the given
  * range.
@@ -933,13 +1012,13 @@ extern slurm_fd_t slurm_init_msg_engine_port(uint16_t port);
  *            to bind
  * RET slurm_fd - file descriptor of the listening socket
  */
-extern slurm_fd_t slurm_init_msg_engine_ports(uint16_t *);
+extern int slurm_init_msg_engine_ports(uint16_t *);
 
 /* sock_bind_range()
  *
  * Try to bind() sock to any port in a given interval of ports
  */
-extern int sock_bind_range(int, uint16_t *);
+extern int sock_bind_range(int, uint16_t *, bool local);
 
 /* In the socket implementation it creates a socket, binds to it, and
  *	listens for connections.
@@ -948,7 +1027,7 @@ extern int sock_bind_range(int, uint16_t *);
  * IN port		- port to bind the msg server to
  * RET slurm_fd		- file descriptor of the connection created
  */
-extern slurm_fd_t slurm_init_msg_engine_addrname_port(char *addr_name,
+extern int slurm_init_msg_engine_addrname_port(char *addr_name,
 						    uint16_t port);
 
 /* In the socket implementation it creates a socket, binds to it, and
@@ -956,25 +1035,27 @@ extern slurm_fd_t slurm_init_msg_engine_addrname_port(char *addr_name,
  * IN slurm_address 	- slurm_addr_t to bind the msg server to
  * RET slurm_fd		- file descriptor of the connection created
  */
-extern slurm_fd_t slurm_init_msg_engine(slurm_addr_t * slurm_address);
+extern int slurm_init_msg_engine(slurm_addr_t * slurm_address);
 
 /* In the bsd implmentation maps directly to a accept call
  * IN open_fd		- file descriptor to accept connection on
  * OUT slurm_address 	- slurm_addr_t of the accepted connection
  * RET slurm_fd		- file descriptor of the connection created
  */
-extern slurm_fd_t slurm_accept_msg_conn(slurm_fd_t open_fd,
-				      slurm_addr_t * slurm_address);
-
-/* just calls close on an established msg connection
- * IN open_fd	- an open file descriptor to close
- * RET int	- the return code
- */
-extern int slurm_shutdown_msg_engine(slurm_fd_t open_fd);
+extern int slurm_accept_msg_conn(int open_fd, slurm_addr_t * slurm_address);
 
 /**********************************************************************\
  * receive message functions
 \**********************************************************************/
+
+/* unpack a complete recieved message
+ * OUT msg - a slurm_msg struct to be filled in by the function
+ * IN  fd - file descriptor the message came from
+ * IN  buffer - Buf we will fill in the message with
+ * RET int	- returns 0 on success, -1 on failure and sets errno
+ */
+
+extern int slurm_unpack_received_msg(slurm_msg_t *msg, int fd, Buf buffer);
 
 /*
  *  Receive a slurm message on the open slurm descriptor "fd" waiting
@@ -990,7 +1071,7 @@ extern int slurm_shutdown_msg_engine(slurm_fd_t open_fd);
  * IN timeout	- how long to wait in milliseconds
  * RET int	- returns 0 on success, -1 on failure and sets errno
  */
-int slurm_receive_msg(slurm_fd_t fd, slurm_msg_t *msg, int timeout);
+int slurm_receive_msg(int fd, slurm_msg_t *msg, int timeout);
 
 /*
  *  Receive a slurm message on the open slurm descriptor "fd" waiting
@@ -1007,7 +1088,7 @@ int slurm_receive_msg(slurm_fd_t fd, slurm_msg_t *msg, int timeout);
  *                (ret_data_info_t). NULL is returned on failure. and
  *                errno set.
  */
-List slurm_receive_msgs(slurm_fd_t fd, int steps, int timeout);
+List slurm_receive_msgs(int fd, int steps, int timeout);
 
 /*
  *  Receive a slurm message on the open slurm descriptor "fd" waiting
@@ -1026,7 +1107,7 @@ List slurm_receive_msgs(slurm_fd_t fd, int steps, int timeout);
  * IN timeout	- how long to wait in milliseconds
  * RET int	- returns 0 on success, -1 on failure and sets errno
  */
-int slurm_receive_msg_and_forward(slurm_fd_t fd, slurm_addr_t *orig_addr,
+int slurm_receive_msg_and_forward(int fd, slurm_addr_t *orig_addr,
 				  slurm_msg_t *resp, int timeout);
 
 /**********************************************************************\
@@ -1039,22 +1120,33 @@ int slurm_receive_msg_and_forward(slurm_fd_t fd, slurm_addr_t *orig_addr,
  * IN msg		- a slurm msg struct to be sent
  * RET int		- size of msg sent in bytes
  */
-int slurm_send_node_msg(slurm_fd_t open_fd, slurm_msg_t *msg);
+int slurm_send_node_msg(int open_fd, slurm_msg_t *msg);
 
 /**********************************************************************\
  * msg connection establishment functions used by msg clients
 \**********************************************************************/
 
-/* calls connect to make a connection-less datagram connection to the
+/*
+ * Calls connect to make a connection-less datagram connection to the
  *	primary or secondary slurmctld message engine
  * IN/OUT addr       - address of controller contacted
  * IN/OUT use_backup - IN: whether to try the backup first or not
  *                     OUT: set to true if connection established with backup
+ * IN comm_cluster_rec	- Communication record (host/port/version)/
  * RET slurm_fd	- file descriptor of the connection created
  */
-extern slurm_fd_t slurm_open_controller_conn(slurm_addr_t *addr,
-					     bool *use_backup);
-extern slurm_fd_t slurm_open_controller_conn_spec(enum controller_id dest);
+extern int slurm_open_controller_conn(slurm_addr_t *addr, bool *use_backup,
+				      slurmdb_cluster_rec_t *comm_cluster_rec);
+
+/*
+ * Calls connect to make a connection-less datagram connection to a specific
+ *	primary or backup slurmctld message engine
+ * IN dest      - controller to contact (0=primary, 1=backup, 2=backup2, etc.)
+ * IN comm_cluster_rec	- Communication record (host/port/version)/
+ * RET int      - file descriptor of the connection created
+ */
+extern int slurm_open_controller_conn_spec(int dest,
+				      slurmdb_cluster_rec_t *comm_cluster_rec);
 
 /* In the bsd socket implementation it creates a SOCK_STREAM socket
  *	and calls connect on it a SOCK_DGRAM socket called with connect
@@ -1064,14 +1156,7 @@ extern slurm_fd_t slurm_open_controller_conn_spec(enum controller_id dest);
  * IN slurm_address 	- slurm_addr_t of the connection destination
  * RET slurm_fd		- file descriptor of the connection created
  */
-extern slurm_fd_t slurm_open_msg_conn(slurm_addr_t * slurm_address);
-
-/* just calls close on an established msg connection to close
- * IN open_fd	- an open file descriptor to close
- * RET int	- the return code
- */
-extern int slurm_shutdown_msg_conn(slurm_fd_t open_fd);
-
+extern int slurm_open_msg_conn(slurm_addr_t * slurm_address);
 
 /**********************************************************************\
  * stream functions
@@ -1085,9 +1170,8 @@ extern int slurm_shutdown_msg_conn(slurm_fd_t open_fd);
  * IN timeout		- how long to wait in milliseconds
  * RET size_t		- bytes sent , or -1 on errror
  */
-extern size_t slurm_write_stream(slurm_fd_t open_fd, char *buffer,
-				 size_t size);
-extern size_t slurm_write_stream_timeout(slurm_fd_t open_fd,
+extern size_t slurm_write_stream(int open_fd, char *buffer, size_t size);
+extern size_t slurm_write_stream_timeout(int open_fd,
 					 char *buffer, size_t size,
 					 int timeout);
 
@@ -1099,9 +1183,8 @@ extern size_t slurm_write_stream_timeout(slurm_fd_t open_fd,
  * IN timeout		- how long to wait in milliseconds
  * RET size_t		- bytes read , or -1 on errror
  */
-extern size_t slurm_read_stream(slurm_fd_t open_fd, char *buffer,
-				size_t size);
-extern size_t slurm_read_stream_timeout(slurm_fd_t open_fd,
+extern size_t slurm_read_stream(int open_fd, char *buffer, size_t size);
+extern size_t slurm_read_stream_timeout(int open_fd,
 					char *buffer, size_t size,
 					int timeout);
 
@@ -1133,7 +1216,7 @@ extern void slurm_get_ip_str(slurm_addr_t * slurm_address, uint16_t * port,
  * IN fd		- an open connection
  * OUT slurm_address	- place to park the peer's slurm_addr
  */
-extern int slurm_get_peer_addr(slurm_fd_t fd, slurm_addr_t * slurm_address);
+extern int slurm_get_peer_addr(int fd, slurm_addr_t * slurm_address);
 
 /**********************************************************************\
  * slurm_addr_t pack routines
@@ -1144,7 +1227,7 @@ extern int slurm_get_peer_addr(slurm_fd_t fd, slurm_addr_t * slurm_address);
  * OUT slurm_address	- slurm_addr_t to pack
  * IN size_val  	- how many to pack
  * IN/OUT buffer	- buffer to pack the slurm_addr_t from
- * returns		- SLURM error code
+ * returns		- Slurm error code
  */
 extern void slurm_pack_slurm_addr_array(slurm_addr_t * slurm_address,
 					uint32_t size_val, Buf buffer);
@@ -1153,7 +1236,7 @@ extern void slurm_pack_slurm_addr_array(slurm_addr_t * slurm_address,
  * OUT slurm_address	- slurm_addr_t to unpack to
  * IN size_val  	- how many to unpack
  * IN/OUT buffer	- buffer to upack the slurm_addr_t from
- * returns		- SLURM error code
+ * returns		- Slurm error code
  */
 extern int slurm_unpack_slurm_addr_array(slurm_addr_t ** slurm_address,
 					 uint32_t * size_val, Buf buffer);
@@ -1163,6 +1246,15 @@ extern int slurm_unpack_slurm_addr_array(slurm_addr_t ** slurm_address,
  * They open a connection do work then close the connection all within
  * the function
 \**********************************************************************/
+
+/* slurm_send_msg
+ * given the original request message this function sends a
+ *	arbitrary message back to the client that made the request
+ * IN request_msg	- slurm_msg the request msg
+ * IN msg_type          - message type being returned
+ * IN resp_msg		- the message being returned to the client
+ */
+int slurm_send_msg(slurm_msg_t *msg, uint16_t msg_type, void *resp);
 
 /* slurm_send_rc_msg
  * given the original request message this function sends a
@@ -1181,15 +1273,19 @@ int slurm_send_rc_msg(slurm_msg_t * request_msg, int rc);
  */
 int slurm_send_rc_err_msg(slurm_msg_t *msg, int rc, char *err_msg);
 
-/* slurm_send_recv_controller_msg
+/*
+ * slurm_send_recv_controller_msg
  * opens a connection to the controller, sends the controller a message,
  * listens for the response, then closes the connection
  * IN request_msg	- slurm_msg request
  * OUT response_msg	- slurm_msg response
+ * IN comm_cluster_rec	- Communication record (host/port/version)/
  * RET int 		- returns 0 on success, -1 on failure and sets errno
  */
-int slurm_send_recv_controller_msg(slurm_msg_t * request_msg,
-				   slurm_msg_t * response_msg);
+extern int slurm_send_recv_controller_msg(slurm_msg_t * request_msg,
+				slurm_msg_t * response_msg,
+				slurmdb_cluster_rec_t *comm_cluster_rec);
+
 
 /* slurm_send_recv_node_msg
  * opens a connection to node,
@@ -1218,6 +1314,16 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg, int timeout,
 			  bool quiet);
 
 /*
+ * Sends back reroute_msg_t which directs the client to make the request to
+ * another cluster.
+ *
+ * IN msg	  - msg to respond to.
+ * IN cluster_rec - cluster to direct msg to.
+ */
+int slurm_send_reroute_msg(slurm_msg_t *msg,
+			   slurmdb_cluster_rec_t *cluster_rec);
+
+/*
  *  Send a message to msg->address
  *    Then return List containing type (ret_data_info_t).
  * IN msg           - a slurm_msg struct to be sent by the function
@@ -1237,26 +1343,49 @@ List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout);
 int slurm_send_recv_rc_msg_only_one(slurm_msg_t *req, int *rc, int timeout);
 
 /*
- *  Same as above, but send to controller
- *  returns 0 on success, -1 on failure and sets errno
+ * Send message to controller and get return code.
+ * Make use of slurm_send_recv_controller_msg(), which handles
+ * support for backup controller and retry during transistion.
+ * IN req - request to send
+ * OUT rc - return code
+ * IN comm_cluster_rec	- Communication record (host/port/version)
+ * RET - 0 on success, -1 on failure
  */
-int slurm_send_recv_controller_rc_msg(slurm_msg_t *req, int *rc);
+extern int slurm_send_recv_controller_rc_msg(slurm_msg_t *req, int *rc,
+				       slurmdb_cluster_rec_t *comm_cluster_rec);
 
 /* slurm_send_only_controller_msg
- * opens a connection to the controller, sends the node a message then,
- * closes the connection
+ * opens a connection to the controller, sends the controller a
+ * message then, closes the connection
  * IN request_msg	- slurm_msg request
- * RET int 		- return code
+ * IN comm_cluster_rec	- Communication record (host/port/version)
+ * RET int		- return code
+ * NOTE: NOT INTENDED TO BE CROSS-CLUSTER
  */
-int slurm_send_only_controller_msg(slurm_msg_t * request_msg);
+extern int slurm_send_only_controller_msg(slurm_msg_t *req,
+				slurmdb_cluster_rec_t *comm_cluster_rec);
 
-/* slurm_send_only_node_msg
- * opens a connection to node, sends the node a message then,
- * closes the connection
+/* DO NOT USE THIS. See comment in slurm_protocol_api.c for further info. */
+extern int slurm_send_only_node_msg(slurm_msg_t *request_msg);
+
+/*
+ * slurm_send_msg_maybe
+ * opens a connection, sends a message across while ignoring any errors,
+ * then closes the connection
  * IN request_msg	- slurm_msg request
- * RET int 		- return code
  */
-int slurm_send_only_node_msg(slurm_msg_t * request_msg);
+extern void slurm_send_msg_maybe(slurm_msg_t *request_msg);
+
+/* Send and recv a slurm request and response on the open slurm descriptor
+ * Doesn't close the connection.
+ * IN fd	- file descriptor to receive msg on
+ * IN req	- a slurm_msg struct to be sent by the function
+ * OUT resp	- a slurm_msg struct to be filled in by the function
+ * IN timeout	- how long to wait in milliseconds
+ * RET int	- returns 0 on success, -1 on failure and sets errno
+ */
+extern int slurm_send_recv_msg(int fd, slurm_msg_t *req,
+			       slurm_msg_t *resp, int timeout);
 
 /* Slurm message functions */
 
@@ -1267,6 +1396,7 @@ int slurm_send_only_node_msg(slurm_msg_t * request_msg);
  * NOTE: Returned array MUST be release by caller using xfree */
 extern int *set_span(int total, uint16_t tree_width);
 
+extern void slurm_free_msg_members(slurm_msg_t *msg);
 extern void slurm_free_msg(slurm_msg_t * msg);
 
 /* must free this memory with free not xfree */
@@ -1287,7 +1417,7 @@ extern void parse_int_to_array(int in, int *out);
  *	credential.
  * IN slurm_step_alloc_req_msg - description of job step request
  * OUT slurm_step_alloc_resp_msg - response to request
- * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ * RET SLURM_SUCCESS on success, otherwise return SLURM_ERROR with errno set
  * NOTE: free the response using slurm_free_job_step_create_response_msg
  */
 extern int slurm_job_step_create (
@@ -1318,5 +1448,19 @@ extern int slurm_forward_data(
  * IN  port - port to used, we will call htons on it
  */
 extern void slurm_setup_sockaddr(struct sockaddr_in *sin, uint16_t port);
+
+/*
+ * slurm_val_to_char - convert an int value (0-16) to a hex value (0-F) char.
+ * IN v - value of number (0-16)
+ * RET ascii value of int given, -1 on error.
+ */
+extern int slurm_hex_to_char(int v);
+
+/*
+ * slurm_val_to_char - convert a hex value (0-F) char to an int value (0-16).
+ * IN c - char value (0-F)
+ * RET value as an int, -1 on error.
+ */
+extern int slurm_char_to_hex(int c);
 
 #endif

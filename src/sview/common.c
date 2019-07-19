@@ -8,24 +8,26 @@
  *
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
+
+#include "config.h"
 
 #include "src/sview/sview.h"
 #include "src/common/parse_time.h"
@@ -47,10 +49,8 @@ typedef struct {
 	GtkTreeView  *treeview;
 } treedata_t;
 
-static gboolean control_key_in_effect = FALSE;
-static gboolean enter_key_in_effect = FALSE;
-
-
+static gboolean control_key_in_effect = false;
+static gboolean enter_key_in_effect = false;
 
 static int _find_node_inx (char *name)
 {
@@ -72,7 +72,6 @@ static int _find_node_inx (char *name)
 	return -1;
 }
 
-
 static void _display_topology(void)
 {
 	int i, one_liner = 1;
@@ -88,8 +87,6 @@ static void _display_topology(void)
 					one_liner);
 	}
 }
-
-
 
 static void _foreach_popup_all(GtkTreeModel  *model,
 			       GtkTreePath   *path,
@@ -118,7 +115,6 @@ static void _foreach_full_info(GtkTreeModel  *model,
 		popup_pos.slider += 100;
 	}
 }
-
 
 /* These next 2 functions are here to make it so we don't magically
  * click on something before we really want to in a menu.
@@ -164,11 +160,8 @@ static gboolean _frame_callback(GtkWindow *window,
 	}
 
 
-	return FALSE;
+	return false;
 }
-
-
-
 
 static void _handle_response(GtkDialog *dialog, gint response_id,
 			     popup_info_t *popup_win)
@@ -331,93 +324,6 @@ cleanup:
 	return ret;
 }
 
-/* Translate a three-digit alpha-numeric value into it's
- * base 36 equivalent number */
-static int _xlate_mp_coord(const char *name)
-{
-	int i, rc = 0;
-
-	for (i=0; i<cluster_dims; i++) {
-		rc *= 36;
-		rc += select_char2coord(name[i]);
-	}
-	return rc;
-}
-
-/* Make a BlueGene node name into a numeric representation of
- * its location.
- * Value is (low_node_coordinate * io_val_max) + I/O node (io_val if none)
- * with use of base 36 for the node coordinate on an L/P:
- * (e.g. bg123[4]    ->  1,371,004
- *       bg[234x235] ->  2,704,999
- *       bglZZZ      -> 46,655,999
- */
-static int _mp_coordinate(const char *name)
-{
-	int i, io_val, io_val_max, low_val = -1;
-
-	/* Since io_val needs to handle all dimensions of the ionode
-	   field with Q the number could be much bigger that 999.
-	   This will have to be handled when a new system comes with
-	   more dims.
-	*/
-	if (cluster_flags & CLUSTER_FLAG_BGQ) {
-		io_val = 99999;
-		io_val_max = 100000;
-	} else {
-		io_val = 999;
-		io_val_max = 1000;
-	}
-
-	for (i=0; name[i]; i++) {
-		if (name[i] == '[') {
-			i++;
-			if (low_val < 0)
-				low_val = _xlate_mp_coord(name+i);
-			else
-				io_val = atoi(name+i);
-			break;
-		} else if ((low_val < 0) &&
-			   ((name[i] >= '0' && (name[i] <= '9')) ||
-			    (name[i] >= 'A' && (name[i] <= 'Z')))) {
-			low_val = _xlate_mp_coord(name+i);
-			i += 2;
-		}
-	}
-
-	if (low_val < 0)
-		return low_val;
-
-	return ((low_val * io_val_max) + io_val);
-}
-
-static int _sort_iter_compare_func_mp_list(GtkTreeModel *model,
-					   GtkTreeIter  *a,
-					   GtkTreeIter  *b,
-					   gpointer      userdata)
-{
-	int sortcol = GPOINTER_TO_INT(userdata);
-	int ret = 0;
-	gchar *name1 = NULL, *name2 = NULL;
-
-	gtk_tree_model_get(model, a, sortcol, &name1, -1);
-	gtk_tree_model_get(model, b, sortcol, &name2, -1);
-
-	if (!name1 && !name2)
-		goto cleanup; /* both equal => ret = 0 */
-	else if (!name1 || !name2)
-		ret = (name1 == NULL) ? -1 : 1;
-	else {
-		/* Sort in numeric order based upon coordinates */
-		ret = _mp_coordinate(name1) - _mp_coordinate(name2);
-	}
-cleanup:
-	g_free(name1);
-	g_free(name2);
-
-	return ret;
-}
-
 static void _editing_started(GtkCellRenderer *cell,
 			     GtkCellEditable *editable,
 			     const gchar     *path,
@@ -506,12 +412,12 @@ static void _add_col_to_treeview(GtkTreeView *tree_view,
 			     "model", model,
 			     "text-column", 0,
 			     "has-entry", 1,
-			     "editable", TRUE,
+			     "editable", true,
 			     NULL);
 	} else if (display_data->extra == EDIT_TEXTBOX) {
 		renderer = gtk_cell_renderer_text_new();
 		g_object_set(renderer,
-			     "editable", TRUE,
+			     "editable", true,
 			     NULL);
 	} else if (display_data->extra == EDIT_COLOR) {
 		GdkPixbuf *pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, false,
@@ -525,7 +431,7 @@ static void _add_col_to_treeview(GtkTreeView *tree_view,
 	if (model)
 		g_object_unref(model);
 
-	gtk_tree_view_column_pack_start(col, renderer, TRUE);
+	gtk_tree_view_column_pack_start(col, renderer, true);
 
 	g_object_set_data(G_OBJECT(renderer), "column",
 			  GINT_TO_POINTER(display_data->id));
@@ -559,10 +465,10 @@ static void _toggle_state_changed(GtkCheckMenuItem *menuitem,
 				  display_data_t *display_data)
 {
 	if (display_data->show)
-		display_data->show = FALSE;
+		display_data->show = false;
 	else
-		display_data->show = TRUE;
-	toggled = TRUE;
+		display_data->show = true;
+	toggled = true;
 	refresh_main(NULL, NULL);
 }
 
@@ -571,9 +477,9 @@ static void _popup_state_changed(GtkCheckMenuItem *menuitem,
 {
 	popup_info_t *popup_win = (popup_info_t *) display_data->user_data;
 	if (display_data->show)
-		display_data->show = FALSE;
+		display_data->show = false;
 	else
-		display_data->show = TRUE;
+		display_data->show = true;
 	popup_win->toggled = 1;
 	(display_data->refresh)(NULL, display_data->user_data);
 }
@@ -597,9 +503,6 @@ static void _selected_page(GtkMenuItem *menuitem, display_data_t *display_data)
 	case NODE_PAGE:
 		each.pfunc = &popup_all_node;
 		break;
-	case BLOCK_PAGE:
-		each.pfunc = &popup_all_block;
-		break;
 	case RESV_PAGE:
 		each.pfunc = &popup_all_resv;
 		break;
@@ -620,10 +523,6 @@ static void _selected_page(GtkMenuItem *menuitem, display_data_t *display_data)
 						&treedata->iter,
 						display_data,
 						treedata->treeview);
-			break;
-		case BLOCK_PAGE:
-			select_admin_block(treedata->model, &treedata->iter,
-					   display_data, treedata->treeview);
 			break;
 		case FRONT_END_PAGE:
 			select_admin_front_end(treedata->model,
@@ -661,7 +560,6 @@ static void _selected_page(GtkMenuItem *menuitem, display_data_t *display_data)
 	xfree(treedata);
 }
 
-
 extern char * replspace (char *str)
 {
 	int pntr = 0;
@@ -683,25 +581,6 @@ extern char * replus (char *str)
 	}
 	return str;
 }
-
-extern char *delstr(char *str, char *orig)
-{
-	static char buffer[150];
-	char *p;
-
-	if (!(p = strstr(str, orig)))
-		return NULL;
-
-	strncpy(buffer, str, p-str);
-	strncpy(buffer+(p-str-1), p+strlen(orig), strlen(str)-(p-str));
-	buffer[strlen(str) - strlen(orig)] = '\0';
-
-	if (_DEBUG)
-		g_print("delstr: new string <%s>\n", buffer);
-
-	return buffer;
-}
-
 
 extern void free_switch_nodes_maps(
 	switch_record_bitmaps_t *sw_nodes_bitmaps_ptr)
@@ -755,7 +634,6 @@ extern int build_nodes_bitmap(char *node_names, bitstr_t **bitmap)
 
 	return SLURM_SUCCESS;
 }
-
 
 extern int get_topo_conf(void)
 {
@@ -811,8 +689,6 @@ extern int get_topo_conf(void)
 
 	return SLURM_SUCCESS;
 }
-
-
 
 extern int get_row_number(GtkTreeView *tree_view, GtkTreePath *path)
 {
@@ -929,7 +805,6 @@ extern void make_fields_menu(popup_info_t *popup_win, GtkMenu *menu,
 	}
 }
 
-
 extern void set_page_opts(int page, display_data_t *display_data,
 			  int count, char* initial_opts)
 {
@@ -951,43 +826,14 @@ extern void set_page_opts(int page, display_data_t *display_data,
 	itr = list_iterator_create(page_opts->col_list);
 	while ((col_name = list_next(itr))) {
 		replus(col_name);
-		if (strstr(col_name, "list") || strstr(col_name, " count")) {
-			char *orig_ptr = col_name;
-			xstrsubstitute(col_name, "bp ", "midplane");
-			if (cluster_flags & CLUSTER_FLAG_BG) {
-				/* We only want to replace "nodes",
-				 * not "cnodes"
-				 */
-				if (col_name[0] != 'c')
-					xstrsubstitute(col_name,
-						       "node", "midplane");
-				xstrsubstitute(col_name, "core", "cnode");
-			} else {
-				xstrsubstitute(col_name, "midplane", "node");
-				xstrsubstitute(col_name, "cnode", "core");
-			}
-
-			/* Make sure we have the correct pointer here
-			   since xstrsubstitute() could of changed it
-			   on us.
-			*/
-			if (col_name != orig_ptr) {
-				list_insert(itr, col_name);
-				/* Don't use list_delete_item().
-				   xstrsubstitute() has already
-				   deleted it for us.
-				*/
-				list_remove(itr);
-			}
-		}
 		while (display_data++) {
 			if (display_data->id == -1)
 				break;
 			if (!display_data->name)
 				continue;
-			if (!strncasecmp(col_name, display_data->name,
-					 strlen(col_name))) {
-				display_data->show = TRUE;
+			if (!xstrncasecmp(col_name, display_data->name,
+					  strlen(col_name))) {
+				display_data->show = true;
 				break;
 			}
 		}
@@ -995,7 +841,6 @@ extern void set_page_opts(int page, display_data_t *display_data,
 	}
 	list_iterator_destroy(itr);
 }
-
 
 extern void make_options_menu(GtkTreeView *tree_view, GtkTreePath *path,
 			      GtkMenu *menu, display_data_t *display_data)
@@ -1046,7 +891,7 @@ extern GtkScrolledWindow *create_scrolled_window(void)
 {
 	GtkScrolledWindow *scrolled_window = NULL;
 	GtkWidget *table = NULL;
-	table = gtk_table_new(1, 1, FALSE);
+	table = gtk_table_new(1, 1, false);
 
 	gtk_container_set_border_width(GTK_CONTAINER(table), 10);
 
@@ -1067,7 +912,7 @@ extern GtkWidget *create_entry(void)
 {
 	GtkWidget *entry = gtk_entry_new();
 
-	gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+	gtk_entry_set_activates_default(GTK_ENTRY(entry), true);
 
 	return entry;
 }
@@ -1083,11 +928,11 @@ extern void create_page(GtkNotebook *notebook, display_data_t *display_data)
 	int err;
 
 	if (display_data->id == TAB_PAGE) {
-		table = gtk_table_new(PAGE_CNT, 3, FALSE);
+		table = gtk_table_new(PAGE_CNT, 3, false);
 		image = gtk_image_new_from_stock(
 			GTK_STOCK_ADD, GTK_ICON_SIZE_SMALL_TOOLBAR);
 	} else {
-		table = gtk_table_new(1, 3, FALSE);
+		table = gtk_table_new(1, 3, false);
 		image = gtk_image_new_from_stock(
 			GTK_STOCK_DIALOG_ERROR, GTK_ICON_SIZE_SMALL_TOOLBAR);
 		g_signal_connect(G_OBJECT(close_button), "button-press-event",
@@ -1098,15 +943,15 @@ extern void create_page(GtkNotebook *notebook, display_data_t *display_data)
 	gtk_container_add(GTK_CONTAINER(close_button), image);
 	gtk_widget_set_size_request(close_button, 10, 10);
 
-	//gtk_event_box_set_above_child(GTK_EVENT_BOX(close_button), FALSE);
+	//gtk_event_box_set_above_child(GTK_EVENT_BOX(close_button), false);
 
 	gtk_container_add(GTK_CONTAINER(event_box), label);
-	gtk_event_box_set_above_child(GTK_EVENT_BOX(event_box), FALSE);
+	gtk_event_box_set_above_child(GTK_EVENT_BOX(event_box), false);
 	g_signal_connect(G_OBJECT(event_box), "button-press-event",
 			 G_CALLBACK(tab_pressed),
 			 display_data);
 
-	gtk_table_set_homogeneous(GTK_TABLE(table), FALSE);
+	gtk_table_set_homogeneous(GTK_TABLE(table), false);
 	gtk_table_set_col_spacings(GTK_TABLE(table), 5);
 	gtk_container_set_border_width(GTK_CONTAINER(table), 1);
 
@@ -1173,7 +1018,7 @@ extern GtkTreeView *create_treeview_2cols_attach_to_table(GtkTable *table)
 
 	gtk_tree_view_set_model(tree_view, GTK_TREE_MODEL(treestore));
 
-	gtk_tree_view_column_pack_start(col, renderer, TRUE);
+	gtk_tree_view_column_pack_start(col, renderer, true);
 	gtk_tree_view_column_add_attribute(col, renderer,
 					   "text", DISPLAY_NAME);
 	gtk_tree_view_column_add_attribute(col, renderer,
@@ -1185,7 +1030,7 @@ extern GtkTreeView *create_treeview_2cols_attach_to_table(GtkTable *table)
 
 	col = gtk_tree_view_column_new();
 	renderer = gtk_cell_renderer_text_new();
-	gtk_tree_view_column_pack_start(col, renderer, TRUE);
+	gtk_tree_view_column_pack_start(col, renderer, true);
 	gtk_tree_view_column_add_attribute(col, renderer,
 					   "text", DISPLAY_VALUE);
 	gtk_tree_view_column_add_attribute(col, renderer,
@@ -1197,7 +1042,7 @@ extern GtkTreeView *create_treeview_2cols_attach_to_table(GtkTable *table)
 
 	col = gtk_tree_view_column_new();
 	renderer = gtk_cell_renderer_text_new();
-	gtk_tree_view_column_pack_start(col, renderer, TRUE);
+	gtk_tree_view_column_pack_start(col, renderer, true);
 	gtk_tree_view_column_set_visible(col, false);
 	gtk_tree_view_column_add_attribute(col, renderer,
 					   "text", DISPLAY_FONT);
@@ -1251,20 +1096,12 @@ extern GtkTreeStore *create_treestore(GtkTreeView *tree_view,
 			if (!xstrcasecmp(display_data[i].name, "Node Count")
 			    || !xstrcasecmp(display_data[i].name, "CPU Count")
 			    || !xstrcasecmp(display_data[i].name, "Real Memory")
+			    || !xstrcasecmp(display_data[i].name, "Port")
 			    || !xstrcasecmp(display_data[i].name, "Tmp Disk")) {
 				gtk_tree_sortable_set_sort_func(
 					GTK_TREE_SORTABLE(treestore),
 					display_data[i].id,
 					_sort_iter_compare_func_nodes,
-					GINT_TO_POINTER(display_data[i].id),
-					NULL);
-				break;
-			} else if (!xstrcasecmp(display_data[i].name,
-						"MidplaneList")) {
-				gtk_tree_sortable_set_sort_func(
-					GTK_TREE_SORTABLE(treestore),
-					display_data[i].id,
-					_sort_iter_compare_func_mp_list,
 					GINT_TO_POINTER(display_data[i].id),
 					NULL);
 				break;
@@ -1388,7 +1225,7 @@ extern gboolean row_activated(GtkTreeView *tree_view, GtkTreePath *path,
 	/* display the full info */
 	if (!enter_key_in_effect)
 		(display_data->set_menu)(tree_view, NULL, path, FULL_CLICKED);
-	enter_key_in_effect = FALSE;
+	enter_key_in_effect = false;
 
 	return false;
 }
@@ -1397,12 +1234,12 @@ extern gboolean key_pressed(GtkTreeView *tree_view,
 			    GdkEventKey *event,
 			    const signal_params_t *signal_params)
 {
-	control_key_in_effect = FALSE;
-	enter_key_in_effect = FALSE;
+	control_key_in_effect = false;
+	enter_key_in_effect = false;
 
 	if ((event->keyval == GDK_Control_L) ||
 	    (event->keyval == GDK_Control_R))
-		control_key_in_effect = TRUE;
+		control_key_in_effect = true;
 	else if (event->keyval == GDK_Return) {
 		each_t each;
 		GtkTreeSelection *selection = NULL;
@@ -1421,11 +1258,11 @@ extern gboolean key_pressed(GtkTreeView *tree_view,
 			selection, _foreach_full_info, &each);
 		/*prevent row_activation from
 		 * performing a redundant 'full info'*/
-		enter_key_in_effect = TRUE;
+		enter_key_in_effect = true;
 
 	}
 
-	return FALSE;
+	return false;
 }/*key_pressed ^^^*/
 
 
@@ -1441,7 +1278,7 @@ extern gboolean key_released(GtkTreeView *tree_view,
 	if ((event->keyval != GDK_Up) &&
 	    (event->keyval != GDK_Down) &&
 	    (event->keyval != GDK_Return))
-		return TRUE;
+		return true;
 
 	gtk_tree_view_get_cursor(GTK_TREE_VIEW(tree_view), &path, &column);
 	if (path) {
@@ -1449,7 +1286,7 @@ extern gboolean key_released(GtkTreeView *tree_view,
 		gtk_tree_selection_select_path(selection, path);
 		gtk_tree_path_free(path);
 	}
-	return TRUE;
+	return true;
 
 
 }/*key_released ^^^*/
@@ -1460,8 +1297,8 @@ extern gboolean row_clicked(GtkTreeView *tree_view, GdkEventButton *event,
 	GtkTreePath *path = NULL;
 	GtkTreePath *last_path = NULL;
 	GtkTreeSelection *selection = NULL;
-	gboolean did_something = FALSE;
-	gboolean selected_in_current_mix = FALSE;
+	gboolean did_something = false;
+	gboolean selected_in_current_mix = false;
 
 	if (!gtk_tree_view_get_path_at_pos(tree_view,
 					   (gint) event->x,
@@ -1478,9 +1315,9 @@ extern gboolean row_clicked(GtkTreeView *tree_view, GdkEventButton *event,
 			if (!(event->state & GDK_CONTROL_MASK))
 				gtk_tree_selection_unselect_all(selection);
 			refresh_main(NULL, NULL);
-			return TRUE;
+			return true;
 		}
-		return FALSE;
+		return false;
 	}
 
 	/* make the selection (highlight) here */
@@ -1530,7 +1367,7 @@ extern gboolean row_clicked(GtkTreeView *tree_view, GdkEventButton *event,
 		   a way to know for sure the expander was clicked
 		   and not the actual column please fix this :).
 		*/
-		did_something = FALSE;
+		did_something = false;
 	} else if (event->button == 1) {
 		/*  left click */
 		if (!(event->state & GDK_CONTROL_MASK)
@@ -1558,9 +1395,9 @@ extern gboolean row_clicked(GtkTreeView *tree_view, GdkEventButton *event,
 		    && !(event->state & GDK_SHIFT_MASK))
 			right_button_pressed(tree_view, path, event,
 					     signal_params, ROW_CLICKED);
-		did_something = TRUE;
+		did_something = true;
 	} else if (!working_sview_config.admin_mode)
-		did_something = TRUE;
+		did_something = true;
 	gtk_tree_path_free(path);
 
 	/* If control key held refresh main (which does the grid and
@@ -1568,14 +1405,14 @@ extern gboolean row_clicked(GtkTreeView *tree_view, GdkEventButton *event,
 	   after left_button_pressed to get other things correct. */
 	if (event->state & GDK_CONTROL_MASK) {
 		refresh_main(NULL, NULL);
-		return FALSE; /*propagate event*/
+		return false; /*propagate event*/
 	}
 	return did_something;
 }
 
 extern popup_info_t *create_popup_info(int type, int dest_type, char *title)
 {
-	GtkScrolledWindow *window = NULL;
+	GtkScrolledWindow *window = NULL, *grid_window = NULL;
 	GtkBin *bin = NULL;
 	GtkViewport *view = NULL;
 	GtkWidget *label = NULL;
@@ -1605,6 +1442,8 @@ extern popup_info_t *create_popup_info(int type, int dest_type, char *title)
 		NULL);
 	close_btn = gtk_dialog_add_button(GTK_DIALOG(popup_win->popup),
 					  GTK_STOCK_CLOSE, GTK_RESPONSE_CLOSE);
+	gtk_window_set_type_hint(GTK_WINDOW(popup_win->popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_focus(GTK_WINDOW(popup_win->popup), close_btn);
 	gtk_dialog_add_button(GTK_DIALOG(popup_win->popup),
 			      "Close All Popups", GTK_RESPONSE_CANCEL);
@@ -1642,24 +1481,24 @@ extern popup_info_t *create_popup_info(int type, int dest_type, char *title)
 
 	gtk_event_box_set_above_child(
 		GTK_EVENT_BOX(popup_win->event_box),
-		FALSE);
+		false);
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup_win->popup)->vbox),
-			   popup_win->event_box, FALSE, FALSE, 0);
+			   popup_win->event_box, false, false, 0);
 
-	window = create_scrolled_window();
-	gtk_scrolled_window_set_policy(window,
+	grid_window = create_scrolled_window();
+	gtk_scrolled_window_set_policy(grid_window,
 				       GTK_POLICY_NEVER,
 				       GTK_POLICY_AUTOMATIC);
-	bin = GTK_BIN(&window->container);
+	bin = GTK_BIN(&grid_window->container);
 	view = GTK_VIEWPORT(bin->child);
 	bin = GTK_BIN(&view->bin);
 	popup_win->grid_table = GTK_TABLE(bin->child);
 	popup_win->grid_button_list = NULL;
 
-	table = gtk_table_new(1, 2, FALSE);
+	table = gtk_table_new(1, 2, false);
 
-	gtk_table_attach(GTK_TABLE(table), GTK_WIDGET(window), 0, 1, 0, 1,
+	gtk_table_attach(GTK_TABLE(table), GTK_WIDGET(grid_window), 0, 1, 0, 1,
 			 GTK_SHRINK, GTK_EXPAND | GTK_FILL,
 			 0, 0);
 
@@ -1673,7 +1512,7 @@ extern popup_info_t *create_popup_info(int type, int dest_type, char *title)
 				  1, 2, 0, 1);
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup_win->popup)->vbox),
-			   table, TRUE, TRUE, 0);
+			   table, true, true, 0);
 
 	g_signal_connect(G_OBJECT(popup_win->popup), "delete_event",
 			 G_CALLBACK(delete_popup),
@@ -1687,6 +1526,10 @@ extern popup_info_t *create_popup_info(int type, int dest_type, char *title)
 	gtk_window_move(GTK_WINDOW(popup_win->popup),
 			popup_pos.x, popup_pos.y);
 	gtk_widget_show_all(popup_win->popup);
+
+	if (cluster_flags & CLUSTER_FLAG_FED)
+		gtk_widget_hide(GTK_WIDGET(grid_window));
+
 	return popup_win;
 }
 
@@ -1707,7 +1550,7 @@ extern void setup_popup_info(popup_info_t *popup_win,
 extern void redo_popup(GtkWidget *widget, GdkEventButton *event,
 		       popup_info_t *popup_win)
 {
-	if (event->button == 3) {
+	if (event && (event->button == 3)) {
 		GtkMenu *menu = GTK_MENU(gtk_menu_new());
 
 		(popup_win->display_data->set_menu)(popup_win, menu,
@@ -1715,8 +1558,7 @@ extern void redo_popup(GtkWidget *widget, GdkEventButton *event,
 						    POPUP_CLICKED);
 
 		gtk_widget_show_all(GTK_WIDGET(menu));
-		gtk_menu_popup(menu, NULL, NULL, NULL, NULL,
-			       event ? event->button : 0,
+		gtk_menu_popup(menu, NULL, NULL, NULL, NULL, event->button,
 			       gdk_event_get_time((GdkEvent*)event));
 	}
 }
@@ -1725,6 +1567,7 @@ extern void destroy_search_info(void *arg)
 {
 	sview_search_info_t *search_info = (sview_search_info_t *)arg;
 	if (search_info) {
+		g_free(search_info->cluster_name);
 		if (search_info->gchar_data)
 			g_free(search_info->gchar_data);
 		search_info->gchar_data = NULL;
@@ -1811,7 +1654,7 @@ extern gboolean delete_popup(GtkWidget *widget, GtkWidget *event, char *title)
 	list_iterator_destroy(itr);
 
 
-	return FALSE;
+	return false;
 }
 
 extern gboolean delete_popups(void)
@@ -1825,7 +1668,7 @@ extern gboolean delete_popups(void)
 	}
 	list_iterator_destroy(itr);
 
-	return FALSE;
+	return false;
 }
 
 extern void *popup_thr(popup_info_t *popup_win)
@@ -1844,9 +1687,6 @@ extern void *popup_thr(popup_info_t *popup_win)
 		break;
 	case NODE_PAGE:
 		specifc_info = specific_info_node;
-		break;
-	case BLOCK_PAGE:
-		specifc_info = specific_info_block;
 		break;
 	case RESV_PAGE:
 		specifc_info = specific_info_resv;
@@ -1867,10 +1707,6 @@ extern void *popup_thr(popup_info_t *popup_win)
 	/* when popup is killed running will be set to 0 */
 	while (running) {
 		gdk_threads_enter();
-		if (!running) {
-			gdk_threads_leave();
-			break;
-		}
 		(specifc_info)(popup_win);
 		gdk_threads_leave();
 		sleep(working_sview_config.refresh_delay);
@@ -1948,7 +1784,7 @@ extern GtkWidget *create_pulldown_combo(display_data_t *display_data)
 
 	g_object_unref(store);
 	renderer = gtk_cell_renderer_text_new();
-	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo), renderer, TRUE);
+	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo), renderer, true);
 	gtk_cell_layout_add_attribute(GTK_CELL_LAYOUT(combo), renderer,
 				      "text", 1);
 
@@ -1976,7 +1812,7 @@ extern char *get_reason(void)
 {
 	char *reason_str = NULL;
 	int len = 0;
-	GtkWidget *table = gtk_table_new(1, 2, FALSE);
+	GtkWidget *table = gtk_table_new(1, 2, false);
 	GtkWidget *label = gtk_label_new("Reason ");
 	GtkWidget *entry = gtk_entry_new();
 	GtkWidget *popup = gtk_dialog_new_with_buttons(
@@ -1990,13 +1826,16 @@ extern char *get_reason(void)
 		NULL);
 	int response = 0;
 	char *user_name = NULL;
-	char time_buf[64], time_str[32];
+	char time_str[32];
 	time_t now = time(NULL);
+
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 
 	gtk_container_set_border_width(GTK_CONTAINER(table), 10);
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   table, FALSE, FALSE, 0);
+			   table, false, false, 0);
 
 	gtk_table_attach_defaults(GTK_TABLE(table), label, 0, 1, 0, 1);
 	gtk_table_attach_defaults(GTK_TABLE(table), entry, 1, 2, 0, 1);
@@ -2018,13 +1857,10 @@ extern char *get_reason(void)
 		user_name = getlogin();
 		if (user_name)
 			xstrcat(reason_str, user_name);
-		else {
-			sprintf(time_buf, "%d", getuid());
-			xstrcat(reason_str, time_buf);
-		}
+		else
+			xstrfmtcat(reason_str, "%d", getuid());
 		slurm_make_time_str(&now, time_str, sizeof(time_str));
-		snprintf(time_buf, sizeof(time_buf), "@%s]", time_str);
-		xstrcat(reason_str, time_buf);
+		xstrfmtcat(reason_str, "@%s]", time_str);
 	} else
 		reason_str = xstrdup("cancelled");
 end_it:
@@ -2072,7 +1908,7 @@ extern void display_admin_edit(GtkTable *table, void *type_msg, int *row,
 
 		renderer = gtk_cell_renderer_text_new();
 		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(entry),
-					   renderer, TRUE);
+					   renderer, true);
 		gtk_cell_layout_add_attribute(GTK_CELL_LAYOUT(entry),
 					      renderer, "text", 0);
 	} else if (display_data->extra == EDIT_TEXTBOX) {
@@ -2128,7 +1964,7 @@ extern void display_edit_note(char *edit_note)
 				    STATUS_ADMIN_EDIT,
 				    edit_note);
 	if (!sview_thread_new(_editing_thr, GINT_TO_POINTER(msg_id),
-			      FALSE, &error))
+			      false, &error))
 		g_printerr("Failed to create edit thread: %s\n",
 			   error->message);
 
@@ -2138,7 +1974,8 @@ extern void display_edit_note(char *edit_note)
 extern void add_display_treestore_line(int update,
 				       GtkTreeStore *treestore,
 				       GtkTreeIter *iter,
-				       const char *name, char *value)
+				       const char *name,
+				       const char *value)
 {
 	if (!name) {
 /*		g_print("error, name = %s and value = %s\n", */
@@ -2267,7 +2104,7 @@ extern void sview_radio_action_set_current_value(GtkRadioAction *action,
 		for (slist = group; slist; slist = slist->next) {
 			if (i == current_value) {
 				gtk_toggle_action_set_active(
-					GTK_TOGGLE_ACTION(slist->data), TRUE);
+					GTK_TOGGLE_ACTION(slist->data), true);
 				return;
 			}
 			i++;
@@ -2278,7 +2115,7 @@ extern void sview_radio_action_set_current_value(GtkRadioAction *action,
 
 extern char *page_to_str(int page)
 {
-	switch(page) {
+	switch (page) {
 	case JOB_PAGE:
 		return "Job";
 	case PART_PAGE:
@@ -2287,8 +2124,6 @@ extern char *page_to_str(int page)
 		return "Reservation";
 	case BB_PAGE:
 		return "BurstBuffer";
-	case BLOCK_PAGE:
-		return "Block";
 	case NODE_PAGE:
 		return "Node";
 	case FRONT_END_PAGE:
@@ -2296,12 +2131,11 @@ extern char *page_to_str(int page)
 	default:
 		return NULL;
 	}
-	return NULL;
 }
 
 extern char *tab_pos_to_str(int pos)
 {
-	switch(pos) {
+	switch (pos) {
 	case GTK_POS_TOP:
 		return "Top";
 	case GTK_POS_BOTTOM:
@@ -2313,7 +2147,6 @@ extern char *tab_pos_to_str(int pos)
 	default:
 		return "Unknown";
 	}
-	return "Unknown";
 }
 
 extern char *visible_to_str(sview_config_t *sview_config)
@@ -2336,4 +2169,46 @@ extern gboolean entry_changed(GtkWidget *widget, void *msg)
 {
 	global_entry_changed = 1;
 	return false;
+}
+
+extern void select_admin_common(GtkTreeModel *model, GtkTreeIter *iter,
+				display_data_t *display_data,
+				GtkTreeView *treeview,
+				uint32_t node_col,
+				void (*process_each)(GtkTreeModel *model,
+						     GtkTreePath *path,
+						     GtkTreeIter *iter,
+						     gpointer userdata))
+{
+	GtkTreePath *path;
+	GtkTreeRowReference *ref;
+	GtkTreeSelection *selection;
+	GList *list = NULL, *selected_rows = NULL;
+
+	if (!treeview)
+		return;
+
+	if (display_data->extra & EXTRA_NODES) {
+		select_admin_nodes(model, iter, display_data,
+				   node_col, treeview);
+		return;
+	}
+
+	global_multi_error = false;
+
+	selection = gtk_tree_view_get_selection(treeview);
+	selected_rows =	gtk_tree_selection_get_selected_rows(selection, &model);
+
+	for (list = selected_rows; list; list = g_list_next(list)) {
+		ref = gtk_tree_row_reference_new(model, list->data);
+		path = gtk_tree_row_reference_get_path(ref);
+		(*(process_each))(model, path, iter, display_data->name);
+		gtk_tree_path_free(path);
+		gtk_tree_row_reference_free(ref);
+	}
+
+	g_list_foreach(selected_rows, (GFunc)gtk_tree_path_free, NULL);
+	g_list_free(selected_rows);
+
+	return;
 }

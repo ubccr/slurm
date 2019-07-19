@@ -6,11 +6,11 @@
  *  Written by Danny Auble <auble1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -54,7 +54,7 @@ extern void forward_init(forward_t *forward, forward_t *from);
 /*
  * forward_msg	      - logic to forward a message which has been received and
  *			accumulate the return codes from processes getting the
- *			the forwarded message
+ *			forwarded message
  *
  * IN: forward_struct - forward_struct_t *   - holds information about message
  *                                             that needs to be forwarded to
@@ -70,7 +70,7 @@ extern void forward_init(forward_t *forward, forward_t *from);
 
 forward_struct = xmalloc(sizeof(forward_struct_t));
 forward_struct->buf_len = remaining_buf(buffer);
-forward_struct->buf = xmalloc(sizeof(char) * forward_struct->buf_len);
+forward_struct->buf = xmalloc(forward_struct->buf_len);
 memcpy(forward_struct->buf, &buffer->head[buffer->processed],
        forward_struct->buf_len);
 forward_struct->ret_list = ret_list;
@@ -90,7 +90,7 @@ extern int forward_msg(forward_struct_t *forward_struct,
 /*
  * start_msg_tree  - logic to begin the forward tree and
  *                   accumulate the return codes from processes getting the
- *                   the forwarded message
+ *                   forwarded message
  *
  * IN: hl          - hostlist_t   - list of every node to send message to
  * IN: msg         - slurm_msg_t  - message to send.

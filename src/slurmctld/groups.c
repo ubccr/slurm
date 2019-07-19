@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,26 +27,21 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
+
 /* needed for getgrent_r */
-#ifndef   _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
-#ifndef   __USE_GNU
-#  define   __USE_GNU
-#endif
+#define _GNU_SOURCE
+#define   __USE_GNU
 
 #include <grp.h>
 #include <pthread.h>
@@ -93,9 +88,7 @@ extern uid_t *get_group_members(char *group_name)
 	uid_t *group_uids = NULL, my_uid;
 	gid_t my_gid;
 	int buflen = PW_BUF_SIZE, i, j, res, uid_cnt;
-#ifdef HAVE_AIX
-	FILE *fp = NULL;
-#elif defined (__APPLE__) || defined (__CYGWIN__)
+#if defined (__APPLE__)
 #else
 	char pw_buffer[PW_BUF_SIZE];
 	struct passwd pw;
@@ -163,21 +156,7 @@ extern uid_t *get_group_members(char *group_name)
 	 * databases), the rest of this function essentially does
 	 * nothing.  */
 
-#ifdef HAVE_AIX
-	setgrent_r(&fp);
-	while (1) {
-		slurm_seterrno(0);
-		res = getgrent_r(&grp, grp_buffer, buflen, &fp);
-		if (res != 0) {
-			if (errno == ERANGE) {
-				buflen *= 2;
-				xrealloc(grp_buffer, buflen);
-				continue;
-			}
-			break;
-		}
-		grp_result = &grp;
-#elif defined (__APPLE__) || defined (__CYGWIN__)
+#if defined (__APPLE__)
 	setgrent();
 	while (1) {
 		if ((grp_result = getgrent()) == NULL)
@@ -226,21 +205,12 @@ extern uid_t *get_group_members(char *group_name)
 			}
 		}
 	}
-#ifdef HAVE_AIX
-	endgrent_r(&fp);
-	setpwent_r(&fp);
-	while (!getpwent_r(&pw, pw_buffer, PW_BUF_SIZE, &fp)) {
-		pwd_result = &pw;
-#else
 	endgrent();
 	setpwent();
-#if defined (__sun)
-	while ((pwd_result = getpwent_r(&pw, pw_buffer, PW_BUF_SIZE)) != NULL) {
-#elif defined (__APPLE__) || defined (__CYGWIN__)
+#if defined (__APPLE__)
 	while ((pwd_result = getpwent()) != NULL) {
 #else
 	while (!getpwent_r(&pw, pw_buffer, PW_BUF_SIZE, &pwd_result)) {
-#endif
 #endif
 		/* At eof FreeBSD returns 0 unlike Linux
 		 * which returns ENOENT.
@@ -255,11 +225,7 @@ extern uid_t *get_group_members(char *group_name)
 		}
 		group_uids[j++] = pwd_result->pw_uid;
 	}
-#ifdef HAVE_AIX
-	endpwent_r(&fp);
-#else
 	endpwent();
-#endif
 	xfree(grp_buffer);
 	_put_group_cache(group_name, group_uids, j);
 	_log_group_members(group_name, group_uids);
@@ -294,7 +260,7 @@ static uid_t *_get_group_cache(char *group_name)
 		if (xstrcmp(group_name, cache_rec->group_name))
 			continue;
 		sz = sizeof(uid_t) * (cache_rec->uid_cnt + 1);
-		group_uids = (uid_t *) xmalloc(sz);
+		group_uids = xmalloc(sz);
 		memcpy(group_uids, cache_rec->group_uids, sz);
 		break;
 	}
@@ -329,7 +295,7 @@ static void _put_group_cache(char *group_name, void *group_uids, int uid_cnt)
 	cache_rec = xmalloc(sizeof(struct group_cache_rec));
 	cache_rec->group_name = xstrdup(group_name);
 	cache_rec->uid_cnt    = uid_cnt;
-	cache_rec->group_uids = (uid_t *) xmalloc(sizeof(uid_t) + sz);
+	cache_rec->group_uids = xmalloc(sizeof(uid_t) + sz);
 	if (uid_cnt > 0)
 		memcpy(cache_rec->group_uids, group_uids, sz);
 	list_append(group_cache_list, cache_rec);

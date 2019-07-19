@@ -10,11 +10,11 @@
  *
  *  Written by Chris Dunlap <cdunlap@llnl.gov>
  *         and Jim Garlick  <garlick@llnl.gov>
- *         modified for SLURM by Moe Jette <jette@llnl.gov>.
+ *         modified for Slurm by Moe Jette <jette@llnl.gov>.
  *
  *  This file is part of pam_slurm, a PAM module for restricting access to
  *  the compute nodes within a cluster based on information obtained from
- *  Simple Linux Utility for Resource Managment (SLURM).  For details, see
+ *  Simple Linux Utility for Resource Managment (Slurm).  For details, see
  *  <http://www.llnl.gov/linux/slurm/>.
  *
  *  pam_slurm is free software; you can redistribute it and/or modify it
@@ -100,7 +100,7 @@ _log_msg(int level, const char *format, ...)
 
 /*
  *  Sends a message to the application informing the user
- *  that access was denied due to SLURM.
+ *  that access was denied due to Slurm.
  */
 extern void
 send_user_msg(pam_handle_t *pamh, const char *mesg)
@@ -110,7 +110,6 @@ send_user_msg(pam_handle_t *pamh, const char *mesg)
 	void *dummy;    /* needed to eliminate warning:
 			 * dereferencing type-punned pointer will
 			 * break strict-aliasing rules */
-	char str[PAM_MAX_MSG_SIZE];
 	struct pam_message msg[1];
 	const struct pam_message *pmsg[1];
 	struct pam_response *prsp;
@@ -128,9 +127,8 @@ send_user_msg(pam_handle_t *pamh, const char *mesg)
 
 	/*  Construct msg to send to app.
 	 */
-	memcpy(str, mesg, sizeof(str));
 	msg[0].msg_style = PAM_ERROR_MSG;
-	msg[0].msg = str;
+	msg[0].msg = mesg;
 	pmsg[0] = &msg[0];
 	prsp = NULL;
 

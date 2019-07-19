@@ -16,7 +16,7 @@ test_sources = \
 	       $(perl_dir)/t/01-clusters_get.t \
 	       $(perl_dir)/t/02-report_cluster_account_by_user.t \
 	       $(perl_dir)/t/03-report_cluster_user_by_account.t \
-	       $(perl_dir)/t/04-report_job_sizes_grouped_by_top_account.t \
+	       $(perl_dir)/t/04-report_job_sizes_grouped_by_account.t \
 	       $(perl_dir)/t/05-report_user_top_usage.t \
 	       $(perl_dir)/t/06-jobs_get.t \
 	       $(perl_dir)/t/07-qos_get.t
@@ -38,22 +38,12 @@ $(perl_dir)/Makefile:	$(perl_dir)/Makefile.PL
 #
 # Note on linking logic below
 #
-# AIX needs to use LD to link. It can not use gcc.
 # Suse Linux compiles with gcc, but picks some other compiler to use for linking.
 #   Since some CFLAGS may be incompatible with this other compiler, the build
 #   may fail, as seen on BlueGene platforms.
 # Other Linux implementations sems to work fine with the LD specified as below
 #
-all-local: $(perl_dir)/Makefile #libslurmdb
-if HAVE_AIX
-	@cd $(perl_dir) && \
-	if [ ! -f Makefile ]; then \
-		$(perlpath) Makefile.PL $(PERL_MM_PARAMS) prefix=${prefix} INSTALL_BASE= PERL_MM_OPT=; \
-	fi && \
-	($(MAKE) CC="$(CC)" CCFLAGS="$(PERL_CFLAGS) -g -static $(CFLAGS) $(CPPFLAGS)" $(PERL_EXTRA_OPTS) || \
-	 $(MAKE) CC="$(CC)" CCFLAGS="$(PERL_CFLAGS) -g -static $(CFLAGS) $(CPPFLAGS)" $(PERL_EXTRA_OPTS)) && \
-	cd ..;
-else
+all-local: $(perl_dir)/Makefile #libslurm
 	@cd $(perl_dir) && \
 	if [ ! -f Makefile ]; then \
 		$(perlpath) Makefile.PL $(PERL_MM_PARAMS) prefix=${prefix} INSTALL_BASE= PERL_MM_OPT=; \
@@ -61,7 +51,6 @@ else
 	($(MAKE) CC="$(CC)" LD="$(CC) $(CFLAGS) $(LDFLAGS)" CCFLAGS="$(PERL_CFLAGS) -g -static $(CFLAGS) $(CPPFLAGS)" $(PERL_EXTRA_OPTS) || \
 	 $(MAKE) CC="$(CC)" LD="$(CC) $(CFLAGS) $(LDFLAGS)" CCFLAGS="$(PERL_CFLAGS) -g -static $(CFLAGS) $(CPPFLAGS)" $(PERL_EXTRA_OPTS)) && \
 	cd ..;
-endif
 
 install-exec-local:
 	@cd $(perl_dir) && \

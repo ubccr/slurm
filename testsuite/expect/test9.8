@@ -15,22 +15,22 @@
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -46,15 +46,8 @@ set task_cnt     60
 
 print_header $test_id
 
-if {[test_alps]} {
-	send_user "\nWARNING: This test is incompatible with Cray systems\n"
-	exit $exit_code
-}
-
 if {![test_select_type_params "Memory"]} {
 	set mem_per_step 0
-} elseif {[test_launch_poe]} {
-	set mem_per_step 200
 } else {
 	set mem_per_step 8
 }
@@ -118,18 +111,7 @@ if {$start_cnt < $job_cnt} {
 	send_user "\nAll $start_cnt jobs submitted\n"
 }
 
-set user_name ""
-
-spawn $bin_id -un
-expect {
-	-re "($alpha_numeric_under)" {
-		set user_name $expect_out(1,string)
-	}
-	eof {
-		wait
-	}
-
-}
+set user_name [get_my_user_name]
 
 #
 # There could be hundreds of job steps, we don't want to see
@@ -194,9 +176,6 @@ while { 1 } {
 	}
 	exec $bin_sleep 3
 }
-if {[test_aix]} {
-	sleep 5
-}
 
 log_user 1
 if {$step_count < $desired_tasks} {
@@ -214,7 +193,7 @@ expect {
 }
 
 #
-# Give a few seconds for clean-up and insure things are still fine
+# Give a few seconds for clean-up and ensure things are still fine
 # If message are lost, slurmctld re-sends job kill RPC 120 seconds later
 # In any case, make sure that all jobs get completed
 #

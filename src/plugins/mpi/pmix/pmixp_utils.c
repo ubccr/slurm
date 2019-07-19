@@ -1,15 +1,15 @@
 /*****************************************************************************\
- **	pmix_utils.c - Various PMIx utility functions
+ ** pmix_utils.c - Various PMIx utility functions
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015-2016 Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,27 +25,33 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
+
+#include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <poll.h>
-#include <time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 
 #include "pmixp_common.h"
 #include "pmixp_utils.h"
@@ -59,10 +65,10 @@ void pmixp_xfree_xmalloced(void *x)
 	xfree(x);
 }
 
-void pmixp_free_Buf(void *x)
+void pmixp_free_buf(void *x)
 {
 	Buf buf = (Buf)x;
-	free_buf(buf);
+	FREE_NULL_BUFFER(buf);
 }
 
 int pmixp_usock_create_srv(char *path)
@@ -107,15 +113,11 @@ err_fd:
 }
 
 size_t pmixp_read_buf(int sd, void *buf, size_t count, int *shutdown,
-		bool blocking)
+		      bool blocking)
 {
 	ssize_t ret, offs = 0;
 
 	*shutdown = 0;
-
-	if (!blocking && !pmixp_fd_read_ready(sd, shutdown)) {
-		return 0;
-	}
 
 	if (blocking) {
 		fd_set_blocking(sd);
@@ -150,8 +152,19 @@ size_t pmixp_read_buf(int sd, void *buf, size_t count, int *shutdown,
 	return offs;
 }
 
+int pmixp_fd_set_nodelay(int fd)
+{
+	int val = 1;
+	if ( 0 > setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&val,
+			    sizeof(val)) ) {
+		PMIXP_ERROR_STD("Cannot set TCP_NODELAY on fd = %d\n", fd);
+		return SLURM_ERROR;
+	}
+	return SLURM_SUCCESS;
+}
+
 size_t pmixp_write_buf(int sd, void *buf, size_t count, int *shutdown,
-		bool blocking)
+		       bool blocking)
 {
 	ssize_t ret, offs = 0;
 
@@ -189,35 +202,83 @@ size_t pmixp_write_buf(int sd, void *buf, size_t count, int *shutdown,
 	return offs;
 }
 
+static int _iov_shift(struct iovec *iov, size_t iovcnt, int offset)
+{
+	int skip, i;
+	size_t count = 0;
+
+	/* find out how many iov's was completely sent */
+	for (skip = 0; skip < iovcnt; skip++) {
+		if (offset < count + iov[skip].iov_len) {
+			break;
+		}
+		count += iov[skip].iov_len;
+	}
+
+	/* remove tose iov's from the list */
+	for (i = 0; i < iovcnt - skip; i++) {
+		iov[i] = iov[i + skip];
+	}
+
+	/* shift the current iov */
+	offset -= count;
+	iov[0].iov_base += offset;
+	iov[0].iov_len -= offset;
+	return iovcnt - skip;
+}
+
+size_t pmixp_writev_buf(int sd, struct iovec *iov, size_t iovcnt,
+			size_t offset, int *shutdown)
+{
+	ssize_t ret;
+	size_t size = 0, written = 0;
+	int i;
+
+	for (i=0; i < iovcnt; i++) {
+		size += iov[i].iov_len;
+	}
+
+	/* Adjust initial buffer with the offset */
+	iovcnt = _iov_shift(iov, iovcnt, offset);
+
+	*shutdown = 0;
+
+	while (size - (offset + written) > 0) {
+		ret = writev(sd, iov, iovcnt);
+		if (ret > 0) {
+			written += ret;
+			iovcnt = _iov_shift(iov, iovcnt, ret);
+			continue;
+		}
+		switch (errno) {
+		case EINTR:
+			continue;
+		case EWOULDBLOCK:
+			return written;
+		default:
+			*shutdown = -errno;
+			return written;
+		}
+	}
+
+	return written;
+}
+
 bool pmixp_fd_read_ready(int fd, int *shutdown)
 {
 	struct pollfd pfd[1];
 	int rc;
-	struct timeval tv;
-	double start, cur;
 	pfd[0].fd = fd;
 	pfd[0].events = POLLIN;
 	/* Drop shutdown before the check */
 	*shutdown = 0;
 
-	gettimeofday(&tv,NULL);
-	start = tv.tv_sec + 1E-6*tv.tv_usec;
-	cur = start;
-	while( cur - start < 0.01 ){
-		rc = poll(pfd, 1, 10);
-		
-		/* update current timestamp */
-		gettimeofday(&tv,NULL);
-		cur = tv.tv_sec + 1E-6*tv.tv_usec;
-		if( rc < 0 ){
-			if( errno == EINTR ){
-				continue;
-			} else {
-				*shutdown = -errno;
-				return false;
-			}
+	rc = poll(pfd, 1, 0);
+	if (rc < 0) {
+		if (!(errno == EINTR)) {
+			*shutdown = -errno;
+			return false;
 		}
-		break;
 	}
 
 	bool ret = ((rc == 1) && (pfd[0].revents & POLLIN));
@@ -235,23 +296,24 @@ bool pmixp_fd_read_ready(int fd, int *shutdown)
 bool pmixp_fd_write_ready(int fd, int *shutdown)
 {
 	struct pollfd pfd[1];
-	int rc;
+	int rc = 0;
 	struct timeval tv;
 	double start, cur;
 	pfd[0].fd = fd;
 	pfd[0].events = POLLOUT;
+	pfd[0].revents = 0;
 
 	gettimeofday(&tv,NULL);
 	start = tv.tv_sec + 1E-6*tv.tv_usec;
 	cur = start;
-	while( cur - start < 0.01 ){
+	while ((cur - start) < 0.01) {
 		rc = poll(pfd, 1, 10);
-		
+
 		/* update current timestamp */
 		gettimeofday(&tv,NULL);
 		cur = tv.tv_sec + 1E-6*tv.tv_usec;
-		if( rc < 0 ){
-			if( errno == EINTR ){
+		if (0 > rc) {
+			if (errno == EINTR) {
 				continue;
 			} else {
 				*shutdown = -errno;
@@ -272,8 +334,9 @@ bool pmixp_fd_write_ready(int fd, int *shutdown)
 	return ((rc == 1) && (pfd[0].revents & POLLOUT));
 }
 
-int pmixp_stepd_send(char *nodelist, const char *address, char *data,
-		     uint32_t len, unsigned int start_delay,
+int pmixp_stepd_send(const char *nodelist, const char *address,
+		     const char *data, uint32_t len,
+		     unsigned int start_delay,
 		     unsigned int retry_cnt, int silent)
 {
 
@@ -283,22 +346,24 @@ int pmixp_stepd_send(char *nodelist, const char *address, char *data,
 
 	while (1) {
 		if (!silent && retry >= 1) {
-			PMIXP_ERROR("send failed, rc=%d, try #%d", rc, retry);
+			PMIXP_DEBUG("send failed, rc=%d, try #%d", rc, retry);
 		}
 
-		rc = slurm_forward_data(
-			&copy_of_nodelist, (char *)address, len, data);
+		rc = slurm_forward_data(&copy_of_nodelist, (char *)address,
+					len, data);
 
 		if (rc == SLURM_SUCCESS)
 			break;
 
 		retry++;
-		if (retry >= retry_cnt)
+		if (retry >= retry_cnt) {
+			PMIXP_ERROR("send failed, rc=%d, exceeded the retry limit", rc);
 			break;
+		}
 
 		/* wait with constantly increasing delay */
 		struct timespec ts =
-			{(delay / 1000), ((delay % 1000) * 1000000)};
+		{(delay / 1000), ((delay % 1000) * 1000000)};
 		nanosleep(&ts, NULL);
 		delay *= 2;
 	}
@@ -307,8 +372,8 @@ int pmixp_stepd_send(char *nodelist, const char *address, char *data,
 	return rc;
 }
 
-static int _pmix_p2p_send_core(char *nodename, const char *address, char *data,
-				uint32_t len)
+static int _pmix_p2p_send_core(const char *nodename, const char *address,
+			       const char *data, uint32_t len)
 {
 	int rc, timeout;
 	slurm_msg_t msg;
@@ -316,12 +381,15 @@ static int _pmix_p2p_send_core(char *nodename, const char *address, char *data,
 	List ret_list;
 	ret_data_info_t *ret_data_info = NULL;
 
+	pmixp_debug_hang(0);
+
 	slurm_msg_t_init(&msg);
 
 	PMIXP_DEBUG("nodelist=%s, address=%s, len=%u", nodename, address, len);
 	req.address = (char *)address;
 	req.len = len;
-	req.data = data;
+	/* there is not much we can do - just cast) */
+	req.data = (char*)data;
 
 	msg.msg_type = REQUEST_FORWARD_DATA;
 	msg.data = &req;
@@ -336,7 +404,7 @@ static int _pmix_p2p_send_core(char *nodename, const char *address, char *data,
 	msg.forward.timeout = timeout;
 	msg.forward.cnt = 0;
 	msg.forward.nodelist = NULL;
-	ret_list = slurm_send_addr_recv_msgs(&msg, nodename, timeout);
+	ret_list = slurm_send_addr_recv_msgs(&msg, (char*)nodename, timeout);
 	if (!ret_list) {
 		/* This should never happen (when this was
 		 * written slurm_send_addr_recv_msgs always
@@ -365,17 +433,18 @@ static int _pmix_p2p_send_core(char *nodename, const char *address, char *data,
 	return rc;
 }
 
-int pmixp_p2p_send(char *nodename, const char *address, char *data,
-		     uint32_t len, unsigned int start_delay,
-		     unsigned int retry_cnt, int silent)
+int pmixp_p2p_send(const char *nodename, const char *address, const char *data,
+		   uint32_t len, unsigned int start_delay,
+		   unsigned int retry_cnt, int silent)
 {
-
 	int retry = 0, rc;
 	unsigned int delay = start_delay; /* in milliseconds */
 
+	pmixp_debug_hang(0);
+
 	while (1) {
 		if (!silent && retry >= 1) {
-			PMIXP_ERROR("send failed, rc=%d, try #%d", rc, retry);
+			PMIXP_DEBUG("send failed, rc=%d, try #%d", rc, retry);
 		}
 
 		rc = _pmix_p2p_send_core(nodename, address, data, len);
@@ -384,12 +453,14 @@ int pmixp_p2p_send(char *nodename, const char *address, char *data,
 			break;
 
 		retry++;
-		if (retry >= retry_cnt)
+		if (retry >= retry_cnt) {
+			PMIXP_ERROR("send failed, rc=%d, exceeded the retry limit", rc);
 			break;
+		}
 
 		/* wait with constantly increasing delay */
 		struct timespec ts =
-			{(delay / 1000), ((delay % 1000) * 1000000)};
+		{(delay / 1000), ((delay % 1000) * 1000000)};
 		nanosleep(&ts, NULL);
 		delay *= 2;
 	}
@@ -433,12 +504,12 @@ int pmixp_rmdir_recursively(char *path)
 
 	while ((ent = readdir(dp)) != NULL) {
 		if (0 == xstrcmp(ent->d_name, ".")
-				|| 0 == xstrcmp(ent->d_name, "..")) {
+		    || 0 == xstrcmp(ent->d_name, "..")) {
 			/* skip special dir's */
 			continue;
 		}
 		snprintf(nested_path, sizeof(nested_path), "%s/%s", path,
-				ent->d_name);
+			 ent->d_name);
 		if (_is_dir(nested_path)) {
 			pmixp_rmdir_recursively(nested_path);
 		} else {
@@ -488,21 +559,25 @@ int pmixp_fixrights(char *path, uid_t uid, mode_t mode)
 
 	while ((ent = readdir(dp)) != NULL) {
 		if (0 == xstrcmp(ent->d_name, ".")
-				|| 0 == xstrcmp(ent->d_name, "..")) {
+		    || 0 == xstrcmp(ent->d_name, "..")) {
 			/* skip special dir's */
 			continue;
 		}
 		snprintf(nested_path, sizeof(nested_path), "%s/%s", path,
-				ent->d_name);
+			 ent->d_name);
 		if (_is_dir(nested_path)) {
-			if( (rc = _file_fix_rights(nested_path, uid, mode)) ){
-				PMIXP_ERROR_STD("cannot fix permissions for \"%s\"", nested_path);
+			if ((rc = _file_fix_rights(nested_path, uid, mode))) {
+				PMIXP_ERROR_STD("cannot fix permissions for "
+						"\"%s\"",
+						nested_path);
 				return -1;
 			}
 			pmixp_rmdir_recursively(nested_path);
 		} else {
-			if( (rc = _file_fix_rights(nested_path, uid, mode)) ){
-				PMIXP_ERROR_STD("cannot fix permissions for \"%s\"", nested_path);
+			if ((rc = _file_fix_rights(nested_path, uid, mode))) {
+				PMIXP_ERROR_STD("cannot fix permissions for "
+						"\"%s\"",
+						nested_path);
 				return -1;
 			}
 		}
@@ -527,7 +602,7 @@ int pmixp_mkdir(char *path, mode_t rights)
 
 	if (0 != mkdir(path, rights) ) {
 		PMIXP_ERROR_STD("Cannot create directory \"%s\"",
-				pmixp_info_tmpdir_lib());
+				path);
 		return errno;
 	}
 
@@ -540,7 +615,7 @@ int pmixp_mkdir(char *path, mode_t rights)
 	}
 
 	if (chown(path, (uid_t) pmixp_info_jobuid(), (gid_t) -1) < 0) {
-		error("%s: chown(%s): %m", __func__, pmixp_info_tmpdir_lib());
+		error("%s: chown(%s): %m", __func__, path);
 		return errno;
 	}
 	return 0;

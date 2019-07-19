@@ -5,11 +5,11 @@
  *  Portions (hwloc) copyright (C) 2012 Bull, <rod.schultz@bull.com>
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,38 +25,27 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#   include "config.h"
-#endif
+#include "config.h"
 
-#ifndef   _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
+#define _GNU_SOURCE
 
-#if HAVE_STDINT_H
-#  include <stdint.h>
-#endif
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>
-#endif
-
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -66,6 +55,7 @@
 #include "src/common/xstring.h"
 #include "src/slurmd/slurmd/get_mach_stat.h"
 #include "src/slurmd/slurmd/slurmd.h"
+#include "src/common/read_config.h"
 
 #ifdef HAVE_HWLOC
 #include <hwloc.h>
@@ -105,20 +95,7 @@ extern slurmd_conf_t *conf;
 extern int
 get_procs(uint16_t *procs)
 {
-#ifdef LPAR_INFO_FORMAT2
-	/* AIX 5.3 only */
-	lpar_info_format2_t info;
-
-	*procs = 1;
-	if (lpar_get_info(LPAR_INFO_FORMAT2, &info, sizeof(info)) != 0) {
-		error("lpar_get_info() failed");
-		return EINVAL;
-	}
-
-	*procs = (uint16_t) info.online_vcpus;
-#else /* !LPAR_INFO_FORMAT2 */
-
-#  ifdef _SC_NPROCESSORS_ONLN
+#ifdef _SC_NPROCESSORS_ONLN
 	int my_proc_tally;
 
 	*procs = 1;
@@ -129,8 +106,7 @@ get_procs(uint16_t *procs)
 	}
 
 	*procs = (uint16_t) my_proc_tally;
-#  else
-#    ifdef HAVE_SYSCTLBYNAME
+#elif defined (HAVE_SYSCTLBYNAME)
 	int ncpu;
 	size_t len = sizeof(ncpu);
 
@@ -140,28 +116,17 @@ get_procs(uint16_t *procs)
 		return EINVAL;
 	}
 	*procs = (uint16_t) ncpu;
-#    else /* !HAVE_SYSCTLBYNAME */
+#else
 	*procs = 1;
-#    endif /* HAVE_SYSCTLBYNAME */
-#  endif /* _SC_NPROCESSORS_ONLN */
-#endif /* LPAR_INFO_FORMAT2 */
+#endif
 
 	return 0;
 }
 
-/*
- * get_cpuinfo - Return detailed cpuinfo on this system
- * Output: p_cpus - number of processors on the system
- *         p_boards - number of baseboards (containing sockets)
- *         p_sockets - number of physical processor sockets
- *         p_cores - total number of physical CPU cores
- *         p_threads - total number of hardware execution threads
- *         block_map - asbtract->physical block distribution map
- *         block_map_inv - physical->abstract block distribution map (inverse)
- *         return code - 0 if no error, otherwise errno
- * NOTE: User must xfree block_map and block_map_inv
- */
 #ifdef HAVE_HWLOC
+
+static char *hwloc_xml_whole = NULL;
+
 #if _DEBUG
 static void _hwloc_children(hwloc_topology_t topology, hwloc_obj_t obj,
 			    int depth)
@@ -171,7 +136,7 @@ static void _hwloc_children(hwloc_topology_t topology, hwloc_obj_t obj,
 
 	if (!obj)
 		return;
-	hwloc_obj_snprintf(string, sizeof(string), topology, obj, "#", 0);
+	hwloc_obj_type_snprintf(string, sizeof(string), obj, 0);
 	debug("%*s%s", 2 * depth, "", string);
 	for (i = 0; i < obj->arity; i++) {
 		_hwloc_children(topology, obj->children[i], depth + 1);
@@ -192,11 +157,122 @@ static int _core_child_count(hwloc_topology_t topology, hwloc_obj_t obj)
 	return count;
 }
 
-extern int
-get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
-	    uint16_t *p_sockets, uint16_t *p_cores, uint16_t *p_threads,
-	    uint16_t *p_block_map_size,
-	    uint16_t **p_block_map, uint16_t **p_block_map_inv)
+static inline int _internal_hwloc_topology_export_xml(
+	hwloc_topology_t topology, const char *hwloc_xml)
+{
+#if HWLOC_API_VERSION >= 0x00020000
+	return hwloc_topology_export_xml(topology, hwloc_xml, 0);
+#else
+	return hwloc_topology_export_xml(topology, hwloc_xml);
+#endif
+}
+
+/* read or load topology and write if needed
+ * init and destroy topology must be outside this function */
+extern int xcpuinfo_hwloc_topo_load(
+	void *topology_in, char *topo_file, bool full)
+{
+	int ret = SLURM_SUCCESS;
+	struct stat buf;
+	hwloc_topology_t *topology = topology_in;
+	hwloc_topology_t tmp_topo;
+	static bool first_full = true;
+	bool check_file = true;
+
+	xassert(topo_file);
+
+	if (!topology_in) {
+		topology = &tmp_topo;
+		goto handle_write;
+	}
+
+	if (full && first_full) {
+		/* Always regenerate file on slurmd startup */
+		if (run_in_daemon("slurmd"))
+			check_file = false;
+		first_full = false;
+	}
+
+	if (check_file && !stat(topo_file, &buf)) {
+		debug2("%s: xml file (%s) found", __func__, topo_file);
+		if (hwloc_topology_set_xml(*topology, topo_file))
+			error("%s: hwloc_topology_set_xml() failed (%s)",
+			      __func__, topo_file);
+		else if (hwloc_topology_load(*topology))
+			error("%s: hwloc_topology_load() failed (%s)",
+			      __func__, topo_file);
+		else
+			return ret;
+	}
+
+	hwloc_topology_destroy(*topology);
+
+handle_write:
+
+	hwloc_topology_init(topology);
+
+	if (full) {
+		/* parse all system */
+		hwloc_topology_set_flags(*topology,
+					 HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM);
+
+		/* ignores cache, misc */
+#if HWLOC_API_VERSION < 0x00020000
+		hwloc_topology_ignore_type (*topology, HWLOC_OBJ_CACHE);
+		hwloc_topology_ignore_type (*topology, HWLOC_OBJ_MISC);
+#else
+		hwloc_topology_set_type_filter(*topology, HWLOC_OBJ_L1CACHE,
+					       HWLOC_TYPE_FILTER_KEEP_NONE);
+		hwloc_topology_set_type_filter(*topology, HWLOC_OBJ_L2CACHE,
+					       HWLOC_TYPE_FILTER_KEEP_NONE);
+		hwloc_topology_set_type_filter(*topology, HWLOC_OBJ_L3CACHE,
+					       HWLOC_TYPE_FILTER_KEEP_NONE);
+		hwloc_topology_set_type_filter(*topology, HWLOC_OBJ_L4CACHE,
+					       HWLOC_TYPE_FILTER_KEEP_NONE);
+		hwloc_topology_set_type_filter(*topology, HWLOC_OBJ_L5CACHE,
+					       HWLOC_TYPE_FILTER_KEEP_NONE);
+		hwloc_topology_set_type_filter(*topology, HWLOC_OBJ_MISC,
+					       HWLOC_TYPE_FILTER_KEEP_NONE);
+#endif
+	}
+
+	/* load topology */
+	debug2("hwloc_topology_load");
+	if (hwloc_topology_load(*topology)) {
+		/* error in load hardware topology */
+		debug("hwloc_topology_load() failed.");
+		ret = SLURM_ERROR;
+	} else if (!conf->def_config) {
+		debug2("hwloc_topology_export_xml");
+		if (_internal_hwloc_topology_export_xml(*topology, topo_file)) {
+			/* error in export hardware topology */
+			error("%s: failed (load will be required after read failures).", __func__);
+		}
+	}
+
+	if (!topology_in)
+		hwloc_topology_destroy(tmp_topo);
+
+	return ret;
+}
+
+/*
+ * xcpuinfo_hwloc_topo_get - Return detailed cpuinfo on the whole system
+ * Output: p_cpus - number of processors on the system
+ *         p_boards - number of baseboards (containing sockets)
+ *         p_sockets - number of physical processor sockets
+ *         p_cores - total number of physical CPU cores
+ *         p_threads - total number of hardware execution threads
+ *         block_map - asbtract->physical block distribution map
+ *         block_map_inv - physical->abstract block distribution map (inverse)
+ *         return code - 0 if no error, otherwise errno
+ * NOTE: User must xfree block_map and block_map_inv
+ */
+extern int xcpuinfo_hwloc_topo_get(
+	uint16_t *p_cpus, uint16_t *p_boards,
+	uint16_t *p_sockets, uint16_t *p_cores, uint16_t *p_threads,
+	uint16_t *p_block_map_size,
+	uint16_t **p_block_map, uint16_t **p_block_map_inv)
 {
 	enum { SOCKET=0, CORE=1, PU=2, LAST_OBJ=3 };
 	hwloc_topology_t topology;
@@ -219,25 +295,20 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 		return 1;
 	}
 
-	/* parse all system */
-	hwloc_topology_set_flags(topology, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM);
-
-	/* ignores cache, misc */
-	hwloc_topology_ignore_type (topology, HWLOC_OBJ_CACHE);
-	hwloc_topology_ignore_type (topology, HWLOC_OBJ_MISC);
-
-	/* load topology */
-	debug2("hwloc_topology_load");
-	if (hwloc_topology_load(topology)) {
-		/* error in load hardware topology */
-		debug("hwloc_topology_load() failed.");
+	if (!hwloc_xml_whole)
+		hwloc_xml_whole = xstrdup_printf("%s/hwloc_topo_whole.xml",
+						 conf->spooldir);
+	if (xcpuinfo_hwloc_topo_load(&topology, hwloc_xml_whole, true)
+	    == SLURM_ERROR) {
 		hwloc_topology_destroy(topology);
+		xfree(hwloc_xml_whole);
 		return 2;
 	}
 #if _DEBUG
 	_hwloc_children(topology, hwloc_get_root_obj(topology), 0);
 #endif
-	/* Some processors (e.g. AMD Opteron 6000 series) contain multiple
+	/*
+	 * Some processors (e.g. AMD Opteron 6000 series) contain multiple
 	 * NUMA nodes per socket. This is a configuration which does not map
 	 * into the hardware entities that Slurm optimizes resource allocation
 	 * for (PU/thread, core, socket, baseboard, node and network switch).
@@ -253,8 +324,7 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	if (hwloc_get_type_depth(topology, HWLOC_OBJ_NODE) >
 	    hwloc_get_type_depth(topology, HWLOC_OBJ_SOCKET)) {
 		char *sched_params = slurm_get_sched_params();
-		if (sched_params &&
-		    strcasestr(sched_params, "Ignore_NUMA")) {
+		if (xstrcasestr(sched_params, "Ignore_NUMA")) {
 			info("Ignoring NUMA nodes within a socket");
 		} else {
 			info("Considering each NUMA node as a socket");
@@ -270,8 +340,10 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 				    1);
 	}
 
-	/* Count sockets/NUMA containing any cores.
-	 * KNL NUMA with no cores are NOT counted. */
+	/*
+	 * Count sockets/NUMA containing any cores.
+	 * KNL NUMA with no cores are NOT counted.
+	 */
 	nobj[SOCKET] = 0;
 	depth = hwloc_get_type_depth(topology, objtype[SOCKET]);
 	used_socket = bit_alloc(_MAX_SOCKET_INX);
@@ -295,13 +367,15 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 
 	nobj[CORE] = hwloc_get_nbobjs_by_type(topology, objtype[CORE]);
 
-	/* Workaround for hwloc bug, in some cases the topology "children" array
-	 * does not get populated, so _core_child_count() always returns 0 */
+	/*
+	 * Workaround for hwloc bug, in some cases the topology "children" array
+	 * does not get populated, so _core_child_count() always returns 0
+	 */
 	if (nobj[SOCKET] == 0) {
 		nobj[SOCKET] = hwloc_get_nbobjs_by_type(topology,
 							objtype[SOCKET]);
 		if (nobj[SOCKET] == 0) {
-			debug("get_cpuinfo() fudging nobj[SOCKET] from 0 to 1");
+			debug("%s: fudging nobj[SOCKET] from 0 to 1", __func__);
 			nobj[SOCKET] = 1;
 		}
 		if (nobj[SOCKET] >= _MAX_SOCKET_INX) {	/* Bitmap size */
@@ -316,13 +390,13 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	 * hwloc_get_nbobjs_by_type() returns 0 on some architectures.
 	 */
 	if ( nobj[CORE] == 0 ) {
-		debug("get_cpuinfo() fudging nobj[CORE] from 0 to 1");
+		debug("%s: fudging nobj[CORE] from 0 to 1", __func__);
 		nobj[CORE] = 1;
 	}
 	if ( nobj[SOCKET] == -1 )
-		fatal("get_cpuinfo() can not handle nobj[SOCKET] = -1");
+		fatal("%s: can not handle nobj[SOCKET] = -1", __func__);
 	if ( nobj[CORE] == -1 )
-		fatal("get_cpuinfo() can not handle nobj[CORE] = -1");
+		fatal("%s: can not handle nobj[CORE] = -1", __func__);
 	actual_cpus  = hwloc_get_nbobjs_by_type(topology, objtype[PU]);
 #if 0
 	/* Used to find workaround above */
@@ -345,7 +419,8 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	      actual_cpus, actual_boards, nobj[SOCKET], nobj[CORE], nobj[PU]);
 
 	/* allocate block_map */
-	*p_block_map_size = (uint16_t)actual_cpus;
+	if (p_block_map_size)
+		*p_block_map_size = (uint16_t)actual_cpus;
 	if (p_block_map && p_block_map_inv) {
 		*p_block_map     = xmalloc(actual_cpus * sizeof(uint16_t));
 		*p_block_map_inv = xmalloc(actual_cpus * sizeof(uint16_t));
@@ -370,7 +445,7 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 				for (idx[PU]=0; idx[PU]<nobj[PU]; ++idx[PU]) {
 					/* get hwloc_obj by indexes */
 					obj=hwloc_get_obj_below_array_by_type(
-					            topology, 3, objtype, idx);
+						topology, 3, objtype, idx);
 					if (!obj)
 						continue;
 					macid = obj->os_index;
@@ -413,12 +488,12 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 		debug("AbstractId PhysicalId Inverse");
 		for (i = 0; i < *p_cpus; i++) {
 			debug3("   %4d      %4u       %4u",
-				i, (*p_block_map)[i], (*p_block_map_inv)[i]);
+			       i, (*p_block_map)[i], (*p_block_map_inv)[i]);
 		}
 		debug("------");
 	}
 #endif
-	return 0;
+	return SLURM_SUCCESS;
 
 }
 #else
@@ -435,11 +510,12 @@ typedef struct cpuinfo {
 } cpuinfo_t;
 static cpuinfo_t *cpuinfo = NULL; /* array of CPU information for get_cpuinfo */
 				  /* Note: file static for qsort/_compare_cpus*/
-extern int
-get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
-	    uint16_t *p_sockets, uint16_t *p_cores, uint16_t *p_threads,
-	    uint16_t *p_block_map_size,
-	    uint16_t **p_block_map, uint16_t **p_block_map_inv)
+
+extern int xcpuinfo_hwloc_topo_get(
+	uint16_t *p_cpus, uint16_t *p_boards,
+	uint16_t *p_sockets, uint16_t *p_cores, uint16_t *p_threads,
+	uint16_t *p_block_map_size,
+	uint16_t **p_block_map, uint16_t **p_block_map_inv)
 {
 	int retval;
 
@@ -460,18 +536,9 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	uint32_t minphysid = 0xffffffff;/* minimum "physical id" */
 	uint32_t mincoreid = 0xffffffff;/* minimum "core id" */
 	int i;
-#if defined (__sun)
-#if defined (_LP64)
-	int64_t curcpu, val, sockets, cores, threads;
-#else
-	int32_t curcpu, val, sockets, cores, threads;
-#endif
-	int32_t chip_id, core_id, ncore_per_chip, ncpu_per_chip;
-#else
 	FILE *cpu_info_file;
 	char buffer[128];
 	uint16_t curcpu, sockets, cores, threads;
-#endif
 
 	get_procs(&numproc);
 	*p_cpus = numproc;
@@ -483,24 +550,12 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	*p_block_map      = NULL;
 	*p_block_map_inv  = NULL;
 
-#if defined (__sun)
-	kstat_ctl_t   *kc;
-	kstat_t       *ksp;
-	kstat_named_t *knp;
-
-	kc = kstat_open();
-	if (kc == NULL) {
-		error ("get speed: kstat error %d", errno);
-		return errno;
-	}
-#else
 	cpu_info_file = fopen(_cpuinfo_path, "r");
 	if (cpu_info_file == NULL) {
-		error ("get_cpuinfo: error %d opening %s",
-			errno, _cpuinfo_path);
+		error ("%s: error %d opening %s",
+		       __func__, errno, _cpuinfo_path);
 		return errno;
 	}
-#endif
 
 	/* Note: assumes all processor IDs are within [0:numproc-1] */
 	/*       treats physical/core IDs as tokens, not indices */
@@ -508,69 +563,6 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 		memset(cpuinfo, 0, numproc * sizeof(cpuinfo_t));
 	else
 		cpuinfo = xmalloc(numproc * sizeof(cpuinfo_t));
-
-#if defined (__sun)
-	ksp = kstat_lookup(kc, "cpu_info", -1, NULL);
-	for (; ksp != NULL; ksp = ksp->ks_next) {
-		if (xstrcmp(ksp->ks_module, "cpu_info"))
-			continue;
-
-		numcpu++;
-		kstat_read(kc, ksp, NULL);
-
-		knp = kstat_data_lookup(ksp, "chip_id");
-		chip_id = knp->value.l;
-		knp = kstat_data_lookup(ksp, "core_id");
-		core_id = knp->value.l;
-		knp = kstat_data_lookup(ksp, "ncore_per_chip");
-		ncore_per_chip = knp->value.l;
-		knp = kstat_data_lookup(ksp, "ncpu_per_chip");
-		ncpu_per_chip = knp->value.l;
-
-		if (chip_id >= numproc) {
-			debug("cpuid is %ld (> %d), ignored", curcpu, numproc);
-			continue;
-		}
-
-		cpuinfo[chip_id].seen = 1;
-		cpuinfo[chip_id].cpuid = chip_id;
-
-		maxcpuid = MAX(maxcpuid, chip_id);
-		mincpuid = MIN(mincpuid, chip_id);
-
-		for (i = 0; i < numproc; i++) {
-			if ((cpuinfo[i].coreid == core_id) &&
-			    (cpuinfo[i].corecnt))
-				break;
-		}
-
-		if (i == numproc) {
-			numcores++;
-		} else {
-			cpuinfo[i].corecnt++;
-		}
-
-		if (chip_id < numproc) {
-			cpuinfo[chip_id].corecnt++;
-			cpuinfo[chip_id].coreid = core_id;
-		}
-
-		maxcoreid = MAX(maxcoreid, core_id);
-		mincoreid = MIN(mincoreid, core_id);
-
-		if (ncore_per_chip > numproc) {
-			debug("cores is %u (> %d), ignored",
-			      ncore_per_chip, numproc);
-				continue;
-		}
-
-		if (chip_id < numproc)
-			cpuinfo[chip_id].cores = ncore_per_chip;
-
-		maxcores = MAX(maxcores, ncore_per_chip);
-		mincores = MIN(mincores, ncore_per_chip);
-	}
-#else
 
 	curcpu = 0;
 	while (fgets(buffer, sizeof(buffer), cpu_info_file) != NULL) {
@@ -591,7 +583,7 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 			/* see if the ID has already been seen */
 			for (i=0; i<numproc; i++) {
 				if ((cpuinfo[i].physid == val)
-				&&  (cpuinfo[i].physcnt))
+				    &&  (cpuinfo[i].physcnt))
 					break;
 			}
 
@@ -612,7 +604,7 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 			/* see if the ID has already been seen */
 			for (i = 0; i < numproc; i++) {
 				if ((cpuinfo[i].coreid == val)
-				&&  (cpuinfo[i].corecnt))
+				    &&  (cpuinfo[i].corecnt))
 					break;
 			}
 
@@ -633,7 +625,7 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 			/* Note: this value is a count, not an index */
 		    	if (val > numproc) {	/* out of bounds, ignore */
 				debug("siblings is %u (> %d), ignored",
-					val, numproc);
+				      val, numproc);
 				continue;
 			}
 			if (curcpu < numproc)
@@ -644,7 +636,7 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 			/* Note: this value is a count, not an index */
 		    	if (val > numproc) {	/* out of bounds, ignore */
 				debug("cores is %u (> %d), ignored",
-					val, numproc);
+				      val, numproc);
 				continue;
 			}
 			if (curcpu < numproc)
@@ -655,7 +647,6 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	}
 
 	fclose(cpu_info_file);
-#endif
 
 	/*** Sanity check ***/
 	if (minsibs == 0) minsibs = 1;		/* guaranteee non-zero */
@@ -685,7 +676,7 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 			cores = numcpu / sockets;	/* assume multi-core */
 			if (cores > 1) {
 				debug3("Warning: cpuinfo missing 'core id' or "
-					"'cpu cores' but assuming multi-core");
+				       "'cpu cores' but assuming multi-core");
 			}
 		}
 		if (cores == 0)
@@ -741,6 +732,12 @@ get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
 	xfree(cpuinfo);		/* done with raw cpuinfo data */
 
 	return retval;
+}
+
+extern int xcpuinfo_hwloc_topo_load(
+	void *topology_in, char *topo_file, bool full)
+{
+	return SLURM_SUCCESS;
 }
 
 /* _chk_cpuinfo_str
@@ -922,7 +919,7 @@ static int _compute_block_map(uint16_t numproc,
 
 	if (block_map_inv) {
 		debug3("\nMachine -> Abstract logical CPU ID block mapping: "
-			"(inverse)");
+		       "(inverse)");
 		debug3("Input: (Machine ID)  ");
 		for (i = 0; i < numproc; i++) {
 			debug3("%3d", i);
@@ -960,8 +957,8 @@ xcpuinfo_init(void)
 	if ( initialized )
 		return XCPUINFO_SUCCESS;
 
-	if ( get_cpuinfo(&procs,&boards,&sockets,&cores,&threads,
-			 &block_map_size,&block_map,&block_map_inv) )
+	if (xcpuinfo_hwloc_topo_get(&procs,&boards,&sockets,&cores,&threads,
+				    &block_map_size,&block_map,&block_map_inv))
 		return XCPUINFO_ERROR;
 
 	initialized = true ;
@@ -980,7 +977,19 @@ xcpuinfo_fini(void)
 	block_map_size = 0;
 	xfree(block_map);
 	xfree(block_map_inv);
-
+#ifdef HAVE_HWLOC
+	if (hwloc_xml_whole) {
+		/*
+		 * When a slurmd is taking over the place of the next
+		 * slurmd it will have already made this file.  So don't
+		 * remove it or it will remove it for the new slurmd.
+		 * If this happens on the slurmstepd we don't want to remove it
+		 * to begin with.
+		 */
+		/* (void)remove(hwloc_xml_whole); */
+		xfree(hwloc_xml_whole);
+	}
+#endif
 	return XCPUINFO_SUCCESS;
 }
 
@@ -1202,7 +1211,6 @@ _map_to_range(uint16_t *map,uint16_t map_size,char** prange)
 	int num_fl=0;
 	int con_fl=0;
 
-	char id[12];
 	char *str;
 
 	uint16_t start=0,end=0,i;
@@ -1220,24 +1228,20 @@ _map_to_range(uint16_t *map,uint16_t map_size,char** prange)
 		}
 		else if ( num_fl ) {
 			if ( start < end ) {
-				sprintf(id,"%u-%u,",start,end);
-				xstrcat(str,id);
+				xstrfmtcat(str, "%u-%u,", start, end);
 			}
 			else {
-				sprintf(id,"%u,",start);
-				xstrcat(str,id);
+				xstrfmtcat(str, "%u,", start);
 			}
 			con_fl = num_fl = 0;
 		}
 	}
 	if ( num_fl ) {
 		if ( start < end ) {
-			sprintf(id,"%u-%u,",start,end);
-			xstrcat(str,id);
+			xstrfmtcat(str, "%u-%u,", start, end);
 		}
 		else {
-			sprintf(id,"%u,",start);
-			xstrcat(str,id);
+			xstrfmtcat(str, "%u,", start);
 		}
 	}
 

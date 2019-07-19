@@ -1,16 +1,17 @@
 /****************************************************************************\
  *  opts.c - sprio command line option parsing
  *****************************************************************************
+ *  Portions Copyright (C) 2010-2017 SchedMD LLC <https://www.schedmd.com>.
  *  Copyright (C) 2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Don Lipari <lipari1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,30 +27,19 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
+#define _GNU_SOURCE
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#if HAVE_GETOPT_H
-#  include <getopt.h>
-#else
-#  include "src/common/getopt.h"
-#endif
-
+#include <getopt.h>
 #include <pwd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,8 +53,11 @@
 #include "src/sprio/sprio.h"
 
 /* getopt_long options, integers but not characters */
-#define OPT_LONG_HELP  0x100
-#define OPT_LONG_USAGE 0x101
+#define OPT_LONG_HELP      0x100
+#define OPT_LONG_USAGE     0x101
+#define OPT_LONG_LOCAL     0x102
+#define OPT_LONG_SIBLING   0x103
+#define OPT_LONG_FEDR      0x104
 
 /* FUNCTIONS */
 static List  _build_job_list( char* str );
@@ -80,22 +73,35 @@ static void _opt_env(void)
 {
 	char *env_val;
 
+	if (slurmctld_conf.fed_params &&
+	    strstr(slurmctld_conf.fed_params, "fed_display"))
+		params.federation = true;
+
 	if ((env_val = getenv("SLURM_CLUSTERS"))) {
 		if (!(params.clusters = slurmdb_get_info_cluster(env_val))) {
 			print_db_notok(env_val, 1);
 			exit(1);
 		}
+		params.local = true;
 	}
+	if (getenv("SPRIO_FEDERATION"))
+		params.federation = true;
+	if (getenv("SPRIO_LOCAL"))
+		params.local = true;
+	if (getenv("SPRIO_SIBLING"))
+		params.sibling = true;
 }
 
 /*
  * parse_command_line
  */
 extern void
-parse_command_line( int argc, char* argv[] )
+parse_command_line( int argc, char* *argv )
 {
 	int opt_char;
 	int option_index;
+	bool override_format_env = false;
+
 	static struct option long_options[] = {
 		{"noheader",   no_argument,       0, 'h'},
 		{"jobs",       optional_argument, 0, 'j'},
@@ -104,12 +110,18 @@ parse_command_line( int argc, char* argv[] )
 		{"clusters",   required_argument, 0, 'M'},
 		{"norm",       no_argument,       0, 'n'},
 		{"format",     required_argument, 0, 'o'},
+		{"sort",       required_argument, 0, 'S'},
+		{"partition",  required_argument, 0, 'p'},
 		{"user",       required_argument, 0, 'u'},
 		{"users",      required_argument, 0, 'u'},
 		{"verbose",    no_argument,       0, 'v'},
 		{"version",    no_argument,       0, 'V'},
 		{"weights",    no_argument,       0, 'w'},
+		{"federation", no_argument,       0, OPT_LONG_FEDR},
 		{"help",       no_argument,       0, OPT_LONG_HELP},
+		{"local",      no_argument,       0, OPT_LONG_LOCAL},
+		{"sib",        no_argument,       0, OPT_LONG_SIBLING},
+		{"sibling",    no_argument,       0, OPT_LONG_SIBLING},
 		{"usage",      no_argument,       0, OPT_LONG_USAGE},
 		{NULL,         0,                 0, 0}
 	};
@@ -117,8 +129,8 @@ parse_command_line( int argc, char* argv[] )
 	/* get defaults from environment */
 	_opt_env();
 
-	while((opt_char = getopt_long(argc, argv, "hj::lM:no:u:vVw",
-				      long_options, &option_index)) != -1) {
+	while ((opt_char = getopt_long(argc, argv, "hj::lM:no:S:p:u:vVw",
+				       long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
 			fprintf(stderr, "Try \"sprio --help\" "
@@ -136,6 +148,7 @@ parse_command_line( int argc, char* argv[] )
 			break;
 		case (int) 'l':
 			params.long_list = true;
+			override_format_env = true;
 			break;
 		case (int) 'M':
 			FREE_NULL_LIST(params.clusters);
@@ -144,6 +157,7 @@ parse_command_line( int argc, char* argv[] )
 				print_db_notok(optarg, 0);
 				exit(1);
 			}
+			params.local = true;
 			break;
 		case (int) 'n':
 			params.normalized = true;
@@ -151,6 +165,15 @@ parse_command_line( int argc, char* argv[] )
 		case (int) 'o':
 			xfree(params.format);
 			params.format = xstrdup(optarg);
+			override_format_env = true;
+			break;
+		case (int) 'S':
+			xfree(params.sort);
+			params.sort = xstrdup(optarg);
+			break;
+		case (int) 'p':
+			xfree(params.parts);
+			params.parts = xstrdup(optarg);
 			break;
 		case (int) 'u':
 			xfree(params.users);
@@ -166,13 +189,32 @@ parse_command_line( int argc, char* argv[] )
 		case (int) 'w':
 			params.weights = true;
 			break;
+		case OPT_LONG_FEDR:
+			params.federation = true;
+			break;
 		case OPT_LONG_HELP:
 			_help();
 			exit(0);
+		case OPT_LONG_LOCAL:
+			params.local = true;
+			break;
+		case OPT_LONG_SIBLING:
+			params.sibling = true;
+			break;
 		case OPT_LONG_USAGE:
 			_usage();
 			exit(0);
 		}
+	}
+
+	if (params.long_list && params.format)
+		fatal("Options -o(--format) and -l(--long) are mutually exclusive. Please remove one and retry.");
+
+	/* This needs to be evaluated here instead of _opt_env*/
+	if (!override_format_env) {
+		char *env_val;
+		if ((env_val = getenv("SPRIO_FORMAT")))
+			params.format = xstrdup(env_val);
 	}
 
 	if (optind < argc) {
@@ -223,9 +265,7 @@ extern int parse_format( char* format )
 		job_format_add_prefix( params.format_list, 0, 0, prefix);
 	}
 
-	field_size = strlen( format );
-	tmp_format = xmalloc( field_size + 1 );
-	strcpy( tmp_format, format );
+	tmp_format = xstrdup(format);
 
 	token = strtok_r( tmp_format, "%", &tmp_char);
 	if (token && (format[0] != '%'))	/* toss header */
@@ -243,6 +283,20 @@ extern int parse_format( char* format )
 							     field_size,
 							     right_justify,
 							     suffix );
+		else if (field[0] == 'b')
+			job_format_add_assoc_priority_normalized(
+							params.format_list,
+							field_size,
+							right_justify, suffix);
+		else if (field[0] == 'B')
+			job_format_add_assoc_priority_weighted(
+							params.format_list,
+							field_size,
+							right_justify, suffix);
+		else if (field[0] == 'c')
+			job_format_add_cluster_name(params.format_list,
+						    field_size, right_justify,
+						    suffix);
 		else if (field[0] == 'f')
 			job_format_add_fs_priority_normalized(params.format_list,
 							      field_size,
@@ -283,6 +337,14 @@ extern int parse_format( char* format )
 							      field_size,
 							      right_justify,
 							      suffix );
+		else if (field[0] == 'r')
+			job_format_add_partition(params.format_list,
+						 field_size, right_justify,
+						 suffix);
+		else if (field[0] == 'S')
+			job_format_add_site_priority(params.format_list,
+						     field_size,
+						     right_justify, suffix);
 		else if (field[0] == 'q')
 			job_format_add_qos_priority_normalized(params.format_list,
 							       field_size,
@@ -384,7 +446,7 @@ _parse_token( char *token, char *field, int *field_size, bool *right_justify,
 
 /* print the parameters specified */
 static void
-_print_options()
+_print_options(void)
 {
 	ListIterator iterator;
 	int i;
@@ -395,6 +457,7 @@ _print_options()
 	printf( "format     = %s\n", params.format );
 	printf( "job_flag   = %d\n", params.job_flag );
 	printf( "jobs       = %s\n", params.jobs );
+	printf( "partition  = %s\n", params.parts );
 	printf( "users      = %s\n", params.users );
 	printf( "verbose    = %d\n", params.verbose );
 
@@ -417,7 +480,7 @@ _print_options()
 	}
 
 	printf( "-----------------------------\n\n\n" );
-} ;
+}
 
 
 /*
@@ -435,20 +498,22 @@ _build_job_list( char* str )
 
 	if ( str == NULL)
 		return NULL;
-	my_list = list_create( NULL );
-	my_job_list = xstrdup( str );
-	job = strtok_r( my_job_list, ",", &tmp_char );
+
+	my_list = list_create(NULL);
+	my_job_list = xstrdup(str);
+	job = strtok_r(my_job_list, ",", &tmp_char);
 	while (job) {
 		i = slurm_xlate_job_id(job);
 		if (i <= 0) {
-			error( "Invalid job id: %s", job );
-			exit( 1 );
+			error("Invalid job id: %s", job);
+			exit(1);
 		}
-		job_id = xmalloc( sizeof( uint32_t ) );
+		job_id = xmalloc(sizeof(uint32_t));
 		*job_id = (uint32_t) i;
-		list_append( my_list, job_id );
-		job = strtok_r (NULL, ",", &tmp_char);
+		list_append(my_list, job_id);
+		job = strtok_r(NULL, ",", &tmp_char);
 	}
+	xfree(my_job_list);
 	return my_list;
 }
 
@@ -458,50 +523,57 @@ _build_job_list( char* str )
  * RET List of UIDs (uint32_t)
  */
 static List
-_build_user_list( char* str )
+_build_user_list(char* str)
 {
 	List my_list;
 	char *user = NULL;
 	char *tmp_char = NULL, *my_user_list = NULL;
 	uid_t uid = (uid_t) 0;
 
-	if ( str == NULL)
+	if (str == NULL)
 		return NULL;
 
-	my_list = list_create( NULL );
-	my_user_list = xstrdup( str );
-	user = strtok_r( my_user_list, ",", &tmp_char );
+	my_list = list_create(NULL);
+	my_user_list = xstrdup(str);
+	user = strtok_r(my_user_list, ",", &tmp_char);
 	while (user) {
-		if (uid_from_string (user, &uid) < 0) {
-			error( "Invalid user: %s\n", user);
+		if (uid_from_string(user, &uid) < 0) {
+			error("Invalid user: %s\n", user);
 		} else {
-			uint32_t *u_tmp = xmalloc( sizeof( uint32_t ));
+			uint32_t *u_tmp = xmalloc(sizeof( uint32_t ));
 			*u_tmp = (uint32_t) uid;
-			list_append( my_list, u_tmp );
+			list_append(my_list, u_tmp);
 		}
 		user = strtok_r (NULL, ",", &tmp_char);
 	}
+	xfree(my_user_list);
 	return my_list;
 }
 
 static void _usage(void)
 {
-	printf("Usage: sprio [-j jid[s]] [-u user_name[s]] [-o format] [--usage] [-hlnvVw]\n");
+	printf("Usage: sprio [-j jid[s]] [-u user_name[s]] [-o format] [-p partitions]\n");
+	printf("   [--federation] [--local] [--sibling] [--usage] [-hlnvVw]\n");
 }
 
 static void _help(void)
 {
 	printf("\
 Usage: sprio [OPTIONS]\n\
+      --federation                display jobs in federation if a member of one\n\
   -h, --noheader                  no headers on output\n\
   -j, --jobs                      comma separated list of jobs\n\
                                   to view, default is all\n\
+      --local                     display jobs on local cluster only\n\
   -l, --long                      long report\n\
   -M, --cluster=cluster_name      cluster to issue commands to.  Default is\n\
                                   current cluster.  cluster with no name will\n\
                                   reset to default.\n\
+                                  NOTE: SlurmDBD must be up.\n\
   -n, --norm                      display normalized values\n\
   -o, --format=format             format specification\n\
+      --sibling                   display job records separately for each federation cluster\n\
+  -p, --partition=partition_name  comma separated list of partitions\n\
   -u, --user=user_name            comma separated list of users to view\n\
   -v, --verbose                   verbosity level\n\
   -V, --version                   output version information and exit\n\

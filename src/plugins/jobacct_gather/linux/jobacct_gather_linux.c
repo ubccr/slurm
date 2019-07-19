@@ -3,14 +3,14 @@
  *****************************************************************************
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *  Written by Andy Riebs, <andy.riebs@hp.com>, who borrowed heavily
- *  from other parts of SLURM, and Danny Auble, <da@llnl.gov>
+ *  from other parts of Slurm, and Danny Auble, <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
  *  This file is patterned after jobcomp_linux.c, written by Morris Jette and
@@ -47,7 +47,7 @@
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_acct_gather_energy.h"
-#include "src/common/slurm_acct_gather_infiniband.h"
+#include "src/common/slurm_acct_gather_interconnect.h"
 #include "src/slurmd/common/proctrack.h"
 #include "../common/common_jag.h"
 
@@ -64,14 +64,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "jobacct" for SLURM job completion logging) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "jobacct" for Slurm job completion logging) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
@@ -81,6 +81,85 @@
 const char plugin_name[] = "Job accounting gather LINUX plugin";
 const char plugin_type[] = "jobacct_gather/linux";
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
+
+
+static int _list_find_prec_by_pid(void *x, void *key)
+{
+        jag_prec_t *j = (jag_prec_t *) x;
+        pid_t pid = *(pid_t *) key;
+
+        if (!j->visited && (j->pid == pid))
+                return 1;
+        return 0;
+}
+
+static int _list_find_prec_by_ppid(void *x, void *key)
+{
+        jag_prec_t *j = (jag_prec_t *) x;
+        pid_t pid = *(pid_t *) key;
+
+        if (!j->visited && (j->ppid == pid))
+                return 1;
+        return 0;
+}
+
+static void _aggregate_prec(jag_prec_t *prec, jag_prec_t *ancestor)
+{
+	int i;
+#if _DEBUG
+	info("pid:%u ppid:%u rss:%"PRIu64" B",
+	     prec->pid, prec->ppid,
+	     prec->tres_data[TRES_ARRAY_MEM].size_read);
+#endif
+	ancestor->usec += prec->usec;
+	ancestor->ssec += prec->ssec;
+
+	for (i = 0; i < prec->tres_count; i++) {
+		if (prec->tres_data[i].num_reads != INFINITE64) {
+			if (ancestor->tres_data[i].num_reads == INFINITE64)
+				ancestor->tres_data[i].num_reads =
+					prec->tres_data[i].num_reads;
+			else
+				ancestor->tres_data[i].num_reads +=
+					prec->tres_data[i].num_reads;
+		}
+
+		if (prec->tres_data[i].num_writes != INFINITE64) {
+			if (ancestor->tres_data[i].num_writes == INFINITE64)
+				ancestor->tres_data[i].num_writes =
+					prec->tres_data[i].num_writes;
+			else
+				ancestor->tres_data[i].num_writes +=
+					prec->tres_data[i].num_writes;
+		}
+
+		if (prec->tres_data[i].size_read != INFINITE64) {
+			if (ancestor->tres_data[i].size_read == INFINITE64)
+				ancestor->tres_data[i].size_read =
+					prec->tres_data[i].size_read;
+			else
+				ancestor->tres_data[i].size_read +=
+					prec->tres_data[i].size_read;
+		}
+
+		if (prec->tres_data[i].size_write != INFINITE64) {
+			if (ancestor->tres_data[i].size_write == INFINITE64)
+				ancestor->tres_data[i].size_write =
+					prec->tres_data[i].size_write;
+			else
+				ancestor->tres_data[i].size_write +=
+					prec->tres_data[i].size_write;
+		}
+	}
+	prec->visited = true;
+}
+
+static int _reset_visited(jag_prec_t *prec, void *empty)
+{
+	prec->visited = false;
+
+	return SLURM_SUCCESS;
+}
 
 /*
  * _get_offspring_data() -- collect memory usage data for the offspring
@@ -105,27 +184,32 @@ const uint32_t plugin_version = SLURM_VERSION_NUMBER;
  */
 static void _get_offspring_data(List prec_list, jag_prec_t *ancestor, pid_t pid)
 {
-	ListIterator itr;
 	jag_prec_t *prec = NULL;
+	jag_prec_t *prec_tmp = NULL;
+	List tmp_list = NULL;
 
-	itr = list_iterator_create(prec_list);
-	while((prec = list_next(itr))) {
-		if (prec->ppid == pid) {
-#if _DEBUG
-			info("pid:%u ppid:%u rss:%d KB",
-			     prec->pid, prec->ppid, prec->rss);
-#endif
-			_get_offspring_data(prec_list, ancestor, prec->pid);
-			ancestor->usec += prec->usec;
-			ancestor->ssec += prec->ssec;
-			ancestor->pages += prec->pages;
-			ancestor->rss += prec->rss;
-			ancestor->vsize += prec->vsize;
-			ancestor->disk_read += prec->disk_read;
-			ancestor->disk_write += prec->disk_write;
+	/* reset all precs to be not visited */
+	(void)list_for_each(prec_list, (ListForF)_reset_visited, NULL);
+
+	/* See if we can find a prec from the given pid */
+	if (!(prec = list_find_first(prec_list, _list_find_prec_by_pid, &pid)))
+		return;
+
+	prec->visited = true;
+
+	tmp_list = list_create(NULL);
+	list_append(tmp_list, prec);
+
+	while ((prec_tmp = list_dequeue(tmp_list))) {
+		while ((prec = list_find_first(prec_list,
+					      _list_find_prec_by_ppid,
+					       &(prec_tmp->pid)))) {
+			_aggregate_prec(prec, ancestor);
+			list_append(tmp_list, prec);
 		}
 	}
-	list_iterator_destroy(itr);
+	FREE_NULL_LIST(tmp_list);
+
 	return;
 }
 

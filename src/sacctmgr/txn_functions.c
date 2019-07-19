@@ -8,11 +8,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,20 +28,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #include "src/sacctmgr/sacctmgr.h"
 #include "src/common/slurmdbd_defs.h"
 
-static int _set_cond(int *start, int argc, char *argv[],
+static int _set_cond(int *start, int argc, char **argv,
 		     slurmdb_txn_cond_t *txn_cond,
 		     List format_list)
 {
@@ -60,18 +60,18 @@ static int _set_cond(int *start, int argc, char *argv[],
 			}
 		}
 
-		if (!end && !strncasecmp(argv[i], "where",
+		if (!end && !xstrncasecmp(argv[i], "where",
 					MAX(command_len, 5))) {
 			continue;
-		} else if (!end && !strncasecmp(argv[i], "withassocinfo",
+		} else if (!end && !xstrncasecmp(argv[i], "withassocinfo",
 					  MAX(command_len, 5))) {
 			txn_cond->with_assoc_info = 1;
 			set = 1;
 		} else if (!end
-			  || (!strncasecmp (argv[i], "Ids",
-					    MAX(command_len, 1)))
-			  || (!strncasecmp (argv[i], "Txn",
-					    MAX(command_len, 1)))) {
+			   || (!xstrncasecmp(argv[i], "Ids",
+					     MAX(command_len, 1)))
+			   || (!xstrncasecmp(argv[i], "Txn",
+					     MAX(command_len, 1)))) {
 			ListIterator itr = NULL;
 			char *temp = NULL;
 			uint32_t id = 0;
@@ -94,7 +94,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 				}
 			}
 			list_iterator_destroy(itr);
-		} else if (!strncasecmp (argv[i], "Accounts",
+		} else if (!xstrncasecmp(argv[i], "Accounts",
 					 MAX(command_len, 3))) {
 			if (!txn_cond->acct_list)
 				txn_cond->acct_list =
@@ -102,7 +102,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 			if (slurm_addto_char_list(txn_cond->acct_list,
 						 argv[i]+end))
 				set = 1;
-		} else if (!strncasecmp (argv[i], "Action",
+		} else if (!xstrncasecmp(argv[i], "Action",
 					 MAX(command_len, 4))) {
 			if (!txn_cond->action_list)
 				txn_cond->action_list =
@@ -113,7 +113,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 				set = 1;
 			else
 				exit_code=1;
-		} else if (!strncasecmp (argv[i], "Actors",
+		} else if (!xstrncasecmp(argv[i], "Actors",
 					 MAX(command_len, 4))) {
 			if (!txn_cond->actor_list)
 				txn_cond->actor_list =
@@ -121,7 +121,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 			if (slurm_addto_char_list(txn_cond->actor_list,
 						 argv[i]+end))
 				set = 1;
-		} else if (!strncasecmp (argv[i], "Clusters",
+		} else if (!xstrncasecmp(argv[i], "Clusters",
 					 MAX(command_len, 3))) {
 			if (!txn_cond->cluster_list)
 				txn_cond->cluster_list =
@@ -129,24 +129,25 @@ static int _set_cond(int *start, int argc, char *argv[],
 			if (slurm_addto_char_list(txn_cond->cluster_list,
 						 argv[i]+end))
 				set = 1;
-		} else if (!strncasecmp (argv[i], "End", MAX(command_len, 1))) {
+		} else if (!xstrncasecmp(argv[i], "End", MAX(command_len, 1))) {
 			txn_cond->time_end = parse_time(argv[i]+end, 1);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Format",
+		} else if (!xstrncasecmp(argv[i], "Format",
 					 MAX(command_len, 1))) {
 			if (format_list)
 				slurm_addto_char_list(format_list, argv[i]+end);
-		} else if (!strncasecmp (argv[i], "Start",
+		} else if (!xstrncasecmp(argv[i], "Start",
 					 MAX(command_len, 1))) {
 			txn_cond->time_start = parse_time(argv[i]+end, 1);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "Users",
+		} else if (!xstrncasecmp(argv[i], "Users",
 					 MAX(command_len, 1))) {
 			if (!txn_cond->user_list)
 				txn_cond->user_list =
 					list_create(slurm_destroy_char);
-			if (slurm_addto_char_list(txn_cond->user_list,
-						 argv[i]+end))
+			if (slurm_addto_char_list_with_case(txn_cond->user_list,
+							    argv[i]+end,
+							    user_case_norm))
 				set = 1;
 		} else {
 			exit_code=1;
@@ -159,7 +160,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 }
 
 
-extern int sacctmgr_list_txn(int argc, char *argv[])
+extern int sacctmgr_list_txn(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	slurmdb_txn_cond_t *txn_cond = xmalloc(sizeof(slurmdb_txn_cond_t));
@@ -177,8 +178,8 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 
 	for (i=0; i<argc; i++) {
 		int command_len = strlen(argv[i]);
-		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
-		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3)))
+		if (!xstrncasecmp(argv[i], "Where", MAX(command_len, 5))
+		    || !xstrncasecmp(argv[i], "Set", MAX(command_len, 3)))
 			i++;
 		_set_cond(&i, argc, argv, txn_cond, format_list);
 	}
@@ -205,7 +206,7 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 		return SLURM_ERROR;
 	}
 
-	txn_list = acct_storage_g_get_txn(db_conn, my_uid, txn_cond);
+	txn_list = slurmdb_txn_get(db_conn, txn_cond);
 	slurmdb_destroy_txn_cond(txn_cond);
 
 	if (!txn_list) {

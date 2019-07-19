@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -44,13 +44,8 @@
 #include "src/common/slurm_protocol_defs.h"
 
 typedef struct {
-	char *cluster_name;
-	uint16_t ctld_port; /* slurmctld_port */
+	slurm_persist_conn_t *conn;
 	void *db_conn; /* database connection */
-	char ip[32];
-	slurm_fd_t newsockfd; /* socket connection descriptor */
-	uint16_t orig_port;
-	uint16_t rpc_version; /* version of rpc */
 	char *tres_str;
 } slurmdbd_conn_t;
 
@@ -63,8 +58,7 @@ typedef struct {
  * buffer OUT - outgoing response, must be freed by caller
  * uid IN/OUT - user ID who initiated the RPC
  * RET SLURM_SUCCESS or error code */
-extern int proc_req(slurmdbd_conn_t *slurmdbd_conn, char *msg,
-		    uint32_t msg_size, bool first, Buf *out_buffer,
-		    uint32_t *uid);
+extern int proc_req(void *conn, persist_msg_t *msg,
+		    Buf *out_buffer, uint32_t *uid);
 
 #endif /* !_PROC_REQ */

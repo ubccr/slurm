@@ -14,15 +14,20 @@ man1_MANS = \
 	slurm.1 \
 	smap.1 \
 	sprio.1 \
-	sh5util.1 \
 	squeue.1 \
 	sreport.1 \
 	srun.1 \
-	srun_cr.1 \
 	sshare.1 \
 	sstat.1 \
-	strigger.1 \
-	sview.1
+	strigger.1
+
+if BUILD_HDF5
+man1_MANS += sh5util.1
+endif
+
+if BUILD_SVIEW
+man1_MANS += sview.1
+endif
 
 EXTRA_DIST = $(man1_MANS)
 
@@ -41,15 +46,20 @@ html_DATA = \
 	sinfo.html \
 	smap.html \
 	sprio.html \
-	sh5util.html \
 	squeue.html \
 	sreport.html \
 	srun.html \
-	srun_cr.html \
 	sshare.html \
 	sstat.html \
-	strigger.html \
-	sview.html
+	strigger.html
+
+if BUILD_HDF5
+html_DATA += sh5util.html
+endif
+
+if BUILD_SVIEW
+html_DATA += sview.html
+endif
 
 MOSTLYCLEANFILES = ${html_DATA}
 

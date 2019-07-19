@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          sacctmgr add an account to this cluster and try using it with
 #          salloc, sbatch and srun.  We also test limits here as well.
 #
@@ -13,22 +13,22 @@
 # Written by Joseph Donaghy <donaghy1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -48,6 +48,7 @@ set timeout     60
 set test_node   " "
 # cr_core = 1 / cr_cpu = 0
 set selectparam  0
+set one_task_pc  0
 
 # test maxjob maxnode maxsubmit maxwall
 array set acct_mod_desc {}
@@ -88,13 +89,19 @@ if { [string compare [priority_type] multifactor] } {
 	exit $exit_code
 }
 
+
 # Determine what the selecttype param is
 if {[test_select_type_params "CR_CORE"]} {
 	set selectparam 1
 }
 
+# Determine what the selecttype param is
+if {[test_select_type_params "CR_ONE_TASK_PER_CORE"]} {
+	set one_task_pc 1
+}
+
 set got_node 0
-spawn $srun -N1 printenv SLURM_NODELIST
+spawn $srun -N1 -t1 printenv SLURM_NODELIST
 expect {
 	-re "($alpha_numeric_under)" {
 		set test_node $expect_out(1,string)
@@ -115,25 +122,7 @@ if {$got_node != 1} {
 	exit 0
 }
 
-# Get the number of CPUs on a node
-spawn $scontrol show node $test_node
-expect {
-	-re "CPUTot=($number)" {
-		set totcpus $expect_out(1,string)
-		exp_continue
-	}
-	-re "ThreadsPerCore=($number)" {
-		set nthreads $expect_out(1,string)
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: scontrol is not responding\n"
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
+lassign [get_node_cpus $test_node] totcpus nthreads
 
 if {$totcpus == 0} {
 	send_user "\nFAILURE: no cpus where found\n"
@@ -167,7 +156,7 @@ proc assoc_setup { limit_type limit_val } {
 
 proc _test_limits { } {
 	global file_in srun sbatch squeue scancel bin_id number bin_sleep bin_rm ta maxjob_lim maxsub_lim
-	global acct_mod_desc acct_mod_acct_vals acct_mod_assoc_vals acct_mod_assoc_test_vals
+	global acct_mod_desc acct_mod_acct_vals acct_mod_assoc_vals acct_mod_assoc_test_vals one_task_pc nthreads
 
 	set exit_code 0
 
@@ -177,6 +166,10 @@ proc _test_limits { } {
 		if { [string compare $option "maxjobsub"] &&
 		     [string compare $option "grpjobsub"] } {
 			assoc_setup $option $acct_mod_assoc_vals($option)
+
+			if { ![string compare $option "maxcpumins"] && $one_task_pc } {
+				set acct_mod_assoc_vals(maxcpumins) "-n [expr [lindex $acct_mod_assoc_vals(maxcpumins) 1] / $nthreads]"
+			}
 
 			if { ![string compare $option "grpwall"] } {
 				if { [inc21_21_grpwall $option \
@@ -228,11 +221,7 @@ proc _test_limits { } {
 
 }
 
-set select_type [test_select_type]
-if {![string compare $select_type "serial"]} {
-	send_user "\nWARNING: This test is incompatible with select/serial systems\n"
-	exit $exit_code
-} elseif {![string compare $select_type "linear"]} {
+if {[test_linear]} {
 	set def_part_name [default_partition]
 	set nb_nodes [get_node_cnt_in_part $def_part_name]
 	if {$nb_nodes < 2} {
@@ -258,17 +247,8 @@ if { [string compare [check_accounting_admin_level] "Administrator"] } {
 # Identify the user and his current default account
 #
 set acct_name ""
-set user_name ""
-spawn $bin_id -u -n
-expect {
-	 -re "($alpha_numeric_under)" {
-		set user_name $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
+set user_name [get_my_user_name]
+
 set s_pid [spawn $sacctmgr show user $user_name]
 expect {
 	-re "$user_name *($alpha_numeric_under)" {
@@ -478,7 +458,7 @@ if {$job_id == 0} {
 # Spawn a job via srun using this account
 #
 set job_id 0
-spawn $srun -N1 -v --account=$ta $bin_id
+spawn $srun -N1 -v --account=$ta -t1 $bin_id
 expect {
 	-re "launching ($number)" {
 		set job_id $expect_out(1,string)

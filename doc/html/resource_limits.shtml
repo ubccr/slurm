@@ -30,6 +30,17 @@ Consider the following example:</p>
 </ul>
 <p>The limits in effect will be MaxJobs=20 and MaxSubmitJobs=50.</p>
 
+<p>Note: The precedence order specified above is respected except for the
+following limits: Max[Time|Wall], [Min|Max]Nodes. For these limits, even
+if the job is enforced with QOS and/or Association limits, it can't
+go over the limit imposed at Partition level, even if it listed at the bottom.
+So the default for these 3 types of limits is that they are upper bound by the
+Partition one. This Partition level bound can be ignored if
+the respective QOS PartitionTimeLimit and/or Partition[Max|Min]Nodes flags
+are set, then the job would be enforced the limits imposed at QOS
+and/or association level respecting the order above.
+</p>
+
 <h2>Configuration</h2>
 
 <p>Scheduling policy information must be stored in a database
@@ -121,8 +132,19 @@ specified then no limit will apply.</p>
 <p><b>NOTE:</b> Unless noted, if a job request breaches a given limit
 the job will pend unless the job's QOS has the DenyOnLimit
 flag set, which will cause the job to be denied at submission.  When
-Grp limits are considerd with respects to this flag the Grp limit
+Grp limits are considered with respects to this flag the Grp limit
 is treated as a Max limit.</p>
+
+<p><b>NOTE:</b> When modifying a TRES field with <i>sacctmgr</i>, one must
+specify which TRES's to modify (see <a href="tres.html">TRES</a> for complete
+list) as in the following examples: </p>
+  <pre>
+  SET:
+  sacctmgr modify user bob set GrpTRES=cpu=1500,mem=200,gres/gpu=50
+  UNSET:
+  sacctmgr modify user bob set GrpTRES=cpu=-1,mem=-1,gres/gpu=-1
+  </pre>
+</p>
 
 <ul>
 <li><b>GrpTRESMins=</b> The total number of TRES minutes that can
@@ -132,8 +154,10 @@ is treated as a Max limit.</p>
   jobs will be allowed to run.  This usage is decayed (at a rate of
   PriorityDecayHalfLife).  It can also be reset (according to
   PriorityUsageResetPeriod) in order to allow jobs to run against the
-  association tree or QOS again.  This limit only applies when using
-  the Priority Multifactor plugin.
+  association tree or QOS again.  QOS that have the NoDecay flag set
+  do not decay GrpTRESMins, see <a href="qos.html#qos_other">QOS Options</a>
+  for details.
+  This limit only applies when using the Priority Multifactor plugin.
 </li>
 
 <li><b>GrpTRESRunMins=</b> Used to limit the combined total number of TRES
@@ -155,6 +179,14 @@ is treated as a Max limit.</p>
   run after previous jobs complete from this group.
 </li>
 
+<li><b>GrpJobsAccrue=</b> The total number of pending jobs able to accrue age
+  priority at any given time from an association and its children QOS.  If
+  this limit is reached new jobs will be queued but not accrue age priority
+  until after previous jobs are removed from pending in this group.
+  This limit does not determine if the job can run or not, it only limits the
+  age factor of the priority.
+</li>
+
 <li><b>GrpSubmitJobs=</b> The total number of jobs able to be submitted
   to the system at any given time from an association and its children
   or QOS.  If this limit is reached new submission requests will be
@@ -163,7 +195,12 @@ is treated as a Max limit.</p>
 
 <li><b>GrpWall=</b> The maximum wall clock time any job submitted to
   this group can run for.  If this limit is reached submission requests
-  will be denied.
+  will be denied.  This usage is decayed (at a rate of
+  PriorityDecayHalfLife).  It can also be reset (according to
+  PriorityUsageResetPeriod) in order to allow jobs to run against the
+  association tree or QOS again.  QOS that have the NoDecay flag set
+  do not decay GrpWall, see <a href="qos.html#qos_other">QOS Options</a> for
+  details.
 </li>
 
 <li><b>MaxTRESMinsPerJob=</b> A limit of TRES minutes to be used by a job.
@@ -180,21 +217,13 @@ is treated as a Max limit.</p>
   allocation can use.
 </li>
 
-<li><b>MaxJobs=</b> The total number of jobs able to run at any given
-  time for the given association/QOS.  If this limit is reached new jobs will
-  be queued but only allowed to run after previous jobs complete from
-  the association/QOS.
-</li>
-
-<li><b>MaxSubmitJobs=</b> The maximum number of jobs able to be submitted
-  to the system at any given time from the given association/QOS.  If
-  this limit is reached new submission requests will be denied until
-  previous jobs complete from this association.
-</li>
-
 <li><b>MaxWallDurationPerJob=</b> The maximum wall clock time any job
   submitted can run for the given association/QOS.  If this limit is reached
   the job will be denied at submission.
+</li>
+
+<li><b>MinPrioThreshold=</b> Used to override bf_min_prio_reserve,
+  see <a href="slurm.conf.html#OPT_bf_min_prio_reserve=#">bf_min_prio_reserve</a> for details.
 </li>
 
 <!-- For future use
@@ -223,20 +252,73 @@ is treated as a Max limit.</p>
   is affected.
 </li>
 
+<li><b>MaxJobs=</b> The total number of jobs able to run at any given
+  time for the given association.  If this limit is reached new jobs will
+  be queued but only allowed to run after previous jobs complete from
+  the association.
+</li>
+
+<li><b>MaxJobsAccrue=</b> The maximum number of pending jobs able to accrue age
+  priority at any given time for the given association.  If this limit is
+  reached new jobs will be queued but not accrue age priority
+  until after previous jobs are removed from pending using this association.
+  This limit does not determine if the job can run or not, it only limits the
+  age factor of the priority.
+</li>
+
+<li><b>MaxSubmitJobs=</b> The maximum number of jobs able to be submitted
+  to the system at any given time from the given association.  If
+  this limit is reached new submission requests will be denied until
+  previous jobs complete from this association.
+</li>
+
 <li><b>QOS=</b> comma separated list of QOS's an association is
   able to run.
 </li>
+
 </ul>
 
 <h2>QOS specific limits supported</h2>
 
 <ul>
-<li><b>MaxTRESPerUser=</b> The maximum number of limited TRES a user can
-  request (combo of all jobs running or pending).
+<li><b>MaxJobsAccruePerAccount=</b> The maximum number of pending jobs an
+  account (or subacct) can have accruing age priority at any given time.
+  This limit does not determine if the job can run or not, it only limits the
+  age factor of the priority.
+</li>
+
+<li><b>MaxJobsAccruePerUser=</b> The maximum number of pending jobs a
+  user can have accruing age priority at any given time.
+  This limit does not determine if the job can run or not, it only limits the
+  age factor of the priority.
+</li>
+
+<li><b>MaxJobsPerAccount=</b> The maximum number of jobs an account (or
+  subaccount) can have running at a given time.
+</li>
+
+<li><b>MaxJobsPerUser=</b> The maximum number of jobs a user can
+  have running at a given time.
+</li>
+
+<li><b>MaxSubmitJobsPerAccount=</b> The maximum number of jobs an account (or
+  subaccount) can have running and pending at a given time.
+</li>
+
+<li><b>MaxSubmitJobsPerUser=</b> The maximum number of jobs a user can
+  have running and pending at a given time.
+</li>
+
+<li><b>MaxTRESPerAccount=</b> The maximum number of TRES an account can
+  allocate at a given time.
+</li>
+
+<li><b>MaxTRESPerUser=</b> The maximum number of TRES a user can
+  allocate at a given time.
 </li>
 
 <li><b>MinTRESPerJob=</b> The minimum size in TRES any given job can
-  have from when using the requested QOS.
+  have when using the requested QOS.
 </li>
 
 </ul>
@@ -254,6 +336,56 @@ data maintained in the Slurm database.  More information can be found
 in the <a href="priority_multifactor.html">priority/multifactor</a>
 plugin description.</p>
 
-<p style="text-align: center;">Last modified 15 December 2016</p>
+<h3>Specific limits over GRES</h3>
+<p> When a GRES has a type associated with it and a limit is applied
+  over this specific type, i.e. <i>MaxTRESPerUser=gres/gpu:tesla=1</i>, if a
+  user requests a generic gres, the type's limit will not be enforced. In this
+  situation an additional lua job submit plugin to check the user request may
+  become useful. For example, if one requests <i>--gres=gpu:2</i> having a
+  limit set of <i>MaxTRESPerUser=gres/gpu:tesla=1</i>, the limit won't be
+  enforced so it will still be possible to get two teslas.
+</p>
+<p>
+  This is due to a design limitation. The only way to enforce such a limit
+  is to combine the specification of the limit with a job submit plugin that
+  forces the user to always request a specific type model.
+</p>
+<p>
+  An example of basic lua job submit plugin function could be:
+</p>
+<pre>
+function slurm_job_submit(job_desc, part_list, submit_uid)
+   if (job_desc.gres ~= nil)
+   then
+      for g in job_desc.gres:gmatch("[^,]+")
+      do
+	 bad = string.match(g,'^gpu[:]*[0-9]*$')
+	 if (bad ~= nil)
+	 then
+	    slurm.log_info("User specified gpu GRES without type: %s", bad)
+	    slurm.user_msg("You must always specify a type when requesting gpu GRES")
+	    return slurm.ERROR
+	 end
+      end
+   end
+end
+</pre>
+<p> Having this script and the limit in place will force the users to always
+  specify a gpu with its type, thus enforcing the limits for each specific
+  model.
+</p>
+<p>It is also advisable to set <b>AccountingStorageTRES</b> for both generic
+  and specific gres types, otherwise requests that ask for generic only gpus
+  won't be accounted for. Set this for example to:
+<p/>
+<p>
+  <i>AccountingStorageTRES=gres/gpu,gres/gpu:tesla</i>
+<p/>
+
+<p>
+  See <a href="tres.html">Trackable Resources TRES</a> for details.
+</p>
+
+<p style="text-align: center;">Last modified 1 May 2018</p>
 
 </ul></body></html>

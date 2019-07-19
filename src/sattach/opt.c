@@ -6,60 +6,41 @@
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
-#include <string.h>		/* strcpy, strncasecmp */
+#define _GNU_SOURCE
 
-#ifdef HAVE_STRINGS_H
-#  include <strings.h>
-#endif
-
-#ifndef _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
-
-#if HAVE_GETOPT_H
-#  include <getopt.h>
-#else
-#  include "src/common/getopt.h"
-#endif
-
-#ifdef HAVE_LIMITS_H
-#  include <limits.h>
-#endif
-
+#include <ctype.h>		/* isdigit    */
 #include <fcntl.h>
+#include <getopt.h>
+#include <limits.h>
 #include <stdarg.h>		/* va_start   */
 #include <stdio.h>
 #include <stdlib.h>		/* getenv     */
-#include <ctype.h>		/* isdigit    */
 #include <sys/param.h>		/* MAXPATHLEN */
-#include <sys/stat.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
+#include <unistd.h>
 
 #include "src/common/list.h"
 #include "src/common/log.h"
@@ -116,7 +97,7 @@ static void  _usage(void);
 
 /*---[ end forward declarations of static functions ]---------------------*/
 
-int initialize_and_process_args(int argc, char *argv[])
+int initialize_and_process_args(int argc, char **argv)
 {
 	/* initialize option defaults */
 	_opt_default();
@@ -133,29 +114,6 @@ int initialize_and_process_args(int argc, char *argv[])
 	return 1;
 
 }
-
-/*
- * print error message to stderr with opt.progname prepended
- */
-#undef USE_ARGERROR
-#if USE_ARGERROR
-static void argerror(const char *msg, ...)
-  __attribute__ ((format (printf, 1, 2)));
-static void argerror(const char *msg, ...)
-{
-	va_list ap;
-	char buf[256];
-
-	va_start(ap, msg);
-	vsnprintf(buf, sizeof(buf), msg, ap);
-
-	fprintf(stderr, "%s: %s\n",
-		opt.progname ? opt.progname : "sbatch", buf);
-	va_end(ap);
-}
-#else
-#  define argerror error
-#endif				/* USE_ARGERROR */
 
 /*
  *  Get a POSITIVE decimal integer from arg.
@@ -379,7 +337,7 @@ static void _parse_jobid_stepid(char *jobid_str)
 
 	verbose("jobid/stepid string = %s\n", jobid_str);
 	job = xstrdup(jobid_str);
-	ptr = index(job, '.');
+	ptr = xstrchr(job, '.');
 	if (ptr == NULL) {
 		error("Did not find a period in the step ID string");
 		_usage();
@@ -462,7 +420,7 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 	if (opt.input_filter_set)
-		opt.fds.in.taskid = opt.input_filter;
+		opt.fds.input.taskid = opt.input_filter;
 	if (opt.output_filter_set)
 		opt.fds.out.taskid = opt.output_filter;
 	if (opt.error_filter_set) {
@@ -505,7 +463,7 @@ static void _help(void)
 "      --layout       print task layout info and exit (does not attach to tasks)\n"
 "  -Q, --quiet        quiet mode (suppress informational messages)\n"
 "  -v, --verbose      verbose mode (multiple -v's increase verbosity)\n"
-"  -V, --version      print the SLURM version and exit\n\n"
+"  -V, --version      print the Slurm version and exit\n\n"
 "Help options:\n"
 "  -h, --help         print this help message\n"
 "  -u, --usage        print a brief usage message\n"

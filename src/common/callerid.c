@@ -4,11 +4,11 @@
  *  Copyright (C) 2015, Brigham Young University
  *  Author:  Ryan Cox <ryan_cox@byu.edu>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,38 +24,21 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif  /* HAVE_INTTYPES_H */
-#else   /* !HAVE_CONFIG_H */
-#  include <inttypes.h>
-#endif  /*  HAVE_CONFIG_H */
+#include "config.h"
 
-
-#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
-#endif
-#include <arpa/inet.h>
-#include <ctype.h>
 
 #ifdef __FreeBSD__
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #endif
@@ -65,16 +48,16 @@
  * Is there a portable interface that could be used instead of accessing
  * structure members directly?
  */
-#if defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #define s6_addr32 __u6_addr.__u6_addr32
 #endif
 
-#if HAVE_DIRENT_H
-#  include <dirent.h>
-#endif
+#include <arpa/inet.h>
+#include <ctype.h>
+#include <dirent.h>
+#include <inttypes.h>
 #include <libgen.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
@@ -112,7 +95,7 @@ static int _match_inode(callerid_conn_t *conn_result, ino_t *inode_search,
 		debug3("_match_inode matched");
 		return SLURM_SUCCESS;
 	}
-	return SLURM_FAILURE;
+	return SLURM_ERROR;
 }
 
 static int _match_conn(callerid_conn_t *conn_search, ino_t *inode_result,
@@ -127,7 +110,7 @@ static int _match_conn(callerid_conn_t *conn_search, ino_t *inode_result,
 	    memcmp((void*)&conn_search->ip_src, (void*)&conn_row->ip_src,
 		   addrbytes) !=0
 	   )
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 
 	debug3("_match_conn matched inode %lu", (long unsigned int)inode_row);
 	*inode_result = inode_row;
@@ -148,7 +131,7 @@ static int _find_match_in_tcp_file(
 		int (*match_func)(callerid_conn_t *,
 				   ino_t *, callerid_conn_t *, ino_t, int))
 {
-	int rc = SLURM_FAILURE;
+	int rc = SLURM_ERROR;
 	FILE *fp;
 	char ip_dst_str[INET6_ADDRSTRLEN+1]; /* +1 for scanf to add \0 */
 	char ip_src_str[INET6_ADDRSTRLEN+1];
@@ -161,8 +144,8 @@ static int _find_match_in_tcp_file(
 
 	/* Zero out the IPs. Not strictly necessary but it will look much better
 	 * in a debugger since IPv4 only uses 4 out of 16 bytes. */
-	bzero(&conn_row.ip_dst, 16);
-	bzero(&conn_row.ip_src, 16);
+	memset(&conn_row.ip_dst, 0, 16);
+	memset(&conn_row.ip_src, 0, 16);
 
 	fp = fopen(path, "r");
 	if (!fp)
@@ -222,42 +205,32 @@ static int _find_match_in_tcp_file(
  *
  * All errors in this function should be silently ignored. Processes appear and
  * disappear all the time. It is natural for processes to disappear in between
- * operations such as readdir_r, stat, and others. We should detect errors but
+ * operations such as readdir, stat, and others. We should detect errors but
  * not log them.
  */
 static int _find_inode_in_fddir(pid_t pid, ino_t inode)
 {
 	DIR *dirp;
 	struct dirent *entryp;
-	struct dirent *result;
-	int name_max;
 	char dirpath[1024];
-	char fdpath[1024];
-	int len, rc = SLURM_FAILURE;
+	char fdpath[2048];
+	int rc = SLURM_ERROR;
 	struct stat statbuf;
 
 	snprintf(dirpath, 1024, "/proc/%d/fd", (pid_t)pid);
 	if ((dirp = opendir(dirpath)) == NULL) {
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 
-	/* Thus saith the man page readdir_r(3) */
-	name_max = pathconf(dirpath, _PC_NAME_MAX);
-	if (name_max == -1)	/* Limit not defined, or error */
-		name_max = 255;	/* Take a guess */
-	len = offsetof(struct dirent, d_name) + name_max + 1;
-	entryp = xmalloc(len);
-
 	while (1) {
-		readdir_r(dirp, entryp, &result);
-		if (!result)
+		if (!(entryp = readdir(dirp)))
 			break;
 		/* Ignore . and .. */
-		if (xstrncmp(entryp->d_name, ".", 1)==0)
+		else if (!xstrncmp(entryp->d_name, ".", 1))
 			continue;
 
 		/* This is a symlink. Follow it to get destination's inode. */
-		snprintf(fdpath, 1024, "%s/%s", dirpath, entryp->d_name);
+		snprintf(fdpath, sizeof(fdpath), "%s/%s", dirpath, entryp->d_name);
 		if (stat(fdpath, &statbuf) != 0)
 			continue;
 		if (statbuf.st_ino == inode) {
@@ -269,7 +242,6 @@ static int _find_inode_in_fddir(pid_t pid, ino_t inode)
 	}
 
 	closedir(dirp);
-	xfree(entryp);
 	return rc;
 }
 
@@ -290,7 +262,7 @@ extern int callerid_find_inode_by_conn(callerid_conn_t conn, ino_t *inode)
 
 	/* Add new protocols here if needed, such as UDP */
 
-	return SLURM_FAILURE;
+	return SLURM_ERROR;
 }
 
 
@@ -310,7 +282,7 @@ extern int callerid_find_conn_by_inode(callerid_conn_t *conn, ino_t inode)
 
 	/* Add new protocols here if needed, such as UDP */
 
-	return SLURM_FAILURE;
+	return SLURM_ERROR;
 }
 
 
@@ -318,35 +290,26 @@ extern int callerid_find_conn_by_inode(callerid_conn_t *conn, ino_t inode)
  *
  * Most errors in this function should be silently ignored. Processes appear and
  * disappear all the time. It is natural for processes to disappear in between
- * operations such as readdir_r, stat, and others. We should detect errors but
+ * operations such as readdir, stat, and others. We should detect errors but
  * not log them.
  */
 extern int find_pid_by_inode (pid_t *pid_result, ino_t inode)
 {
 	DIR *dirp;
 	struct dirent *entryp;
-	struct dirent *result;
 	char *dirpath = "/proc";
-	int name_max, len, rc = SLURM_FAILURE;
+	int rc = SLURM_ERROR;
 	pid_t pid;
 
 	if ((dirp = opendir(dirpath)) == NULL) {
 		/* Houston, we have a problem: /proc is inaccessible */
 		error("find_pid_by_inode: unable to open %s: %m",
 				dirpath);
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 
-	/* Thus saith the man page readdir_r(3) */
-	name_max = pathconf(dirpath, _PC_NAME_MAX);
-	if (name_max == -1)	/* Limit not defined, or error */
-		name_max = 255;	/* Take a guess */
-	len = offsetof(struct dirent, d_name) + name_max + 1;
-	entryp = xmalloc(len);
-
 	while (1) {
-		readdir_r(dirp, entryp, &result);
-		if (!result)
+		if (!(entryp = readdir(dirp)))
 			break;
 		/* We're only looking for /proc/[0-9]*  */
 		else if (!isdigit(entryp->d_name[0]))
@@ -367,7 +330,6 @@ extern int find_pid_by_inode (pid_t *pid_result, ino_t inode)
 	}
 
 	closedir(dirp);
-	xfree(entryp);
 	return rc;
 }
 
@@ -376,10 +338,9 @@ extern int callerid_get_own_netinfo (callerid_conn_t *conn)
 {
 	DIR *dirp;
 	struct dirent *entryp;
-	struct dirent *result;
 	char *dirpath = "/proc/self/fd";
 	char fdpath[1024];
-	int name_max, len, rc = SLURM_FAILURE;
+	int rc = SLURM_ERROR;
 	struct stat statbuf;
 
 	if ((dirp = opendir(dirpath)) == NULL) {
@@ -388,20 +349,11 @@ extern int callerid_get_own_netinfo (callerid_conn_t *conn)
 		return rc;
 	}
 
-	/* thus saith the man page readdir_r(3) */
-	name_max = pathconf(dirpath, _PC_NAME_MAX);
-	if (name_max == -1)	/* Limit not defined, or error */
-		name_max = 255;	/* Take a guess */
-	len = offsetof(struct dirent, d_name) + name_max + 1;
-	entryp = xmalloc(len);
-
 	while (1) {
-		readdir_r(dirp, entryp, &result);
-		if (!result)
+		if (!(entryp = readdir(dirp)))
 			break;
-
 		/* Ignore . and .. */
-		if (xstrncmp(entryp->d_name, ".", 1)==0)
+		else if (!xstrncmp(entryp->d_name, ".", 1))
 			continue;
 
 		snprintf(fdpath, 1024, "%s/%s", dirpath, entryp->d_name);
@@ -424,6 +376,5 @@ extern int callerid_get_own_netinfo (callerid_conn_t *conn)
 	}
 
 	closedir(dirp);
-	xfree(entryp);
 	return rc;
 }

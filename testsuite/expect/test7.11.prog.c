@@ -6,22 +6,22 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #include <stdio.h>
@@ -36,39 +36,57 @@
 #define SPANK_JOB_ENV_TESTS 0
 
 /*
- * All spank plugins must define this macro for the SLURM plugin loader.
+ * All spank plugins must define this macro for the Slurm plugin loader.
  */
 SPANK_PLUGIN(test_suite, 1);
 
-static int opt_arg = 0;
+static int opt_arg_srun   = 0;
+static int opt_arg_sbatch = 0;
 static char *opt_out_file = NULL;
 
-static int _test_opt_process(int val, const char *optarg, int remote);
+static int _test_opt_process_srun(int val, const char *optarg, int remote);
+static int _test_opt_process_sbatch(int val, const char *optarg, int remote);
 
 /*
  *  Provide a --test_suite=[opt_arg] option to srun:
  */
 struct spank_option spank_options[] =
 {
-	{ "test_suite", "[opt_arg]", "Component of slurm test suite.", 2, 0,
-		_test_opt_process
+	{ "test_suite_srun",
+	  "[opt_arg_srun]",
+	  "Component of slurm test suite.",
+	  2,
+	  0,
+	  _test_opt_process_srun
 	},
 	SPANK_OPTIONS_TABLE_END
 };
 struct spank_option spank_options_reg[] =
 {
-	{ "test_suite_reg", "[opt_arg]",
-		"Registered component of slurm test suite.", 2, 0,
-		_test_opt_process
+	{ "test_suite_sbatch",
+	  "[opt_arg_sbatch]",
+	  "Registered component of slurm test suite.",
+	  2,
+	  0,
+	  _test_opt_process_sbatch
 	},
 	SPANK_OPTIONS_TABLE_END
 };
 
-static int _test_opt_process(int val, const char *optarg, int remote)
+static int _test_opt_process_srun(int val, const char *optarg, int remote)
 {
-	opt_arg = atoi(optarg);
+	opt_arg_srun = atoi(optarg);
 	if (!remote)
-		slurm_info("_test_opt_process: test_suite: opt_arg=%d", opt_arg);
+		slurm_info("%s: opt_arg_srun=%d", __func__, opt_arg_srun);
+
+	return (0);
+}
+
+static int _test_opt_process_sbatch(int val, const char *optarg, int remote)
+{
+	opt_arg_sbatch = atoi(optarg);
+	if (!remote)
+		slurm_info("%s: opt_arg_sbatch=%d", __func__, opt_arg_sbatch);
 
 	return (0);
 }
@@ -127,23 +145,26 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av)
 	int argc, i;
 	char **argv;
 
-	if (opt_out_file && opt_arg) {
-		FILE *fp = fopen(opt_out_file, "a");
+	if (opt_out_file) {
+		FILE *fp = NULL;
+		for (i = 0; (i < 10) && !fp; i++)
+			fp = fopen(opt_out_file, "a");
 		if (!fp)
-			return (-1);
-		fprintf(fp, "slurm_spank_task_init: opt_arg=%d\n", opt_arg);
+			return -1;
+		fprintf(fp, "%s: opt_arg_sbatch=%d opt_arg_srun=%d\n",
+			__func__, opt_arg_sbatch, opt_arg_srun);
 		if (spank_get_item(sp, S_JOB_UID, &my_uid) == ESPANK_SUCCESS)
 			fprintf(fp, "spank_get_item: my_uid=%d\n", my_uid);
                 if (spank_get_item(sp, S_JOB_ARGV, &argc, &argv) ==
 		    ESPANK_SUCCESS) {
-			for (i=0; i<argc; i++) {
+			for (i = 0; i < argc; i++) {
 				fprintf(fp, "spank_get_item: argv[%d]=%s\n",
 					i, argv[i]);
 			}
 		}
 		fclose(fp);
 	}
-	return (0);
+	return 0;
 }
 
 /* Called from slurmd only, not tested here
@@ -155,13 +176,19 @@ int slurm_spank_task_exit(spank_t sp, int ac, char **av) */
 /* Called from both srun and slurmd */
 int slurm_spank_exit(spank_t sp, int ac, char **av)
 {
-	if (opt_out_file && opt_arg) {
-		FILE *fp = fopen(opt_out_file, "a");
+	int i;
+
+	if (opt_out_file) {
+		FILE *fp = NULL;
+		for (i = 0; (i < 10) && !fp; i++)
+			fp = fopen(opt_out_file, "a");
 		if (!fp)
-			return (-1);
-		fprintf(fp, "slurm_spank_exit: opt_arg=%d\n", opt_arg);
+			return -1;
+		fprintf(fp, "%s: opt_arg_sbatch=%d opt_arg_srun=%d\n",
+			__func__, opt_arg_sbatch, opt_arg_srun);
 		fclose(fp);
-	} else if (opt_arg)
-		slurm_info("slurm_spank_exit: opt_arg=%d", opt_arg);
-	return (0);
+	} else
+		slurm_info("%s: opt_arg_sbatch=%d opt_arg_srun=%d",
+			   __func__, opt_arg_sbatch, opt_arg_srun);
+	return 0;
 }

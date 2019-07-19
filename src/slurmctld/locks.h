@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette@llnl.gov>, Randy Sanchez <rsancez@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -91,6 +91,8 @@
 #ifndef _SLURMCTLD_LOCKS_H
 #define _SLURMCTLD_LOCKS_H
 
+#include <stdbool.h>
+
 /* levels of locking required for each data structure */
 typedef enum {
 	NO_LOCK,
@@ -100,60 +102,38 @@ typedef enum {
 
 /* slurmctld specific data structures to lock via APIs */
 typedef struct {
-	lock_level_t	config;
-	lock_level_t	job;
-	lock_level_t	node;
-	lock_level_t	partition;
+	lock_level_t conf;
+	lock_level_t job;
+	lock_level_t node;
+	lock_level_t part;
+	lock_level_t fed;
 }	slurmctld_lock_t;
 
-/* Interval lock structure
- * we actually use the count for each data type, see macros below
- *	(lock_datatype_t * 4 + 0) = read_lock		read locks in use
- *	(lock_datatype_t * 4 + 1) = write_lock		write locks in use
- *	(lock_datatype_t * 4 + 2) = write_wait_lock	write locks pending
- *	(lock_datatype_t * 4 + 3) = write_cnt_lock	write lock count
- * NOTE: If changing the number of functions (array size), then also change
- * the size of "entity" in src/common/assoc_mgr.h
- */
 typedef enum {
-	CONFIG_LOCK,
+	CONF_LOCK,
 	JOB_LOCK,
 	NODE_LOCK,
 	PART_LOCK,
+	FED_LOCK,
 	ENTITY_COUNT
 }	lock_datatype_t;
 
-#define read_lock(data_type)		(data_type * 4 + 0)
-#define write_lock(data_type)		(data_type * 4 + 1)
-#define write_wait_lock(data_type)	(data_type * 4 + 2)
-#define write_cnt_lock(data_type)	(data_type * 4 + 3)
-
-typedef struct {
-	int entity[ENTITY_COUNT * 4];
-}	slurmctld_lock_flags_t;
-
-
-/* get_lock_values - Get the current value of all locks
- * OUT lock_flags - a copy of the current lock values */
-extern void get_lock_values (slurmctld_lock_flags_t *lock_flags);
+#ifndef NDEBUG
+extern bool verify_lock(lock_datatype_t datatype, lock_level_t level);
+#endif
 
 /* init_locks - create locks used for slurmctld data structure access
  *	control */
 extern void init_locks ( void );
 
-/* kill_locked_threads - Kill all threads waiting on semaphores */
-extern void kill_locked_threads ( void );
-
 /* lock_slurmctld - Issue the required lock requests in a well defined order */
 extern void lock_slurmctld (slurmctld_lock_t lock_levels);
-
-/* try_lock_slurmctld - equivalent to lock_slurmctld() except 
- * RET 0 on success or -1 if the locks are currently not available */
-extern int try_lock_slurmctld (slurmctld_lock_t lock_levels);
 
 /* unlock_slurmctld - Issue the required unlock requests in a well
  *	defined order */
 extern void unlock_slurmctld (slurmctld_lock_t lock_levels);
+
+extern int report_locks_set(void);
 
 /* un/lock semaphore used for saving state of slurmctld */
 extern void lock_state_files ( void );

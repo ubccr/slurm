@@ -3,18 +3,6 @@
 /* Define if building universal (internal helper macro) */
 #undef AC_APPLE_UNIVERSAL_BUILD
 
-/* Define the BG_BRIDGE_SO value */
-#undef BG_BRIDGE_SO
-
-/* Define the BG_DB2_SO value */
-#undef BG_DB2_SO
-
-/* Define the BG_SERIAL value */
-#undef BG_SERIAL
-
-/* Define BLCR installation home */
-#undef BLCR_HOME
-
 /* Define location of cpuset directory */
 #undef CPUSET_DIR
 
@@ -23,9 +11,6 @@
 
 /* Define to 1 if using glib-2.32.0 or higher */
 #undef GLIB_NEW_THREADS
-
-/* Define to 1 if licensed under terms of the GNU General Public License. */
-#undef GPL_LICENSED
 
 /* Define to 1 if using gtk+-2.14.0 or higher */
 #undef GTK2_USE_GET_FOCUS
@@ -42,49 +27,10 @@
 /* Define to 1 if 3-dimensional architecture */
 #undef HAVE_3D
 
-/* Define to 1 if 4-dimensional architecture */
-#undef HAVE_4D
-
-/* Define to 1 for AIX operating system */
-#undef HAVE_AIX
-
-/* Define to 1 for Cray XT/XE systems using ALPS */
-#undef HAVE_ALPS_CRAY
-
-/* Define to 1 for emulating a Cray XT/XE system using ALPS */
-#undef HAVE_ALPS_CRAY_EMULATION
-
-/* Define to 1 if running against an ALPS emulation */
-#undef HAVE_ALPS_EMULATION
-
-/* Define to 1 if emulating or running on Blue Gene system */
-#undef HAVE_BG
-
-/* Define to 1 if emulating or running on Blue Gene/L system */
-#undef HAVE_BGL
-
-/* Define to 1 if emulating or running on Blue Gene/P system */
-#undef HAVE_BGP
-
-/* Define to 1 if emulating or running on Blue Gene/Q system */
-#undef HAVE_BGQ
-
-/* Define to 1 if have Blue Gene files */
-#undef HAVE_BG_FILES
-
-/* Define to 1 if using code where blocks have actions */
-#undef HAVE_BG_GET_ACTION
-
-/* Define to 1 if emulating or running on Blue Gene/L or P system */
-#undef HAVE_BG_L_P
-
-/* Define to 1 if using code with new iocheck */
-#undef HAVE_BG_NEW_IO_CHECK
-
 /* Define to 1 if you have the `cfmakeraw' function. */
 #undef HAVE_CFMAKERAW
 
-/* Define to 1 for systems with a Cray network */
+/* Define to 1 for systems with a Cray Aries network */
 #undef HAVE_CRAY_NETWORK
 
 /* Define to 1 if you have the <curses.h> header file. */
@@ -121,9 +67,6 @@
 /* Define to 1 if you have the <errno.h> header file. */
 #undef HAVE_ERRNO_H
 
-/* Define to 1 if function EVP_MD_CTX_cleanup exists. */
-#undef HAVE_EVP_MD_CTX_CLEANUP
-
 /* Define to 1 if you have the `faccessat' function. */
 #undef HAVE_FACCESSAT
 
@@ -150,9 +93,6 @@
 
 /* Define to 1 if hwloc library found */
 #undef HAVE_HWLOC
-
-/* Define to 1 if hwloc library supports PCI devices */
-#undef HAVE_HWLOC_PCI
 
 /* Define to 1 if you have the `inet_aton' function. */
 #undef HAVE_INET_ATON
@@ -181,6 +121,9 @@
 /* Define to 1 if you have a functional curl library. */
 #undef HAVE_LIBCURL
 
+/* Define to 1 if you have the `ucp' library (-lucp). */
+#undef HAVE_LIBUCP
+
 /* Define to 1 if you have `z' library (-lz) */
 #undef HAVE_LIBZ
 
@@ -190,18 +133,11 @@
 /* Define to 1 if you have the <linux/sched.h> header file. */
 #undef HAVE_LINUX_SCHED_H
 
-/* Compile with Lua 5.1 */
-#undef HAVE_LUA_5_1
-
-/* Compile with Lua 5.2 */
-#undef HAVE_LUA_5_2
+/* Define to 1 if we have the Lua library */
+#undef HAVE_LUA
 
 /* Define to 1 if you have 'lz4' library (-llz4) */
 #undef HAVE_LZ4
-
-/* Define to 1 if your system has a GNU libc compatible `malloc' function, and
-   to 0 otherwise. */
-#undef HAVE_MALLOC
 
 /* Define to 1 if you have the <mcheck.h> header file. */
 #undef HAVE_MCHECK_H
@@ -215,11 +151,8 @@
 /* Define to 1 if using MySQL libaries */
 #undef HAVE_MYSQL
 
-/* Define to 1 for running on a Cray in native mode without ALPS */
+/* Define to 1 for running on a Cray Aries system */
 #undef HAVE_NATIVE_CRAY
-
-/* Define to 1 if alpscomm functions new to CLE 5.2UP01 are defined */
-#undef HAVE_NATIVE_CRAY_GA
 
 /* Define to 1 if you have the <ncurses.h> header file. */
 #undef HAVE_NCURSES_H
@@ -233,20 +166,17 @@
 /* Define to 1 if netloc includes use underscore not subdirectory */
 #undef HAVE_NETLOC_NOSUB
 
-/* define if you have nrt.h */
-#undef HAVE_NRT_H
-
 /* define if numa library installed */
 #undef HAVE_NUMA
+
+/* Define to 1 if NVML library found */
+#undef HAVE_NVML
 
 /* Define to 1 if ofed library found */
 #undef HAVE_OFED
 
 /* Define to 1 if using code with pma_query_via */
 #undef HAVE_OFED_PMA_QUERY_VIA
-
-/* define if you have openssl. */
-#undef HAVE_OPENSSL
 
 /* define if you have the PAM library */
 #undef HAVE_PAM
@@ -257,17 +187,8 @@
 /* Define to 1 if you have the <paths.h> header file. */
 #undef HAVE_PATHS_H
 
-/* define if you have permapi_h */
-#undef HAVE_PERMAPI_H
-
 /* Define to 1 if pmix library found */
 #undef HAVE_PMIX
-
-/* Define if you have Posix semaphores. */
-#undef HAVE_POSIX_SEMS
-
-/* Define to 1 if you have the <proctrack.h> header file. */
-#undef HAVE_PROCTRACK_H
 
 /* Define if libc sets program_invocation_name */
 #undef HAVE_PROGRAM_INVOCATION_NAME
@@ -289,9 +210,6 @@
 
 /* Define if you are compiling with readline. */
 #undef HAVE_READLINE
-
-/* Define to 1 for running on a real Cray system */
-#undef HAVE_REAL_CRAY
 
 /* Define to 1 if you have the `sched_setaffinity' function. */
 #undef HAVE_SCHED_SETAFFINITY
@@ -350,6 +268,9 @@
 /* Define to 1 if you have the <sysint.h> header file. */
 #undef HAVE_SYSINT_H
 
+/* Define systemd presence */
+#undef HAVE_SYSTEMD
+
 /* Define to 1 if you have the <sys/dr.h> header file. */
 #undef HAVE_SYS_DR_H
 
@@ -401,11 +322,11 @@
 /* Define to 1 if you have the <termcap.h> header file. */
 #undef HAVE_TERMCAP_H
 
+/* Define to 1 if ucx library found */
+#undef HAVE_UCX
+
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
-
-/* Define to 1 if you have the `unsetenv' function. */
-#undef HAVE_UNSETENV
 
 /* Define to 1 if you have the <utmp.h> header file. */
 #undef HAVE_UTMP_H
@@ -419,6 +340,16 @@
 /* Define to 1 if you have the external variable, _system_configuration with a
    member named physmem. */
 #undef HAVE__SYSTEM_CONFIGURATION
+
+/* Define to 1 if the system has the `__builtin_clzll' built-in function */
+#undef HAVE___BUILTIN_CLZLL
+
+/* Define to 1 if the system has the `__builtin_ctzll' built-in function */
+#undef HAVE___BUILTIN_CTZLL
+
+/* Define to 1 if the system has the `__builtin_popcountll' built-in function
+   */
+#undef HAVE___BUILTIN_POPCOUNTLL
 
 /* Defined if libcurl supports AsynchDNS */
 #undef LIBCURL_FEATURE_ASYNCHDNS
@@ -483,14 +414,19 @@
 /* Defined if libcurl supports TFTP */
 #undef LIBCURL_PROTOCOL_TFTP
 
-/* Define the libnrt.so location */
-#undef LIBNRT_SO
-
 /* Define to 1 for --get-user-env to load user environment without .login */
 #undef LOAD_ENV_NO_LOGIN
 
 /* Define to the sub-directory where libtool stores uninstalled libraries. */
 #undef LT_OBJDIR
+
+/* Define to 1 if `major', `minor', and `makedev' are declared in <mkdev.h>.
+   */
+#undef MAJOR_IN_MKDEV
+
+/* Define to 1 if `major', `minor', and `makedev' are declared in
+   <sysmacros.h>. */
+#undef MAJOR_IN_SYSMACROS
 
 /* Define to 1 for memory leak debugging. */
 #undef MEMORY_LEAK_DEBUG
@@ -498,15 +434,8 @@
 /* Enable multiple slurmd on one node */
 #undef MULTIPLE_SLURMD
 
-/* Define to 1 if with non thread-safe code */
-#undef MYSQL_NOT_THREAD_SAFE
-
 /* Define to 1 if you are building a production release. */
 #undef NDEBUG
-
-/* Define to 1 if we can't use the alter ignore when messing with a database
-   table */
-#undef NO_ALTER_IGNORE_MYSQL
 
 /* Define to the address where bug reports for this package should be sent. */
 #undef PACKAGE_BUGREPORT
@@ -548,20 +477,14 @@
 /* Define to 1 to require salloc execution in the foreground. */
 #undef SALLOC_RUN_FOREGROUND
 
-/* Define to 1 if sched_getaffinity takes three arguments. */
-#undef SCHED_GETAFFINITY_THREE_ARGS
-
-/* Define to 1 if sched_getaffinity takes two arguments. */
-#undef SCHED_GETAFFINITY_TWO_ARGS
-
-/* Define to 1 if setpgrp takes two arguments. */
-#undef SETPGRP_TWO_ARGS
-
 /* Define if you need setproctitle padding */
 #undef SETPROCTITLE_PS_PADDING
 
 /* Define to the setproctitle() emulation type */
 #undef SETPROCTITLE_STRATEGY
+
+/* The size of `void *', as computed by sizeof. */
+#undef SIZEOF_VOID_P
 
 /* Define path to sleep command */
 #undef SLEEP_CMD
@@ -608,10 +531,7 @@
 /* Define Slurm installation prefix */
 #undef SLURM_PREFIX
 
-/* Define to 1 if running slurm simulator */
-#undef SLURM_SIMULATOR
-
-/* SLURM Version Number */
+/* Slurm Version Number */
 #undef SLURM_VERSION_NUMBER
 
 /* Define the project's version string. */
@@ -641,8 +561,8 @@
 /* Define the project's version. */
 #undef VERSION
 
-/* Define if you have pthreads. */
-#undef WITH_PTHREADS
+/* Using internal Slurm X11 support */
+#undef WITH_SLURM_X11
 
 /* Define WORDS_BIGENDIAN to 1 if your processor stores words with the most
    significant byte first (like Motorola and SPARC, unlike Intel). */
@@ -656,19 +576,5 @@
 # endif
 #endif
 
-/* Enable large inode numbers on Mac OS X 10.5.  */
-#ifndef _DARWIN_USE_64_BIT_INODE
-# define _DARWIN_USE_64_BIT_INODE 1
-#endif
-
-/* Number of bits in a file offset, on hosts where this is settable. */
-#undef _FILE_OFFSET_BITS
-
-/* Define for large files, on AIX-style hosts. */
-#undef _LARGE_FILES
-
 /* Define curl_free() as free() if our version of curl lacks curl_free. */
 #undef curl_free
-
-/* Define to rpl_malloc if the replacement function should be used. */
-#undef malloc

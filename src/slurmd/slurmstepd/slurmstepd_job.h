@@ -8,11 +8,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,23 +28,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _SLURMSTEPD_JOB_H
 #define _SLURMSTEPD_JOB_H
 
-#if WITH_PTHREADS
 #include <pthread.h>
-#endif
-
 #include <pwd.h>
 
 #include "src/common/macros.h"
@@ -129,19 +126,30 @@ typedef struct {
 	slurmstepd_state_t state;	/* Job state			*/
 	pthread_cond_t state_cond;	/* Job state conditional	*/
 	pthread_mutex_t state_mutex;	/* Job state mutex		*/
-	uint32_t       jobid;  /* Current SLURM job id                      */
+	uint32_t       jobid;  /* Current Slurm job id                      */
 	uint32_t       stepid; /* Current step id (or NO_VAL)               */
 	uint32_t       array_job_id;  /* job array master job ID            */
 	uint32_t       array_task_id; /* job array ID                       */
 	uint32_t       nnodes; /* number of nodes in current job            */
 	uint32_t       ntasks; /* total number of tasks in current job      */
 	uint32_t       nodeid; /* relative position of this node in job     */
-	uint32_t       node_tasks; /* number of tasks on *this* node        */
+	uint32_t       node_offset;	/* pack job node offset or NO_VAL   */
+	uint32_t       node_tasks;	/* number of tasks on *this* node   */
+	uint32_t       pack_jobid;	/* pack job ID or NO_VAL */
+	uint32_t       pack_nnodes;	/* total node count for entire pack job */
+	char          *pack_node_list;	/* pack step node list */
+	uint32_t       pack_ntasks;	/* total task count for entire pack job */
+	uint32_t       pack_offset; 	/* pack job offset or NO_VAL        */
+	uint32_t       pack_step_cnt;  /* number of steps for entire pack job */
+	uint32_t       pack_task_offset;/* pack job task offset or NO_VAL   */
+	uint16_t      *pack_task_cnts;	/* Number of tasks on each node in pack job */
+	uint32_t     **pack_tids;       /* Task IDs on each node of pack job */
+	uint32_t      *pack_tid_offsets;/* map of tasks (by id) to originating pack*/
 	uint16_t      *task_cnts;  /* Number of tasks on each node in job   */
 	uint32_t       cpus_per_task;	/* number of cpus desired per task  */
 	uint32_t       debug;  /* debug level for job slurmd                */
-	uint32_t       job_mem;  /* MB of memory reserved for the job       */
-	uint32_t       step_mem; /* MB of memory reserved for the step      */
+	uint64_t       job_mem;  /* MB of memory reserved for the job       */
+	uint64_t       step_mem; /* MB of memory reserved for the step      */
 	uint16_t       cpus;   /* number of cpus to use for this job        */
 	uint32_t       argc;   /* number of commandline arguments           */
 	char         **env;    /* job environment                           */
@@ -150,24 +158,28 @@ typedef struct {
 	task_dist_states_t task_dist;/* -m distribution                     */
 	char          *node_name; /* node name of node running job
 				   * needed for front-end systems           */
-	cpu_bind_type_t cpu_bind_type; /* --cpu_bind=                       */
+	cpu_bind_type_t cpu_bind_type; /* --cpu-bind=                       */
 	char          *cpu_bind;       /* binding map for map/mask_cpu      */
-	mem_bind_type_t mem_bind_type; /* --mem_bind=                       */
+	mem_bind_type_t mem_bind_type; /* --mem-bind=                       */
 	char          *mem_bind;       /* binding map for tasks to memory   */
 	uint16_t accel_bind_type;  /* --accel_bind= */
 	uint32_t cpu_freq_min; /* Minimum cpu frequency  */
 	uint32_t cpu_freq_max; /* Maximum cpu frequency  */
 	uint32_t cpu_freq_gov; /* cpu frequency governor */
-	switch_jobinfo_t *switch_job; /* switch-specific job information     */
+	dynamic_plugin_data_t *switch_job; /* switch-specific job information     */
 	uid_t         uid;     /* user id for job                           */
 	char          *user_name;
+	/* fields from the launch cred used to support nss_slurm	    */
+	char *pw_gecos;
+	char *pw_dir;
+	char *pw_shell;
 	gid_t         gid;     /* group ID for job                          */
 	int           ngids;   /* length of the following gids array        */
+	char **gr_names;
 	gid_t        *gids;    /* array of gids for user specified in uid   */
 	bool           aborted;    /* true if already aborted               */
 	bool           batch;      /* true if this is a batch job           */
 	bool           run_prolog; /* true if need to run prolog            */
-	bool           user_managed_io;
 	time_t         timelimit;  /* time at which job must stop           */
 	uint32_t       profile;	   /* Level of acct_gather_profile          */
 	char          *task_prolog; /* per-task prolog                      */
@@ -199,20 +211,13 @@ typedef struct {
 			       * used when a new client attaches
 			       */
 
-	uint8_t	buffered_stdio; /* stdio buffering flag, 1 for line-buffering,
-				 * 0 for no buffering
-				 */
-	uint8_t labelio;	/* 1 for labelling output with the task id */
-
 	pthread_t      ioid;  /* pthread id of IO thread                    */
 	pthread_t      msgid; /* pthread id of message thread               */
 	eio_handle_t  *msg_handle; /* eio handle for the message thread     */
 
 	pid_t          jmgr_pid;     /* job manager pid                     */
 	pid_t          pgid;         /* process group id for tasks          */
-
-	uint16_t       task_flags;
-	uint16_t       multi_prog;
+	uint32_t       flags;        /* See LAUNCH_* flags defined in slurm_protocol_defs.h */
 	uint16_t       overcommit;
 	env_t          *envtp;
 	uint64_t       cont_id;
@@ -220,7 +225,6 @@ typedef struct {
 	char          *batchdir;
 	jobacctinfo_t *jobacct;
 	uint8_t        open_mode;	/* stdout/err append or truncate */
-	uint8_t        pty;		/* set if creating pseudo tty	*/
 	job_options_t  options;
 	char          *ckpt_dir;
 	time_t         ckpt_timestamp;
@@ -231,6 +235,8 @@ typedef struct {
 	char	      *step_alloc_cores;/* needed by the SPANK cpuset plugin */
 	List           job_gres_list;	/* Needed by GRES plugin */
 	List           step_gres_list;	/* Needed by GRES plugin */
+	char          *tres_bind;	/* TRES binding */
+	char          *tres_freq;	/* TRES frequency */
 	launch_tasks_request_msg_t *msg; /* When a non-batch step this
 					  * is the message sent.  DO
 					  * NOT FREE, IT IS JUST A
@@ -240,6 +246,16 @@ typedef struct {
 	int		non_smp;	/* Set if task IDs are not monotonically
 					 * increasing across all nodes, set only
 					 * native Cray systems */
+	bool		oom_error;	/* step out of memory error */
+
+	uint16_t x11;			/* only set for extern step */
+	int x11_display;		/* display number if x11 forwarding setup */
+	char *x11_alloc_host;		/* remote host to proxy through */
+	uint16_t x11_alloc_port;	/* remote port to proxy through */
+	char *x11_magic_cookie;		/* xauth magic cookie value */
+	char *x11_target;		/* remote target. unix socket if port == 0 */
+	uint16_t x11_target_port;	/* remote x11 port to connect back to */
+	char *x11_xauthority;		/* temporary XAUTHORITY location, or NULL */
 } stepd_step_rec_t;
 
 

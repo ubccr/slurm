@@ -4,11 +4,11 @@
  *  Copyright (C) 2009 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,19 +24,15 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#if HAVE_CONFIG_H
-#   include "config.h"
-#endif
 
 #ifndef _XCPUINFO_H_
 #define _XCPUINFO_H_
@@ -45,10 +41,30 @@
 #define XCPUINFO_SUCCESS  0
 
 extern int get_procs(uint16_t *procs);
-extern int get_cpuinfo(uint16_t *cpus, uint16_t *boards,
-		       uint16_t *sockets, uint16_t *cores, uint16_t *threads,
-		       uint16_t *block_map_size,
-		       uint16_t **block_map, uint16_t **block_map_inv);
+
+/* read or load topology and write if needed
+ * init and destroy topology must be outside this function */
+extern int xcpuinfo_hwloc_topo_load(
+	void *topology_in, char *topo_file, bool full);
+/*
+ * Get the node's cpu info.
+ *
+ * OUT - cpus - cpus per node
+ * OUT - boards - boards per node
+ * OUT - sockets - sockets per board
+ * OUT - cores - cores per socket
+ * OUT - threads - threads per core
+ * OUT - block_map_size - should be same as cpus
+ * OUT - block_map - physical map of cpus
+ * OUT - block_map_inv - absolute map of cpus
+ *
+ * RET SLURM_SUCCESS on success and 1 or 2 on failure.
+ */
+extern int xcpuinfo_hwloc_topo_get(
+	uint16_t *cpus, uint16_t *boards,
+	uint16_t *sockets, uint16_t *cores, uint16_t *threads,
+	uint16_t *block_map_size,
+	uint16_t **block_map, uint16_t **block_map_inv);
 
 /*
  * Initialize xcpuinfo internal data

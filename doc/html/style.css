@@ -23,7 +23,6 @@ body:before {
 .container {
 	margin: 0 auto;
 	padding: 0 18px;
-	max-width: 1400px;
 }
 
 .container--main {
@@ -176,14 +175,28 @@ sub {
 }
 
 code,
-pre {
+pre,
+.commandline {
 	font-family: 'Source Code Pro', monospace;
-	display: block;
+}
+
+code,
+.commandline {
+	display: inline;
+	overflow: auto;
+	padding: 0 0.2em;
+	border-radius: 5px;
+	border: 1px solid #e8e8e8;
+	background-color: #e8e8e8;
+}
+
+pre {
 	background: #333333;
 	color: #EEEEEE;
-	padding: 12px 18px;
-	overflow: auto;
+	display: block;
 	font-size: .85em;
+	overflow: auto;
+	padding: 12px 18px;
 }
 
 
@@ -661,6 +674,7 @@ input[type="checkbox"] {
 @media screen and (min-width: 32em) {
 	.container {
 		padding: 0 36px;
+		max-width: 100%;
 	}
 }
 
@@ -673,6 +687,7 @@ input[type="checkbox"] {
 
 	.container {
 		padding: 0 48px;
+		max-width: 90%;
 	}
 
 	.container--main {
@@ -726,13 +741,13 @@ input[type="checkbox"] {
 	}
 
 	.content {
-		flex: 1;
+		flex: auto;
 		width: calc(100% - 360px);
 		float: right;
 	}
 
 	.content .container {
-		padding: 0 8% 0 8%;
+		padding: 0 0 0 100px;
 		margin: 0;
 	}
 
@@ -772,6 +787,9 @@ input[type="checkbox"] {
 
 /* Extra Large Size */
 @media screen and (min-width: 78em) {
-
+	.container {
+		padding: 0 48px;
+		max-width: 90%;
+	}
 }
 

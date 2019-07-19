@@ -5,11 +5,11 @@
  *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 #ifndef PMIXP_DEBUG_H
@@ -49,20 +49,20 @@
 		file_base = file;				\
 	}							\
 	debug("%s [%d] %s:%d [%s] mpi/pmix: " format "",	\
-		pmixp_info_hostname(), pmixp_info_nodeid(),	\
-		file_base, __LINE__, __func__, ## args);	\
+	      pmixp_info_hostname(), pmixp_info_nodeid(),	\
+	      file_base, __LINE__, __func__, ## args);		\
 }
 
 #define PMIXP_ERROR_STD(format, args...) {			\
 	char file[] = __FILE__;					\
 	char *file_base = strrchr(file, '/');			\
 	if (file_base == NULL) {				\
-	file_base = file;					\
+		file_base = file;				\
 	}							\
-	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)",	\
-		pmixp_info_hostname(), pmixp_info_nodeid(),	\
-		file_base, __LINE__, __func__,			\
-		## args, strerror(errno), errno);		\
+	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
+	      pmixp_info_hostname(), pmixp_info_nodeid(),	\
+	      file_base, __LINE__, __func__,			\
+	      ## args, strerror(errno), errno);			\
 }
 
 #define PMIXP_ERROR(format, args...) {				\
@@ -72,17 +72,17 @@
 		file_base = file;				\
 	}							\
 	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format,	\
-		pmixp_info_hostname(), pmixp_info_nodeid(),	\
-		file_base, __LINE__, __func__, ## args);	\
+	      pmixp_info_hostname(), pmixp_info_nodeid(),	\
+	      file_base, __LINE__, __func__, ## args);		\
 }
 
 #define PMIXP_ABORT(format, args...) {				\
 	PMIXP_ERROR(format, ##args);                            \
 	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format,	\
-		pmixp_info_hostname(), pmixp_info_nodeid(),	\
-		file_base, __LINE__, __func__, ## args);	\
-		slurm_kill_job_step(pmixp_info_jobid(),         \
-		pmixp_info_stepid(), SIGKILL);			\
+	      pmixp_info_hostname(), pmixp_info_nodeid(),	\
+	      file_base, __LINE__, __func__, ## args);		\
+	slurm_kill_job_step(pmixp_info_jobid(),			\
+			    pmixp_info_stepid(), SIGKILL);	\
 }
 
 #define PMIXP_ERROR_NO(err, format, args...) {			\
@@ -92,9 +92,9 @@
 		file_base = file;				\
 	}							\
 	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
-		pmixp_info_hostname(), pmixp_info_nodeid(),	\
-		file_base, __LINE__, __func__,			\
-		## args, strerror(err), err);			\
+	      pmixp_info_hostname(), pmixp_info_nodeid(),	\
+	      file_base, __LINE__, __func__,			\
+	      ## args, strerror(err), err);			\
 }
 
 #ifdef NDEBUG

@@ -66,8 +66,8 @@ function get_radio_value(form)
 // correspond to the checked select_type
 function get_select_type_params()
 {
-  if ((document.config.select_type[2].checked) ||	// cons_res or
-      (document.config.select_type[3].checked)) {	// cray
+  if ((document.config.select_type[0].checked) ||	// cons_res or
+      (document.config.select_type[1].checked)) {	// cray
     return get_radio_field_skipfirst("SelectTypeParameters",
     					document.config.cons_res_params)
   } else {
@@ -103,8 +103,7 @@ function displayfile()
    "# Put this file on all nodes of your cluster.<br>" +
    "# See the slurm.conf man page for more information.<br>" +
    "#<br>" +
-   "ControlMachine=" + document.config.control_machine.value + "<br>" +
-   get_field("ControlAddr",document.config.control_addr) + "<br>" +
+   "SlurmctldHost=" + document.config.control_machine.value + "<br>" +
    "# <br>" +
    "#MailProg=/bin/mail <br>" +
    "MpiDefault=" + get_radio_value(document.config.mpi_default) + "<br>" +
@@ -133,8 +132,8 @@ function displayfile()
    "# SCHEDULING <br>" +
    "FastSchedule=" + get_radio_value(document.config.fast_schedule) + "<br>" +
    "SchedulerType=sched/" + get_radio_value(document.config.sched_type) + "<br>" +
-   "#SchedulerPort=7321 <br>" +
    "SelectType=select/" + get_radio_value(document.config.select_type) + "<br>" +
+   get_select_type_params() + "<br>" +
    "# <br>" +
    "# <br>" +
    "# LOGGING AND ACCOUNTING <br>" +
@@ -142,9 +141,9 @@ function displayfile()
    get_field("ClusterName",document.config.cluster_name) + "<br>" +
    "#JobAcctGatherFrequency=30 <br>" +
    "JobAcctGatherType=jobacct_gather/" + get_radio_value(document.config.job_acct_gather_type) + "<br>" +
-   "#SlurmctldDebug=3 <br>" +
+   "#SlurmctldDebug=info <br>" +
    get_field("SlurmctldLogFile",document.config.slurmctld_logfile) + "<br>" +
-   "#SlurmdDebug=3 <br>" +
+   "#SlurmdDebug=info <br>" +
    get_field("SlurmdLogFile",document.config.slurmd_logfile) + "<br>" +
    "# <br>" +
    "# <br>" +
@@ -222,17 +221,12 @@ as <I>slurm.conf</I> for use by Slurm.
 
 <H2>Control Machines</H2>
 Define the hostname of the computer on which the Slurm controller and
-optional backup controller will execute. You can also specify addresses
-of these computers if desired (defaults to their hostnames).
-The IP addresses can be either numeric IP addresses or names.
+optional backup controller will execute.
 Hostname values should should not be the fully qualified domain
 name (e.g. use <I>tux</I> rather than <I>tux.abc.com</I>).
 <P>
-<input type="text" name="control_machine" value="linux0"> <B>ControlMachine</B>:
+<input type="text" name="control_machine" value="linux0"> <B>SlurmctldHost</B>:
 Master Controller Hostname
-<P>
-<input type="text" name="control_addr"> <B>ControlAddr</B>: Master Controller
-Address (optional)
 <P>
 
 <H2>Compute Machines</H2>
@@ -352,28 +346,21 @@ Mark node DOWN if registers with fewer resources<BR>
 <H2>Interconnect</H2>
 Define the node interconnect used.<BR>
 Select one value for <B>SwitchType</B>:<BR>
-<input type="radio" name="switch_type" value="cray"> <B>Cray</B>: Cray proprietary interconnect<BR>
+<input type="radio" name="switch_type" value="cray_aries"> <B>Cray XC</B>: Cray XC proprietary interconnect<BR>
 <input type="radio" name="switch_type" value="none" checked> <B>None</B>: No special
 handling required (InfiniBand, Myrinet, Ethernet, etc.)<BR>
-<input type="radio" name="switch_type" value="nrt"> <B>NRT</B>: IBM Network Resource Table<BR>
 <P>
 
 <H2>Default MPI Type</H2>
 Specify the type of MPI to be used by default. Slurm will configure environment
 variables accordingly. Users can over-ride this specification with an srun option.<BR>
 Select one value for <B>MpiDefault</B>:<BR>
-<input type="radio" name="mpi_default" value="mpichgm"> <B>MPICH-GM</B><BR>
-<input type="radio" name="mpi_default" value="mpichmx"> <B>MPICH-MX</B><BR>
-<input type="radio" name="mpi_default" value="mpich1_p4"> <B>MPICH1-P4</B><BR>
-<input type="radio" name="mpi_default" value="mpich1_shmem"> <B>MPICH1-SHMEM</B>:
-This also works for MVAPICH-SHMEM.<BR>
 <input type="radio" name="mpi_default" value="pmi2"> <B>MPI-PMI2</B>
-(For MPI2 and MVAPICH2)<BR>
+(For PMI2-supporting MPI implementations)<BR>
 <input type="radio" name="mpi_default" value="pmix"> <B>MPI-PMIx</B>
 (Exascale PMI implementation)<BR>
-<input type="radio" name="mpi_default" value="mvapich"> <B>MVAPICH</B><BR>
 <input type="radio" name="mpi_default" value="none" checked> <B>None</B>:
-+This works for most other MPI types including MPICH2, LAM MPI and Open MPI.<BR>
+ This works for most other MPI types.<BR>
 <P>
 
 <H2>Process Tracking</H2>
@@ -381,51 +368,37 @@ Define the algorithm used to identify which processes are associated with a
 given job. This is used signal, kill, and account for the processes associated
 with a job step.<BR>
 Select one value for <B>ProctrackType</B>:<BR>
-<input type="radio" name="proctrack_type" value="aix"> <B>AIX</B>: Use AIX kernel
-extension, recommended for AIX systems<BR>
-<input type="radio" name="proctrack_type" value="cgroup"> <B>Cgroup</B>:  Use
+<input type="radio" name="proctrack_type" value="cgroup" checked> <B>Cgroup</B>:  Use
 Linux <i>cgroup</i> to create a job container and track processes.
 Build a <i>cgroup.conf</i> file as well<BR>
-<input type="radio" name="proctrack_type" value="cray"> <B>Cray</B>: Cray proprietary process tracking<BR>
-<input type="radio" name="proctrack_type" value="pgid" checked> <B>Pgid</B>: Use Unix
+<input type="radio" name="proctrack_type" value="cray_aries"> <B>Cray XC</B>: Cray XC proprietary process tracking<BR>
+<input type="radio" name="proctrack_type" value="linuxproc"> <B>LinuxProc</B>: Use
+parent process ID records, processes can escape from Slurm control<BR>
+<input type="radio" name="proctrack_type" value="pgid"> <B>Pgid</B>: Use Unix
 Process Group ID, processes changing their process group ID can escape from Slurm
 control<BR>
-<input type="radio" name="proctrack_type" value="linuxproc"> <B>LinuxProc</B>: Use
-parent process ID records, required for MPICH-GM use, processes can escape
-from Slurm control<BR>
-<input type="radio" name="proctrack_type" value="rms"> <B>RMS</B>: Use Quadrics
-kernel infrastructure, recommended for systems where this is available<BR>
-<input type="radio" name="proctrack_type" value="sgi_job"> <B>SGI's PAGG
-module</B>: Use <A HREF="http://oss.sgi.com/projects/pagg/">SGI's Process
-Aggregates (PAGG) kernel module</A>, recommended where available<BR>
 <P>
 
 <H2>Resource Selection</H2>
 Define resource (node) selection algorithm to be used.<BR>
 Select one value for <B>SelectType</B>:<BR>
-<input type="radio" name="select_type" value="alps">
-<B>Alps</B>: Cray systems running ALPS only<BR>
-<input type="radio" name="select_type" value="bluegene">
-<B>BlueGene</B>: For IBM Blue Gene systems only<BR>
-<input type="radio" name="select_type" value="cons_res">
+<input type="radio" name="select_type" value="cons_res" checked>
 <B>Cons_res</B>: Allocate individual processors and memory<BR>
-<input type="radio" name="select_type" value="cray">
-<B>Cray</B>: Cray systems running native Slurm without ALPS<BR>
-<input type="radio" name="select_type" value="linear" checked>
+<input type="radio" name="select_type" value="cray_aries">
+<B>Cray XC</B>: Cray XC systems running native Slurm without ALPS<BR>
+<input type="radio" name="select_type" value="linear">
 <B>Linear</B>: Node-base
 resource allocation, does not manage individual processor allocation<BR>
-<input type="radio" name="select_type" value="serial">
-<B>Serial</B>: Execute single CPU jobs only<BR>
 <DL>
-<DT><B>SelectTypeParameters</B> (As used by <I>SelectType=cons_res or cray</I> only):
+<DT><B>SelectTypeParameters</B> (Not supported by <I>SelectType=select/linear</I>):
     <DD> Note: The -E extension for sockets, cores, and threads
 	are ignored within the node allocation mechanism
 	when CR_CPU or CR_CPU_MEMORY is selected.
 	They are considered to compute the total number of
 	tasks when -n is not specified
     <DD> Note: CR_MEMORY assumes MaxShare value of one of higher
-<DT> <input type="radio" name="cons_res_params" value="CR_CPU" checked>
-    <B>CR_CPU</B>: (default)
+<DT> <input type="radio" name="cons_res_params" value="CR_CPU">
+    <B>CR_CPU</B>:
     CPUs as consumable resources.
     <DD> No notion of sockets, cores, or threads.
     On a multi-core system, cores will be considered CPUs.
@@ -433,8 +406,8 @@ resource allocation, does not manage individual processor allocation<BR>
     On a single-core systems CPUs are CPUs. ;-)
 <DT> <input type="radio" name="cons_res_params" value="CR_Socket">
     <B>CR_Socket</B>: Sockets as a consumable resource.
-<DT> <input type="radio" name="cons_res_params" value="CR_Core">
-    <B>CR_Core</B>: Cores as a consumable resource.
+<DT> <input type="radio" name="cons_res_params" value="CR_Core" checked>
+    <B>CR_Core</B>: (default) Cores as a consumable resource.
 <DT> <input type="radio" name="cons_res_params" value="CR_Memory">
     <B>CR_Memory</B>: Memory as a consumable resource.
     <DD> Note: CR_Memory assumes MaxShare value of one of higher
@@ -455,12 +428,12 @@ Define a task launch plugin. This may be used to
 provide resource management within a node (e.g. pinning
 tasks to specific processors).
 Select one value for <B>TaskPlugin</B>:<BR>
-<input type="radio" name="task_plugin" value="cray"> <B>Cray</B>: Cray proprietary
+<input type="radio" name="task_plugin" value="cray_aries"> <B>Cray XC</B>: Cray XC proprietary
 task launch<BR>
-<input type="radio" name="task_plugin" value="none" checked> <B>None</B>: No task launch actions<BR>
-<input type="radio" name="task_plugin" value="affinity"> <B>Affinity</B>:
+<input type="radio" name="task_plugin" value="none"> <B>None</B>: No task launch actions<BR>
+<input type="radio" name="task_plugin" value="affinity" checked> <B>Affinity</B>:
 CPU affinity support
-(see srun man pages for the --cpu_bind, --mem_bind, and -E options)<BR>
+(see srun man pages for the --cpu-bind, --mem-bind, and -E options)<BR>
 <input type="radio" name="task_plugin" value="cgroup"> <B>Cgroup</B>:
 Allocated resources constraints enforcement using Linux Control Groups
 (see cgroup.conf man page)
@@ -485,8 +458,6 @@ determined by system type<BR>
 Select one value for <B>JobAcctGatherType</B>:<BR>
 <input type="radio" name="job_acct_gather_type" value="none" checked> <B>None</B>: No
 job accounting<BR>
-<input type="radio" name="job_acct_gather_type" value="aix"> <B>AIX</B>: Specifc
-AIX process table information gathered, use with AIX systems only<BR>
 <input type="radio" name="job_acct_gather_type" value="linux"> <B>Linux</B>: Specifc
 Linux process table information gathered, use with Linux systems only<BR>
 
@@ -497,8 +468,6 @@ Select one value for <B>AccountingStorageType</B>:<BR>
 No job accounting storage<BR>
 <input type="radio" name="accounting_storage_type" value="filetxt"> <B>FileTxt</B>:
 Write job accounting to a text file (records limited information)<BR>
-<input type="radio" name="accounting_storage_type" value="mysql"> <B>MySQL</B>:
-Write job accounting to a MySQL or MariaDB database<BR>
 <input type="radio" name="accounting_storage_type" value="slurmdbd"> <B>SlurmDBD</B>:
 Write job accounting to Slurm DBD (database daemon) which can securely
 save the data from many Slurm managed clusters into a common database<BR>
@@ -512,7 +481,7 @@ from multiple Slurm-managed clusters.<br>
 
 <H2>Process ID Logging</H2>
 Define the location into which we can record the daemon's process ID.
-This is used for locate the appropriate daemon for signalling.
+This is used for locate the appropriate daemon for signaling.
 Specify a specify the fully qualified pathname for the file.
 <P>
 <input type="text" name="slurmctld_pid_file" value="/var/run/slurmctld.pid">
@@ -530,5 +499,5 @@ Specify a specify the fully qualified pathname for the file.
 </FORM>
 <HR>
 <a href="disclaimer.html" target="_blank" class="privacy">Legal Notices</a><br>
-Last modified 25 March 2014</P>
+Last modified 10 April 2018</P>
 </BODY>

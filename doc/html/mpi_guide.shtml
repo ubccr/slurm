@@ -4,19 +4,21 @@
 
 <p>MPI use depends upon the type of MPI being used.
 There are three fundamentally different modes of operation used
-by these various MPI implementations.</p>
+by these various MPI implementation.
 <ol>
-<li>Slurm directly launches the tasks and performs initialization
-of communications (UPC, Quadrics MPI, MPICH2, MPICH-GM, MPICH-MX,
-MVAPICH, MVAPICH2, some MPICH1 modes, and OpenMPI version 1.5 or higher).</li>
+<li>Slurm directly launches the tasks and performs initialization of
+communications through the PMI2 or PMIx APIs. (Supported by most
+modern MPI implementations.)</li>
 <li>Slurm creates a resource allocation for the job and then
-mpirun launches tasks using Slurm's infrastructure (LAM/MPI and HP-MPI).</li>
+mpirun launches tasks using Slurm's infrastructure (older versions of
+OpenMPI).</li>
 <li>Slurm creates a resource allocation for the job and then
 mpirun launches tasks using some mechanism other than Slurm,
-such as SSH or RSH (BlueGene MPI and some MPICH1 modes).
-These tasks are initiated outside of Slurm's monitoring
+such as SSH or RSH.
+These tasks initiated outside of Slurm's monitoring
 or control. Slurm's epilog should be configured to purge
-these tasks when the job's allocation is relinquished. </li>
+these tasks when the job's allocation is relinquished. The
+use of pam_slurm_adopt is also strongly recommended.</li>
 </ol>
 <p><b>Note</b>: Slurm is not directly launching the user application in case 3,
 which may prevent the desired behavior of binding tasks to CPUs and/or
@@ -30,27 +32,250 @@ environment variables. The <i>MpiDefault</i> configuration parameter
 in <i>slurm.conf</i> establishes the system default MPI to be supported.
 The <i>srun</i> option <i>--mpi=</i> (or the equivalent environment
 variable <i>SLURM_MPI_TYPE</i> can be used to specify when a
-different MPI implementation is to be supported for an individual job.</p>
+different MPI implementation is to be supported for an individual job).</p>
 
-<p>Links to instructions for using several varieties of MPI
+<p><b>Note</b>: Use of an MPI implementation without the appropriate Slurm
+plugin may result in application failure. If multiple MPI implementations
+are used on a system then some users may be required to explicitly specify
+a suitable Slurm MPI plugin.</p>
+
+<p>Links to instructions for using several varieties of MPI/PMI
 with Slurm are provided below.
 <ul>
-<li><a href="#bluegene_mpi">BlueGene MPI</a></li>
-<li><a href="#hp_mpi">HP-MPI</a></li>
 <li><a href="#intel_mpi">Intel-MPI</a></li>
-<li><a href="#lam_mpi">LAM/MPI</a></li>
-<li><a href="#mpich1">MPICH1</a></li>
 <li><a href="#mpich2">MPICH2</a></li>
-<li><a href="#mpich_gm">MPICH-GM</a></li>
-<li><a href="#mpich_mx">MPICH-MX</a></li>
-<li><a href="#mvapich">MVAPICH</a></li>
 <li><a href="#mvapich2">MVAPICH2</a></li>
 <li><a href="#open_mpi">Open MPI</a></li>
-<li><a href="#quadrics_mpi">Quadrics MPI</a></li>
+<li><a href="#pmix">PMIx</a></li>
 <li><a href="#UPC">UPC</a></li>
 </ul></p>
 <hr size=4 width="100%">
 
+<h2><a name="pmix" href="https://www.open-mpi.org/projects/pmix/"><b>PMIx</b>
+</a></h2>
+
+<h3>Building PMIx</h3>
+
+<p>Before building PMIx, it is advisable to read these
+<a href="https://pmix.org/support/how-to/">How-To Guides</a>. They provide
+some details on
+<a href="https://pmix.org/code/getting-the-reference-implementation">
+building dependencies and installation steps</a> as well as some relevant notes
+with regards to <a href="https://pmix.org/support/how-to/slurm-support">Slurm
+Support</a>.</p>
+
+<p>This section is intended to complement the PMIx FAQ with some notes on how to
+prepare Slurm and PMIx to work together. PMIx can be obtained from the official
+<a href="https://github.com/pmix/pmix">PMIx GitHub</a> repository, either by
+cloning the repository or by downloading a packaged release.</p>
+
+<p>Slurm support for PMIx was first included in Slurm 16.05 based on the PMIx
+v1.2 release. It has since been updated to support the PMIx v2.x and v3.x
+series, as per the following table:
+<ul>
+<li>Slurm 16.05+ supports only the PMIx v1.x series, starting with v1.2.0. This
+Slurm version specifically does <b>not</b> support PMIx v2.x and above.</li>
+<li>Slurm 17.11+ supports both PMIx v1.2+ and v2.x but not v3.x.</li>
+<li>Slurm 18.08+ supports PMIx v1.2+, v2.x and v3.x.</li>
+</ul>
+If running PMIx v1, it is recommended to run at least 1.2.5 since older
+versions may have some compatibility issues with support of pmi and pmi2 APIs.
+
+Note also that Intel MPI doesn't officially support PMIx, so thought it can
+run there is not any guarantee.
+</p>
+
+<p>Altough it is recommended to build PMIx from the
+<a href="https://github.com/pmix/pmix/releases">packaged releases</a>, here is
+an example on how to build PMIx v2.1 by cloning the git repository:
+</p>
+
+<pre>
+user@testbox:~/git$ mkdir -p pmix/build/2.1 pmix/install/2.1
+user@testbox:~/git$ cd pmix
+user@testbox:~/git/pmix$ git clone https://github.com/pmix/pmix.git source
+user@testbox:~/git/pmix$ cd source/
+user@testbox:~/git/pmix/source$ git branch -a
+user@testbox:~/git/pmix/source$ git checkout v2.1
+user@testbox:~/git/pmix/source$ git pull
+user@testbox:~/git/pmix/source$ ./autogen.sh
+user@testbox:~/git/pmix/source$ cd ../build/2.1/
+user@testbox:~/git/pmix/build/2.1$ ../../source/configure \
+&gt; --prefix=/home/user/git/pmix/install/2.1
+user@testbox:~/git/pmix/build/2.1$ make -j install >/dev/null
+user@testbox:~/git/pmix/build/2.1$ cd ../../install/2.1/
+user@testbox:~/git/pmix/install/2.1$ grep PMIX_VERSION include/pmix_version.h
+#define PMIX_VERSION_MAJOR 2L
+#define PMIX_VERSION_MINOR 1L
+user@testbox:~/git/pmix/install/2.1$
+</pre>
+
+<p>For the purpose of these instructions let's imagine PMIx v2.1 has been
+installed on the following path:</p>
+
+<pre>
+user@testbox:/home/user/git/pmix/install/2.1
+</pre>
+
+<p>Additional PMIx notes can be found in the SchedMD
+<a href="publications.html">Publications and Presentations</a> page.</p>
+
+<h3>Building Slurm with PMIx support</h3>
+
+<p>At configure time, Slurm looks by default for a PMIx installation under:</p>
+
+<pre>
+/usr
+/usr/local
+</pre>
+
+<p>If PMIx isn't installed in any of the previous locations, the Slurm configure
+script can be requested to point to the non default location. Here's an example:
+</p>
+
+<pre>
+user@testbox:~/slurm/17.11/testbox/slurm$ ../../slurm/configure \
+&gt; --prefix=/home/user/slurm/17.11/testbox \
+&gt; <b>--with-pmix=/home/user/git/pmix/install/2.1</b> \
+&gt; --enable-multiple-slurmd
+</pre>
+
+<p>Or the analogous with RPM based building:</p>
+
+<pre>
+[user@testbox Downloads]$ rpmbuild \
+&gt; --define '_prefix /home/user/slurm/17.11/testbox' \
+&gt; --define '_slurm_sysconfdir /home/user/slurm/17.11/testbox/etc' \
+&gt; --with multiple_slurmd \
+&gt; <b>--define '_with_pmix --with-pmix=/home/user/git/pmix/install/2.1'</b> \
+&gt; -ta slurm-17.11.1.tar.bz2
+</pre>
+
+<p>NOTE: It is also possible to build against multiple PMIx versions with a ':'
+separator. For instance to build against 1.2 and 2.1:</p>
+
+<pre>
+...
+&gt; <b>--with-pmix=/path/to/pmix/install/1.2:/path/to/pmix/install/2.1</b> \
+...
+</pre>
+
+<p>NOTE: When submitting a job, the desired version can then be selected using
+any of the available from --mpi=list. The default for pmix will be the highest
+version of the library:</p>
+
+<pre>
+user@testbox:~/t$ srun --mpi=list
+srun: MPI types are...
+srun: pmix_v1
+srun: pmi2
+srun: openmpi
+srun: none
+srun: pmix
+srun: pmix_v2
+</pre>
+
+<p>NOTE: There is no need to configure Slurm with the multiple-slurmd option,
+but if it is configured with it, additional steps will be required to make PMIx
+work. That case is covered a few paragraphs below.
+</p>
+
+<p>Continuing with the configuration, if Slurm is unable to locate the PMIx
+installation and/or finds it but considers it not usable, the configure output
+should log something like this:</p>
+
+<pre>
+checking for pmix installation...
+configure: WARNING: unable to locate pmix installation
+</pre>
+
+<p>Otherwise, if Slurm finds it and considers it usable, something like this:
+</p>
+
+<pre>
+checking for pmix installation... /home/user/git/pmix/install/2.1
+</pre>
+
+<p>Inspecting the generated config.log in the Slurm build directory might
+provide even more detail for troubleshooting purposes. After configuration,
+we can proceed to install Slurm (using make or rpm accordingly):</p>
+
+<pre>
+user@testbox:~/slurm/17.11/testbox/slurm$ make -j install > /dev/null
+user@testbox:~/slurm/17.11/testbox/slurm$ cd ../lib/slurm/
+user@testbox:~/slurm/17.11/testbox/lib/slurm$ ls -l | grep pmix
+lrwxrwxrwx 1 user user       16 Dec  6 19:35 mpi_pmix.so -> ./mpi_pmix_v2.so
+-rw-r--r-- 1 user user  7008260 Dec  6 19:35 mpi_pmix_v2.a
+-rwxr-xr-x 1 user user     1040 Dec  6 19:35 mpi_pmix_v2.la
+-rwxr-xr-x 1 user user  1020112 Dec  6 19:35 mpi_pmix_v2.so
+user@testbox:~/slurm/17.11/testbox/lib/slurm$
+</pre>
+
+<p>If support for PMI2 version is also needed, it can also be installed from
+the contribs directory:</p>
+
+<pre>
+user@testbox:~/slurm/17.11/testbox/lib/slurm$ cd ../../slurm/contribs/pmi2
+user@testbox:~/slurm/17.11/testbox/slurm/contribs/pmi2$ make -j install
+user@testbox:~/slurm/17.11/testbox/slurm/contribs/pmi2$ cd ../../../lib
+user@testbox:~/slurm/17.11/testbox/lib$ ls -l | grep pmi
+-rw-r--r-- 1 user user   498144 Dec  6 20:05 libpmi2.a
+-rwxr-xr-x 1 user user      958 Dec  6 20:05 libpmi2.la
+lrwxrwxrwx 1 user user       16 Dec  6 20:05 libpmi2.so -> libpmi2.so.0.0.0
+lrwxrwxrwx 1 user user       16 Dec  6 20:05 libpmi2.so.0 -> libpmi2.so.0.0.0
+-rwxr-xr-x 1 user user   214512 Dec  6 20:05 libpmi2.so.0.0.0
+-rw-r--r-- 1 user user   414680 Dec  6 19:35 libpmi.a
+-rwxr-xr-x 1 user user     1011 Dec  6 19:35 libpmi.la
+lrwxrwxrwx 1 user user       15 Dec  6 19:35 libpmi.so -> libpmi.so.0.0.0
+lrwxrwxrwx 1 user user       15 Dec  6 19:35 libpmi.so.0 -> libpmi.so.0.0.0
+-rwxr-xr-x 1 user user   230552 Dec  6 19:35 libpmi.so.0.0.0
+user@testbox:~/slurm/17.11/testbox/lib$
+</pre>
+
+<p>NOTE: Since both Slurm and PMIx provide libpmi[2].so libraries, we recommend
+to install both pieces of software in different locations. Otherwise, both
+libraries provided by Slurm and PMIx might end up being installed under standard
+locations like /usr/lib64 and the package manager erroring out and reporting
+the conflict. It is planned to alleviate that by putting these libraries in a
+separate libpmi-slurm package.</p>
+
+<p>NOTE: If support for multiple-slurmd is required, the TmpFS option in
+slurm.conf needs to be specified and as many directory paths as nodes be
+created. These directories are used by the Slurm PMIx plugin to create temporal
+files and/or UNIX sockets. Here's an example setup for two nodes named
+compute[1-2]:
+</p>
+
+<pre>
+TmpFS=/home/user/slurm/17.11/testbox/spool/slurmd-tmpfs-%n
+user@testbox:~/slurm/17.11/testbox$ mkdir spool/slurmd-tmpfs-compute1
+user@testbox:~/slurm/17.11/testbox$ mkdir spool/slurmd-tmpfs-compute2
+</pre>
+
+<h3>Testing Slurm and PMIx</h3>
+
+<p>It is possible to directly test Slurm and PMIx without the need of a MPI
+implementation software being installed. Here's an example indicating that
+both components work properly:</p>
+
+<pre>
+user@testbox:~/t$ srun --mpi=list
+srun: MPI types are...
+srun: pmi2
+srun: openmpi
+srun: none
+srun: pmix
+srun: pmix_v2
+user@testbox:~/t$ srun --mpi=pmix -n2 -N2 \
+&gt; ~/git/pmix/build/2.1/test/pmix_client -n 2 --job-fence -c
+OK
+OK
+user@testbox:~/t$ srun --mpi=pmix_v2 -n2 -N2 \
+&gt; ~/git/pmix/build/2.1/test/pmix_client -n 2 --job-fence -c
+OK
+OK
+user@testbox:~/t$
+</pre>
 
 <h2><a name="open_mpi" href="http://www.open-mpi.org/"><b>OpenMPI</b></a></h2>
 
@@ -59,17 +284,48 @@ with Slurm are provided below.
 It relies upon Slurm managing reservations of communication ports for use by
 the Open MPI version 1.5.</p>
 
-<p>If OpenMPI is configured with <i>--with-pmi</i> either pmi or pmi2
+<p>If OpenMPI is configured with <i>--with-pmi</i> either pmi or pmi2,
 the OMPI jobs can be launched directly using the srun command. This is
-the preferred way. If the pmi2 support is enabled then the command line
-options '--mpi=pmi2' has to be specified on the srun command line.
+the preferred mode of operation. If the pmi2 support is enabled, the option
+'--mpi=pmi2' or '--mpi=pmi2_v2' must be specified on the srun command line.
+Alternately configure 'DefaultMpi=pmi' or 'DefaultMpi=pmi_v2' in slurm.conf.</p>
 
-<p>Starting from Open MPI version 2.0 PMIx is natively supported. To launch
-Open MPI application using PMIx the '--mpi=pmix' option has to be
-specified on the srun command line.
+<p>Starting with Open MPI version 3.1, PMIx version 2 is natively supported.
+To launch Open MPI application using PMIx version 2 the '--mpi=pmix_v2' option
+must be specified on the srun command line or 'DefaultMpi=pmi_v2' configured
+in slurm.conf. Open MPI version 4.0, adds support for PMIx version 3 and is
+invoked in the same way, with '--mpi=pmix_v3'.</p>
 
-<p>
-For older versions of OMPI not compiled with the pmi support
+<p>In Open MPI version 2.0, PMIx is natively supported too. To launch
+Open MPI application using PMIx the '--mpi=pmix' or '--mpi=pmix_v1' option has
+to be specified on the srun command line. It is also possible to build OpenMPI
+using an external PMIx installation. That option can take one of three values:
+"internal", "external", or a valid directory name. "internal" (or no DIR value)
+forces Open MPI to use its internal copy of PMIx. "external" forces Open MPI to
+use an external installation of PMIx. Supplying a valid directory name also
+forces Open MPI to use an external installation of PMIx, and adds DIR/include,
+DIR/lib, and DIR/lib64 to the search path for headers and libraries.
+Note that Open MPI does not support --without-pmix. Note also that if building
+OpenMPI using an external PMIx installation, both OpenMPI and PMIx need to be
+built against the same libevent/hwloc installations, otherwise a warning is
+shown. OpenMPI configure script provides the options <b>--with-libevent=PATH</b>
+ and/or <b>--with-hwloc=PATH</b> to make OpenMPI match what PMIx was built
+against.</p>
+
+<p>A set of environment variables are available to control the behavior of Slurm
+PMIx plugin:
+<ul>
+<li><i>SLURM_PMIX_SRV_TMPDIR</i> base directory for PMIx/server service files.
+<li><i>SLURM_PMIX_TMPDIR</i> base directory for applications session
+directories.
+<li><i>SLURM_PMIX_DIRECT_CONN</i> (default - yes) enables (1/yes/true) or
+disables (0/no/false) controls wheter direct connections between slurmstepd's
+are astablished or Slurm RPCs are used for data exchange. Direct connection
+shows better performanse for fully-packed nodes when PMIx is running in the
+direct-modex mode.
+</ul>
+
+<p>For older versions of OMPI not compiled with the pmi support
 the system administrator must specify the range of ports to be reserved
 in the <i>slurm.conf</i> file using the <i>MpiParams</i> parameter.
 For example: MpiParams=ports=12000-12999
@@ -188,6 +444,14 @@ Slurm Process Management Interface (PMI) library:</li>
 <pre>
 <i>export I_MPI_PMI_LIBRARY=/path/to/slurm/pmi/library/libpmi.so</i>
 </pre>
+<p>NOTE: Due to licensing reasons IMPI doesn't link directly to any external
+PMI implementation. Instead one must point to the desired library just
+exporting the environment variable mentioned above, which will then be dlopened
+by IMPI. Also, there is no official support provided by Intel against PMIx
+libraries. Since IMPI is based on MPICH, using PMIx with Intel may work due
+PMIx mantaining compatibility with pmi and pmi2, which are the ones used in
+MPICH, but it is not guaranteed to run in all cases.
+</p>
 <li>Use the <i>srun</i> command to launch the MPI job:</li>
 <pre>
 <i>srun -n &lt;num_procs&gt; a.out</i>
@@ -196,56 +460,9 @@ Slurm Process Management Interface (PMI) library:</li>
 
 <p>Above information used by permission from <a href="http://www.intel.com">Intel</a>.
 For more information see
-<a href="http://software.intel.com/en-us/articles/intel-mpi-library/">Intel MPI Library</a>.
+<a href="https://software.intel.com/en-us/intel-mpi-library">Intel MPI Library</a>.
 
-<hr size=4 width="100%">
-
-<h2><a name="lam_mpi" href="http://www.lam-mpi.org/"><b>LAM/MPI</b></a></h2>
-
-<p>LAM/MPI relies upon the Slurm
-<span class="commandline">salloc</span> or <span class="commandline">sbatch</span>
-command to allocate. In either case, specify
-the maximum number of tasks required for the job. Then execute the
-<span class="commandline">lamboot</span> command to start lamd daemons.
-<span class="commandline">lamboot</span> utilize. Slurm's
-<span class="commandline">srun</span> command to launch these daemons.
-Do not directly execute the <span class="commandline">srun</span> command
-to launch LAM/MPI tasks. For example:
-<pre>
-$ salloc -n16 sh  # allocates 16 processors
-                  # and spawns shell for job
-&gt; lamboot
-&gt; mpirun -np 16 foo args
-1234 foo running on adev0 (o)
-2345 foo running on adev1
-etc.
-&gt; lamclean
-&gt; lamhalt
-&gt; exit            # exits shell spawned by
-                 # initial srun command
-</pre>
-
-<p>Note that any direct use of <span class="commandline">srun</span>
-will only launch one task per node when the LAM/MPI plugin is configured
-as the default plugin.  To launch more than one task per node using the
-<span class="commandline">srun</span> command, the <i>--mpi=none</i>
-option would be required to explicitly disable the LAM/MPI plugin
-if that is the system default.</p>
-<hr size=4 width="100%">
-
-
-<h2><a name="hp_mpi" href="http://www.hp.com/go/mpi"><b>HP-MPI</b></a></h2>
-
-<p>HP-MPI uses the
-<span class="commandline">mpirun</span> command with the <b>-srun</b>
-option to launch jobs. For example:
-<pre>
-$MPI_ROOT/bin/mpirun -TCP -srun -N8 ./a.out
-</pre></p>
-<hr size=4 width="100%">
-
-
-<h2><a name="mpich2" href="http://www.mcs.anl.gov/research/projects/mpich2/"><b>MPICH2</b></a></h2>
+<h2><a name="mpich2" href="https://www.mpich.org/"><b>MPICH (a.k.a. MPICH2)</b></a></h2>
 
 <p>MPICH2 jobs can be launched using the <b>srun</b> command using
   pmi 1 or 2, or <b>mpiexec</b>.
@@ -275,7 +492,7 @@ which provides the server side functionality but the client side must implement 
 and the other interface calls.<br>
 
 <p>
-You can refere yourself to <i>mpich2-1.5</i> implementation and configure MPICH to use PMI2 with the <i>--with-pmi=pmi2</i> configure option.<br>
+This does require that the MPICH intallation have been installed with the <i>--with-pmi=pmi2</i> configure option.<br>
 
 <p>
 To check if the MPI version you are using supports PMI2 check for PMI2_* symbols in the MPI library.
@@ -284,7 +501,7 @@ Slurm provides a version of the PMI2 client library in the contribs directory. T
 installed in the Slurm lib directory. If your MPI implementation supports PMI2 and you wish to use
 the Slurm provided library you have to link the Slurm provided library explicitly:
 <pre>
-$ mpicc -L&lt;path_to_pim2_lib&gt; -lpmi2 ...
+$ mpicc -L&lt;path_to_pmi2_lib&gt; -lpmi2 ...
 $ srun -n20 a.out
 </pre>
 
@@ -332,58 +549,7 @@ to launch the tasks. A simple example is shown below.</p>
 
 <hr size=4 width="100%">
 
-
-<h2><a name="mpich_gm" href="http://www.myri.com/scs/download-mpichgm.html"><b>MPICH-GM</b></a></h2>
-
-<p>MPICH-GM jobs can be launched directly by <b>srun</b> command.
-Slurm's <i>mpichgm</i> MPI plugin must be used to establish communications
-between the launched tasks. This can be accomplished either using the Slurm
-configuration parameter <i>MpiDefault=mpichgm</i> in <b>slurm.conf</b>
-or srun's <i>--mpi=mpichgm</i> option.
-<pre>
-$ mpicc ...
-$ srun -n16 --mpi=mpichgm a.out
-</pre>
-<hr size=4 width="100%">
-
-
-<h2><a name="mpich_mx" href="http://www.myri.com/scs/download-mpichmx.html"><b>MPICH-MX</b></a></h2>
-
-<p>MPICH-MX jobs can be launched directly by <b>srun</b> command.
-Slurm's <i>mpichmx</i> MPI plugin must be used to establish communications
-between the launched tasks. This can be accomplished either using the Slurm
-configuration parameter <i>MpiDefault=mpichmx</i> in <b>slurm.conf</b>
-or srun's <i>--mpi=mpichmx</i> option.
-<pre>
-$ mpicc ...
-$ srun -n16 --mpi=mpichmx a.out
-</pre>
-<hr size=4 width="100%">
-
-
-<h2><a name="mvapich" href="http://mvapich.cse.ohio-state.edu/"><b>MVAPICH</b></a></h2>
-
-<p>MVAPICH jobs can be launched directly by <b>srun</b> command.
-Slurm's <i>mvapich</i> MPI plugin must be used to establish communications
-between the launched tasks. This can be accomplished either using the Slurm
-configuration parameter <i>MpiDefault=mvapich</i> in <b>slurm.conf</b>
-or srun's <i>--mpi=mvapich</i> option.
-<pre>
-$ mpicc ...
-$ srun -n16 --mpi=mvapich a.out
-</pre>
-<b>NOTE:</b> If MVAPICH is used in the shared memory model, with all tasks
-running on a single node, then use the <i>mpich1_shmem</i> MPI plugin instead.<br>
-<b>NOTE (for system administrators):</b> Configure
-<i>PropagateResourceLimitsExcept=MEMLOCK</i> in <b>slurm.conf</b> and
-start the <i>slurmd</i> daemons with an unlimited locked memory limit.
-For more details, see
-<a href="http://mvapich.cse.ohio-state.edu/support/mvapich_user_guide.html#x1-420007.2.3">MVAPICH</a>
-documentation for "CQ or QP Creation failure".</p>
-<hr size=4 width="100%">
-
-
-<h2><a name="mvapich2" href="http://mvapich.cse.ohio-state.edu/static/media/mvapich/mvapich2-2.0-userguide.html"><b>MVAPICH2</b></a></h2>
+<h2><a name="mvapich2" href="http://mvapich.cse.ohio-state.edu/"><b>MVAPICH (a.k.a. MVAPICH2)</b></a></h2>
 
 <p>MVAPICH2 supports launching multithreaded programs by Slurm as well as
 mpirun_rsh.
@@ -402,115 +568,14 @@ below or with the environment variable setting of "SLURM_MPI_TYPE=pmi2".</p>
 $ srun -n16 --mpi=pmi2 a.out
 </pre>
 
+<p>MVAPICH2 can be built using the following options:<br>
+--with-pmi=pmi2 \<br>
+--with-pm=slurm \<br>
+--with-slurm=&lt;install directory&gt; \<br>
+--enable-slurm=yes</p>
+
 <p>For more information, please see the
 <a href="http://mvapich.cse.ohio-state.edu/static/media/mvapich/mvapich2-2.0-userguide.html">MVAPICH2 User Guide</a></p>
-
-<hr size=4 width="100%">
-
-
-<h2><a name="bluegene_mpi" href="http://www.research.ibm.com/bluegene/"><b>BlueGene MPI</b></a></h2>
-
-<p>All IBM BlueGene Systems rely upon Slurm to create a job's resource
-allocation, but the task launch mechanism differs by system type.</p>
-
-<h3>BlueGene/Q</h3>
-<p>The BlueGene/Q systems support the ability to allocate different portions of
-a BlueGene block to different users and different jobs, so Slurm must be
-directly involved in each task launch request.</p>
-<p>
-<b>The following is subject to change in order to support debugging.</b>
-In order to accomplish this, Slurm's srun command is executed to launch tasks.
-The srun command creates a job step allocation which is linked to IBM's
-<span class="commandline">runjob</span> libraries which will launch
-the tasks within the allocated resources.</p>
-
-<h3>BlueGene/L and BlueGene/P</h3>
-<p>BlueGene/L and P MPI relies upon the native
-<span class="commandline">mpirun</span> command to launch tasks.
-Build a job script containing one or more invocations of the
-<span class="commandline">mpirun</span> command. Then submit
-the script to Slurm using <span class="commandline">sbatch</span>.
-For example:</p>
-<pre>
-$ sbatch -N512 my.script
-</pre>
-<p>Note that the node count specified with the <i>-N</i> option indicates
-the base partition count.
-See <a href="bluegene.html">BlueGene User and Administrator Guide</a>
-for more information.</p>
-<hr size=4 width="100%">
-
-
-<h2><a name="mpich1" href="http://www-unix.mcs.anl.gov/mpi/mpich1/"><b>MPICH1</b></a></h2>
-
-<p>MPICH1 development ceased in 2005. It is recommended that you convert to
-MPICH2 or some other MPI implementation.
-If you still want to use MPICH1, note that it has several different
-programming models. If you are using the shared memory model
-(<i>DEFAULT_DEVICE=ch_shmem</i> in the mpirun script), then initiate
-the tasks using the <span class="commandline">srun</span> command
-with the <i>--mpi=mpich1_shmem</i> option.</p>
-<pre>
-$ srun -n16 --mpi=mpich1_shmem a.out
-</pre>
-
-<p>NOTE: Using a configuration of <i>MpiDefault=mpich1_shmem</i> will result in
-one task being launched per node with the expectation that the MPI library will
-launch the remaining tasks based upon environment variables set by Slurm.
-Non-MPI jobs started in this configuration will lack the mechanism to launch
-more than one task per node unless srun's <i>--mpi=none</i> option is used.</p>
-
-<p>If you are using MPICH P4 (<i>DEFAULT_DEVICE=ch_p4</i> in
-the mpirun script),
-then it is recommended that you apply the patch in the Slurm
-distribution's file <i>contribs/mpich1.slurm.patch</i>.
-Follow directions within the file to rebuild MPICH.
-Applications must be relinked with the new library.
-Initiate tasks using the
-<span class="commandline">srun</span> command with the
-<i>--mpi=mpich1_p4</i> option.</p>
-<pre>
-$ srun -n16 --mpi=mpich1_p4 a.out
-</pre>
-<p>Note tha. Slurm launches one task per node and the MPICH
-library linked within your applications launches the other
-tasks with shared memory used for communications between them.
-The only real anomaly is that all output from all spawned tasks
-on a node appear to Slurm as coming from the one task that it
-launched. If the srun --label option is used, the task ID labels
-will be misleading.</p>
-
-<p>Other MPICH1 programming models current rely upon the Slurm
-<span class="commandline">salloc</span> or
-<span class="commandline">sbatch</span> command to allocate resources.
-In either case, specify the maximum number of tasks required for the job.
-You may then need to build a list of hosts to be used and use that
-as an argument to the mpirun command.
-For example:
-<pre>
-$ cat mpich.sh
-#!/bin/bash
-srun hostname -s | sort -u >slurm.hosts
-mpirun [options] -machinefile slurm.hosts a.out
-rm -f slurm.hosts
-$ sbatch -n16 mpich.sh
-sbatch: Submitted batch job 1234
-</pre>
-<p>Note that in this example, mpirun uses the rsh command to launch
-tasks. These tasks are not managed b. Slurm since they are launched
-outside of its control.</p>
-
-<hr size=4 width="100%">
-
-<h2><a name="quadrics_mpi" href="http://www.quadrics.com/"><b>Quadrics MPI</b></a></h2>
-
-<p>Quadrics MPI relies upon Slurm to
-allocate resources for the job and <span class="commandline">srun</span>
-to initiate the tasks. One would build the MPI program in the normal manner
-then initiate it using a command line of this sort:</p>
-<pre>
-$ srun [options] &lt;program&gt; [program args]
-</pre>
 
 <hr size=4 width="100%">
 
@@ -527,6 +592,6 @@ $ srun -N4 -n16 a.out
 
 <hr size=4 width="100%">
 
-<p style="text-align:center;">Last modified 23 June 2015</p>
+<p style="text-align:center;">Last modified 12 February 2019</p>
 
 <!--#include virtual="footer.txt"-->

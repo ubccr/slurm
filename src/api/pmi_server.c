@@ -6,28 +6,24 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -103,8 +99,6 @@ static void _print_kvs(void);
 static void _kvs_xmit_tasks(void)
 {
 	struct agent_arg *args;
-	pthread_attr_t attr;
-	pthread_t agent_id;
 
 #if _DEBUG
 	info("All tasks at barrier, transmit KVS keypairs now");
@@ -137,11 +131,7 @@ static void _kvs_xmit_tasks(void)
 	}
 
 	/* Spawn a pthread to transmit it */
-	slurm_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if (pthread_create(&agent_id, &attr, _agent, (void *) args))
-		fatal("pthread_create");
-	slurm_attr_destroy(&attr);
+	slurm_thread_create_detached(NULL, _agent, args);
 }
 
 static void *_msg_thread(void *x)
@@ -175,7 +165,7 @@ static void *_msg_thread(void *x)
 
 	slurm_mutex_lock(&agent_mutex);
 	agent_cnt--;
-	pthread_cond_signal(&agent_cond);
+	slurm_cond_signal(&agent_cond);
 	slurm_mutex_unlock(&agent_mutex);
 	xfree(x);
 	return NULL;
@@ -190,8 +180,6 @@ static void *_agent(void *x)
 	int i, j, kvs_set_cnt = 0, host_cnt, pmi_fanout = 32;
 	int msg_sent = 0, max_forward = 0;
 	char *tmp, *fanout_off_host;
-	pthread_t msg_id;
-	pthread_attr_t attr;
 	DEF_TIMERS;
 
 	tmp = getenv("PMI_FANOUT");
@@ -205,8 +193,6 @@ static void *_agent(void *x)
 	/* only send one message to each host,
 	 * build table of the ports on each host */
 	START_TIMER;
-	slurm_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	kvs_set = xmalloc(sizeof(kvs_comm_set_t) * args->barrier_xmit_cnt);
 	for (i=0; i<args->barrier_xmit_cnt; i++) {
 		if (args->barrier_xmit_ptr[i].port == 0)
@@ -241,7 +227,7 @@ static void *_agent(void *x)
 
 		slurm_mutex_lock(&agent_mutex);
 		while (agent_cnt >= agent_max_cnt)
-			pthread_cond_wait(&agent_cond, &agent_mutex);
+			slurm_cond_wait(&agent_cond, &agent_mutex);
 		agent_cnt++;
 		slurm_mutex_unlock(&agent_mutex);
 
@@ -260,9 +246,9 @@ static void *_agent(void *x)
 			 * or for some other reason we only want
 			 * one pthread. */
 			_msg_thread((void *) msg_args);
-		} else if (pthread_create(&msg_id, &attr, _msg_thread,
-				(void *) msg_args)) {
-			fatal("pthread_create: %m");
+		} else {
+			slurm_thread_create_detached(NULL, _msg_thread,
+						     msg_args);
 		}
 	}
 
@@ -272,9 +258,8 @@ static void *_agent(void *x)
 	/* wait for completion of all outgoing message */
 	slurm_mutex_lock(&agent_mutex);
 	while (agent_cnt > 0)
-		pthread_cond_wait(&agent_cond, &agent_mutex);
+		slurm_cond_wait(&agent_cond, &agent_mutex);
 	slurm_mutex_unlock(&agent_mutex);
-	slurm_attr_destroy(&attr);
 
 	/* Release allocated memory */
 	for (i=0; i<kvs_set_cnt; i++)

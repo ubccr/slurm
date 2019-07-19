@@ -91,6 +91,43 @@ AC_DEFUN([X_AC_DIMENSIONS], [
 ])
 
 dnl
+dnl To link to share object or the static version
+dnl
+AC_DEFUN([X_AC_LIBSLURM], [
+  AC_MSG_CHECKING([Link to libslurm.so instead of libslurm.o])
+  AC_ARG_WITH([shared-libslurm],
+    AS_HELP_STRING(--without-shared-libslurm, statically link to libslurm.o instead of the shared libslurm lib - can dramatically increase the footprint of Slurm.),
+    [ case "$withval" in
+      yes) x_ac_shared_libslurm=yes ;;
+      no)  x_ac_shared_libslurm=no ;;
+      *)   AC_MSG_RESULT([doh!])
+           AC_MSG_ERROR([bad value "$withval" for --without-shared-libslurm]) ;;
+        esac
+      ]
+  )
+
+  if test "$x_ac_shared_libslurm" = no; then
+    LIB_SLURM_BUILD='$(top_builddir)/src/api/libslurm.o'
+    LIB_SLURM=$LIB_SLURM_BUILD
+    AC_MSG_RESULT([static]);
+  else
+    # The *_BUILD variables are here to make sure these are made before
+    # compiling the bin
+    LIB_SLURM_BUILD='$(top_builddir)/src/api/full_version.map $(top_builddir)/src/api/libslurmfull.la'
+    # You will notice " or ' each does something different when resolving
+    # variables.  Some need to be resolved now ($libdir) and others
+    # ($(top_builddir)) need to be resolved when dealing with the Makefile.am's
+    LIB_SLURM="-Wl,-rpath=$libdir/slurm"
+    LIB_SLURM=$LIB_SLURM' -L$(top_builddir)/src/api/.libs -lslurmfull'
+
+    AC_MSG_RESULT([shared]);
+  fi
+
+  AC_SUBST(LIB_SLURM)
+  AC_SUBST(LIB_SLURM_BUILD)
+])
+
+dnl
 dnl Check for program_invocation_name
 dnl
 AC_DEFUN([X_AC_SLURM_PROGRAM_INVOCATION_NAME],
@@ -123,27 +160,8 @@ AC_DEFUN([X_AC_SLURM_BIGENDIAN],
 ])dnl AC_SLURM_BIGENDIAN
 
 dnl
-dnl AC_SLURM_SEMAPHORE
+dnl Perform Slurm Project version setup
 dnl
-AC_DEFUN([X_AC_SLURM_SEMAPHORE],
-[
-  SEMAPHORE_SOURCES=""
-  SEMAPHORE_LIBS=""
-  AC_CHECK_LIB(
-    posix4,
-    sem_open,
-    [SEMAPHORE_LIBS="-lposix4";
-     AC_DEFINE(HAVE_POSIX_SEMS, 1, [Define if you have Posix semaphores.])],
-    [SEMAPHORE_SOURCES="semaphore.c"]
-  )
-  AC_SUBST(SEMAPHORE_SOURCES)
-  AC_SUBST(SEMAPHORE_LIBS)
-])dnl AC_SLURM_SEMAPHORE
-
-dnl
-dnl
-dnl
-dnl Perform SLURM Project version setup
 AC_DEFUN([X_AC_SLURM_VERSION],
 [
 #
@@ -195,7 +213,7 @@ RELEASE="`perl -ne 'print,exit if s/^\s*RELEASE:\s*(\S*).*/\1/i' $srcdir/META`"
 # (e.g. "pre1" in the MICRO), but may be suitable for the user determining 
 # how to use the APIs or other differences. 
 SLURM_VERSION_NUMBER="`printf "0x%02x%02x%02x" ${SLURM_MAJOR#0} ${SLURM_MINOR#0} ${SLURM_MICRO#0}`"
-AC_DEFINE_UNQUOTED(SLURM_VERSION_NUMBER, $SLURM_VERSION_NUMBER, [SLURM Version Number])
+AC_DEFINE_UNQUOTED(SLURM_VERSION_NUMBER, $SLURM_VERSION_NUMBER, [Slurm Version Number])
 AC_SUBST(SLURM_VERSION_NUMBER)
 
 if test "$SLURM_MAJOR.$SLURM_MINOR.$SLURM_MICRO" != "$VERSION"; then

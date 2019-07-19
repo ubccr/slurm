@@ -6,11 +6,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,34 +26,19 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
-#if HAVE_UNISTD_H
-#  if HAVE_SETRESUID
-#    define _GNU_SOURCE /* for setresuid(3) */
-#  endif
-#  include <unistd.h>
-#endif
-
-#if HAVE_STRING_H
-#  include <string.h>
-#endif
-
-#if HAVE_STDLIB_H
-#  include <stdlib.h>
-#endif
+#define _GNU_SOURCE /* for setresuid(3) */
 
 #ifdef HAVE_PTY_H
 #  include <pty.h>
@@ -63,13 +48,16 @@
 #  include <utmp.h>
 #endif
 
+#include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
-#include <sys/types.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <fcntl.h>
+#include <sys/types.h>
+#include <termios.h>
 #include <unistd.h>
-#include <errno.h>
 
 #include "src/common/cbuf.h"
 #include "src/common/eio.h"
@@ -85,10 +73,9 @@
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
 
-
+#include "src/slurmd/common/fname.h"
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/io.h"
-#include "src/slurmd/slurmstepd/fname.h"
 #include "src/slurmd/slurmstepd/slurmstepd.h"
 
 /**********************************************************************
@@ -129,7 +116,7 @@ struct client_io_info {
 	   write for one task. -1 means accept output from any task. */
 	int  ltaskid_stdout, ltaskid_stderr;
 	bool labelio;
-	int  label_width;
+	int  taskid_width;
 
 	/* true if writing to a file, false if writing to a socket */
 	bool is_local_file;
@@ -201,7 +188,7 @@ struct task_read_info {
 struct window_info {
 	stepd_step_task_info_t *task;
 	stepd_step_rec_t *job;
-	slurm_fd_t pty_fd;
+	int pty_fd;
 };
 #ifdef HAVE_PTY_H
 static void  _spawn_window_manager(stepd_step_task_info_t *task, stepd_step_rec_t *job);
@@ -238,7 +225,7 @@ _client_readable(eio_obj_t *obj)
 	xassert(client->magic == CLIENT_IO_MAGIC);
 
 	if (client->in_eof) {
-		debug5("  false");
+		debug5("  false, in_eof");
 		/* We no longer want the _client_read() function to handle
 		   errors on write now that the read side of the connection
 		   is closed.  Setting handle_read to NULL will result in
@@ -547,8 +534,10 @@ _local_file_write(eio_obj_t *obj, List objs)
 					io_hdr_packed_size();
 	}
 
-	/* This code to make a buffer, fill it, unpack its contents, and free
-	   it is just used to read the header to get the global task id. */
+	/*
+	 * This code to make a buffer, fill it, unpack its contents, and free
+	 * it is just used to read the header to get the global task id.
+	 */
 	header_tmp_buf = create_buf(client->out_msg->data,
 				    client->out_msg->length);
 	if (!header_tmp_buf) {
@@ -559,8 +548,10 @@ _local_file_write(eio_obj_t *obj, List objs)
 	header_tmp_buf->head = NULL;	/* CLANG false positive bug here */
 	free_buf(header_tmp_buf);
 
-	/* A zero-length message indicates the end of a stream from one
-	   of the tasks.  Just free the message and return. */
+	/*
+	 * A zero-length message indicates the end of a stream from one
+	 * of the tasks.  Just free the message and return.
+	 */
 	if (header.length == 0) {
 		_free_outgoing_msg(client->out_msg, client->job);
 		client->out_msg = NULL;
@@ -570,10 +561,10 @@ _local_file_write(eio_obj_t *obj, List objs)
 	/* Write the message to the file. */
 	buf = client->out_msg->data +
 		(client->out_msg->length - client->out_remaining);
-
 	n = write_labelled_message(obj->fd, buf, client->out_remaining,
-				   header.gtaskid, client->labelio,
-				   client->label_width);
+				   header.gtaskid, client->job->pack_offset,
+				   client->job->pack_task_offset,
+				   client->labelio, client->taskid_width);
 	if (n < 0) {
 		client->out_eof = true;
 		_free_all_outgoing_msgs(client->msg_queue, client->job);
@@ -872,12 +863,10 @@ static void
 _spawn_window_manager(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 {
 	char *host, *port, *rows, *cols;
-	slurm_fd_t pty_fd;
+	int pty_fd;
 	slurm_addr_t pty_addr;
 	uint16_t port_u;
 	struct window_info *win_info;
-	pthread_attr_t attr;
-	pthread_t win_id;
 
 #if 0
 	/* NOTE: SLURM_LAUNCH_NODE_IPADDR is not available at this point */
@@ -921,10 +910,7 @@ _spawn_window_manager(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 	win_info->task   = task;
 	win_info->job    = job;
 	win_info->pty_fd = pty_fd;
-	slurm_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if (pthread_create(&win_id, &attr, &_window_manager, (void *) win_info))
-		error("pthread_create(pty_conn): %m");
+	slurm_thread_create_detached(NULL, _window_manager, win_info);
 }
 #endif
 
@@ -946,7 +932,7 @@ _init_task_stdio_fds(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 	 *  Initialize stdin
 	 */
 #ifdef HAVE_PTY_H
-	if (job->pty) {
+	if (job->flags & LAUNCH_PTY) {
 		/* All of the stdin fails unless EVERY
 		 * task gets an eio object for stdin.
 		 * Its not clear why that is. */
@@ -1032,7 +1018,7 @@ _init_task_stdio_fds(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 	 *  Initialize stdout
 	 */
 #ifdef HAVE_PTY_H
-	if (job->pty) {
+	if (job->flags & LAUNCH_PTY) {
 		if (task->gtid == 0) {
 			task->stdout_fd = dup(task->stdin_fd);
 			fd_set_close_on_exec(task->stdout_fd);
@@ -1050,11 +1036,13 @@ _init_task_stdio_fds(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 			fd_set_close_on_exec(task->stdout_fd);
 			task->from_stdout = -1;  /* not used */
 		}
-	} else if (task->ofname != NULL &&
-		   (!job->labelio || xstrcmp(task->ofname, "/dev/null")==0)) {
+	} else if ((task->ofname != NULL) &&
+		   (((job->flags & LAUNCH_LABEL_IO) == 0) ||
+		    (xstrcmp(task->ofname, "/dev/null") == 0))) {
 #else
 	if (task->ofname != NULL &&
-	    (!job->labelio || xstrcmp(task->ofname, "/dev/null")==0) ) {
+	    (((job->flags & LAUNCH_LABEL_IO) == 0) ||
+	     xstrcmp(task->ofname, "/dev/null") == 0)) {
 #endif
 		int count = 0;
 		/* open file on task's stdout */
@@ -1073,8 +1061,9 @@ _init_task_stdio_fds(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 	} else {
 		/* create pipe and eio object */
 		int pout[2];
+		struct termios tio;
 #if HAVE_PTY_H
-		if (job->buffered_stdio) {
+		if (!(job->flags & LAUNCH_BUFFERED_IO)) {
 #if HAVE_SETRESUID
 			if (setresuid(geteuid(), geteuid(), 0) < 0)
 				error("%s: %d setresuid() %m",
@@ -1083,6 +1072,12 @@ _init_task_stdio_fds(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 			if (openpty(pout, pout + 1, NULL, NULL, NULL) < 0) {
 				error("%s: stdout openpty: %m", __func__);
 				return SLURM_ERROR;
+			}
+			memset(&tio, 0, sizeof(tio));
+			if (tcgetattr(pout[1], &tio) == 0) {
+				tio.c_oflag &= ~OPOST;
+				if (tcsetattr(pout[1], 0, &tio) != 0)
+					error("%s: tcsetattr: %m", __func__);
 			}
 #if HAVE_SETRESUID
 			if (setresuid(0, getuid(), 0) < 0)
@@ -1117,7 +1112,7 @@ _init_task_stdio_fds(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 	 *  Initialize stderr
 	 */
 #ifdef HAVE_PTY_H
-	if (job->pty) {
+	if (job->flags & LAUNCH_PTY) {
 		if (task->gtid == 0) {
 			/* Make a file descriptor for the task to write to, but
 			   don't make a separate one read from, because in pty
@@ -1136,11 +1131,14 @@ _init_task_stdio_fds(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 			fd_set_close_on_exec(task->stderr_fd);
 			task->from_stderr = -1;  /* not used */
 		}
-	} else if (task->efname != NULL &&
-		   (!job->labelio || xstrcmp(task->efname, "/dev/null")==0)) {
+
+	} else if ((task->efname != NULL) &&
+		   (((job->flags & LAUNCH_LABEL_IO) == 0) ||
+		    (xstrcmp(task->efname, "/dev/null") == 0))) {
 #else
-	if (task->efname != NULL &&
-	    (!job->labelio || xstrcmp(task->efname, "/dev/null")==0) ) {
+	if ((task->efname != NULL) &&
+	    (((job->flags & LAUNCH_LABEL_IO) == 0) ||
+	     (xstrcmp(task->efname, "/dev/null") == 0))) {
 #endif
 		int count = 0;
 		/* open file on task's stdout */
@@ -1192,29 +1190,9 @@ io_init_tasks_stdio(stepd_step_rec_t *job)
 	return rc;
 }
 
-int
-io_thread_start(stepd_step_rec_t *job)
+extern void io_thread_start(stepd_step_rec_t *job)
 {
-	pthread_attr_t attr;
-	int rc = 0, retries = 0;
-
-	slurm_attr_init(&attr);
-
-	while (pthread_create(&job->ioid, &attr, &_io_thr, (void *)job)) {
-		error("io_thread_start: pthread_create error %m");
-		if (++retries > MAX_RETRIES) {
-			error("io_thread_start: Can't create pthread");
-			rc = -1;
-			break;
-		}
-		usleep(10);	/* sleep and again */
-	}
-
-	slurm_attr_destroy(&attr);
-
-	/*fatal_add_cleanup(&_fatal_cleanup, (void *) job);*/
-
-	return rc;
+	slurm_thread_create(&job->ioid, _io_thr, job);
 }
 
 
@@ -1452,6 +1430,7 @@ io_close_all(stepd_step_rec_t *job)
 	} else {
 		if (dup2(devnull, STDERR_FILENO) < 0)
 			error("Unable to dup /dev/null onto stderr");
+		(void) close(devnull);
 	}
 
 	/* Signal IO thread to close appropriate
@@ -1545,10 +1524,10 @@ io_create_local_client(const char *filename, int file_flags,
 	client->labelio = labelio;
 	client->is_local_file = true;
 
-	client->label_width = 1;
-	tmp = job->node_tasks-1;
+	client->taskid_width = 1;
+	tmp = job->node_tasks - 1;
 	while ((tmp /= 10) > 0)
-		client->label_width++;
+		client->taskid_width++;
 
 
 	obj = eio_obj_create(fd, &local_file_ops, (void *)client);
@@ -1617,7 +1596,7 @@ io_initial_client_connect(srun_info_t *srun, stepd_step_rec_t *job,
 	client->ltaskid_stdout = stdout_tasks;
 	client->ltaskid_stderr = stderr_tasks;
 	client->labelio = false;
-	client->label_width = 0;
+	client->taskid_width = 0;
 	client->is_local_file = false;
 
 	obj = eio_obj_create(sock, &client_ops, (void *)client);
@@ -1677,7 +1656,7 @@ io_client_connect(srun_info_t *srun, stepd_step_rec_t *job)
 	client->ltaskid_stdout = -1;     /* accept from all tasks */
 	client->ltaskid_stderr = -1;     /* accept from all tasks */
 	client->labelio = false;
-	client->label_width = 0;
+	client->taskid_width = 0;
 	client->is_local_file = false;
 
 	/* client object adds itself to job->clients in _client_writable */
@@ -1726,19 +1705,19 @@ io_dup_stdio(stepd_step_task_info_t *t)
 {
 	if (dup2(t->stdin_fd, STDIN_FILENO  ) < 0) {
 		error("dup2(stdin): %m");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 	fd_set_noclose_on_exec(STDIN_FILENO);
 
 	if (dup2(t->stdout_fd, STDOUT_FILENO) < 0) {
 		error("dup2(stdout): %m");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 	fd_set_noclose_on_exec(STDOUT_FILENO);
 
 	if (dup2(t->stderr_fd, STDERR_FILENO) < 0) {
 		error("dup2(stderr): %m");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 	fd_set_noclose_on_exec(STDERR_FILENO);
 
@@ -1791,18 +1770,18 @@ _send_eof_msg(struct task_read_info *out)
 
 	/* Add eof message to the msg_queue of all clients */
 	clients = list_iterator_create(out->job->clients);
-	while((eio = list_next(clients))) {
+	while ((eio = list_next(clients))) {
 		client = (struct client_io_info *)eio->arg;
 		debug5("======================== Enqueued eof message");
 		xassert(client->magic == CLIENT_IO_MAGIC);
 
-		/* Send eof message to all clients.
-		 */
-
+		/* Send eof message to all clients */
 		if (list_enqueue(client->msg_queue, msg))
 			msg->ref_count++;
 	}
 	list_iterator_destroy(clients);
+	if (msg->ref_count == 0)
+		free_io_buf(msg);
 
 	debug4("Leaving  _send_eof_msg");
 }
@@ -1815,8 +1794,11 @@ _task_build_message(struct task_read_info *out, stepd_step_rec_t *job, cbuf_t cb
 	struct io_buf *msg;
 	char *ptr;
 	Buf packbuf;
+	bool must_truncate = false;
+	int avail;
 	struct slurm_io_header header;
 	int n;
+	bool buffered_stdio = job->flags & LAUNCH_BUFFERED_IO;
 
 	debug4("%s: Entering...", __func__);
 
@@ -1827,13 +1809,43 @@ _task_build_message(struct task_read_info *out, stepd_step_rec_t *job, cbuf_t cb
 	}
 
 	ptr = msg->data + io_hdr_packed_size();
-	n = cbuf_read(cbuf, ptr, MAX_MSG_LEN);
+
+	if (buffered_stdio) {
+		avail = cbuf_peek_line(cbuf, ptr, MAX_MSG_LEN, 1);
+		if (avail >= MAX_MSG_LEN)
+			must_truncate = true;
+		else if (avail == 0 && cbuf_used(cbuf) >= MAX_MSG_LEN)
+			must_truncate = true;
+	}
+
+	debug5("%s: buffered_stdio is %s", __func__,
+	       buffered_stdio ? "true" : "false");
+	debug5("%s: must_truncate  is %s", __func__,
+	       must_truncate ? "true" : "false");
+
+	/*
+	 * If eof has been read from a tasks stdout or stderr, we need to
+	 * ignore normal line buffering and send the buffer immediately.
+	 * Hence the "|| out->eof".
+	 */
+	if (must_truncate || !buffered_stdio || out->eof) {
+		n = cbuf_read(cbuf, ptr, MAX_MSG_LEN);
+	} else {
+		n = cbuf_read_line(cbuf, ptr, MAX_MSG_LEN, -1);
+		if (n == 0) {
+			debug5("  partial line in buffer, ignoring");
+			debug4("Leaving  _task_build_message");
+			list_enqueue(job->free_outgoing, msg);
+			return NULL;
+		}
+	}
+
 	header.type = out->type;
 	header.ltaskid = out->ltaskid;
 	header.gtaskid = out->gtaskid;
 	header.length = n;
 
-	debug4("%s: header.length %d", __func__, n);
+	debug4("%s: header.length = %d", __func__, n);
 	packbuf = create_buf(msg->data, io_hdr_packed_size());
 	if (!packbuf) {
 		fatal("Failure to allocate memory for a message header");
@@ -1847,7 +1859,7 @@ _task_build_message(struct task_read_info *out, stepd_step_rec_t *job, cbuf_t cb
 	packbuf->head = NULL;	/* CLANG false positive bug here */
 	free_buf(packbuf);
 
-	debug4("%s: Leaving...", __func__);
+	debug4("%s: Leaving", __func__);
 	return msg;
 }
 
@@ -1856,18 +1868,12 @@ alloc_io_buf(void)
 {
 	struct io_buf *buf;
 
-	buf = (struct io_buf *)xmalloc(sizeof(struct io_buf));
-	if (!buf)
-		return NULL;
+	buf = xmalloc(sizeof(struct io_buf));
 	buf->ref_count = 0;
 	buf->length = 0;
 	/* The following "+ 1" is just temporary so I can stick a \0 at
 	   the end and do a printf of the data pointer */
 	buf->data = xmalloc(MAX_MSG_LEN + io_hdr_packed_size() + 1);
-	if (!buf->data) {
-		xfree(buf);
-		return NULL;
-	}
 
 	return buf;
 }

@@ -6,11 +6,11 @@
  *  Written by Mark A. Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,19 +26,15 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
 
 #include "src/common/fd.h"
 #include "src/common/io_hdr.h"
@@ -46,24 +42,23 @@
 
 #define IO_PROTOCOL_VERSION 0xb001
 
-/*
-static void
-_print_data(char *data, int datalen)
-{
-	char buf[1024];
-	size_t len = 0;
-	int i;
+/* If this changes, io_hdr_pack|unpack must change. */
+int g_io_hdr_size = sizeof(uint32_t) + 3*sizeof(uint16_t);
 
-	for (i = 0; i < datalen; i += sizeof(char))
-		len += sprintf(buf+len, "%02x", data[i]);
+/* If this changes, io_init_msg_pack|unpack must change. */
+static int g_io_init_msg_packed_size =
+	sizeof(uint16_t)    /* version */
+	+ sizeof(uint32_t)  /* nodeid */
+	+ (SLURM_IO_KEY_SIZE + sizeof(uint32_t)) /* signature */
+	+ sizeof(uint32_t)  /* stdout_objs */
+	+ sizeof(uint32_t); /* stderr_objs */
 
-	info("data: %s", buf);
-}
-*/
+#define io_init_msg_packed_size() g_io_init_msg_packed_size
 
 void
 io_hdr_pack(io_hdr_t *hdr, Buf buffer)
 {
+	/* If this function changes, io_hdr_packed_size must change. */
 	pack16(hdr->type, buffer);
 	pack16(hdr->gtaskid, buffer);
 	pack16(hdr->ltaskid, buffer);
@@ -73,6 +68,7 @@ io_hdr_pack(io_hdr_t *hdr, Buf buffer)
 int
 io_hdr_unpack(io_hdr_t *hdr, Buf buffer)
 {
+	/* If this function changes, io_hdr_packed_size must change. */
 	safe_unpack16(&hdr->type, buffer);
 	safe_unpack16(&hdr->gtaskid, buffer);
 	safe_unpack16(&hdr->ltaskid, buffer);
@@ -82,12 +78,6 @@ io_hdr_unpack(io_hdr_t *hdr, Buf buffer)
     unpack_error:
 	error("io_hdr_unpack error: %m");
 	return SLURM_ERROR;
-}
-
-int
-io_hdr_packed_size()
-{
-	return sizeof(uint32_t) + 3*sizeof(uint16_t);
 }
 
 /*
@@ -173,22 +163,10 @@ io_init_msg_validate(struct slurm_io_init_msg *msg, const char *sig)
 }
 
 
-static int
-io_init_msg_packed_size(void)
-{
-	int len;
-
-	len = sizeof(uint16_t)        /* version */
-		+ sizeof(uint32_t)    /* nodeid */
-		+ (SLURM_IO_KEY_SIZE + sizeof(uint32_t))  /* signature */
-		+ sizeof(uint32_t)    /* stdout_objs */
-		+ sizeof(uint32_t);   /* stderr_objs */
-	return len;
-}
-
 static void
 io_init_msg_pack(struct slurm_io_init_msg *hdr, Buf buffer)
 {
+	/* If this function changes, io_init_msg_packed_size must change. */
 	pack16(hdr->version, buffer);
        	pack32(hdr->nodeid, buffer);
 	pack32(hdr->stdout_objs, buffer);
@@ -201,6 +179,7 @@ io_init_msg_pack(struct slurm_io_init_msg *hdr, Buf buffer)
 static int
 io_init_msg_unpack(struct slurm_io_init_msg *hdr, Buf buffer)
 {
+	/* If this function changes, io_init_msg_packed_size must change. */
 	uint32_t val;
 	safe_unpack16(&hdr->version, buffer);
 	safe_unpack32(&hdr->nodeid, buffer);
@@ -222,41 +201,29 @@ int
 io_init_msg_write_to_fd(int fd, struct slurm_io_init_msg *msg)
 {
 	Buf buf;
-	void *ptr;
-	int n;
+	int rc = SLURM_ERROR;
 
 	xassert(msg);
 
-	debug2("Entering io_init_msg_write_to_fd");
+	debug2("%s: entering", __func__);
 	msg->version = IO_PROTOCOL_VERSION;
 	buf = init_buf(io_init_msg_packed_size());
-	debug2("  msg->nodeid = %d", msg->nodeid);
+	debug2("%s: msg->nodeid = %d", __func__, msg->nodeid);
 	io_init_msg_pack(msg, buf);
 
-	ptr = get_buf_data(buf);
-again:
-	if ((n = write(fd, ptr, io_init_msg_packed_size())) < 0) {
-		if (errno == EINTR)
-			goto again;
-		free_buf(buf);
-		return SLURM_ERROR;
-	}
-	if (n != io_init_msg_packed_size()) {
-		error("io init msg write too small");
-		free_buf(buf);
-		return SLURM_ERROR;
-	}
+	safe_write(fd, buf->head, io_init_msg_packed_size());
+	rc = SLURM_SUCCESS;
 
+rwfail:
 	free_buf(buf);
-	debug2("Leaving  io_init_msg_write_to_fd");
-	return SLURM_SUCCESS;
+	debug2("%s: leaving", __func__);
+	return rc;
 }
 
 int
 io_init_msg_read_from_fd(int fd, struct slurm_io_init_msg *msg)
 {
 	Buf buf;
-	void *ptr;
 	int n;
 
 	xassert(msg);
@@ -268,14 +235,7 @@ io_init_msg_read_from_fd(int fd, struct slurm_io_init_msg *msg)
 	}
 
 	buf = init_buf(io_init_msg_packed_size());
-	ptr = get_buf_data(buf);
-again:
-	if ((n = read(fd, ptr, io_init_msg_packed_size())) < 0) {
-		if (errno == EINTR)
-			goto again;
-		free_buf(buf);
-		return SLURM_ERROR;
-	}
+	n = _full_read(fd, buf->head, io_init_msg_packed_size());
 	if (n != io_init_msg_packed_size()) {
 		error("io_init_msg_read too small");
 		free_buf(buf);

@@ -8,11 +8,11 @@
  *  Written by Danny Auble <da@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,15 +28,18 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
+
+#include "config.h"
+
 #include "sview.h"
 #include "src/common/parse_time.h"
 
@@ -57,24 +60,18 @@ static gboolean _delete_popup(GtkWidget *widget,
 			      gpointer data)
 {
 	gtk_widget_destroy(widget);
-	return FALSE;
+	return false;
 }
 
 /* Creates a tree model containing the completions */
 void _search_entry(sview_search_info_t *sview_search_info)
 {
 	int id = 0;
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 	GError *error = NULL;
 	char *upper = NULL, *lower = NULL;
-	char *type;
-
-	if (cluster_flags & CLUSTER_FLAG_BG)
-		type = "Midplane";
-	else
-		type = "Node";
 
 	if (sview_search_info->int_data == NO_VAL &&
 	    (!sview_search_info->gchar_data
@@ -101,27 +98,6 @@ void _search_entry(sview_search_info_t *sview_search_info)
 		snprintf(title, 100, "Job(s) info for user %s",
 			 sview_search_info->gchar_data);
 		break;
-	case SEARCH_BLOCK_STATE:
-		id = BLOCK_PAGE;
-		upper = bg_block_state_string(sview_search_info->int_data);
-		lower = str_tolower(upper);
-		snprintf(title, 100, "BG Block(s) in the %s state", lower);
-		xfree(lower);
-		break;
-	case SEARCH_BLOCK_NAME:
-		id = BLOCK_PAGE;
-		snprintf(title, 100, "Block %s info",
-			 sview_search_info->gchar_data);
-		break;
-	case SEARCH_BLOCK_SIZE:
-		id = BLOCK_PAGE;
-		sview_search_info->int_data =
-			revert_num_unit(sview_search_info->gchar_data);
-		if (sview_search_info->int_data == -1)
-			return;
-		snprintf(title, 100, "Block(s) of size %d cnodes",
-			 sview_search_info->int_data);
-		break;
 	case SEARCH_PARTITION_NAME:
 		id = PART_PAGE;
 		snprintf(title, 100, "Partition %s info",
@@ -136,15 +112,14 @@ void _search_entry(sview_search_info_t *sview_search_info)
 		break;
 	case SEARCH_NODE_NAME:
 		id = NODE_PAGE;
-		snprintf(title, 100, "%s(s) %s info",
-			 type, sview_search_info->gchar_data);
+		snprintf(title, 100, "Node(s) %s info",
+			 sview_search_info->gchar_data);
 		break;
 	case SEARCH_NODE_STATE:
 		id = NODE_PAGE;
 		upper = node_state_string(sview_search_info->int_data);
 		lower = str_tolower(upper);
-		snprintf(title, 100, "%s(s) in the %s state",
-			 type, lower);
+		snprintf(title, 100, "Node(s) in the %s state", lower);
 		xfree(lower);
 
 		break;
@@ -178,7 +153,7 @@ void _search_entry(sview_search_info_t *sview_search_info)
 	memcpy(popup_win->spec_info->search_info, sview_search_info,
 	       sizeof(sview_search_info_t));
 
-	if (!sview_thread_new((gpointer)popup_thr, popup_win, FALSE, &error)) {
+	if (!sview_thread_new((gpointer)popup_thr, popup_win, false, &error)) {
 		g_printerr ("Failed to create main popup thread: %s\n",
 			    error->message);
 		return;
@@ -205,7 +180,7 @@ static GtkTreeStore *_local_create_treestore_2cols(GtkWidget *popup,
 				    x, y);
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   GTK_WIDGET(window), TRUE, TRUE, 0);
+			   GTK_WIDGET(window), true, true, 0);
 
 	treeview = create_treeview_2cols_attach_to_table(table);
 	treestore = GTK_TREE_STORE(gtk_tree_view_get_model(treeview));
@@ -235,6 +210,33 @@ static void _gtk_print_key_pairs(List config_list, char *title, bool first,
 	list_iterator_destroy(itr);
 }
 
+static void
+_gtk_print_config_plugin_params_list(List l, char *title, bool first,
+				     GtkTreeStore *treestore,
+				     GtkTreeIter *iter)
+{
+	ListIterator itr = NULL;
+	config_plugin_params_t *p;
+	int update = 0;
+
+	if (!l || !list_count(l))
+		return;
+
+	if (!first)
+		add_display_treestore_line(update, treestore, iter, "", NULL);
+
+	add_display_treestore_line_with_font(update, treestore, iter,
+					     title, NULL, "bold");
+
+	itr = list_iterator_create(l);
+	while ((p = list_next(itr))){
+		add_display_treestore_line_with_font(update, treestore, iter,
+					   p->name, NULL, "italic");
+		_gtk_print_key_pairs(p->key_pairs, NULL, 1, treestore, iter);
+	}
+	list_iterator_destroy(itr);
+}
+
 static void _layout_conf_ctl(GtkTreeStore *treestore,
 			     slurm_ctl_conf_info_msg_t *slurm_ctl_conf_ptr)
 {
@@ -242,14 +244,9 @@ static void _layout_conf_ctl(GtkTreeStore *treestore,
 	GtkTreeIter iter;
 	List ret_list = NULL;
 	char *select_title = "Select Plugin Configuration";
+	char *tmp_title = NULL;
 
-	if (cluster_flags & CLUSTER_FLAG_BGL)
-		select_title = "Bluegene/L configuration";
-	else if (cluster_flags & CLUSTER_FLAG_BGP)
-		select_title = "Bluegene/P configuration";
-	else if (cluster_flags & CLUSTER_FLAG_BGQ)
-		select_title = "Bluegene/Q configuration";
-	else if (cluster_flags & CLUSTER_FLAG_CRAY)
+	if (cluster_flags & CLUSTER_FLAG_CRAY)
 		select_title = "\nCray configuration\n";
 
 	if (!slurm_ctl_conf_ptr)
@@ -267,8 +264,23 @@ static void _layout_conf_ctl(GtkTreeStore *treestore,
 	_gtk_print_key_pairs(slurm_ctl_conf_ptr->acct_gather_conf,
 			     "Account Gather", 0, treestore, &iter);
 
+	_gtk_print_key_pairs(slurm_ctl_conf_ptr->cgroup_conf,
+			     "Cgroup Support", 0, treestore, &iter);
+
 	_gtk_print_key_pairs(slurm_ctl_conf_ptr->ext_sensors_conf,
 			     "External Sensors", 0, treestore, &iter);
+
+	xstrcat(tmp_title, "Node Features:");
+	_gtk_print_config_plugin_params_list(
+		slurm_ctl_conf_ptr->node_features_conf,
+		tmp_title, 0, treestore, &iter);
+	xfree(tmp_title);
+
+	xstrcat(tmp_title, "Slurmctld Plugstack Plugins:");
+	_gtk_print_config_plugin_params_list(
+		slurm_ctl_conf_ptr->slurmctld_plugstack_conf,
+		tmp_title, 0, treestore, &iter);
+	xfree(tmp_title);
 
 	_gtk_print_key_pairs(slurm_ctl_conf_ptr->select_conf_key_pairs,
 			     select_title, 0, treestore, &iter);
@@ -303,7 +315,7 @@ static void _layout_conf_dbd(GtkTreeStore *treestore)
 	slurm_make_time_str(&now, tmp_str, sizeof(tmp_str));
 	add_display_treestore_line_with_font(
 		update, treestore, &iter,
-		"SLURM Configuration data as of", tmp_str, "bold");
+		"Slurm Configuration data as of", tmp_str, "bold");
 
 	add_display_treestore_line(update, treestore, &iter,
 				   "AccountingStorageBackupHost",
@@ -374,7 +386,7 @@ static void _layout_conf_dbd(GtkTreeStore *treestore)
 extern void create_config_popup(GtkAction *action, gpointer user_data)
 {
 	GtkWidget *popup = gtk_dialog_new_with_buttons(
-		"SLURM Config Info",
+		"Slurm Config Info",
 		GTK_WINDOW(user_data),
 		GTK_DIALOG_DESTROY_WITH_PARENT,
 		GTK_STOCK_CLOSE,
@@ -384,6 +396,8 @@ extern void create_config_popup(GtkAction *action, gpointer user_data)
 		_local_create_treestore_2cols(popup, 600, 400);
 	static slurm_ctl_conf_info_msg_t  *slurm_ctl_conf_ptr = NULL;
 
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	g_signal_connect(G_OBJECT(popup), "delete_event",
 			 G_CALLBACK(_delete_popup), NULL);
 	g_signal_connect(G_OBJECT(popup), "response",
@@ -401,7 +415,7 @@ extern void create_dbconfig_popup(GtkAction *action, gpointer user_data)
 {
 	List dbd_config_list = NULL;
 	GtkWidget *popup = gtk_dialog_new_with_buttons(
-		"SLURM Database Config Info",
+		"Slurm Database Config Info",
 		GTK_WINDOW(user_data),
 		GTK_DIALOG_DESTROY_WITH_PARENT,
 		GTK_STOCK_CLOSE,
@@ -410,6 +424,8 @@ extern void create_dbconfig_popup(GtkAction *action, gpointer user_data)
 	GtkTreeStore *treestore =
 		_local_create_treestore_2cols(popup, 600, 400);
 
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	g_signal_connect(G_OBJECT(popup), "delete_event",
 			 G_CALLBACK(_delete_popup), NULL);
 	g_signal_connect(G_OBJECT(popup), "response",
@@ -427,20 +443,22 @@ extern void create_dbconfig_popup(GtkAction *action, gpointer user_data)
 extern void create_daemon_popup(GtkAction *action, gpointer user_data)
 {
 	GtkWidget *popup = gtk_dialog_new_with_buttons(
-		"SLURM Daemons running",
+		"Slurm Daemons running",
 		GTK_WINDOW(user_data),
 		GTK_DIALOG_DESTROY_WITH_PARENT,
 		GTK_STOCK_CLOSE,
 		GTK_RESPONSE_OK,
 		NULL);
-
-	int update = 0;
+	int i, update = 0;
 	slurm_ctl_conf_info_msg_t *conf;
 	char me[MAX_SLURM_NAME], *b, *c, *n;
+	char *token, *save_ptr = NULL;
 	int actld = 0, ctld = 0, d = 0;
 	GtkTreeStore *treestore =
 		_local_create_treestore_2cols(popup, 300, 100);
 	GtkTreeIter iter;
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	g_signal_connect(G_OBJECT(popup), "delete_event",
 			 G_CALLBACK(_delete_popup), NULL);
 	g_signal_connect(G_OBJECT(popup), "response",
@@ -450,16 +468,26 @@ extern void create_daemon_popup(GtkAction *action, gpointer user_data)
 	conf = slurm_conf_lock();
 
 	gethostname_short(me, MAX_SLURM_NAME);
-	if ((b = conf->backup_controller)) {
-		if ((xstrcmp(b, me) == 0) ||
-		    (xstrcasecmp(b, "localhost") == 0))
-			ctld = 1;
+	for (i = 1; i < conf->control_cnt; i++) {
+		if ((b = conf->control_machine[i])) {
+			if (!xstrcmp(b, me) ||
+			    !xstrcasecmp(b, "localhost"))
+				ctld = 1;
+		}
 	}
-	if ((c = conf->control_machine)) {
+	if (conf->control_machine[0]) {
 		actld = 1;
-		if ((xstrcmp(c, me) == 0) ||
-		    (xstrcasecmp(c, "localhost") == 0))
-			ctld = 1;
+		c = xstrdup(conf->control_machine[0]);
+		token = strtok_r(c, ",", &save_ptr);
+		while (token) {
+			if ((xstrcmp(token, me) == 0) ||
+			    (xstrcasecmp(token, "localhost") == 0)) {
+				ctld = 1;
+				break;
+			}
+			token = strtok_r(NULL, ",", &save_ptr);
+		}
+		xfree(c);
 	}
 	slurm_conf_unlock();
 
@@ -512,6 +540,8 @@ extern void create_create_popup(GtkAction *action, gpointer user_data)
 
 	label = gtk_dialog_add_button(GTK_DIALOG(popup),
 				      GTK_STOCK_OK, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(popup), label);
 	gtk_dialog_add_button(GTK_DIALOG(popup),
 			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
@@ -545,11 +575,7 @@ extern void create_create_popup(GtkAction *action, gpointer user_data)
 		label = gtk_label_new(
 			"Reservation creation specifications\n\n"
 			"Specify Time_Start and either Duration or Time_End.\n"
-#ifdef HAVE_BG
-			"Specify either Node_Count or Midplane_List.\n"
-#else
 			"Specify either Node_Count or Node_List.\n"
-#endif
 			"Specify either Accounts or Users.\n\n"
 			"Supported Flags include: Maintenance, Overlap,\n"
 			"Ignore_Jobs, Daily and Weekly, License_Only\n"
@@ -564,9 +590,9 @@ extern void create_create_popup(GtkAction *action, gpointer user_data)
 	}
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   label, FALSE, FALSE, 0);
+			   label, false, false, 0);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   entry, TRUE, TRUE, 0);
+			   entry, true, true, 0);
 
 	gtk_widget_show_all(popup);
 	response = gtk_dialog_run (GTK_DIALOG(popup));
@@ -659,12 +685,15 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 	const gchar *name = gtk_action_get_name(action);
 	sview_search_info_t sview_search_info;
 
+	sview_search_info.cluster_name = NULL;
 	sview_search_info.gchar_data = NULL;
 	sview_search_info.int_data = NO_VAL;
 	sview_search_info.int_data2 = NO_VAL;
 
 	label = gtk_dialog_add_button(GTK_DIALOG(popup),
 				      GTK_STOCK_OK, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(popup), label);
 	gtk_dialog_add_button(GTK_DIALOG(popup),
 			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
@@ -679,19 +708,20 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 		label = gtk_label_new("Which user?");
 	} else if (!xstrcmp(name, "state_jobs")) {
 		display_data_t pulldown_display_data[] = {
-			{G_TYPE_NONE, JOB_PENDING, "Pending", TRUE, -1},
-			{G_TYPE_NONE, JOB_CONFIGURING, "Configuring", TRUE, -1},
-			{G_TYPE_NONE, JOB_RUNNING, "Running", TRUE, -1},
-			{G_TYPE_NONE, JOB_SUSPENDED, "Suspended", TRUE, -1},
-			{G_TYPE_NONE, JOB_COMPLETE, "Complete", TRUE, -1},
-			{G_TYPE_NONE, JOB_CANCELLED, "Cancelled", TRUE, -1},
-			{G_TYPE_NONE, JOB_FAILED, "Failed", TRUE, -1},
-			{G_TYPE_NONE, JOB_TIMEOUT, "Timeout", TRUE, -1},
-			{G_TYPE_NONE, JOB_NODE_FAIL, "Node Failure", TRUE, -1},
-			{G_TYPE_NONE, JOB_PREEMPTED, "Preempted", TRUE, -1},
-			{G_TYPE_NONE, JOB_BOOT_FAIL, "Boot Failure", TRUE, -1},
-			{G_TYPE_NONE, JOB_DEADLINE, "Deadline", TRUE, -1},
-			{G_TYPE_NONE, -1, NULL, FALSE, -1}
+			{G_TYPE_NONE, JOB_PENDING, "Pending", true, -1},
+			{G_TYPE_NONE, JOB_CONFIGURING, "Configuring", true, -1},
+			{G_TYPE_NONE, JOB_RUNNING, "Running", true, -1},
+			{G_TYPE_NONE, JOB_SUSPENDED, "Suspended", true, -1},
+			{G_TYPE_NONE, JOB_COMPLETE, "Complete", true, -1},
+			{G_TYPE_NONE, JOB_CANCELLED, "Cancelled", true, -1},
+			{G_TYPE_NONE, JOB_FAILED, "Failed", true, -1},
+			{G_TYPE_NONE, JOB_TIMEOUT, "Timeout", true, -1},
+			{G_TYPE_NONE, JOB_NODE_FAIL, "Node Failure", true, -1},
+			{G_TYPE_NONE, JOB_PREEMPTED, "Preempted", true, -1},
+			{G_TYPE_NONE, JOB_BOOT_FAIL, "Boot Failure", true, -1},
+			{G_TYPE_NONE, JOB_DEADLINE, "Deadline", true, -1},
+			{G_TYPE_NONE, JOB_OOM, "Out Of Memory", true, -1},
+			{G_TYPE_NONE, -1, NULL, false, -1}
 		};
 
 		sview_search_info.search_type = SEARCH_JOB_STATE;
@@ -703,11 +733,11 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 		label = gtk_label_new("Which partition");
 	} else if (!xstrcmp(name, "partition_state")) {
 		display_data_t pulldown_display_data[] = {
-			{G_TYPE_NONE, PARTITION_UP, "Up", TRUE, -1},
-			{G_TYPE_NONE, PARTITION_DOWN, "Down", TRUE, -1},
-			{G_TYPE_NONE, PARTITION_INACTIVE, "Inactive", TRUE, -1},
-			{G_TYPE_NONE, PARTITION_DRAIN, "Drain", TRUE, -1},
-			{G_TYPE_NONE, -1, NULL, FALSE, -1}
+			{G_TYPE_NONE, PARTITION_UP, "Up", true, -1},
+			{G_TYPE_NONE, PARTITION_DOWN, "Down", true, -1},
+			{G_TYPE_NONE, PARTITION_INACTIVE, "Inactive", true, -1},
+			{G_TYPE_NONE, PARTITION_DRAIN, "Drain", true, -1},
+			{G_TYPE_NONE, -1, NULL, false, -1}
 		};
 
 		sview_search_info.search_type = SEARCH_PARTITION_STATE;
@@ -716,96 +746,42 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 	} else if (!xstrcmp(name, "node_name")) {
 		sview_search_info.search_type = SEARCH_NODE_NAME;
 		entry = create_entry();
-		if (cluster_flags & CLUSTER_FLAG_BG)
-			label = gtk_label_new("Which Midplane(s)?\n"
-					      "(ranged or comma separated)");
-		else
-			label = gtk_label_new("Which node(s)?\n"
-					      "(ranged or comma separated)");
+		label = gtk_label_new("Which node(s)?\n"
+				      "(ranged or comma separated)");
 	} else if (!xstrcmp(name, "node_state")) {
 		display_data_t pulldown_display_data[] = {
 			{G_TYPE_NONE, NODE_STATE_ALLOCATED, "Allocated",
-			 TRUE, -1},
+			 true, -1},
 			{G_TYPE_NONE, NODE_STATE_COMPLETING, "Completing",
-			 TRUE, -1},
-			{G_TYPE_NONE, NODE_STATE_DOWN, "Down", TRUE, -1},
+			 true, -1},
+			{G_TYPE_NONE, NODE_STATE_DOWN, "Down", true, -1},
 			{G_TYPE_NONE, NODE_STATE_ALLOCATED | NODE_STATE_DRAIN,
-			 "Draining", TRUE, -1},
+			 "Draining", true, -1},
 			{G_TYPE_NONE, NODE_STATE_IDLE | NODE_STATE_DRAIN,
-			 "Drained", TRUE, -1},
-			{G_TYPE_NONE, NODE_STATE_ERROR, "Error", TRUE, -1},
-			{G_TYPE_NONE, NODE_STATE_FAIL, "Fail", TRUE, -1},
+			 "Drained", true, -1},
+			{G_TYPE_NONE, NODE_STATE_FAIL, "Fail", true, -1},
 			{G_TYPE_NONE, NODE_STATE_FAIL | NODE_STATE_ALLOCATED,
-			 "Failing", TRUE, -1},
-			{G_TYPE_NONE, NODE_STATE_FUTURE, "Future", TRUE, -1},
-			{G_TYPE_NONE, NODE_STATE_IDLE, "Idle", TRUE, -1},
-			{G_TYPE_NONE, NODE_STATE_MAINT, "Maint", TRUE, -1},
-			{G_TYPE_NONE, NODE_STATE_MIXED, "Mixed", TRUE, -1},
+			 "Failing", true, -1},
+			{G_TYPE_NONE, NODE_STATE_FUTURE, "Future", true, -1},
+			{G_TYPE_NONE, NODE_STATE_IDLE, "Idle", true, -1},
+			{G_TYPE_NONE, NODE_STATE_MAINT, "Maint", true, -1},
+			{G_TYPE_NONE, NODE_STATE_MIXED, "Mixed", true, -1},
 			{G_TYPE_NONE, NODE_STATE_NO_RESPOND,
-			 "No Respond", TRUE, -1},
+			 "No Respond", true, -1},
 			{G_TYPE_NONE, NODE_STATE_NET | NODE_STATE_IDLE,
-			 "PerfCTRs", TRUE, -1},
+			 "PerfCTRs", true, -1},
 			{G_TYPE_NONE, NODE_STATE_POWER_SAVE,
-			 "Power Down", TRUE, -1},
+			 "Power Down", true, -1},
 			{G_TYPE_NONE, NODE_STATE_POWER_UP,
-			 "Power Up", TRUE, -1},
+			 "Power Up", true, -1},
+			{G_TYPE_NONE, NODE_STATE_REBOOT, "Reboot", true, -1},
 			{G_TYPE_NONE, NODE_STATE_RES | NODE_STATE_IDLE,
-			 "Reserved", TRUE, -1},
-			{G_TYPE_NONE, NODE_STATE_UNKNOWN, "Unknown", TRUE, -1},
-			{G_TYPE_NONE, -1, NULL, FALSE, -1}
+			 "Reserved", true, -1},
+			{G_TYPE_NONE, NODE_STATE_UNKNOWN, "Unknown", true, -1},
+			{G_TYPE_NONE, -1, NULL, false, -1}
 		};
 
 		sview_search_info.search_type = SEARCH_NODE_STATE;
-		entry = create_pulldown_combo(pulldown_display_data);
-		label = gtk_label_new("Which state?");
-	} else if ((cluster_flags & CLUSTER_FLAG_BG)
-		   && !xstrcmp(name, "bg_block_name")) {
-		sview_search_info.search_type = SEARCH_BLOCK_NAME;
-		entry = create_entry();
-		label = gtk_label_new("Which block?");
-	} else if ((cluster_flags & CLUSTER_FLAG_BG)
-		   && !xstrcmp(name, "bg_block_size")) {
-		sview_search_info.search_type = SEARCH_BLOCK_SIZE;
-		entry = create_entry();
-		label = gtk_label_new("Which block size?");
-	} else if (!xstrcmp(name, "bg_block_state")) {
-		display_data_t pulldown_display_data[] = {
-			{G_TYPE_NONE, BG_BLOCK_NAV, "Nav", TRUE, -1},
-			{G_TYPE_NONE, BG_BLOCK_FREE, "Free", TRUE, -1},
-			{G_TYPE_NONE, BG_BLOCK_BUSY, NULL, TRUE, -1},
-			{G_TYPE_NONE, BG_BLOCK_BOOTING, "Booting", TRUE, -1},
-			{G_TYPE_NONE, BG_BLOCK_REBOOTING, NULL, TRUE, -1},
-			{G_TYPE_NONE, BG_BLOCK_INITED, "Inited", TRUE, -1},
-			{G_TYPE_NONE, BG_BLOCK_ALLOCATED, NULL, TRUE, -1},
-			{G_TYPE_NONE, BG_BLOCK_TERM, "Terminating", TRUE, -1},
-			{G_TYPE_NONE, BG_BLOCK_ERROR_FLAG, "Error", TRUE, -1},
-			{G_TYPE_NONE, -1, NULL, FALSE, -1}
-		};
-		display_data_t *display_data = pulldown_display_data;
-		while (display_data++) {
-			if (display_data->id == -1)
-				break;
-			if (cluster_flags & CLUSTER_FLAG_BGL) {
-				switch(display_data->id) {
-				case BG_BLOCK_BUSY:
-					display_data->name = "Busy";
-					break;
-				}
-			} else if (cluster_flags & CLUSTER_FLAG_BGP){
-				switch(display_data->id) {
-				case BG_BLOCK_REBOOTING:
-					display_data->name = "Rebooting";
-					break;
-				}
-			} else {
-				switch(display_data->id) {
-				case BG_BLOCK_ALLOCATED:
-					display_data->name = "Allocated";
-					break;
-				}
-			}
-		}
-		sview_search_info.search_type = SEARCH_BLOCK_STATE;
 		entry = create_pulldown_combo(pulldown_display_data);
 		label = gtk_label_new("Which state?");
 	} else if (!xstrcmp(name, "reservation_name")) {
@@ -818,9 +794,9 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 	}
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   label, FALSE, FALSE, 0);
+			   label, false, false, 0);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   entry, FALSE, FALSE, 0);
+			   entry, false, false, 0);
 
 	gtk_widget_show_all(popup);
 	response = gtk_dialog_run (GTK_DIALOG(popup));
@@ -830,7 +806,6 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 			goto end_it;
 
 		switch(sview_search_info.search_type) {
-		case SEARCH_BLOCK_STATE:
 		case SEARCH_JOB_STATE:
 		case SEARCH_NODE_STATE:
 		case SEARCH_PARTITION_STATE:
@@ -850,8 +825,6 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 			break;
 		case SEARCH_JOB_ID:
 		case SEARCH_JOB_USER:
-		case SEARCH_BLOCK_NAME:
-		case SEARCH_BLOCK_SIZE:
 		case SEARCH_PARTITION_NAME:
 		case SEARCH_NODE_NAME:
 		case SEARCH_RESERVATION_NAME:
@@ -873,7 +846,7 @@ end_it:
 
 extern void change_refresh_popup(GtkAction *action, gpointer user_data)
 {
-	GtkWidget *table = gtk_table_new(1, 2, FALSE);
+	GtkWidget *table = gtk_table_new(1, 2, false);
 	GtkWidget *label = NULL;
 	GtkObject *adjustment = gtk_adjustment_new(
 		working_sview_config.refresh_delay,
@@ -893,6 +866,8 @@ extern void change_refresh_popup(GtkAction *action, gpointer user_data)
 
 	label = gtk_dialog_add_button(GTK_DIALOG(popup),
 				      GTK_STOCK_OK, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(popup), label);
 	gtk_dialog_add_button(GTK_DIALOG(popup),
 			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
@@ -902,7 +877,7 @@ extern void change_refresh_popup(GtkAction *action, gpointer user_data)
 	gtk_container_set_border_width(GTK_CONTAINER(table), 10);
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   table, FALSE, FALSE, 0);
+			   table, false, false, 0);
 
 	gtk_table_attach_defaults(GTK_TABLE(table), label, 0, 1, 0, 1);
 	gtk_table_attach_defaults(GTK_TABLE(table), spin_button, 1, 2, 0, 1);
@@ -923,7 +898,7 @@ extern void change_refresh_popup(GtkAction *action, gpointer user_data)
 					      temp);
 		g_free(temp);
 		if (!sview_thread_new(_refresh_thr, GINT_TO_POINTER(response),
-				      FALSE, &error)) {
+				      false, &error)) {
 			g_printerr ("Failed to create refresh thread: %s\n",
 				    error->message);
 		}
@@ -936,7 +911,7 @@ extern void change_refresh_popup(GtkAction *action, gpointer user_data)
 
 extern void change_grid_popup(GtkAction *action, gpointer user_data)
 {
-	GtkWidget *table = gtk_table_new(1, 2, FALSE);
+	GtkWidget *table = gtk_table_new(1, 2, false);
 	GtkWidget *label;
 	GtkObject *adjustment;
 	GtkWidget *width_sb, *hori_sb, *vert_sb;
@@ -954,11 +929,13 @@ extern void change_grid_popup(GtkAction *action, gpointer user_data)
 
 	label = gtk_dialog_add_button(GTK_DIALOG(popup),
 				      GTK_STOCK_OK, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(popup), label);
 	gtk_dialog_add_button(GTK_DIALOG(popup),
 			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   table, FALSE, FALSE, 0);
+			   table, false, false, 0);
 
 	label = gtk_label_new("Nodes in row ");
 	adjustment = gtk_adjustment_new(working_sview_config.grid_x_width,
@@ -1051,7 +1028,7 @@ extern void change_grid_popup(GtkAction *action, gpointer user_data)
 					      temp);
 		g_free(temp);
 		if (!sview_thread_new(_refresh_thr, GINT_TO_POINTER(response),
-				      FALSE, &error)) {
+				      false, &error)) {
 			g_printerr ("Failed to create refresh thread: %s\n",
 				    error->message);
 		}
@@ -1064,7 +1041,7 @@ extern void change_grid_popup(GtkAction *action, gpointer user_data)
 
 extern void about_popup(GtkAction *action, gpointer user_data)
 {
-	GtkWidget *table = gtk_table_new(1, 1, FALSE);
+	GtkWidget *table = gtk_table_new(1, 1, false);
 	GtkWidget *label = NULL;
 
 	GtkWidget *popup = gtk_dialog_new_with_buttons(
@@ -1074,10 +1051,13 @@ extern void about_popup(GtkAction *action, gpointer user_data)
 		NULL);
 	char *version = NULL;
 
-	version = xstrdup_printf("SLURM Version: %s", SLURM_VERSION_STRING);
+	version = xstrdup_printf("Slurm Version: %s", SLURM_VERSION_STRING);
 
 	label = gtk_dialog_add_button(GTK_DIALOG(popup),
 				      GTK_STOCK_OK, GTK_RESPONSE_OK);
+
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 
 	gtk_window_set_default(GTK_WINDOW(popup), label);
 
@@ -1090,7 +1070,7 @@ extern void about_popup(GtkAction *action, gpointer user_data)
 	gtk_container_set_border_width(GTK_CONTAINER(table), 10);
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   table, FALSE, FALSE, 0);
+			   table, false, false, 0);
 
 	gtk_table_attach_defaults(GTK_TABLE(table), label, 0, 1, 0, 1);
 
@@ -1104,7 +1084,7 @@ extern void about_popup(GtkAction *action, gpointer user_data)
 
 extern void usage_popup(GtkAction *action, gpointer user_data)
 {
-	GtkWidget *table = gtk_table_new(1, 1, FALSE);
+	GtkWidget *table = gtk_table_new(1, 1, false);
 	GtkWidget *label = NULL;
 
 	GtkWidget *popup = gtk_dialog_new_with_buttons(
@@ -1113,7 +1093,7 @@ extern void usage_popup(GtkAction *action, gpointer user_data)
 		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
 		NULL);
 	char *help_msg =
-		"sview can be used to view and modify many of SLURM's\n"
+		"sview can be used to view and modify many of Slurm's\n"
 		"records.\n\n"
 		"Tabs are used to select the data type to work with.\n"
 		"Right click on the tab to select it. Left click on\n"
@@ -1131,6 +1111,9 @@ extern void usage_popup(GtkAction *action, gpointer user_data)
 	label = gtk_dialog_add_button(GTK_DIALOG(popup),
 				      GTK_STOCK_OK, GTK_RESPONSE_OK);
 
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
+
 	gtk_window_set_default(GTK_WINDOW(popup), label);
 
 	gtk_window_set_default_size(GTK_WINDOW(popup), 200, 50);
@@ -1140,7 +1123,7 @@ extern void usage_popup(GtkAction *action, gpointer user_data)
 	gtk_container_set_border_width(GTK_CONTAINER(table), 10);
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			   table, FALSE, FALSE, 0);
+			   table, false, false, 0);
 
 	gtk_table_attach_defaults(GTK_TABLE(table), label, 0, 1, 0, 1);
 
@@ -1150,4 +1133,25 @@ extern void usage_popup(GtkAction *action, gpointer user_data)
 	gtk_widget_destroy(popup);
 
 	return;
+}
+
+extern void display_fed_disabled_popup(const char *title)
+{
+	char tmp_char[100];
+	GtkWidget *label = NULL;
+	GtkDialog *dialog = GTK_DIALOG(gtk_dialog_new_with_buttons(
+						title, GTK_WINDOW(main_window),
+						GTK_DIALOG_MODAL |
+						GTK_DIALOG_DESTROY_WITH_PARENT,
+						NULL));
+	label = gtk_dialog_add_button(dialog, GTK_STOCK_OK, GTK_RESPONSE_OK);
+	gtk_window_set_default(GTK_WINDOW(dialog), label);
+	snprintf(tmp_char, sizeof(tmp_char),
+		 "Disabled in a federated view.\n"
+		 "Go to the individual cluster and perform the action.");
+	label = gtk_label_new(tmp_char);
+	gtk_box_pack_start(GTK_BOX(dialog->vbox), label, false, false, 0);
+	gtk_widget_show_all(GTK_WIDGET(dialog));
+	(void) gtk_dialog_run(dialog);
+	gtk_widget_destroy(GTK_WIDGET(dialog));
 }

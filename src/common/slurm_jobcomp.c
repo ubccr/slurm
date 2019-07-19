@@ -8,11 +8,11 @@
  *  Written by Jay Windley <jwindley@lnxi.com>, Morris Jette <jette1@llnl.com>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,19 +28,15 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -56,17 +52,9 @@
 #include "src/common/xstring.h"
 #include "src/slurmctld/slurmctld.h"
 
-/*
- * WARNING:  Do not change the order of these fields or add additional
- * fields at the beginning of the structure.  If you do, job completion
- * logging plugins will stop working.  If you need to add fields, add them
- * at the end of the structure.
- */
 typedef struct slurm_jobcomp_ops {
 	int          (*set_loc)   ( char *loc );
 	int          (*job_write) ( struct job_record *job_ptr);
-	int          (*sa_errno)  ( void );
-	char *       (*job_strerror)  ( int errnum );
 	List         (*get_jobs)  ( slurmdb_job_cond_t *params );
 	int          (*archive)   ( slurmdb_archive_cond_t *params );
 } slurm_jobcomp_ops_t;
@@ -78,8 +66,6 @@ typedef struct slurm_jobcomp_ops {
 static const char *syms[] = {
 	"slurm_jobcomp_set_location",
 	"slurm_jobcomp_log_record",
-	"slurm_jobcomp_get_errno",
-	"slurm_jobcomp_strerror",
 	"slurm_jobcomp_get_jobs",
 	"slurm_jobcomp_archive"
 };
@@ -110,6 +96,16 @@ jobcomp_destroy_job(void *object)
 		xfree(job->geo);
 		xfree(job->bg_start_point);
 		xfree(job->work_dir);
+		xfree(job->resv_name);
+		xfree(job->req_gres);
+		xfree(job->account);
+		xfree(job->qos_name);
+		xfree(job->wckey);
+		xfree(job->cluster);
+		xfree(job->submit_time);
+		xfree(job->eligible_time);
+		xfree(job->exit_code);
+		xfree(job->derived_ec);
 		xfree(job);
 	}
 }
@@ -178,36 +174,6 @@ g_slurm_jobcomp_write(struct job_record *job_ptr)
 		error ("slurm_jobcomp plugin context not initialized");
 		retval = ENOENT;
 	}
-	slurm_mutex_unlock( &context_lock );
-	return retval;
-}
-
-extern int
-g_slurm_jobcomp_errno(void)
-{
-	int retval = SLURM_SUCCESS;
-
-	slurm_mutex_lock( &context_lock );
-	if ( g_context )
-		retval = (*(ops.sa_errno))();
-	else {
-		error ("slurm_jobcomp plugin context not initialized");
-		retval = ENOENT;
-	}
-	slurm_mutex_unlock( &context_lock );
-	return retval;
-}
-
-extern char *
-g_slurm_jobcomp_strerror(int errnum)
-{
-	char *retval = NULL;
-
-	slurm_mutex_lock( &context_lock );
-	if ( g_context )
-		retval = (*(ops.job_strerror))(errnum);
-	else
-		error ("slurm_jobcomp plugin context not initialized");
 	slurm_mutex_unlock( &context_lock );
 	return retval;
 }

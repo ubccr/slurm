@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Cray persistent burst buffer creation
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -8,26 +8,25 @@
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2015 SchedMD LLC.
-# Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
+# Copyright (C) 2015-2018 SchedMD LLC.
 # Written by Morris Jette <jette(at)schedmd.com>
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -61,8 +60,8 @@ proc find_bb_name { fname bb_name } {
 print_header $test_id
 
 set bb_types [get_bb_types]
-if {[string first "cray" $bb_types] == -1} {
-	send_user "\nWARNING: This test can only be run with the burst_buffer/cray plugin\n"
+if {[string first "datawarp" $bb_types] == -1} {
+	send_user "\nWARNING: This test can only be run with the burst_buffer/datawarp plugin\n"
 	exit 0
 }
 if {[get_bb_persistent] == 0} {
@@ -85,7 +84,7 @@ $scontrol show burst"
 send_user "\n\nClean up vestigial burst buffer\n"
 incr max_job_state_delay 300
 set job_id 0
-spawn $sbatch -N1 --output=/dev/null $script_rm
+spawn $sbatch -t1 -N1 --output=/dev/null $script_rm
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
@@ -106,6 +105,7 @@ if {$job_id == 0} {
 if {[wait_for_job $job_id "DONE"] != 0} {
 	send_user "\nFAILURE: job did not complete\n"
 	set exit_code 1
+	cancel_job $job_id
 }
 
 #
@@ -114,7 +114,7 @@ if {[wait_for_job $job_id "DONE"] != 0} {
 #
 send_user "\n\nCreate and use a burst buffer\n"
 set job_id_use 0
-spawn $sbatch -N1 --output=$output_use $script_use
+spawn $sbatch -t1 -N1 --output=$output_use $script_use
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id_use $expect_out(1,string)
@@ -130,7 +130,7 @@ expect {
 }
 
 set job_id_mk 0
-spawn $sbatch -N1 --output=$output_mk $script_mk
+spawn $sbatch -t1 -N1 --output=$output_mk $script_mk
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id_mk $expect_out(1,string)
@@ -151,6 +151,7 @@ if {$job_id_mk == 0} {
 } elseif {[wait_for_job $job_id_mk "DONE"] != 0} {
 	send_user "\nFAILURE: job did not complete\n"
 	set exit_code 1
+	cancel_job $job_id_mk
 }
 
 if {$job_id_use == 0} {
@@ -159,6 +160,7 @@ if {$job_id_use == 0} {
 } elseif {[wait_for_job $job_id_use "DONE"] != 0} {
 	send_user "\nFAILURE: job did not complete\n"
 	set exit_code 1
+	cancel_job $job_id_use
 } elseif {[wait_for_file $output_use] != 0} {
 	set exit_code 1
 } elseif {[find_bb_name $output_use test$test_id] == 0} {
@@ -175,7 +177,7 @@ if {$job_id_use == 0} {
 # Now clean up the burst buffer
 #
 set job_id_rm 0
-spawn $sbatch -N1 --output=$output_rm $script_rm
+spawn $sbatch -t1 -N1 --output=$output_rm $script_rm
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id_rm $expect_out(1,string)
@@ -195,6 +197,7 @@ if {$job_id_rm == 0} {
 } elseif {[wait_for_job $job_id_rm "DONE"] != 0} {
 	send_user "\nFAILURE: job did not complete\n"
 	set exit_code 1
+	cancel_job $job_id_rm
 } elseif {[wait_for_file $output_rm] != 0} {
 	set exit_code 1
 } elseif {[find_bb_name $output_rm test$test_id] != 0} {

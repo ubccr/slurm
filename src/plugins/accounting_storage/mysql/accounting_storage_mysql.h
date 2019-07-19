@@ -6,11 +6,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,20 +26,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _HAVE_ACCOUNTING_STORAGE_MYSQL_H
 #define _HAVE_ACCOUNTING_STORAGE_MYSQL_H
 
-#include <strings.h>
+#include <string.h>
 #include <stdlib.h>
 
 /* we can't include common/slurm_xlator.h here since it contains
@@ -56,6 +56,20 @@
 #define	debug3			slurm_debug3
 #define	debug4			slurm_debug4
 #define	debug5			slurm_debug5
+
+/*
+ * Allow up to 999 static TRES
+ * NOTE: If this changes for some reason you will also need to update the 1001
+ * in accounting_storage_mysql.c...
+ *
+ * 	if (mysql_db_create_table(mysql_conn, tres_table,
+ *				  tres_table_fields,
+ *				  ", primary key (id), "
+ *				  "unique index (type(20), name(20))) "
+ *				  "auto_increment=1001")
+ *
+ */
+#define TRES_OFFSET 1000
 
 #include "src/common/assoc_mgr.h"
 #include "src/common/macros.h"
@@ -81,6 +95,8 @@ extern char *cluster_day_table;
 extern char *cluster_hour_table;
 extern char *cluster_month_table;
 extern char *cluster_table;
+extern char *convert_version_table;
+extern char *federation_table;
 extern char *event_table;
 extern char *job_table;
 extern char *last_ran_table;
@@ -104,6 +120,7 @@ extern List as_mysql_total_cluster_list;
 extern pthread_mutex_t as_mysql_cluster_list_lock;
 
 extern uint64_t debug_flags;
+extern bool backup_dbd;
 
 typedef enum {
 	QOS_LEVEL_NONE,

@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,41 +26,21 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if STDC_HEADERS
-#    include <string.h>
-#  endif
-#  if HAVE_SYS_TYPES_H
-#    include <sys/types.h>
-#  endif /* HAVE_SYS_TYPES_H */
-#  if HAVE_UNISTD_H
-#    include <unistd.h>
-#  endif
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else /* ! HAVE_INTTYPES_H */
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif /* HAVE_INTTYPES_H */
-#else /* ! HAVE_CONFIG_H */
-#  include <sys/types.h>
-#  include <unistd.h>
-#  include <stdint.h>
-#  include <string.h>
-#endif /* HAVE_CONFIG_H */
+#include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -73,6 +53,7 @@
 #include "src/common/xstring.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/job_submit.h"
+#include "src/slurmctld/locks.h"
 
 typedef struct slurm_submit_ops {
 	int		(*submit)	( struct job_descriptor *job_desc,
@@ -101,12 +82,12 @@ static bool init_run = false;
 /*
  * Initialize the job submit plugin.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int job_submit_plugin_init(void)
 {
 	int rc = SLURM_SUCCESS;
-	char *last = NULL, *names;
+	char *last = NULL, *tmp_plugin_list, *names;
 	char *plugin_type = "job_submit";
 	char *type;
 
@@ -122,12 +103,12 @@ extern int job_submit_plugin_init(void)
 	if ((submit_plugin_list == NULL) || (submit_plugin_list[0] == '\0'))
 		goto fini;
 
-	names = submit_plugin_list;
+	tmp_plugin_list = xstrdup(submit_plugin_list);
+	names = tmp_plugin_list;
 	while ((type = strtok_r(names, ",", &last))) {
-		xrealloc(ops,
-			 (sizeof(slurm_submit_ops_t) * (g_context_cnt + 1)));
-		xrealloc(g_context,
-			 (sizeof(plugin_context_t *) * (g_context_cnt + 1)));
+		xrecalloc(ops, g_context_cnt + 1, sizeof(slurm_submit_ops_t));
+		xrecalloc(g_context, g_context_cnt + 1,
+			  sizeof(plugin_context_t *));
 		if (xstrncmp(type, "job_submit/", 11) == 0)
 			type += 11; /* backward compatibility */
 		type = xstrdup_printf("job_submit/%s", type);
@@ -147,6 +128,7 @@ extern int job_submit_plugin_init(void)
 		names = NULL; /* for next strtok_r() iteration */
 	}
 	init_run = true;
+	xfree(tmp_plugin_list);
 
 fini:
 	slurm_mutex_unlock(&g_context_lock);
@@ -160,7 +142,7 @@ fini:
 /*
  * Terminate the job submit plugin. Free memory.
  *
- * Returns a SLURM errno.
+ * Returns a Slurm errno.
  */
 extern int job_submit_plugin_fini(void)
 {
@@ -206,8 +188,7 @@ extern int job_submit_plugin_reconfig(void)
 		return rc;
 
 	slurm_mutex_lock(&g_context_lock);
-	if (plugin_names && submit_plugin_list &&
-	    xstrcmp(plugin_names, submit_plugin_list))
+	if (xstrcmp(plugin_names, submit_plugin_list))
 		plugin_change = true;
 	else
 		plugin_change = false;
@@ -238,7 +219,16 @@ extern int job_submit_plugin_submit(struct job_descriptor *job_desc,
 	DEF_TIMERS;
 	int i, rc;
 
+	xassert(verify_lock(CONF_LOCK, READ_LOCK));
+	xassert(verify_lock(JOB_LOCK, READ_LOCK));
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+	xassert(verify_lock(PART_LOCK, READ_LOCK));
+
 	START_TIMER;
+
+	/* Set to NO_VAL so that it can only be set by the job submit plugin. */
+	job_desc->site_factor = NO_VAL;
+
 	rc = job_submit_plugin_init();
 	slurm_mutex_lock(&g_context_lock);
 	/* NOTE: On function entry read locks are set on config, job, node and
@@ -265,7 +255,16 @@ extern int job_submit_plugin_modify(struct job_descriptor *job_desc,
 	DEF_TIMERS;
 	int i, rc;
 
+	xassert(verify_lock(CONF_LOCK, READ_LOCK));
+	xassert(verify_lock(JOB_LOCK, READ_LOCK));
+	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+	xassert(verify_lock(PART_LOCK, READ_LOCK));
+
 	START_TIMER;
+
+	/* Set to NO_VAL so that it can only be set by the job submit plugin. */
+	job_desc->site_factor = NO_VAL;
+
 	rc = job_submit_plugin_init();
 	slurm_mutex_lock(&g_context_lock);
 	for (i = 0; ((i < g_context_cnt) && (rc == SLURM_SUCCESS)); i++)

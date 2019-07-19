@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM sprio functionality.
+# Purpose: Test of Slurm sprio functionality.
 #
 #          sprio all options all arguments
 #
@@ -13,22 +13,22 @@
 # Written by Joseph Donaghy <donaghy1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -52,6 +52,15 @@ if { [string compare [priority_type] multifactor] } {
 }
 
 #
+# This test needs to be modified to use the core counts rather than CPU counts
+#
+set select_type_params [get_select_type_params ""]
+if { [string first "CR_ONE_TASK_PER_CORE" $select_type_params] != -1 } {
+	log_warn "This test can't be run SelectTypeParameters=CR_ONE_TASK_PER_CORE"
+	exit 0
+}
+
+#
 # Build input script file
 #
 make_bash_script $file_in "$bin_sleep 600"
@@ -65,7 +74,7 @@ proc def_cpu_cnt { } {
 	set cpu_cnt 1
 	spawn $sinfo -h -o "%P %C" -p $partition --state=idle
 	expect {
-		-re "$partition\\* ($number)(K?)/($number)(K?)" {
+		-re "$partition\\* ($number)(K?)\/($number)(K?)" {
 			set cpu_cnt $expect_out(3,string)
 			if {[string compare $expect_out(4,string) ""]} {
 				set cpu_cnt [expr $cpu_cnt * 1024]
@@ -146,7 +155,7 @@ proc sprio_opt { soption } {
 
 		spawn $sprio $soption
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -196,11 +205,11 @@ proc sprio_opt { soption } {
 
 		spawn $sprio $soption job sizes
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "Usage: sprio .-j jid.s.. .-u user_name.s.. .-o format. .--usage. .-hlnvVw." {
+			-re "Usage: sprio .-j jid.s.. .-u user_name.s.. .-o format. .-p partitions.\r\n   .--federation. .--local. .--sibling. .--usage. .-hlnvVw." {
 				if {$debug} {send_user "\nmatch5\n"}
 				incr matches
 				exp_continue
@@ -230,7 +239,7 @@ proc sprio_opt { soption } {
 
 		spawn $sprio $soption
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -265,11 +274,11 @@ proc sprio_opt { soption } {
 
 		spawn $sprio $soption
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "JOBID *PRIORITY" {
+			-re "JOBID\\s+PARTITION\\s+PRIORITY" {
 				if {$debug} {send_user "\nmatch7\n"}
 				incr matches
 				exp_continue
@@ -325,11 +334,11 @@ proc sprio_args { soption sargs jobid} {
 
 		spawn $sprio $soption $sargs $jobid
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "JOBID|PRIORITY|AGE|FAIRSHARE|JOBSIZE|PARTITION|QOS" {
+			-re "JOBID|PARTITION|PRIORITY|ADMIN|AGE|ASSOC|FAIRSHARE|JOBSIZE|PARTITION|QOS" {
 				if {$debug} {send_user "\nmatch9\n"}
 				incr matches
 				exp_continue
@@ -359,16 +368,16 @@ proc sprio_args { soption sargs jobid} {
 
 		spawn $sprio $soption $jobid
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "JOBID.*PRIORITY" {
+			-re "JOBID\\s+PARTITION\\s+PRIORITY" {
 				if {$debug} {send_user "\nmatch10\n"}
 				incr matches
 				exp_continue
 			}
-			-re "$jobid *$number" {
+			-re "$jobid\\s+\\S+\\s+$number" {
 				if {$debug} {send_user "\nmatch11\n"}
 				incr matches
 				exp_continue
@@ -398,11 +407,11 @@ proc sprio_args { soption sargs jobid} {
 
 		spawn $sprio $soption $sargs $jobid
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "JOBID     USER   PRIORITY        AGE  FAIRSHARE    JOBSIZE  PARTITION        QOS        NICE" {
+			-re "JOBID PARTITION     USER   PRIORITY       SITE        AGE      ASSOC  FAIRSHARE    JOBSIZE  PARTITION        QOS        NICE                 TRES" {
 				if {$debug} {send_user "\nmatch12\n"}
 				incr matches
 				exp_continue
@@ -437,16 +446,16 @@ proc sprio_args { soption sargs jobid} {
 
 		spawn $sprio $soption $sargs $jobid
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "JOBID *PRIORITY" {
+			-re "JOBID\\s+PARTITION\\s+PRIORITY" {
 				if {$debug} {send_user "\nmatch14\n"}
 				incr matches
 				exp_continue
 			}
-			-re "$jobid *$float" {
+			-re "$jobid\\s+\\S+\\s+$float" {
 				if {$debug} {send_user "\nmatch15\n"}
 				incr matches
 				exp_continue
@@ -474,13 +483,13 @@ proc sprio_args { soption sargs jobid} {
 ############# sprio format options
 	if { $soption == "--format" || $soption == "-o" } {
 
-		spawn $sprio $soption "%.15i %.8u %.10y %.10Y %.10a %.10A %.10f %.10F %.10j %.10J %.10p %.10P %.10q %.10Q %.6N" $sargs $jobid
+		spawn $sprio $soption "%.15i %.8u %.10y %.10Y %.10S %.10a %.10A %.10b %.10B %.10f %.10F %.10j %.10J %.10p %.10P %.10q %.10Q %.6N" $sargs $jobid
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "JOBID     USER   PRIORITY   PRIORITY        AGE        AGE  " {
+			-re "JOBID     USER   PRIORITY   PRIORITY       SITE        AGE        AGE      ASSOC      ASSOC " {
 				if {$debug} {send_user "\nmatch16\n"}
 				incr matches
 				exp_continue
@@ -520,16 +529,16 @@ proc sprio_args { soption sargs jobid} {
 
 		spawn $sprio $soption $sargs
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "JOBID *USER" {
+			-re "JOBID\\s+PARTITION\\s+USER" {
 				if {$debug} {send_user "\nmatch19\n"}
 				incr matches
 				exp_continue
 			}
-			-re "$jobid *$sargs" {
+			-re "$jobid\\s+\\S+\\s+[string range $sargs 0 7]" {
 				if {$debug} {send_user "\nmatch20\n"}
 				incr matches
 				exp_continue
@@ -559,16 +568,16 @@ proc sprio_args { soption sargs jobid} {
 
 		spawn $sprio $soption$sargs
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "JOBID *USER" {
+			-re "JOBID\\s+PARTITION\\s+USER" {
 				if {$debug} {send_user "\nmatch21\n"}
 				incr matches
 				exp_continue
 			}
-			-re "$jobid *$sargs" {
+			-re "$jobid\\s+\\S+\\s+[string range $sargs 0 7]" {
 				if {$debug} {send_user "\nmatch22\n"}
 				incr matches
 				exp_continue
@@ -598,7 +607,7 @@ proc sprio_args { soption sargs jobid} {
 
 		spawn $sprio $soption $sargs $jobid
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -607,12 +616,12 @@ proc sprio_args { soption sargs jobid} {
 				incr matches
 				exp_continue
 			}
-			-re "JOBID *PRIORITY" {
+			-re "JOBID\\s+PARTITION\\s+PRIORITY" {
 				if {$debug} {send_user "\nmatch24\n"}
 				incr matches
 				exp_continue
 			}
-			-re "$jobid *$number" {
+			-re "$jobid\\s+\\S+\\s+$number" {
 				if {$debug} {send_user "\nmatch25\n"}
 				incr matches
 				exp_continue
@@ -655,7 +664,14 @@ send_user "\nSubmitted 2 jobs successfully\n\n"
 #
 # Collect uid
 #
-set nuid [get_my_nuid]
+set user_name [get_my_user_name]
+
+#
+# Remove the sprio format variable if found
+#
+if {[info exists env(SPRIO_FORMAT)]} {
+    unset env(SPRIO_FORMAT)
+}
 
 #
 # Start testing sprio options and arguments
@@ -689,10 +705,10 @@ if {!$exit_code} {
 	sprio_args --format -j $jobid2
 }
 if {!$exit_code} {
-	sprio_args -u $nuid $jobid2
+	sprio_args -u $user_name $jobid2
 }
 if {!$exit_code} {
-	sprio_args --user= $nuid $jobid2
+	sprio_args --user= $user_name $jobid2
 }
 if {!$exit_code} {
 	sprio_args -v -j $jobid2

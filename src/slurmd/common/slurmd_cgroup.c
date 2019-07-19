@@ -6,11 +6,11 @@
  *
  *  Written by Martin Perry <martin.perry@bull.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,22 +26,21 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \****************************************************************************/
 
-#if HAVE_CONFIG_H
 #include "config.h"
-#endif
 
 #define _GNU_SOURCE
 #include <ctype.h>
+#include <limits.h>
 #include <sched.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -57,31 +56,27 @@
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
-#ifndef PATH_MAX
-#define PATH_MAX 256
-#endif
-
-static xcgroup_t system_cpuset_cg = {NULL, NULL, NULL, 0, 0, 0, 0};
-static xcgroup_t system_memory_cg = {NULL, NULL, NULL, 0, 0, 0, 0};
+static xcgroup_t system_cpuset_cg = {NULL, NULL, NULL, 0, 0, 0};
+static xcgroup_t system_memory_cg = {NULL, NULL, NULL, 0, 0, 0};
 
 static bool cpuset_prefix_set = false;
 static char *cpuset_prefix = "";
 
-static xcgroup_ns_t cpuset_ns = {NULL, NULL, NULL, NULL};
-static xcgroup_ns_t memory_ns = {NULL, NULL, NULL, NULL};
+static xcgroup_ns_t cpuset_ns = {NULL, NULL, NULL};
+static xcgroup_ns_t memory_ns = {NULL, NULL, NULL};
 
 char cpuset_meta[PATH_MAX];
 
 static char system_cgroup_path[PATH_MAX];
 
-static slurm_cgroup_conf_t slurm_cgroup_conf;
-
 static bool constrain_ram_space;
 static bool constrain_swap_space;
+static bool constrain_kmem_space;
 
 static float allowed_ram_space;   /* Allowed RAM in percent       */
 static float allowed_swap_space;  /* Allowed Swap percent         */
 
+static uint64_t max_kmem;       /* Upper bound for kmem.limit_in_bytes  */
 static uint64_t max_ram;        /* Upper bound for memory.limit_in_bytes  */
 static uint64_t max_swap;       /* Upper bound for swap                   */
 static uint64_t totalram;       /* Total real memory available on node    */
@@ -105,15 +100,10 @@ extern int init_system_cpuset_cgroup(void)
 	char* slurm_cgpath;
 	xcgroup_t slurm_cg;
 
-	/* read cgroup configuration */
-	if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
-		return SLURM_ERROR;
-
 	/* initialize cpuset cgroup namespace */
-	if (xcgroup_ns_create(&slurm_cgroup_conf, &cpuset_ns, "", "cpuset")
+	if (xcgroup_ns_create(&cpuset_ns, "", "cpuset")
 	    != XCGROUP_SUCCESS) {
 		error("system cgroup: unable to create cpuset namespace");
-		free_slurm_cgroup_conf(&slurm_cgroup_conf);
 		return SLURM_ERROR;
 	}
 
@@ -121,7 +111,6 @@ extern int init_system_cpuset_cgroup(void)
 	slurm_cgpath = _system_cgroup_create_slurm_cg(&cpuset_ns);
 	if ( slurm_cgpath == NULL ) {
 		xcgroup_ns_destroy(&cpuset_ns);
-		free_slurm_cgroup_conf(&slurm_cgroup_conf);
 		return SLURM_ERROR;
 	}
 
@@ -131,7 +120,6 @@ extern int init_system_cpuset_cgroup(void)
 		error("system cgroup: unable to load slurm cpuset xcgroup");
 		xfree(slurm_cgpath);
 		xcgroup_ns_destroy(&cpuset_ns);
-		free_slurm_cgroup_conf(&slurm_cgroup_conf);
 		return SLURM_ERROR;
 	}
 
@@ -150,7 +138,6 @@ again:
 			xfree(slurm_cgpath);
 			xcgroup_destroy(&slurm_cg);
 			xcgroup_ns_destroy(&cpuset_ns);
-			free_slurm_cgroup_conf(&slurm_cgroup_conf);
 			xfree(cpus);
 			return SLURM_ERROR;
 		}
@@ -174,7 +161,6 @@ again:
 		goto error;
 	}
 
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
 	debug("system cgroup: system cpuset cgroup initialized");
 	return SLURM_SUCCESS;
 
@@ -182,7 +168,6 @@ error:
 	xcgroup_unlock(&system_cpuset_cg);
 	xcgroup_destroy(&system_cpuset_cg);
 	xcgroup_ns_destroy(&cpuset_ns);
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
 	return fstatus;
 }
 
@@ -190,21 +175,22 @@ extern int init_system_memory_cgroup(void)
 {
 	int fstatus = SLURM_ERROR;
 	char* slurm_cgpath;
-
-	/* read cgroup configuration */
-	if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
-		return SLURM_ERROR;
+	slurm_cgroup_conf_t *cg_conf;
 
 	/* initialize memory cgroup namespace */
-	if (xcgroup_ns_create(&slurm_cgroup_conf, &memory_ns, "", "memory")
+	if (xcgroup_ns_create(&memory_ns, "", "memory")
 	    != XCGROUP_SUCCESS) {
 		error("system cgroup: unable to create memory namespace");
-		free_slurm_cgroup_conf(&slurm_cgroup_conf);
 		return SLURM_ERROR;
 	}
 
-	constrain_ram_space = slurm_cgroup_conf.constrain_ram_space;
-	constrain_swap_space = slurm_cgroup_conf.constrain_swap_space;
+	/* read cgroup configuration */
+	slurm_mutex_lock(&xcgroup_config_read_mutex);
+	cg_conf = xcgroup_get_slurm_cgroup_conf();
+
+	constrain_kmem_space = cg_conf->constrain_kmem_space;
+	constrain_ram_space = cg_conf->constrain_ram_space;
+	constrain_swap_space = cg_conf->constrain_swap_space;
 
 	/*
 	 * as the swap space threshold will be configured with a
@@ -214,32 +200,44 @@ extern int init_system_memory_cgroup(void)
 	 * used for both mem and mem+swp limit during memcg creation.
 	 */
 	if ( constrain_ram_space )
-		allowed_ram_space = slurm_cgroup_conf.allowed_ram_space;
+		allowed_ram_space = cg_conf->allowed_ram_space;
 	else
 		allowed_ram_space = 100.0;
 
-	allowed_swap_space = slurm_cgroup_conf.allowed_swap_space;
+	allowed_swap_space = cg_conf->allowed_swap_space;
 
 	if ((totalram = (uint64_t) conf->real_memory_size) == 0)
 		error ("system cgroup: Unable to get RealMemory size");
 
-	max_ram = _percent_in_bytes(totalram, slurm_cgroup_conf.max_ram_percent);
-	max_swap = _percent_in_bytes(totalram, slurm_cgroup_conf.max_swap_percent);
+	max_kmem = _percent_in_bytes(totalram, cg_conf->max_kmem_percent);
+	max_ram = _percent_in_bytes(totalram, cg_conf->max_ram_percent);
+	max_swap = _percent_in_bytes(totalram, cg_conf->max_swap_percent);
 	max_swap += max_ram;
-	min_ram_space = slurm_cgroup_conf.min_ram_space * 1024 * 1024;
+	min_ram_space = cg_conf->min_ram_space * 1024 * 1024;
 
 	debug ("system cgroup: memory: total:%luM allowed:%.4g%%(%s), "
-	       "swap:%.4g%%(%s), max:%.4g%%(%luM) max+swap:%.4g%%(%luM) min:%uM",
+	       "swap:%.4g%%(%s), max:%.4g%%(%luM) "
+	       "max+swap:%.4g%%(%luM) min:%luM "
+	       "kmem:%.4g%%(%luM %s) min:%luM",
 	       (unsigned long) totalram,
 	       allowed_ram_space,
 	       constrain_ram_space?"enforced":"permissive",
+
 	       allowed_swap_space,
 	       constrain_swap_space?"enforced":"permissive",
-	       slurm_cgroup_conf.max_ram_percent,
+	       cg_conf->max_ram_percent,
 	       (unsigned long) (max_ram/(1024*1024)),
-	       slurm_cgroup_conf.max_swap_percent,
+
+	       cg_conf->max_swap_percent,
 	       (unsigned long) (max_swap/(1024*1024)),
-	       (unsigned) slurm_cgroup_conf.min_ram_space);
+	       (unsigned long) cg_conf->min_ram_space,
+
+	       cg_conf->max_kmem_percent,
+	       (unsigned long)(max_kmem/(1024*1024)),
+	       constrain_kmem_space?"enforced":"permissive",
+	       (unsigned long) cg_conf->min_kmem_space);
+
+	slurm_mutex_unlock(&xcgroup_config_read_mutex);
 
         /*
          *  Warning: OOM Killer must be disabled for slurmstepd
@@ -253,13 +251,12 @@ extern int init_system_memory_cgroup(void)
          *  FYI, setting "export SLURMSTEPD_OOM_ADJ=-1000"
          *  in /etc/sysconfig/slurm would be the same
          */
-        setenv("SLURMSTEPD_OOM_ADJ", "-1000", 0);
+	 setenv("SLURMSTEPD_OOM_ADJ", "-1000", 0);
 
 	/* create slurm root cg in this cg namespace */
 	slurm_cgpath = _system_cgroup_create_slurm_cg(&memory_ns);
 	if ( slurm_cgpath == NULL ) {
 		xcgroup_ns_destroy(&memory_ns);
-		free_slurm_cgroup_conf(&slurm_cgroup_conf);
 		return SLURM_ERROR;
 	}
 
@@ -284,7 +281,6 @@ extern int init_system_memory_cgroup(void)
 		goto error;
 	}
 
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
 	debug("system cgroup: system memory cgroup initialized");
 	return SLURM_SUCCESS;
 
@@ -292,7 +288,6 @@ error:
 	xcgroup_unlock(&system_memory_cg);
 	xcgroup_destroy(&system_memory_cg);
 	xcgroup_ns_destroy(&memory_ns);
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
 	return fstatus;
 }
 
@@ -302,6 +297,7 @@ extern void fini_system_cgroup(void)
 	xcgroup_destroy(&system_memory_cg);
 	xcgroup_ns_destroy(&cpuset_ns);
 	xcgroup_ns_destroy(&memory_ns);
+	xcgroup_fini_slurm_cgroup_conf();
 }
 
 static char* _system_cgroup_create_slurm_cg (xcgroup_ns_t* ns)
@@ -309,7 +305,16 @@ static char* _system_cgroup_create_slurm_cg (xcgroup_ns_t* ns)
 	/* we do it here as we do not have access to the conf structure */
 	/* in libslurm (src/common/xcgroup.c) */
 	xcgroup_t slurm_cg;
-	char* pre = (char*) xstrdup(slurm_cgroup_conf.cgroup_prepend);
+	char* pre;
+	slurm_cgroup_conf_t *cg_conf;
+
+	/* read cgroup configuration */
+	slurm_mutex_lock(&xcgroup_config_read_mutex);
+	cg_conf = xcgroup_get_slurm_cgroup_conf();
+
+	pre = xstrdup(cg_conf->cgroup_prepend);
+
+	slurm_mutex_unlock(&xcgroup_config_read_mutex);
 
 #ifdef MULTIPLE_SLURMD
 	if ( conf->node_name != NULL )
@@ -320,15 +325,12 @@ static char* _system_cgroup_create_slurm_cg (xcgroup_ns_t* ns)
 	}
 #endif
 
-	/* create slurm cgroup in the ns
-	 * disable notify_on_release to avoid the removal/creation
-	 * of this cgroup for each last/first running job on the node */
+	/* create slurm cgroup in the ns */
 	if (xcgroup_create(ns, &slurm_cg, pre,
 			   getuid(), getgid()) != XCGROUP_SUCCESS) {
 		xfree(pre);
 		return pre;
 	}
-	slurm_cg.notify = 0;
 	if (xcgroup_instantiate(&slurm_cg) != XCGROUP_SUCCESS) {
 		error("system cgroup: unable to build slurm cgroup for "
 		      "ns %s: %m",
@@ -370,7 +372,7 @@ static int _xcgroup_cpuset_init(xcgroup_t* cg)
 
 	/* load ancestor cg */
 	acg_name = (char*) xstrdup(cg->name);
-	p = rindex(acg_name,'/');
+	p = xstrrchr(acg_name, '/');
 	if (p == NULL) {
 		debug2("system cgroup: unable to get ancestor path for "
 		       "cpuset cg '%s' : %m", cg->path);
@@ -430,9 +432,9 @@ extern int set_system_cgroup_cpus(char *phys_cpu_str)
 	return SLURM_SUCCESS;
 }
 
-extern int set_system_cgroup_mem_limit(uint32_t mem_spec_limit)
+extern int set_system_cgroup_mem_limit(uint64_t mem_spec_limit)
 {
-    uint64_t mem_spec_bytes = (uint64_t)mem_spec_limit * 1024 * 1024;
+	uint64_t mem_spec_bytes = mem_spec_limit * 1024 * 1024;
 	xcgroup_set_uint64_param(&system_memory_cg, "memory.limit_in_bytes",
 				 mem_spec_bytes);
 	return SLURM_SUCCESS;
@@ -459,46 +461,39 @@ extern int attach_system_memory_pid(pid_t pid)
 	return SLURM_SUCCESS;
 }
 
-extern bool check_memspec_cgroup_job_confinement(void)
-{
-	char *task_plugin_type = NULL;
-	bool status = false;
-
-	if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
-		return false;
-	task_plugin_type = slurm_get_task_plugin();
-	if (slurm_cgroup_conf.constrain_ram_space &&
-	    strstr(task_plugin_type, "cgroup"))
-		status = true;
-	xfree(task_plugin_type);
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
-	return status;
-}
-
 extern bool check_corespec_cgroup_job_confinement(void)
 {
 	char *task_plugin_type = NULL;
-	bool status = FALSE;
+	bool status = false;
+	slurm_cgroup_conf_t *cg_conf;
 
-	if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
-		return FALSE;
+	/* read cgroup configuration */
+	slurm_mutex_lock(&xcgroup_config_read_mutex);
+	cg_conf = xcgroup_get_slurm_cgroup_conf();
+
 	task_plugin_type = slurm_get_task_plugin();
-	if (slurm_cgroup_conf.constrain_cores &&
+	if (cg_conf->constrain_cores &&
 	    strstr(task_plugin_type, "cgroup"))
-		status = TRUE;
+		status = true;
+	slurm_mutex_unlock(&xcgroup_config_read_mutex);
+
 	xfree(task_plugin_type);
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
 	return status;
 }
 
 extern void attach_system_cgroup_pid(pid_t pid)
 {
 	char* slurm_cgpath;
+	slurm_cgroup_conf_t *cg_conf;
 
-	if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
-		return;
+	/* read cgroup configuration */
+	slurm_mutex_lock(&xcgroup_config_read_mutex);
+	cg_conf = xcgroup_get_slurm_cgroup_conf();
 
-	slurm_cgpath = (char*) xstrdup(slurm_cgroup_conf.cgroup_prepend);
+	slurm_cgpath = (char*) xstrdup(cg_conf->cgroup_prepend);
+
+	slurm_mutex_unlock(&xcgroup_config_read_mutex);
+
 #ifdef MULTIPLE_SLURMD
 	if ( conf->node_name != NULL )
 		xstrsubstitute(slurm_cgpath,"%n", conf->node_name);
@@ -508,7 +503,7 @@ extern void attach_system_cgroup_pid(pid_t pid)
 	}
 #endif
 	xstrcat(slurm_cgpath,"/system");
-	if (xcgroup_ns_load(&slurm_cgroup_conf, &cpuset_ns, "cpuset")
+	if (xcgroup_ns_load(&cpuset_ns, "cpuset")
 	    == XCGROUP_SUCCESS) {
 		if (xcgroup_load(&cpuset_ns, &system_cpuset_cg, slurm_cgpath)
 		    == XCGROUP_SUCCESS)
@@ -516,7 +511,7 @@ extern void attach_system_cgroup_pid(pid_t pid)
 				debug2("system cgroup: unable to attach pid to "
 				       "system cpuset cgroup");
 	}
-	if (xcgroup_ns_load(&slurm_cgroup_conf, &memory_ns, "memory")
+	if (xcgroup_ns_load(&memory_ns, "memory")
 	    == XCGROUP_SUCCESS) {
 		if (xcgroup_load(&memory_ns, &system_memory_cg, slurm_cgpath)
 		    == XCGROUP_SUCCESS)
@@ -525,7 +520,5 @@ extern void attach_system_cgroup_pid(pid_t pid)
 				       "system memory cgroup");
 	}
 	xfree(slurm_cgpath);
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
 	return;
 }
-

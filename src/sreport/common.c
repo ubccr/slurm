@@ -2,17 +2,17 @@
  *  common.c - common functions for generating reports
  *             from accounting infrastructure.
  *****************************************************************************
- *
+ *  Portions Copyright (C) 2010-2017 SchedMD LLC.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -64,7 +64,7 @@ extern void slurmdb_report_print_time(print_field_t *field, uint64_t value,
 		double percent = (double)value;
 		double temp_d = (double)value;
 
-		switch(time_format) {
+		switch (time_format) {
 		case SLURMDB_REPORT_TIME_SECS:
 			output = xstrdup_printf("%"PRIu64"", value);
 			break;
@@ -164,7 +164,7 @@ extern char *strip_quotes(char *option, int *increased)
 		i++;
 	start = i;
 
-	while(option[i]) {
+	while (option[i]) {
 		if (option[i] == '\"' || option[i] == '\'') {
 			end++;
 			break;
@@ -184,7 +184,7 @@ extern char *strip_quotes(char *option, int *increased)
 
 extern void addto_char_list(List char_list, char *names)
 {
-	int i=0, start=0;
+	int i = 0, start = 0;
 	char *name = NULL, *tmp_char = NULL;
 	ListIterator itr = NULL;
 
@@ -369,49 +369,6 @@ extern int sort_assoc_dec(void *v1, void *v2)
 	return 0;
 }
 
-/*
- * Comparator used for sorting resvs largest cpu to smallest cpu
- *
- * returns: 1: resv_a > resv_b   0: resv_a == resv_b   -1: resv_a < resv_b
- *
- */
-extern int sort_reservations_dec(void *v1, void *v2)
-{
-	int diff;
-	slurmdb_reservation_rec_t *resv_a;
-	slurmdb_reservation_rec_t *resv_b;
-
-	resv_a = *(slurmdb_reservation_rec_t **)v1;
-	resv_b = *(slurmdb_reservation_rec_t **)v2;
-
-	if (!resv_a->cluster || !resv_b->cluster)
-		return 0;
-
-	diff = xstrcmp(resv_a->cluster, resv_b->cluster);
-
-	if (diff > 0)
-		return 1;
-	else if (diff < 0)
-		return -1;
-
-	if (!resv_a->name || !resv_b->name)
-		return 0;
-
-	diff = xstrcmp(resv_a->name, resv_b->name);
-
-	if (diff > 0)
-		return 1;
-	else if (diff < 0)
-		return -1;
-
-	if (resv_a->time_start < resv_b->time_start)
-		return 1;
-	else if (resv_a->time_start > resv_b->time_start)
-		return -1;
-
-	return 0;
-}
-
 extern int get_uint(char *in_value, uint32_t *out_value, char *type)
 {
 	char *ptr = NULL, *meat = NULL;
@@ -576,4 +533,163 @@ extern void sreport_set_usage_column_width(print_field_t *usage_field,
 
 	sreport_set_usage_col_width(usage_field, max_usage);
 	sreport_set_usage_col_width(energy_field, max_energy);
+}
+
+/* Return 1 if UID for two association records match */
+static int _match_assoc(void *x, void *key)
+{
+	slurmdb_report_assoc_rec_t *orig_report_assoc;
+	slurmdb_report_assoc_rec_t *dup_report_assoc;
+
+	orig_report_assoc = (slurmdb_report_assoc_rec_t *) key;
+	dup_report_assoc  = (slurmdb_report_assoc_rec_t *) x;
+	if (!xstrcmp(orig_report_assoc->acct, dup_report_assoc->acct) &&
+	    !xstrcmp(orig_report_assoc->user, dup_report_assoc->user))
+		return 1;
+	return 0;
+}
+
+/* Return 1 if a slurmdb associatin record has NULL tres_list */
+static int _find_empty_assoc_tres(void *x, void *key)
+{
+	slurmdb_report_assoc_rec_t *dup_report_assoc;
+
+	dup_report_assoc = (slurmdb_report_assoc_rec_t *) x;
+	if (dup_report_assoc->tres_list == NULL)
+		return 1;
+	return 0;
+}
+
+/* For duplicate user/account records, combine TRES records into the original
+ * list and purge the duplicate records */
+extern void combine_assoc_tres(List first_assoc_list, List new_assoc_list)
+{
+	slurmdb_report_assoc_rec_t *orig_report_assoc = NULL;
+	slurmdb_report_assoc_rec_t *dup_report_assoc = NULL;
+	ListIterator iter = NULL;
+
+	if (!first_assoc_list || !new_assoc_list)
+		return;
+
+	iter = list_iterator_create(first_assoc_list);
+	while ((orig_report_assoc = list_next(iter))) {
+		dup_report_assoc = list_find_first(new_assoc_list,
+						   _match_assoc,
+						   orig_report_assoc);
+		if (!dup_report_assoc)
+			continue;
+		combine_tres_list(orig_report_assoc->tres_list,
+				  dup_report_assoc->tres_list);
+		FREE_NULL_LIST(dup_report_assoc->tres_list);
+	}
+	list_iterator_destroy(iter);
+
+	(void) list_delete_all(new_assoc_list, _find_empty_assoc_tres, NULL);
+	list_transfer(first_assoc_list, new_assoc_list);
+}
+
+/* Return 1 if two TRES records have the same TRES ID */
+static int _match_tres_id(void *x, void *key)
+{
+	slurmdb_tres_rec_t *orig_tres = (slurmdb_tres_rec_t *) key;
+	slurmdb_tres_rec_t *dup_tres = (slurmdb_tres_rec_t *) x;
+
+	if (orig_tres->id == dup_tres->id)
+		return 1;
+	return 0;
+}
+
+/* Return 1 if a TRES alloc_secs is zero, the entry has already been merged */
+static int _zero_alloc_secs(void *x, void *key)
+{
+	slurmdb_tres_rec_t *dup_tres;
+
+	dup_tres = (slurmdb_tres_rec_t *) x;
+	if (dup_tres->alloc_secs == 0)
+		return 1;
+	return 0;
+}
+
+/* Given two TRES lists, combine the content of the second with the first,
+ * adding the counts for duplicate TRES IDs */
+extern void combine_tres_list(List orig_tres_list, List dup_tres_list)
+{
+	slurmdb_tres_rec_t *orig_tres, *dup_tres;
+	ListIterator iter = NULL;
+
+	if (!orig_tres_list || !dup_tres_list)
+		return;
+
+	/* Merge counts for common TRES */
+	iter = list_iterator_create(orig_tres_list);
+	while ((orig_tres = list_next(iter))) {
+		dup_tres = list_find_first(dup_tres_list, _match_tres_id,
+					   orig_tres);
+		if (!dup_tres)
+			continue;
+
+		orig_tres->alloc_secs += dup_tres->alloc_secs;
+		orig_tres->rec_count  += dup_tres->rec_count;
+		orig_tres->count      += dup_tres->count;
+		dup_tres->alloc_secs  = 0;
+	}
+	list_iterator_destroy(iter);
+
+	/* Now transfer TRES records that exists only in the duplicate */
+	list_delete_all(dup_tres_list, _zero_alloc_secs, NULL);
+	list_transfer(orig_tres_list, dup_tres_list);
+}
+
+
+/* Return 1 if a slurmdb user record has NULL tres_list */
+static int _find_empty_user_tres(void *x, void *key)
+{
+	slurmdb_report_user_rec_t *dup_report_user;
+
+	dup_report_user = (slurmdb_report_user_rec_t *) x;
+	if (dup_report_user->tres_list == NULL)
+		return 1;
+	return 0;
+}
+
+/* Return 1 if UID for two user records match */
+static int _match_user_acct(void *x, void *key)
+{
+	slurmdb_report_user_rec_t *orig_report_user;
+	slurmdb_report_user_rec_t *dup_report_user;
+
+	orig_report_user = (slurmdb_report_user_rec_t *) key;
+	dup_report_user  = (slurmdb_report_user_rec_t *) x;
+	if ((orig_report_user->uid == dup_report_user->uid) &&
+	    !xstrcmp(orig_report_user->acct, dup_report_user->acct))
+		return 1;
+	return 0;
+}
+
+/* For duplicate user/account records, combine TRES records into the original
+ * list and purge the duplicate records */
+extern void combine_user_tres(List first_user_list, List new_user_list)
+{
+	slurmdb_report_user_rec_t *orig_report_user = NULL;
+	slurmdb_report_user_rec_t *dup_report_user = NULL;
+	ListIterator iter = NULL;
+
+	if (!first_user_list || !new_user_list)
+		return;
+
+	iter = list_iterator_create(first_user_list);
+	while ((orig_report_user = list_next(iter))) {
+		dup_report_user = list_find_first(new_user_list,
+						  _match_user_acct,
+						  orig_report_user);
+		if (!dup_report_user)
+			continue;
+		combine_tres_list(orig_report_user->tres_list,
+				  dup_report_user->tres_list);
+		FREE_NULL_LIST(dup_report_user->tres_list);
+	}
+	list_iterator_destroy(iter);
+
+	(void) list_delete_all(new_user_list, _find_empty_user_tres, NULL);
+	list_transfer(first_user_list, new_user_list);
 }

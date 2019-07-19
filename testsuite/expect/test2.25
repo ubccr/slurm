@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Validate that scontrol show assoc_mgr shows the data cached in
 #          the slurmctld
 #
@@ -11,22 +11,22 @@
 # Copyright (C) 2015 SchedMD LLC
 # Written by Nathan Yee <nyee32@schedmd.com>
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.
+# with Slurm; if not, write to the Free Software Foundation, Inc.
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -51,7 +51,7 @@ proc mod_assoc_vals { } {
 
 	set modified 0
 	spawn $sacctmgr mod -i account $test_acct where user=$test_user set \
-	    GrpCpus=3 MaxJobs=2 MaxCPUs=6
+	    GrpCpus=3 MaxJobs=2 MaxCPUs=6 Priority=9
 	expect {
 		-re "Modified account associations" {
 			set modified 1
@@ -77,7 +77,7 @@ proc clear_assoc_vals { } {
 
 	set modified 0
 	spawn $sacctmgr mod -i account $test_acct where user=$test_user set \
-	    GrpCpus=-1 MaxJobs=-1 MaxCPUs=-1
+	    GrpCpus=-1 MaxJobs=-1 MaxCPUs=-1 Priority=-1
 	expect {
 		-re "Modified account associations" {
 			set modified 1
@@ -122,21 +122,13 @@ proc delete_test_acct { } {
 delete_test_acct
 
 # Get username
-spawn $bin_id -u -n
-expect {
-	-re "($alpha_numeric_under)" {
-		set test_user $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
+set test_user [get_my_user_name]
 
 if {[test_using_slurmdbd]} {
 	# Add test Account
 	set acct_added 0
-	spawn $sacctmgr add -i account $test_acct
+	set cluster [get_cluster_name]
+	spawn $sacctmgr add -i account $test_acct cluster=$cluster
 	expect {
 		-re "Adding Account" {
 			set acct_added 1
@@ -229,6 +221,10 @@ if {[test_using_slurmdbd]} {
 			incr match
 			exp_continue
 		}
+		-re " Priority=9" {
+			incr match
+			exp_continue
+		}
 		-re " GrpTRES=cpu=3" {
 			incr match
 			exp_continue
@@ -250,8 +246,8 @@ if {[test_using_slurmdbd]} {
 		}
 	}
 
-	if {$match != 5} {
-		send_user "\nFAILURE: 2 scontrol show assoc_mgr did not show correct information ($match != 5).\n"
+	if {$match != 6} {
+		send_user "\nFAILURE: 2 scontrol show assoc_mgr did not show correct information ($match != 6).\n"
 		set exit_code 1
 	}
 
@@ -270,6 +266,10 @@ if {[test_using_slurmdbd]} {
 			incr match
 			exp_continue
 		}
+		-re " Priority=0" {
+			incr match
+			exp_continue
+		}
 		-re " GrpTRES=cpu=3" {
 			incr limit_match
 			exp_continue
@@ -291,8 +291,8 @@ if {[test_using_slurmdbd]} {
 		}
 	}
 
-	if {$match != 2 && $limit_match} {
-		send_user "\nFAILURE: 3 scontrol show assoc_mgr did not show correct information ($match != 2).\n"
+	if {$match != 3 && $limit_match} {
+		send_user "\nFAILURE: 3 scontrol show assoc_mgr did not show correct information ($match != 3).\n"
 		set exit_code 1
 	}
 

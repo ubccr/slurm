@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -48,13 +48,14 @@
 
 /* If you want "linux12" to sort before "linux2", then set PURE_ALPHA_SORT */
 #define PURE_ALPHA_SORT 0
+#define CLUSTER_NAME_LEN 7
 
 static bool reverse_order;
 
 static void _get_job_info_from_void(job_info_t **j1, job_info_t **j2, void *v1, void *v2);
 static void _get_step_info_from_void(job_step_info_t **j1, job_step_info_t **j2, void *v1, void *v2);
 static int _sort_job_by_batch_host(void *void1, void *void2);
-static int _sort_job_by_gres(void *void1, void *void2);
+static int _sort_job_by_cluster_name(void *void1, void *void2);
 static int _sort_job_by_group_id(void *void1, void *void2);
 static int _sort_job_by_group_name(void *void1, void *void2);
 static int _sort_job_by_id(void *void1, void *void2);
@@ -64,6 +65,7 @@ static int _sort_job_by_state_compact(void *void1, void *void2);
 static int _sort_job_by_time_end(void *void1, void *void2);
 static int _sort_job_by_time_left(void *void1, void *void2);
 static int _sort_job_by_time_limit(void *void1, void *void2);
+static int _sort_job_by_time_submit(void *void1, void *void2);
 static int _sort_job_by_time_start(void *void1, void *void2);
 static int _sort_job_by_time_used(void *void1, void *void2);
 static int _sort_job_by_node_list(void *void1, void *void2);
@@ -81,7 +83,7 @@ static int _sort_job_by_user_id(void *void1, void *void2);
 static int _sort_job_by_user_name(void *void1, void *void2);
 static int _sort_job_by_reservation(void *void1, void *void2);
 
-static int _sort_step_by_gres(void *void1, void *void2);
+static int _sort_step_by_cluster_name(void *void1, void *void2);
 static int _sort_step_by_id(void *void1, void *void2);
 static int _sort_step_by_node_list(void *void1, void *void2);
 static int _sort_step_by_partition(void *void1, void *void2);
@@ -113,10 +115,20 @@ void sort_job_list(List job_list)
 		if ((i > 0) && (params.sort[i-1] == '-'))
 			reverse_order = true;
 
-		if (params.sort[i] == 'B')
+		if ((CLUSTER_NAME_LEN <= (i + 1)) &&
+		    !xstrncasecmp(params.sort + (i - CLUSTER_NAME_LEN + 1),
+				  "cluster", CLUSTER_NAME_LEN))
+		{
+			if ((CLUSTER_NAME_LEN <= i) &&
+			    (params.sort[i - CLUSTER_NAME_LEN] == '-'))
+				reverse_order = true;
+
+			list_sort(job_list, _sort_job_by_cluster_name);
+			i -= CLUSTER_NAME_LEN - 1;
+		} else if (params.sort[i] == 'B')
 			list_sort(job_list, _sort_job_by_batch_host);
-		else if (params.sort[i] == 'b')
-			list_sort(job_list, _sort_job_by_gres);
+		else if (params.sort[i] == 'b')	/* Vestigial gres sort */
+			info("Invalid sort specification: b");
 		else if (params.sort[i] == 'c')
 			;	/* sort_job_by_min_cpus_per_node */
 		else if (params.sort[i] == 'C')
@@ -177,6 +189,8 @@ void sort_job_list(List job_list)
 			list_sort(job_list, _sort_job_by_user_id);
 		else if (params.sort[i] == 'v')
 			list_sort(job_list, _sort_job_by_reservation);
+		else if (params.sort[i] == 'V')
+			list_sort(job_list, _sort_job_by_time_submit);
 		else if (params.sort[i] == 'z')
 			list_sort(job_list, _sort_job_by_num_sct);
 		else {
@@ -209,8 +223,18 @@ void sort_step_list(List step_list)
 		if ((i > 0) && (params.sort[i-1] == '-'))
 			reverse_order = true;
 
-		if      (params.sort[i] == 'b')
-			list_sort(step_list, _sort_step_by_gres);
+		if ((CLUSTER_NAME_LEN <= (i + 1)) &&
+		    !xstrncasecmp(params.sort + (i - CLUSTER_NAME_LEN + 1),
+				  "cluster", CLUSTER_NAME_LEN)) {
+			if ((CLUSTER_NAME_LEN <= i) &&
+			    (params.sort[i - CLUSTER_NAME_LEN] == '-'))
+				reverse_order = true;
+
+			list_sort(step_list, _sort_step_by_cluster_name);
+			i -= CLUSTER_NAME_LEN - 1;
+		}
+		else if (params.sort[i] == 'b')	/* Vestigial gres sort */
+			info("Invalid sort specification: b");
 		else if (params.sort[i] == 'i')
 			list_sort(step_list, _sort_step_by_id);
 		else if (params.sort[i] == 'N')
@@ -250,6 +274,14 @@ static inline int _diff_time(time_t value_1, time_t value_2)
 	return 0;
 }
 static inline int _diff_uint32(uint32_t value_1, uint32_t value_2)
+{
+	if (value_1 > value_2)
+		return 1;
+	if (value_1 < value_2)
+		return -1;
+	return 0;
+}
+static inline int _diff_uint64(uint64_t value_1, uint64_t value_2)
 {
 	if (value_1 > value_2)
 		return 1;
@@ -301,20 +333,15 @@ static int _sort_job_by_batch_host(void *void1, void *void2)
 	return diff;
 }
 
-static int _sort_job_by_gres(void *void1, void *void2)
+static int _sort_job_by_cluster_name(void *void1, void *void2)
 {
 	int diff;
 	job_info_t *job1;
 	job_info_t *job2;
-	char *val1 = "", *val2 = "";
 
 	_get_job_info_from_void(&job1, &job2, void1, void2);
 
-	if (job1->gres)
-		val1 = job1->gres;
-	if (job2->gres)
-		val2 = job2->gres;
-	diff = xstrcmp(val1, val2);
+	diff = xstrcmp(job1->cluster, job2->cluster);
 
 	if (reverse_order)
 		diff = -diff;
@@ -366,17 +393,29 @@ static int _sort_job_by_id(void *void1, void *void2)
 
 	_get_job_info_from_void(&job1, &job2, void1, void2);
 
-	if (job1->array_task_id == NO_VAL)
+	if (job1->pack_job_id)
+		job_id1 = job1->pack_job_id;
+	else if (job1->array_task_id == NO_VAL)
 		job_id1 = job1->job_id;
 	else
 		job_id1 = job1->array_job_id;
-	if (job2->array_task_id == NO_VAL)
+
+	if (job2->pack_job_id)
+		job_id2 = job2->pack_job_id;
+	else if (job2->array_task_id == NO_VAL)
 		job_id2 = job2->job_id;
 	else
 		job_id2 = job2->array_job_id;
+
 	if (job_id1 == job_id2) {
-		job_id1 = job1->array_task_id;
-		job_id2 = job2->array_task_id;
+		if (job1->pack_job_id)
+			job_id1 = job1->pack_job_offset;
+		else
+			job_id1 = job1->array_task_id;
+		if (job2->pack_job_id)
+			job_id2 = job2->pack_job_offset;
+		else
+			job_id2 = job2->array_task_id;
 	}
 
 	diff = _diff_uint32(job_id1, job_id2);
@@ -413,6 +452,7 @@ static int _sort_job_by_node_list(void *void1, void *void2)
 	job_info_t *job2;
 	hostlist_t hostlist1, hostlist2;
 	char *val1, *val2;
+	char *ptr1, *ptr2;
 #if	PURE_ALPHA_SORT == 0
 	int inx;
 #endif
@@ -422,40 +462,44 @@ static int _sort_job_by_node_list(void *void1, void *void2)
 	hostlist1 = hostlist_create(job1->nodes);
 	hostlist_sort(hostlist1);
 	val1 = hostlist_shift(hostlist1);
-	if (val1 == NULL)
-		val1 = "";
+	if (val1)
+		ptr1 = val1;
+	else
+		ptr1 = "";
 	hostlist_destroy(hostlist1);
 
 	hostlist2 = hostlist_create(job2->nodes);
 	hostlist_sort(hostlist2);
 	val2 = hostlist_shift(hostlist2);
-	if (val2 == NULL)
-		val2 = "";
+	if (val2)
+		ptr2 = val2;
+	else
+		ptr2 = "";
 	hostlist_destroy(hostlist2);
 
 #if	PURE_ALPHA_SORT
-	diff = xstrcmp(val1, val2);
+	diff = xstrcmp(ptr1, ptr2);
 #else
-	for (inx=0; ; inx++) {
-		if (val1[inx] == val2[inx]) {
-			if (val1[inx] == '\0')
+	for (inx = 0; ; inx++) {
+		if (ptr1[inx] == ptr2[inx]) {
+			if (ptr1[inx] == '\0')
 				break;
 			continue;
 		}
-		if ((isdigit((int)val1[inx])) &&
-		    (isdigit((int)val2[inx]))) {
+		if ((isdigit((int)ptr1[inx])) &&
+		    (isdigit((int)ptr2[inx]))) {
 			int num1, num2;
-			num1 = atoi(val1+inx);
-			num2 = atoi(val2+inx);
+			num1 = atoi(ptr1 + inx);
+			num2 = atoi(ptr2 + inx);
 			diff = num1 - num2;
 		} else
-			diff = xstrcmp(val1, val2);
+			diff = xstrcmp(ptr1, ptr2);
 		break;
 	}
 #endif
-	if (strlen(val1))
+	if (val1)
 		free(val1);
-	if (strlen(val2))
+	if (val2)
 		free(val2);
 
 	if (reverse_order)
@@ -573,7 +617,7 @@ static int _sort_job_by_min_memory(void *void1, void *void2)
 
 	job1->pn_min_memory &= (~MEM_PER_CPU);
 	job2->pn_min_memory &= (~MEM_PER_CPU);
-	diff = _diff_uint32(job1->pn_min_memory, job2->pn_min_memory);
+	diff = _diff_uint64(job1->pn_min_memory, job2->pn_min_memory);
 
 	if (reverse_order)
 		diff = -diff;
@@ -675,6 +719,21 @@ static int _sort_job_by_time_limit(void *void1, void *void2)
 	_get_job_info_from_void(&job1, &job2, void1, void2);
 
 	diff = _diff_uint32(job1->time_limit, job2->time_limit);
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
+static int _sort_job_by_time_submit(void *void1, void *void2)
+{
+	int diff;
+	job_info_t *job1;
+	job_info_t *job2;
+
+	_get_job_info_from_void(&job1, &job2, void1, void2);
+
+	diff = _diff_time(job1->submit_time, job2->submit_time);
 
 	if (reverse_order)
 		diff = -diff;
@@ -816,20 +875,15 @@ static int _sort_job_by_reservation(void *void1, void *void2)
 /*****************************************************************************
  * Local Step Sort Functions
  *****************************************************************************/
-static int _sort_step_by_gres(void *void1, void *void2)
+static int _sort_step_by_cluster_name(void *void1, void *void2)
 {
 	int diff;
 	job_step_info_t *step1;
 	job_step_info_t *step2;
-	char *val1 = "", *val2 = "";
 
 	_get_step_info_from_void(&step1, &step2, void1, void2);
 
-	if (step1->gres)
-		val1 = step1->gres;
-	if (step2->gres)
-		val2 = step2->gres;
-	diff = xstrcmp(val1, val2);
+	diff = xstrcmp(step1->cluster, step2->cluster);
 
 	if (reverse_order)
 		diff = -diff;
@@ -861,6 +915,7 @@ static int _sort_step_by_node_list(void *void1, void *void2)
 
 	hostlist_t hostlist1, hostlist2;
 	char *val1, *val2;
+	char *ptr1, *ptr2;
 #if	PURE_ALPHA_SORT == 0
 	int inx;
 #endif
@@ -870,40 +925,44 @@ static int _sort_step_by_node_list(void *void1, void *void2)
 	hostlist1 = hostlist_create(step1->nodes);
 	hostlist_sort(hostlist1);
 	val1 = hostlist_shift(hostlist1);
-	if (val1 == NULL)
-		val1 = "";
+	if (val1)
+		ptr1 = val1;
+	else
+		ptr1 = "";
 	hostlist_destroy(hostlist1);
 
 	hostlist2 = hostlist_create(step2->nodes);
 	hostlist_sort(hostlist2);
 	val2 = hostlist_shift(hostlist2);
-	if (val2 == NULL)
-		val2 = "";
+	if (val2)
+		ptr2 = val2;
+	else
+		ptr2 = "";
 	hostlist_destroy(hostlist2);
 
 #if	PURE_ALPHA_SORT
-	diff = xstrcmp(val1, val2);
+	diff = xstrcmp(ptr1, ptr2);
 #else
-	for (inx=0; ; inx++) {
-		if (val1[inx] == val2[inx]) {
-			if (val1[inx] == '\0')
+	for (inx = 0; ; inx++) {
+		if (ptr1[inx] == ptr2[inx]) {
+			if (ptr1[inx] == '\0')
 				break;
 			continue;
 		}
-		if ((isdigit((int)val1[inx])) &&
-		    (isdigit((int)val2[inx]))) {
+		if ((isdigit((int)ptr1[inx])) &&
+		    (isdigit((int)ptr2[inx]))) {
 			int num1, num2;
-			num1 = atoi(val1+inx);
-			num2 = atoi(val2+inx);
+			num1 = atoi(ptr1 + inx);
+			num2 = atoi(ptr2 + inx);
 			diff = num1 - num2;
 		} else
-			diff = xstrcmp(val1, val2);
+			diff = xstrcmp(ptr1, ptr2);
 		break;
 	}
 #endif
-	if (strlen(val1))
+	if (val1)
 		free(val1);
-	if (strlen(val2))
+	if (val2)
 		free(val2);
 
 	if (reverse_order)

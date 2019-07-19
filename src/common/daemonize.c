@@ -6,11 +6,11 @@
  *  Written by Mark A. Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,25 +26,25 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include <config.h>
-#endif
+#include <config.h>
+
+#define _GNU_SOURCE
 
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "src/common/daemonize.h"
 #include "src/common/fd.h"
@@ -52,15 +52,14 @@
 #include "src/common/macros.h"
 #include "src/common/xassert.h"
 
-/* detach and go into background.
- * caller is responsible for umasks
- *
- * if nochdir == 0, will do a chdir to /
- * if noclose == 0, will close all FDs
+/*
+ * Double-fork and go into background.
+ * Caller is responsible for umasks
  */
-int
-daemon(int nochdir, int noclose)
+int xdaemon(void)
 {
+	int devnull;
+
 	switch (fork()) {
 		case  0 : break;        /* child */
 		case -1 : return -1;
@@ -76,38 +75,22 @@ daemon(int nochdir, int noclose)
 		default: _exit(0);      /* exit parent */
 	}
 
-	if (!nochdir && chdir("/") < 0) {
-		error("chdir(/): %m");
-		return -1;
-	}
-
-	/* Close all file descriptors if requested
+	/*
+	 * dup stdin, stdout, and stderr onto /dev/null
 	 */
-	if (!noclose) {
-		closeall(0);
-		if (open("/dev/null", O_RDWR) != 0)
-			error("Unable to open /dev/null on stdin: %m");
-		dup2(0, STDOUT_FILENO);
-		dup2(0, STDERR_FILENO);
-	} else {
-		/*
-		 * Otherwise, dup stdin, stdout, and stderr onto /dev/null
-		 */
-		int devnull = open("/dev/null", O_RDWR);
-		if (devnull < 0)
-			error("Unable to open /dev/null: %m");
-		if (dup2(devnull, STDIN_FILENO) < 0)
-			error("Unable to dup /dev/null onto stdin: %m");
-		if (dup2(devnull, STDOUT_FILENO) < 0)
-			error("Unable to dup /dev/null onto stdout: %m");
-		if (dup2(devnull, STDERR_FILENO) < 0)
-			error("Unable to dup /dev/null onto stderr: %m");
-		if (close(devnull) < 0)
-			error("Unable to close /dev/null: %m");
-	}
+	devnull = open("/dev/null", O_RDWR);
+	if (devnull < 0)
+		error("Unable to open /dev/null: %m");
+	if (dup2(devnull, STDIN_FILENO) < 0)
+		error("Unable to dup /dev/null onto stdin: %m");
+	if (dup2(devnull, STDOUT_FILENO) < 0)
+		error("Unable to dup /dev/null onto stdout: %m");
+	if (dup2(devnull, STDERR_FILENO) < 0)
+		error("Unable to dup /dev/null onto stderr: %m");
+	if (close(devnull) < 0)
+		error("Unable to close /dev/null: %m");
 
 	return 0;
-
 }
 
 /*
@@ -127,8 +110,11 @@ read_pidfile(const char *pidfile, int *pidfd)
 	if ((fd = open(pidfile, O_RDONLY)) < 0)
 		return ((pid_t) 0);
 
-	if (!(fp = fdopen(fd, "r")) && (errno != ENOENT))
+	if (!(fp = fdopen(fd, "r"))) {
 		error ("Unable to access old pidfile at `%s': %m", pidfile);
+		(void) close(fd);
+		return ((pid_t) 0);
+	}
 
 	if (fscanf(fp, "%lu", &pid) < 1) {
 		error ("Possible corrupt pidfile `%s'", pidfile);
@@ -151,6 +137,7 @@ read_pidfile(const char *pidfile, int *pidfd)
 	else
 		(void) close(fd);
 
+/*	fclose(fp);	NOTE: DO NOT CLOSE, "fd" CONTAINS FILE DESCRIPTOR */
 	return (lpid);
 }
 
@@ -165,13 +152,18 @@ create_pidfile(const char *pidfile, uid_t uid)
 	xassert(pidfile != NULL);
 	xassert(pidfile[0] == '/');
 
-	fd = creat_cloexec(pidfile, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+	fd = open(pidfile, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC,
+		  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 	if (fd < 0) {
 		error("Unable to open pidfile `%s': %m", pidfile);
 		return -1;
 	}
 
-	fp = fdopen(fd, "w");
+	if (!(fp = fdopen(fd, "w"))) {
+		error("Unable to access pidfile at `%s': %m", pidfile);
+		(void) close(fd);
+		return -1;
+	}
 
 	if (fd_get_write_lock(fd) < 0) {
 		error ("Unable to lock pidfile `%s': %m", pidfile);
@@ -188,6 +180,7 @@ create_pidfile(const char *pidfile, uid_t uid)
 	if (uid && (fchown(fd, uid, -1) < 0))
 		error ("Unable to reset owner of pidfile: %m");
 
+/*	fclose(fp);	NOTE: DO NOT CLOSE, "fd" CONTAINS FILE DESCRIPTOR */
 	return fd;
 
   error:

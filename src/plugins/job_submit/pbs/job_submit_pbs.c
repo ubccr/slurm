@@ -5,11 +5,11 @@
  *  Copyright (C) 2013 SchedMD LLC.
  *  Written by Morris Jette <jette@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,36 +25,24 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#   include "config.h"
-#endif
-
-#if HAVE_STDINT_H
-#  include <stdint.h>
-#endif
-
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>
-#endif
-
-#include <stdio.h>
-
-#include <sys/types.h>
-#include <signal.h>
-#include <stdlib.h>
-#include <unistd.h>
 #include <dlfcn.h>
+#include <inttypes.h>
 #include <pthread.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -77,14 +65,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "auth" for SLURM authentication) and <method> is a
- * description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "auth" for Slurm authentication) and <method> is a
+ * description of how this plugin satisfies that application.  Slurm will
  * only load authentication plugins if the plugin_type string has a prefix
  * of "auth/".
  *
@@ -120,15 +108,12 @@ static void _add_env(struct job_descriptor *job_desc, char *new_env)
 
 static void _add_env2(struct job_descriptor *job_desc, char *key, char *val)
 {
-	int len;
-	char *new_env;
+	char *new_env = NULL;
 
 	if (!job_desc->environment || !key || !val)
 		return;	/* Nothing we can do for interactive jobs */
 
-	len = strlen(key) + strlen(val) + 2;
-	new_env = xmalloc(len);
-	snprintf(new_env, len, "%s=%s", key, val);
+	xstrfmtcat(new_env, "%s=%s", key, val);
 	_add_env(job_desc, new_env);
 	xfree(new_env);
 }
@@ -159,11 +144,16 @@ static void _decr_depend_cnt(struct job_record *job_ptr)
  * later. */
 static void *_dep_agent(void *args)
 {
+	/* Locks: Write job, read node, read partition */
+	slurmctld_lock_t job_write_lock = {
+		READ_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK, NO_LOCK };
+
 	struct job_record *job_ptr = (struct job_record *) args;
 	char *end_ptr = NULL, *tok;
 	int cnt = 0;
 
 	usleep(100000);
+	lock_slurmctld(job_write_lock);
 	if (job_ptr && job_ptr->details && (job_ptr->magic == JOB_MAGIC) &&
 	    job_ptr->comment && strstr(job_ptr->comment, "on:")) {
 		char *new_depend = job_ptr->details->dependency;
@@ -175,6 +165,8 @@ static void *_dep_agent(void *args)
 	}
 	if (cnt == 0)
 		set_job_prio(job_ptr);
+	unlock_slurmctld(job_write_lock);
+
 	return NULL;
 }
 
@@ -183,9 +175,6 @@ static void _xlate_before(char *depend, uint32_t submit_uid, uint32_t my_job_id)
 	uint32_t job_id;
 	char *last_ptr = NULL, *new_dep = NULL, *tok, *type;
 	struct job_record *job_ptr;
-        pthread_attr_t attr;
-	pthread_t dep_thread;
-
 
 	tok = strtok_r(depend, ":", &last_ptr);
 	if (!xstrcmp(tok, "before"))
@@ -241,11 +230,7 @@ static void _xlate_before(char *depend, uint32_t submit_uid, uint32_t my_job_id)
 			new_dep = NULL;
 			_decr_depend_cnt(job_ptr);
 
-			slurm_attr_init(&attr);
-			pthread_attr_setdetachstate(&attr,
-						    PTHREAD_CREATE_DETACHED);
-			pthread_create(&dep_thread, &attr, _dep_agent, job_ptr);
-			slurm_attr_destroy(&attr);
+			slurm_thread_create_detached(NULL, _dep_agent, job_ptr);
 		}
 		tok = strtok_r(NULL, ":", &last_ptr);
 	}
@@ -314,7 +299,7 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid)
 	char *std_out, *tok;
 	uint32_t my_job_id;
 
-	my_job_id = get_next_job_id();
+	my_job_id = get_next_job_id(true);
 	_xlate_dependency(job_desc, submit_uid, my_job_id);
 
 	if (job_desc->account)
@@ -346,12 +331,11 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid)
 	}
 	tok = strstr(std_out, "%j");
 	if (tok) {
-		char buf[16], *tok2;
+		char *tok2;
 		char *tmp = xstrdup(std_out);
 		tok2 = strstr(tmp, "%j");
 		tok2[0] = '\0';
-		snprintf(buf, sizeof(buf), "%u", my_job_id);
-		xstrcat(tmp, buf);
+		xstrfmtcat(tmp, "%u", my_job_id);
 		xstrcat(tmp, tok + 2);
 		xstrcat(job_desc->comment, tmp);
 		xfree(tmp);
@@ -385,12 +369,11 @@ extern int job_modify(struct job_descriptor *job_desc,
 		}
 		tok = strstr(job_desc->std_out, "%j");
 		if (tok) {
-			char buf[16], *tok2;
+			char *tok2;
 			char *tmp = xstrdup(job_desc->std_out);
 			tok2 = strstr(tmp, "%j");
 			tok2[0] = '\0';
-			snprintf(buf, sizeof(buf), "%u", job_ptr->job_id);
-			xstrcat(tmp, buf);
+			xstrfmtcat(tmp, "%u", job_ptr->job_id);
 			xstrcat(tmp, tok + 2);
 			xstrcat(job_ptr->comment, tmp);
 			xfree(tmp);

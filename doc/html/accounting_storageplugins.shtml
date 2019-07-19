@@ -34,7 +34,7 @@ for the type of accounting package. We currently use
 If specified, identifies the version of Slurm used to build this plugin and
 any attempt to load the plugin from a different version of Slurm will result
 in an error.
-If not specified, then the plugin may be loadeed by Slurm commands and
+If not specified, then the plugin may be loaded by Slurm commands and
 daemons from any version, however this may result in difficult to diagnose
 failures due to changes in the arguments to plugin functions or changes
 in other Slurm functions used by the plugin.</p>
@@ -42,13 +42,12 @@ in other Slurm functions used by the plugin.</p>
 <p>The programmer is urged to study
 <span class="commandline">src/plugins/accounting_storage/mysql</span>
 for a sample implementation of a Slurm Accounting Storage plugin.
-<p> The Accounting Storage plugin was written to be a interface
+<p>The Accounting Storage plugin was written to be an interface
 to storage data collected by the Job Accounting Gather plugin.  When
 adding a new database you may want to add common functions in a common
 file in the src/database dir.  Refer to src/database/mysql_common.c|.h for an
 example so other plugins can also use that database type to write out
 information.
-<p class="footer"><a href="#top">top</a>
 
 
 <h2>API Functions</h2>
@@ -82,34 +81,37 @@ The system <span class="commandline">_init()</span> is called before the Slurm
 <h3>Functions called by the accounting_storage plugin</h3>
 
 <p class="commandline">void *acct_storage_p_get_connection(bool
-  make_agent, int conn_num, bool rollback, char *location)
+  make_agent, int conn_num, uint16_t *persist_conn_flags,
+  bool rollback, char *location)
 <p style="margin-left:.2in"><b>Description</b>:<br>
 acct_storage_p_get_connection() is called to get a connection to the
   storage medium. acct_storage_p_close_connection() should be used to
   free the pointer returned by this function.
 <p style="margin-left:.2in"><b>Arguments</b>: <br>
 <span class="commandline">make_agent</span> (input) to make an agent
-thread of not.  This is primarily used in the slurmdbd plugin.<br>
+thread or not.  This is primarily used in the slurmdbd plugin.<br>
 <span class="commandline">conn_num</span> (input) connection number to
 the plugin.  In many cases you should plan on multiple simultaneous
 connections to the plugin.  This number is useful since the debug
 messages can print this out to determine which connection the message
 is from.<br>
+<span class="commandline">persist_conn_flags</span> (output) Flags passed back
+from the server if talking to the dbd (optional).<br>
 <span class="commandline">rollback</span> (input) Allow rollback to
 happen or not (in use with databases that support rollback).<br>
 <p style="margin-left:.2in"><b>Returns</b>: <br>
 <span class="commandline">void *</span> which is an opaque structure
-used inside the plugin to connection to the storage type on success, or<br>
+used inside the plugin to connect to the storage type on success, or<br>
 <span class="commandline">NULL</span> on failure.
 
 <p class="commandline">int acct_storage_p_close_connection(void **db_conn)
 <p style="margin-left:.2in"><b>Description</b>:<br>
 acct_storage_p_close_connection() is called at the end of the program that has
-called acct_storage_p_get_connection this function closes the connection to
+called acct_storage_p_get_connection(). This function closes the connection to
 the storage type.
 <p style="margin-left:.2in"><b>Arguments</b>: <br>
 <span class="commandline">db_conn</span> (input/output) connection to
-the storage type, all memory will be freed inside this function and
+the storage type; all memory will be freed inside this function and
 set to NULL.
 <p style="margin-left:.2in"><b>Returns</b>: <br>
 <span class="commandline">SLURM_SUCCESS</span> on success, or<br>
@@ -118,7 +120,7 @@ set to NULL.
 <p class="commandline">int acct_storage_p_commit(void *db_conn, bool commit)
 <p style="margin-left:.2in"><b>Description</b>:<br>
 acct_storage_p_commit() is called at a point where you would either
-  want changes to storage be committed or rolled back.  This function
+  want changes to storage to be committed or rolled back.  This function
   should also send appropriate update messages to the various slurmctlds.
 <p style="margin-left:.2in"><b>Arguments</b>: <br>
 <span class="commandline">db_conn</span> (input) connection to
@@ -206,7 +208,7 @@ associations to add. <br>
 <p class="commandline">
 int acct_storage_p_add_qos(void *db_conn, uint32_t uid, List qos_list)
 <p style="margin-left:.2in"><b>Description</b>:<br>
-Called to add QOS' to the storage type.
+Called to add QOS's to the storage type.
 <p style="margin-left:.2in"><b>Arguments</b>: <br>
 <span class="commandline">db_conn</span> (input) connection to
 the storage type. <br>
@@ -711,13 +713,17 @@ that was sent in some how.<br>
 <span class="commandline">SLURM_ERROR</span> on failure.
 
 <p class="commandline">
-int acct_storage_p_roll_usage(void *db_conn, time_t sent_start)
+int acct_storage_p_roll_usage(void *db_conn, time_t sent_start, time_t sent_end,
+uint16_t archive_data, rollup_stats_t *rollup_stats)
 <p style="margin-left:.2in"><b>Description</b>:<br>
 roll up association, cluster, and wckey usage in the storage.
 <p style="margin-left:.2in"><b>Arguments</b>: <br>
 <span class="commandline">db_conn</span> (input) connection to
 the storage type.<br>
-<span class="commandline">start</span> (input) start time of the rollup.<br>
+<span class="commandline">sent_start</span> (input) start time of the rollup.<br>
+<span class="commandline">sent_end</span> (input) end time of the rollup.<br>
+<span class="commandline">archive_data</span> (input) archive the results if not zero.<br>
+<span class="commandline">rollup_stats</span> (input/output) performance statistics.<br>
 <p style="margin-left:.2in"><b>Returns</b>: <br>
 <span class="commandline">SLURM_SUCCESS</span> on success, or<br>
 <span class="commandline">SLURM_ERROR</span> on failure.
@@ -994,7 +1000,6 @@ the storage type.<br>
 <span class="commandline">SLURM_SUCCESS</span> on success, or<br>
 <span class="commandline">SLURM_ERROR</span> on failure.
 
-<p class="footer"><a href="#top">top</a>
 
 
 <h2>Parameters</h2>
@@ -1022,8 +1027,7 @@ database with.
   of those listed.
 </dl>
 
-<p class="footer"><a href="#top">top</a>
 
-<p style="text-align:center;">Last modified 27 March 2015</p>
+<p style="text-align:center;">Last modified 22 July 2016</p>
 
 <!--#include virtual="footer.txt"-->

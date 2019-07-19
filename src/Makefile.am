@@ -3,7 +3,6 @@ SUBDIRS =		\
 	bcast		\
 	common		\
 	database	\
-	db_api		\
 	layouts		\
 	plugins		\
 	sacct		\
@@ -20,16 +19,11 @@ SUBDIRS =		\
 	slurmd		\
 	slurmdbd	\
 	smap		\
-	smd		\
 	sprio		\
 	squeue		\
 	sreport		\
-	srun_cr		\
+	srun		\
 	sshare		\
 	sstat		\
 	strigger	\
 	sview
-
-if !REAL_BG_L_P_LOADED
-SUBDIRS += srun
-endif

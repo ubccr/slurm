@@ -3,16 +3,16 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2011 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2017 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -94,6 +94,8 @@ void print_sinfo_reservation(reserve_info_msg_t *resv_ptr);
 	format_add_function(list,wid,right,suffix,_print_groups)
 #define format_add_gres(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_gres)
+#define format_add_gres_used(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_gres_used)
 #define format_add_memory(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_memory)
 #define format_add_node_address(list,wid,right,suffix) \
@@ -112,6 +114,8 @@ void print_sinfo_reservation(reserve_info_msg_t *resv_ptr);
 	format_add_function(list,wid,right,suffix,_print_partition)
 #define format_add_partition_name(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_partition_name)
+#define format_add_port(list, wid, right, suffix) \
+	format_add_function(list, wid, right, suffix, _print_port)
 #define format_add_prefix(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_prefix)
 #define format_add_preempt_mode(list,wid,right,suffix) \
@@ -158,6 +162,8 @@ void print_sinfo_reservation(reserve_info_msg_t *resv_ptr);
 	format_add_function(list,wid,right,suffix,_print_version)
 #define format_add_alloc_mem(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_alloc_mem)
+#define format_add_cluster_name(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_cluster_name)
 
 /*****************************************************************************
  * Print Field Functions
@@ -187,6 +193,8 @@ int _print_groups(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_gres(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
+int _print_gres_used(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
 int _print_memory(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_node_hostnames(sinfo_data_t * sinfo_data, int width,
@@ -206,6 +214,8 @@ int _print_oversubscribe(sinfo_data_t * sinfo_data, int width,
 int _print_partition(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_partition_name(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
+int _print_port(sinfo_data_t *sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_prefix(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
@@ -251,4 +261,6 @@ int _print_version(sinfo_data_t * sinfo_data, int width,
 		   bool right_justify, char *suffix);
 int _print_alloc_mem(sinfo_data_t * sinfo_data, int width,
 		     bool right_justify, char *suffix);
+int _print_cluster_name(sinfo_data_t *sinfo_data, int width,
+			bool right_justify, char *suffix);
 #endif

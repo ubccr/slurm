@@ -3,11 +3,11 @@
  *****************************************************************************
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -23,13 +23,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -43,6 +43,7 @@
  */
 #define PROPAGATE_RLIMITS    1  /* The default is to propagate rlimits */
 #define NO_PROPAGATE_RLIMITS 0
+#define PROPAGATE_RLIMITS_NOT_SET -1
 
 struct slurm_rlimits_info {
         int  resource;          /* Values:  RLIMIT_NPROC, RLIMIT_MEMLOCK, ... */
@@ -58,5 +59,12 @@ extern slurm_rlimits_info_t *get_slurm_rlimits_info( void );
 extern int parse_rlimits( char *rlimits_str, int propagate_flag );
 
 extern void print_rlimits( void );
+
+/*
+ * Max out the RLIMIT_NOFILE setting.
+ *
+ * Handled through this so cross-platform issues can be isolated.
+ */
+extern void rlimits_maximize_nofile(void);
 
 #endif /*__SLURM_RLIMITS_INFO_H__*/

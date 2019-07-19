@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,15 +26,17 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
+
+#include "config.h"
 
 #include <fcntl.h>
 #include <stdlib.h>
@@ -43,6 +45,7 @@
 #include <unistd.h>
 
 #include "slurm/slurm.h"
+#include "src/common/fd.h"
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/node_conf.h"
@@ -86,32 +89,23 @@ static void _dump_front_end_state(front_end_record_t *front_end_ptr,
  * state_file IN - the name of the state save file used
  * RET the file description to read from or error code
  */
-static int _open_front_end_state_file(char **state_file)
+static Buf _open_front_end_state_file(char **state_file)
 {
-	int state_fd;
-	struct stat stat_buf;
+	Buf buf;
 
 	*state_file = xstrdup(slurmctld_conf.state_save_location);
 	xstrcat(*state_file, "/front_end_state");
-	state_fd = open(*state_file, O_RDONLY);
-	if (state_fd < 0) {
+
+	if (!(buf = create_mmap_buf(*state_file)))
 		error("Could not open front_end state file %s: %m",
 		      *state_file);
-	} else if (fstat(state_fd, &stat_buf) < 0) {
-		error("Could not stat front_end state file %s: %m",
-		      *state_file);
-		(void) close(state_fd);
-	} else if (stat_buf.st_size < 10) {
-		error("Front_end state file %s too small", *state_file);
-		(void) close(state_fd);
-	} else 	/* Success */
-		return state_fd;
+	else
+		return buf;
 
 	error("NOTE: Trying backup front_end_state save file. Information may "
 	      "be lost!");
 	xstrcat(*state_file, ".old");
-	state_fd = open(*state_file, O_RDONLY);
-	return state_fd;
+	return create_mmap_buf(*state_file);
 }
 
 /*
@@ -213,8 +207,8 @@ extern front_end_record_t *assign_front_end(struct job_record *job_ptr)
 		    _front_end_access(front_end_ptr, job_ptr)) {
 			best_front_end = front_end_ptr;
 		} else {
-			info("%s: front-end node %s not available for job %u",
-			     __func__, job_ptr->alloc_node, job_ptr->job_id);
+			info("%s: front-end node %s not available for %pJ",
+			     __func__, job_ptr->alloc_node, job_ptr);
 			return NULL;
 		}
 	} else {
@@ -309,7 +303,7 @@ extern int update_front_end(update_front_end_msg_t *msg_ptr)
 			xassert(front_end_ptr->magic == FRONT_END_MAGIC);
 			if (xstrcmp(this_node_name, front_end_ptr->name))
 				continue;
-			if (msg_ptr->node_state == (uint32_t)NO_VAL) {
+			if (msg_ptr->node_state == NO_VAL) {
 				;	/* No change in node state */
 			} else if (msg_ptr->node_state == NODE_RESUME) {
 				front_end_ptr->node_state = NODE_STATE_IDLE;
@@ -330,7 +324,7 @@ extern int update_front_end(update_front_end_msg_t *msg_ptr)
 				set_front_end_down(front_end_ptr,
 						   msg_ptr->reason);
 			}
-			if (msg_ptr->node_state != (uint32_t) NO_VAL) {
+			if (msg_ptr->node_state != NO_VAL) {
 				info("update_front_end: set state of %s to %s",
 				     this_node_name,
 				     node_state_string(front_end_ptr->
@@ -680,7 +674,7 @@ extern int dump_all_front_end_state(void)
 	front_end_record_t *front_end_ptr;
 	/* Locks: Read config and node */
 	slurmctld_lock_t node_read_lock = { READ_LOCK, NO_LOCK, READ_LOCK,
-					    NO_LOCK };
+					    NO_LOCK, NO_LOCK };
 	Buf buffer = init_buf(high_buffer_size);
 	DEF_TIMERS;
 
@@ -770,57 +764,37 @@ extern int dump_all_front_end_state(void)
 extern int load_all_front_end_state(bool state_only)
 {
 #ifdef HAVE_FRONT_END
-	char *node_name = NULL, *reason = NULL, *data = NULL, *state_file;
-	int data_allocated, data_read = 0, error_code = 0, node_cnt = 0;
+	char *node_name = NULL, *reason = NULL, *state_file;
+	int error_code = 0, node_cnt = 0;
 	uint32_t node_state;
-	uint32_t data_size = 0, name_len;
+	uint32_t name_len;
 	uint32_t reason_uid = NO_VAL;
 	time_t reason_time = 0;
 	front_end_record_t *front_end_ptr;
-	int state_fd;
 	time_t time_stamp;
 	Buf buffer;
 	char *ver_str = NULL;
-	uint16_t protocol_version = (uint16_t) NO_VAL;
+	uint16_t protocol_version = NO_VAL16;
 
 	/* read the file */
-	lock_state_files ();
-	state_fd = _open_front_end_state_file(&state_file);
-	if (state_fd < 0) {
-		info ("No node state file (%s) to recover", state_file);
-		error_code = ENOENT;
-	} else {
-		data_allocated = BUF_SIZE;
-		data = xmalloc(data_allocated);
-		while (1) {
-			data_read = read(state_fd, &data[data_size], BUF_SIZE);
-			if (data_read < 0) {
-				if (errno == EINTR)
-					continue;
-				else {
-					error ("Read error on %s: %m",
-						state_file);
-					break;
-				}
-			} else if (data_read == 0)     /* eof */
-				break;
-			data_size      += data_read;
-			data_allocated += data_read;
-			xrealloc(data, data_allocated);
-		}
-		close (state_fd);
+	lock_state_files();
+	if (!(buffer = _open_front_end_state_file(&state_file))) {
+		info("No node state file (%s) to recover", state_file);
+		xfree(state_file);
+		unlock_state_files();
+		return ENOENT;
 	}
-	xfree (state_file);
-	unlock_state_files ();
-
-	buffer = create_buf (data, data_size);
+	xfree(state_file);
+	unlock_state_files();
 
 	safe_unpackstr_xmalloc( &ver_str, &name_len, buffer);
 	debug3("Version string in front_end_state header is %s", ver_str);
 	if (ver_str && !xstrcmp(ver_str, FRONT_END_STATE_VERSION))
 		safe_unpack16(&protocol_version, buffer);
 
-	if (protocol_version == (uint16_t) NO_VAL) {
+	if (protocol_version == NO_VAL16) {
+		if (!ignore_state_errors)
+			fatal("Can not recover front_end state, version incompatible, start with '-i' to ignore this");
 		error("*****************************************************");
 		error("Can not recover front_end state, version incompatible");
 		error("*****************************************************");
@@ -833,8 +807,8 @@ extern int load_all_front_end_state(bool state_only)
 	safe_unpack_time(&time_stamp, buffer);
 
 	while (remaining_buf (buffer) > 0) {
-		uint32_t base_state = (uint32_t)NO_VAL;
-		uint16_t obj_protocol_version = (uint16_t)NO_VAL;;
+		uint32_t base_state = NO_VAL;
+		uint16_t obj_protocol_version = NO_VAL16;
 
 		if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 			safe_unpackstr_xmalloc (&node_name, &name_len, buffer);
@@ -891,7 +865,7 @@ extern int load_all_front_end_state(bool state_only)
 
 		if (front_end_ptr) {
 			node_cnt++;
-			if (obj_protocol_version != (uint16_t)NO_VAL)
+			if (obj_protocol_version != NO_VAL16)
 				front_end_ptr->protocol_version =
 					obj_protocol_version;
 			else
@@ -916,6 +890,8 @@ fini:	info("Recovered state of %d front_end nodes", node_cnt);
 	return error_code;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete front_end node data checkpoint file, start with '-i' to ignore this");
 	error("Incomplete front_end node data checkpoint file");
 	error_code = EFAULT;
 	xfree (node_name);
@@ -948,7 +924,7 @@ extern void set_front_end_down (front_end_record_t *front_end_ptr,
 		xfree(front_end_ptr->reason);
 		front_end_ptr->reason = xstrdup(reason);
 		front_end_ptr->reason_time = now;
-		front_end_ptr->reason_uid = slurm_get_slurm_user_id();
+		front_end_ptr->reason_uid = slurmctld_conf.slurm_user_id;
 	}
 	last_front_end_update = now;
 #endif
@@ -979,9 +955,8 @@ extern void sync_front_end_state(void)
 				find_front_end_record(job_ptr->batch_host);
 			if ((job_ptr->front_end_ptr == NULL) &&
 			    IS_JOB_RUNNING(job_ptr)) {
-				error("front end node %s has vanished, "
-				      "killing job %u",
-				      job_ptr->batch_host, job_ptr->job_id);
+				error("front end node %s has vanished, killing %pJ",
+				      job_ptr->batch_host, job_ptr);
 				job_ptr->job_state = JOB_NODE_FAIL |
 						     JOB_COMPLETING;
 			} else if (job_ptr->front_end_ptr == NULL) {

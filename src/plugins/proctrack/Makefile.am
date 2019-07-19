@@ -1,22 +1,11 @@
 # Makefile for proctrack plugins
 
-if HAVE_AIX_PROCTRACK
-AIX_PROCTRACK = aix
-endif
-
-# On a native cray the sgi_job is similar but different enough we felt we
-# wanted to make a new plugin to not break other implementations.
-
 if HAVE_NATIVE_CRAY
-CRAY = cray
-else
-if HAVE_SGI_JOB
-SGI_JOB = sgi_job
-endif
+CRAY = cray_aries
 endif
 
-if HAVE_LUA
-LUA = lua
-endif
+SUBDIRS = $(CRAY) linuxproc pgid
 
-SUBDIRS = $(AIX_PROCTRACK) $(CRAY) $(SGI_JOB) $(LUA) pgid linuxproc cgroup
+if WITH_CGROUP
+SUBDIRS += cgroup
+endif

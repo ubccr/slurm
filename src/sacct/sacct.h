@@ -6,11 +6,11 @@
  *  Written by Danny Auble <da@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #ifndef _SACCT_H
@@ -51,7 +51,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "src/common/getopt.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/list.h"
@@ -67,7 +66,7 @@
 #define BRIEF_COMP_FIELDS "jobid,uid,state"
 #define DEFAULT_FIELDS "jobid,jobname,partition,account,alloccpus,state,exitcode"
 #define DEFAULT_COMP_FIELDS "jobid,uid,jobname,partition,nnodes,nodelist,state,end"
-#define LONG_FIELDS "jobid,jobidraw,jobname,partition,maxvmsize,maxvmsizenode,maxvmsizetask,avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks,alloccpus,elapsed,state,exitcode,avecpufreq,reqcpufreqmin,reqcpufreqmax,reqcpufreqgov,reqmem,consumedenergy,maxdiskread,maxdiskreadnode,maxdiskreadtask,avediskread,maxdiskwrite,maxdiskwritenode,maxdiskwritetask,avediskwrite,allocgres,reqgres,reqtres,alloctres"
+#define LONG_FIELDS "jobid,jobidraw,jobname,partition,maxvmsize,maxvmsizenode,maxvmsizetask,avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks,alloccpus,elapsed,state,exitcode,avecpufreq,reqcpufreqmin,reqcpufreqmax,reqcpufreqgov,reqmem,consumedenergy,maxdiskread,maxdiskreadnode,maxdiskreadtask,avediskread,maxdiskwrite,maxdiskwritenode,maxdiskwritetask,avediskwrite,allocgres,reqgres,reqtres,alloctres,tresusageinave,tresusageinmax,tresusageinmaxn,tresusageinmaxt,tresusageinmin,tresusageinminn,tresusageinmint,tresusageintot,tresusageoutmax,tresusageoutmaxn,tresusageoutmaxt,tresusageoutave,tresusageouttot"
 
 #define LONG_COMP_FIELDS "jobid,uid,jobname,partition,nnodes,nodelist,state,start,end,timelimit"
 
@@ -89,6 +88,7 @@ typedef enum {	HEADLINE,
 
 typedef enum {
 		PRINT_ACCOUNT,
+		PRINT_ADMIN_COMMENT,
 		PRINT_ALLOC_CPUS,
 		PRINT_ALLOC_GRES,
 		PRINT_ALLOC_NODES,
@@ -105,15 +105,18 @@ typedef enum {
 		PRINT_BLOCKID,
 		PRINT_CLUSTER,
 		PRINT_COMMENT,
+		PRINT_CONSTRAINTS,
 		PRINT_CONSUMED_ENERGY,
 		PRINT_CONSUMED_ENERGY_RAW,
 		PRINT_CPU_TIME,
 		PRINT_CPU_TIME_RAW,
 		PRINT_DERIVED_EC,
 		PRINT_ELAPSED,
+		PRINT_ELAPSED_RAW,
 		PRINT_ELIGIBLE,
 		PRINT_END,
 		PRINT_EXITCODE,
+		PRINT_FLAGS,
 		PRINT_GID,
 		PRINT_GROUP,
 		PRINT_JOBID,
@@ -135,6 +138,7 @@ typedef enum {
 		PRINT_MAXVSIZE,
 		PRINT_MAXVSIZENODE,
 		PRINT_MAXVSIZETASK,
+		PRINT_MCS_LABEL,
 		PRINT_MINCPU,
 		PRINT_MINCPUNODE,
 		PRINT_MINCPUTASK,
@@ -145,6 +149,7 @@ typedef enum {
 		PRINT_PRIO,
 		PRINT_QOS,
 		PRINT_QOSRAW,
+		PRINT_REASON,
 		PRINT_REQ_CPUFREQ_MIN,
 		PRINT_REQ_CPUFREQ_MAX,
 		PRINT_REQ_CPUFREQ_GOV,
@@ -162,26 +167,46 @@ typedef enum {
 		PRINT_SUBMIT,
 		PRINT_SUSPENDED,
 		PRINT_SYSTEMCPU,
+		PRINT_SYSTEM_COMMENT,
 		PRINT_TIMELIMIT,
+		PRINT_TIMELIMIT_RAW,
 		PRINT_TOTALCPU,
+		PRINT_TRESUIA,
+		PRINT_TRESUIM,
+		PRINT_TRESUIMN,
+		PRINT_TRESUIMT,
+		PRINT_TRESUIMI,
+		PRINT_TRESUIMIN,
+		PRINT_TRESUIMIT,
+		PRINT_TRESUIT,
+		PRINT_TRESUOA,
+		PRINT_TRESUOM,
+		PRINT_TRESUOMN,
+		PRINT_TRESUOMT,
+		PRINT_TRESUOMI,
+		PRINT_TRESUOMIN,
+		PRINT_TRESUOMIT,
+		PRINT_TRESUOT,
 		PRINT_UID,
 		PRINT_USER,
 		PRINT_USERCPU,
 		PRINT_WCKEY,
-		PRINT_WCKEYID
+		PRINT_WCKEYID,
+		PRINT_WORK_DIR
 } sacct_print_types_t;
 
 typedef struct {
+	char *cluster_name;	/* Set if in federated cluster */
 	uint32_t convert_flags;	/* --noconvert */
 	slurmdb_job_cond_t *job_cond;
 	int opt_completion;	/* --completion */
-	int opt_dup;		/* --duplicates; +1 = explicitly set */
+	bool opt_federation;	/* --federation */
 	char *opt_field_list;	/* --fields= */
+	char *opt_filein;	/* --file */
 	int opt_gid;		/* running persons gid */
 	int opt_help;		/* --help */
-	char *opt_filein;
+	bool opt_local;		/* --local */
 	int opt_noheader;	/* can only be cleared */
-	int opt_allocs;		/* --total */
 	int opt_uid;		/* running persons uid */
 	int units;		/* --units*/
 } sacct_parameters_t;
@@ -197,19 +222,18 @@ extern List g_qos_list;
 extern List g_tres_list;
 
 /* process.c */
-char *find_hostname(uint32_t pos, char *hosts);
 void aggregate_stats(slurmdb_stats_t *dest, slurmdb_stats_t *from);
 
 /* print.c */
 void print_fields(type_t type, void *object);
 
 /* options.c */
-int get_data(void);
+int  get_data(void);
 void parse_command_line(int argc, char **argv);
 void do_help(void);
 void do_list(void);
 void do_list_completion(void);
-void sacct_init();
-void sacct_fini();
+void sacct_init(void);
+void sacct_fini(void);
 
 #endif /* !_SACCT_H */

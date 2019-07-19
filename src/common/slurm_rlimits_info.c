@@ -3,11 +3,11 @@
  *****************************************************************************
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -23,18 +23,19 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/param.h>	/* for OPEN_MAX on macOS */
 #include <sys/time.h>
 #include <sys/resource.h>
 
@@ -47,49 +48,49 @@
 
 
 /*
- * List SLURM rlimits get/setrlimit resource number with associated name and
+ * List Slurm rlimits get/setrlimit resource number with associated name and
  * whether it should be propagated.
  */
 
 static slurm_rlimits_info_t rlimits_info[] = {
 
-		      /*  resource,        name,       propagate_flag  */
+		/*  resource,        name,       propagate_flag  */
 
 #ifdef RLIMIT_CPU
-			{ RLIMIT_CPU,      "CPU",      -1      },
+		{ RLIMIT_CPU,      "CPU",      PROPAGATE_RLIMITS_NOT_SET },
 #endif
 #ifdef RLIMIT_FSIZE
-			{ RLIMIT_FSIZE,    "FSIZE",    -1      },
+		{ RLIMIT_FSIZE,    "FSIZE",    PROPAGATE_RLIMITS_NOT_SET },
 #endif
 #ifdef RLIMIT_DATA
-			{ RLIMIT_DATA,     "DATA",     -1      },
+		{ RLIMIT_DATA,     "DATA",     PROPAGATE_RLIMITS_NOT_SET },
 #endif
 #ifdef RLIMIT_STACK
-			{ RLIMIT_STACK,    "STACK",    -1      },
+		{ RLIMIT_STACK,    "STACK",    PROPAGATE_RLIMITS_NOT_SET },
 #endif
 #ifdef RLIMIT_CORE
-			{ RLIMIT_CORE,     "CORE",     -1      },
+		{ RLIMIT_CORE,     "CORE",     PROPAGATE_RLIMITS_NOT_SET },
 #endif
 #ifdef RLIMIT_RSS
-			{ RLIMIT_RSS,      "RSS",      -1      },
+		{ RLIMIT_RSS,      "RSS",      PROPAGATE_RLIMITS_NOT_SET },
 #endif
 #ifdef RLIMIT_NPROC
-			{ RLIMIT_NPROC,    "NPROC",    -1      },
+		{ RLIMIT_NPROC,    "NPROC",    PROPAGATE_RLIMITS_NOT_SET },
 #endif
 #ifdef RLIMIT_NOFILE
-			{ RLIMIT_NOFILE,   "NOFILE",   -1      },
+		{ RLIMIT_NOFILE,   "NOFILE",   PROPAGATE_RLIMITS_NOT_SET },
 #endif
 #ifdef RLIMIT_MEMLOCK
-			{ RLIMIT_MEMLOCK,  "MEMLOCK",  -1      },
+		{ RLIMIT_MEMLOCK,  "MEMLOCK",  PROPAGATE_RLIMITS_NOT_SET },
 #endif
 #ifdef RLIMIT_AS
-			{ RLIMIT_AS,       "AS",       -1      },
+		{ RLIMIT_AS,       "AS",       PROPAGATE_RLIMITS_NOT_SET },
 #endif
-			{ 0,               NULL,       -1      }
+		{ 0,               NULL,       PROPAGATE_RLIMITS_NOT_SET }
 };
 
 
-static bool rlimits_were_parsed = FALSE;
+static bool rlimits_were_parsed = false;
 
 /*
  * Return a pointer to the private rlimits info array.
@@ -97,7 +98,7 @@ static bool rlimits_were_parsed = FALSE;
 slurm_rlimits_info_t *
 get_slurm_rlimits_info( void )
 {
-	xassert( rlimits_were_parsed == TRUE );
+	xassert( rlimits_were_parsed == true );
 
 	return rlimits_info;
 }
@@ -135,7 +136,7 @@ parse_rlimits( char *rlimits_str, int propagate_flag )
 		 */
 		for (rli = rlimits_info; rli->name; rli++)
 			rli->propagate_flag = propagate_flag;
-		rlimits_were_parsed = TRUE;
+		rlimits_were_parsed = true;
 		return( 0 );
 	}
 
@@ -146,30 +147,30 @@ parse_rlimits( char *rlimits_str, int propagate_flag )
 	 */
 	if (rlimits_were_parsed)
 		for (rli = rlimits_info; rli->name; rli++)
-			rli->propagate_flag = -1;
+			rli->propagate_flag = PROPAGATE_RLIMITS_NOT_SET;
 
 	rlimits_str_dup = xstrdup( rlimits_str );
-	if ((tp = strtok( rlimits_str_dup, RLIMIT_DELIMS )) != NULL) {
-		do {
-			found = FALSE;
-			for (rli = rlimits_info; rli->name; rli++) {
-				/*
-				 * Accept either "RLIMIT_CORE" or "CORE"
-				 */
-				if (xstrncmp( tp, RLIMIT_, LEN_RLIMIT_ ) == 0)
-					tp += LEN_RLIMIT_;
-				if (xstrcmp( tp, rli->name ))
-					continue;
-				rli->propagate_flag = propagate_flag;
-				found = TRUE;
-				break;
-			}
-			if (found == FALSE) {
-				error( "Bad rlimit name: %s", tp );
-				xfree( rlimits_str_dup );
-				return( -1 );
-			}
-		} while ((tp = strtok( NULL, RLIMIT_DELIMS )));
+	tp = strtok( rlimits_str_dup, RLIMIT_DELIMS );
+	while (tp != NULL) {
+		found = false;
+		for (rli = rlimits_info; rli->name; rli++) {
+			/*
+			 * Accept either "RLIMIT_CORE" or "CORE"
+			 */
+			if (xstrncmp( tp, RLIMIT_, LEN_RLIMIT_ ) == 0)
+				tp += LEN_RLIMIT_;
+			if (xstrcmp( tp, rli->name ))
+				continue;
+			rli->propagate_flag = propagate_flag;
+			found = true;
+			break;
+		}
+		if (found == false) {
+			error( "Bad rlimit name: %s", tp );
+			xfree( rlimits_str_dup );
+			return( -1 );
+		}
+		tp = strtok( NULL, RLIMIT_DELIMS );
 	}
 	xfree( rlimits_str_dup );
 
@@ -178,10 +179,10 @@ parse_rlimits( char *rlimits_str, int propagate_flag )
 	 * opposite propagate flag value.
 	 */
 	for (rli = rlimits_info; rli->name; rli++)
-		if (rli->propagate_flag == -1)
+		if (rli->propagate_flag == PROPAGATE_RLIMITS_NOT_SET)
 			rli->propagate_flag = ( ! propagate_flag );
 
-	rlimits_were_parsed = TRUE;
+	rlimits_were_parsed = true;
 	return( 0 );
 }
 
@@ -195,5 +196,23 @@ extern void print_rlimits(void)
 			printf("SLURM_RLIMIT_%s=%lu\n", rli->name,
 			       (unsigned long) rlp.rlim_cur);
 		}
+	}
+}
+
+extern void rlimits_maximize_nofile(void)
+{
+	struct rlimit rlim;
+
+	if (getrlimit(RLIMIT_NOFILE, &rlim) < 0)
+		error("getrlimit(RLIMIT_NOFILE): %m");
+
+	if (rlim.rlim_cur < rlim.rlim_max) {
+#if defined(__APPLE__)
+		rlim.rlim_cur = MIN(OPEN_MAX, rlim.rlim_max);
+#else
+		rlim.rlim_cur = rlim.rlim_max;
+#endif
+		if (setrlimit(RLIMIT_NOFILE, &rlim) < 0)
+			error("Unable to increase maximum number of open files: %m");
 	}
 }

@@ -7,11 +7,11 @@
  *  Written by Jay Windley <jwindley@lnxi.com>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -43,157 +43,177 @@
 #include <pthread.h>
 
 #include "src/common/macros.h"
-#include "src/common/xmalloc.h"
-#include "src/common/xassert.h"
-#include "src/common/xstring.h"
-#include "src/common/slurm_auth.h"
-#include "src/common/slurm_protocol_api.h"
 #include "src/common/plugin.h"
 #include "src/common/plugrack.h"
-#include "src/common/arg_desc.h"
+#include "src/common/read_config.h"
+#include "src/common/slurm_auth.h"
+#include "src/common/slurm_protocol_api.h"
+#include "src/common/xassert.h"
+#include "src/common/xmalloc.h"
+#include "src/common/xstring.h"
 
-static bool auth_dummy = false;	/* for security testing */
 static bool init_run = false;
 
-/*
- * WARNING:  Do not change the order of these fields or add additional
- * fields at the beginning of the structure.  If you do, authentication
- * plugins will stop working.  If you need to add fields, add them at the
- * end of the structure.
- */
-typedef struct slurm_auth_ops {
-        void *       (*create)    ( void *argv[], char *auth_info );
-        int          (*destroy)   ( void *cred );
-        int          (*verify)    ( void *cred, char *auth_info );
-        uid_t        (*get_uid)   ( void *cred, char *auth_info );
-        gid_t        (*get_gid)   ( void *cred, char *auth_info );
-        int          (*pack)      ( void *cred, Buf buf );
-        void *       (*unpack)    ( Buf buf );
-        int          (*print)     ( void *cred, FILE *fp );
-        int          (*sa_errno)  ( void *cred );
-        const char * (*sa_errstr) ( int slurm_errno );
+typedef struct {
+	int index;
+	char data[];
+} cred_wrapper_t;
+
+typedef struct {
+	uint32_t	(*plugin_id);
+	char		(*plugin_type);
+	void *		(*create)	(char *auth_info);
+	int		(*destroy)	(void *cred);
+	int		(*verify)	(void *cred, char *auth_info);
+	uid_t		(*get_uid)	(void *cred);
+	gid_t		(*get_gid)	(void *cred);
+	char *		(*get_host)	(void *cred);
+	int		(*pack)		(void *cred, Buf buf,
+					 uint16_t protocol_version);
+	void *		(*unpack)	(Buf buf, uint16_t protocol_version);
 } slurm_auth_ops_t;
 /*
  * These strings must be kept in the same order as the fields
  * declared for slurm_auth_ops_t.
  */
 static const char *syms[] = {
+	"plugin_id",
+	"plugin_type",
 	"slurm_auth_create",
 	"slurm_auth_destroy",
 	"slurm_auth_verify",
 	"slurm_auth_get_uid",
 	"slurm_auth_get_gid",
+	"slurm_auth_get_host",
 	"slurm_auth_pack",
 	"slurm_auth_unpack",
-	"slurm_auth_print",
-	"slurm_auth_errno",
-	"slurm_auth_errstr"
 };
 
 /*
  * A global authentication context.  "Global" in the sense that there's
  * only one, with static bindings.  We don't export it.
  */
-static slurm_auth_ops_t ops;
-static plugin_context_t *g_context = NULL;
-static pthread_mutex_t      context_lock = PTHREAD_MUTEX_INITIALIZER;
+static slurm_auth_ops_t *ops = NULL;
+static plugin_context_t **g_context = NULL;
+static int g_context_num = -1;
+static pthread_mutex_t context_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void **
-_slurm_auth_marshal_args(void *hosts, int timeout)
+extern int slurm_auth_init(char *auth_type)
 {
-        void **argv;
-
-        argv = xmalloc(ARG_COUNT * sizeof(void *));
-        argv[ARG_HOST_LIST] = hosts;
-        /* This strange looking code avoids warnings on IA64 */
-        argv[ARG_TIMEOUT] = ((char *) NULL) + timeout;
-
-        return argv;
-}
-
-static const char *
-slurm_auth_generic_errstr( int slurm_errno )
-{
-        static struct {
-                int err;
-                const char *msg;
-        } generic_table[] = {
-		{ SLURM_SUCCESS, "no error" },
-		{ SLURM_ERROR, "unknown error" },
-		{ SLURM_AUTH_NOPLUGIN, "no authentication plugin installed" },
-		{ SLURM_AUTH_BADARG, "bad argument to plugin function" },
-		{ SLURM_AUTH_MEMORY, "memory management error" },
-		{ SLURM_AUTH_NOUSER, "no such user" },
-		{ SLURM_AUTH_INVALID, "authentication credential invalid" },
-		{ SLURM_AUTH_MISMATCH, "authentication type mismatch" },
-		{ SLURM_AUTH_VERSION, "authentication version too old" },
-		{ 0, NULL }
-        };
-
-        int i;
-
-        for ( i = 0; ; ++i ) {
-                if ( generic_table[ i ].msg == NULL )
-			return NULL;
-                if ( generic_table[ i ].err == slurm_errno )
-                        return generic_table[ i ].msg;
-        }
-}
-
-extern int slurm_auth_init( char *auth_type )
-{
-        int retval = SLURM_SUCCESS;
-	char *type = NULL;
+	int retval = SLURM_SUCCESS;
+	char *auth_alt_types = NULL, *list = NULL;
+	char *auth_plugin_type = NULL, *type, *last = NULL;
 	char *plugin_type = "auth";
 
-	if (init_run && g_context)
-                return retval;
+	if (init_run && (g_context_num > 0))
+		return retval;
 
 	slurm_mutex_lock(&context_lock);
 
-        if (g_context)
-                goto done;
+	if (g_context_num > 0)
+		goto done;
 
 	if (auth_type)
 		slurm_set_auth_type(auth_type);
 
-	type = slurm_get_auth_type();
-
-	if (xstrcmp(type, "auth/dummy") == 0) {
-		info( "warning: %s plugin selected", type);
-		auth_dummy = true;
+	type = auth_plugin_type = slurm_get_auth_type();
+	if (run_in_daemon("slurmctld,slurmdbd"))
+		list = auth_alt_types = slurm_get_auth_alt_types();
+	g_context_num = 0;
+	if (!auth_plugin_type || auth_plugin_type[0] == '\0')
 		goto done;
-	}
 
-	g_context = plugin_context_create(
-		plugin_type, type, (void **)&ops, syms, sizeof(syms));
+	/*
+	 * This loop construct ensures that the AuthType is in position zero
+	 * of the ops and g_context arrays, followed by any AuthAltTypes that
+	 * have been defined. This ensures that the most common type is found
+	 * first in g_slurm_auth_unpack(), and that we can default to
+	 * the zeroth element rather than tracking the primary plugin
+	 * through some other index.
+	 * One other side effect is that the AuthAltTypes are permitted to
+	 * be comma separated, vs. AuthType which can have only one value.
+	 */
+	while (type) {
+		xrecalloc(ops, g_context_num + 1, sizeof(slurm_auth_ops_t));
+		xrecalloc(g_context, g_context_num + 1,
+			  sizeof(plugin_context_t));
 
-	if (!g_context) {
-		error("cannot create %s context for %s", plugin_type, type);
-		retval = SLURM_ERROR;
-		goto done;
+		g_context[g_context_num] = plugin_context_create(
+			plugin_type, type, (void **)&ops[g_context_num],
+			syms, sizeof(syms));
+
+		if (!g_context[g_context_num]) {
+			error("cannot create %s context for %s", plugin_type, type);
+			retval = SLURM_ERROR;
+			goto done;
+		}
+		g_context_num++;
+
+		if (auth_alt_types) {
+			type = strtok_r(list, ",", &last);
+			list = NULL; /* for next iteration */
+		} else {
+			type = NULL;
+		}
 	}
 	init_run = true;
 
 done:
-	xfree(type);
-        slurm_mutex_unlock(&context_lock);
-        return retval;
+	xfree(auth_plugin_type);
+	xfree(auth_alt_types);
+	slurm_mutex_unlock(&context_lock);
+	return retval;
 }
 
 /* Release all global memory associated with the plugin */
-extern int
-slurm_auth_fini( void )
+extern int slurm_auth_fini(void)
 {
-	int rc;
+	int i, rc = SLURM_SUCCESS, rc2;
 
+	slurm_mutex_lock(&context_lock);
 	if (!g_context)
-		return SLURM_SUCCESS;
+		goto done;
 
 	init_run = false;
-	rc = plugin_context_destroy(g_context);
-	g_context = NULL;
+
+	for (i = 0; i < g_context_num; i++) {
+		rc2 = plugin_context_destroy(g_context[i]);
+		if (rc2) {
+			debug("%s: %s: %s",
+			      __func__, g_context[i]->type,
+			      slurm_strerror(rc2));
+			rc = SLURM_ERROR;
+		}
+	}
+
+	xfree(ops);
+	xfree(g_context);
+	g_context_num = -1;
+
+done:
+	slurm_mutex_unlock(&context_lock);
 	return rc;
+}
+
+/*
+ * Retrieve the auth_index corresponding to the authentication
+ * plugin used to create a given credential.
+ *
+ * Note that this works because all plugin credential types
+ * are required to store the auth_index as an int first in their
+ * internal (opaque) structures.
+ *
+ * The cast through cred_wrapper_t then gives us convenient access
+ * to that auth_index value.
+ */
+int slurm_auth_index(void *cred)
+{
+	cred_wrapper_t *wrapper = (cred_wrapper_t *) cred;
+
+	if (wrapper)
+		return wrapper->index;
+
+	return 0;
 }
 
 /*
@@ -203,125 +223,141 @@ slurm_auth_fini( void )
  * the API function dispatcher.
  */
 
-void *
-g_slurm_auth_create( void *hosts, int timeout, char *auth_info )
+void *g_slurm_auth_create(int index, char *auth_info)
 {
-        void **argv;
-        void *ret;
+	cred_wrapper_t *cred;
 
-	if ( slurm_auth_init(NULL) < 0 )
+	if (slurm_auth_init(NULL) < 0)
 		return NULL;
 
-	if ( auth_dummy )
-		return xmalloc(0);
-
-        if ( ( argv = _slurm_auth_marshal_args(hosts, timeout) ) == NULL ) {
-                return NULL;
-        }
-
-        ret = (*(ops.create))( argv, auth_info );
-        xfree( argv );
-        return ret;
+	cred = (*(ops[index].create))(auth_info);
+	if (cred)
+		cred->index = index;
+	return cred;
 }
 
-int
-g_slurm_auth_destroy( void *cred )
+int g_slurm_auth_destroy(void *cred)
 {
-        if ( slurm_auth_init(NULL) < 0 )
-                return SLURM_ERROR;
+	cred_wrapper_t *wrap = (cred_wrapper_t *) cred;
 
-	if ( auth_dummy )	/* don't worry about leak in testing */
-		return SLURM_SUCCESS;
+	if (!wrap || slurm_auth_init(NULL) < 0)
+		return SLURM_ERROR;
 
-        return (*(ops.destroy))( cred );
+	return (*(ops[wrap->index].destroy))(cred);
 }
 
-int
-g_slurm_auth_verify( void *cred, void *hosts, int timeout, char *auth_info )
+int g_slurm_auth_verify(void *cred, char *auth_info)
 {
-        int ret;
+	cred_wrapper_t *wrap = (cred_wrapper_t *) cred;
 
-        if ( slurm_auth_init(NULL) < 0 )
-                return SLURM_ERROR;
+	if (!wrap || slurm_auth_init(NULL) < 0)
+		return SLURM_ERROR;
 
-	if ( auth_dummy )
-		return SLURM_SUCCESS;
-
-        ret = (*(ops.verify))( cred, auth_info );
-        return ret;
+	return (*(ops[wrap->index].verify))(cred, auth_info);
 }
 
-uid_t
-g_slurm_auth_get_uid( void *cred, char *auth_info )
+uid_t g_slurm_auth_get_uid(void *cred)
 {
-	if (( slurm_auth_init(NULL) < 0 ) || auth_dummy )
-                return SLURM_AUTH_NOBODY;
+	cred_wrapper_t *wrap = (cred_wrapper_t *) cred;
 
-        return (*(ops.get_uid))( cred, auth_info );
+	if (!wrap || slurm_auth_init(NULL) < 0)
+		return SLURM_AUTH_NOBODY;
+
+	return (*(ops[wrap->index].get_uid))(cred);
 }
 
-gid_t
-g_slurm_auth_get_gid( void *cred, char *auth_info )
+gid_t g_slurm_auth_get_gid(void *cred)
 {
-	if (( slurm_auth_init(NULL) < 0 ) || auth_dummy )
-                return SLURM_AUTH_NOBODY;
+	cred_wrapper_t *wrap = (cred_wrapper_t *) cred;
 
-        return (*(ops.get_gid))( cred, auth_info );
+	if (!wrap || slurm_auth_init(NULL) < 0)
+		return SLURM_AUTH_NOBODY;
+
+	return (*(ops[wrap->index].get_gid))(cred);
 }
 
-int
-g_slurm_auth_pack( void *cred, Buf buf )
+char *g_slurm_auth_get_host(void *cred)
 {
-        if ( slurm_auth_init(NULL) < 0 )
-                return SLURM_ERROR;
+	cred_wrapper_t *wrap = (cred_wrapper_t *) cred;
 
-	if ( auth_dummy )
-		return SLURM_SUCCESS;
+	if (!wrap || slurm_auth_init(NULL) < 0)
+		return NULL;
 
-        return (*(ops.pack))( cred, buf );
+	return (*(ops[wrap->index].get_host))(cred);
 }
 
-void *
-g_slurm_auth_unpack( Buf buf )
+int g_slurm_auth_pack(void *cred, Buf buf, uint16_t protocol_version)
 {
-	if (( slurm_auth_init(NULL) < 0 ) || auth_dummy )
-                return NULL;
+	cred_wrapper_t *wrap = (cred_wrapper_t *) cred;
 
-        return (*(ops.unpack))( buf );
+	if (!wrap || slurm_auth_init(NULL) < 0)
+		return SLURM_ERROR;
+
+	if (protocol_version >= SLURM_19_05_PROTOCOL_VERSION) {
+		pack32(*ops[wrap->index].plugin_id, buf);
+		return (*(ops[wrap->index].pack))(cred, buf, protocol_version);
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
+		packstr(ops[wrap->index].plugin_type, buf);
+		/*
+		 * This next field was packed with plugin_version within each
+		 * individual auth plugin, but upon unpack was never checked
+		 * against anything. Rather than expose the protocol_version
+		 * symbol, just pack a zero here instead.
+		 */
+		pack32(0, buf);
+		return (*(ops[wrap->index].pack))(cred, buf, protocol_version);
+	} else {
+		error("%s: protocol_version %hu not supported",
+		      __func__, protocol_version);
+		return SLURM_ERROR;
+	}
 }
 
-int
-g_slurm_auth_print( void *cred, FILE *fp )
+void *g_slurm_auth_unpack(Buf buf, uint16_t protocol_version)
 {
-        if ( slurm_auth_init(NULL) < 0 )
-                return SLURM_ERROR;
+	uint32_t plugin_id = 0;
+	cred_wrapper_t *cred;
 
-	if ( auth_dummy )
-		return SLURM_SUCCESS;
+	if (!buf || slurm_auth_init(NULL) < 0)
+		return NULL;
 
-        return (*(ops.print))( cred, fp );
-}
+	if (protocol_version >= SLURM_19_05_PROTOCOL_VERSION) {
+		safe_unpack32(&plugin_id, buf);
+		for (int i = 0; i < g_context_num; i++) {
+			if (plugin_id == *(ops[i].plugin_id)) {
+				cred = (*(ops[i].unpack))(buf,
+							  protocol_version);
+				if (cred)
+					cred->index = i;
+				return cred;
+			}
+		}
+		error("%s: remote plugin_id %u not found",
+		      __func__, plugin_id);
+		return NULL;
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
+		char *plugin_type;
+		uint32_t uint32_tmp, version;
+		safe_unpackmem_ptr(&plugin_type, &uint32_tmp, buf);
+		safe_unpack32(&version, buf);
+		for (int i = 0; i < g_context_num; i++) {
+			if (!xstrcmp(plugin_type, ops[i].plugin_type)) {
+				cred = (*(ops[i].unpack))(buf,
+							  protocol_version);
+				if (cred)
+					cred->index = i;
+				return cred;
+			}
+		}
+		error("%s: remote plugin_type %s not found",
+		      __func__, plugin_type);
+		return NULL;
+	} else {
+		error("%s: protocol_version %hu not supported",
+		      __func__, protocol_version);
+		return NULL;
+	}
 
-int
-g_slurm_auth_errno( void *cred )
-{
-        if (( slurm_auth_init(NULL) < 0 ) || auth_dummy )
-                return SLURM_ERROR;
-
-        return (*(ops.sa_errno))( cred );
-}
-
-const char *
-g_slurm_auth_errstr( int slurm_errno )
-{
-        static char auth_init_msg[] = "authentication initialization failure";
-        char *generic;
-
-	if (( slurm_auth_init(NULL) < 0 ) || auth_dummy )
-		return auth_init_msg;
-
-        if (( generic = (char *) slurm_auth_generic_errstr( slurm_errno ) ))
-                return generic;
-
-        return (*(ops.sa_errstr))( slurm_errno );
+unpack_error:
+	return NULL;
 }

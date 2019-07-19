@@ -21,30 +21,16 @@ The major type must be &quot;proctrack.&quot;
 The minor type can be any recognizable abbreviation for the type
 of proctrack. We recommend, for example:</p>
 <ul>
-<li><b>aix</b> &mdash; Perform process tracking on an AIX platform.
-NOTE: This requires a kernel extension that records
-ever process creation and termination.</li>
-<li><b>cgroup</b> &mdash; Use Linux cgroups for process tracking.</li>
+<li><b>cray_aries</b> &mdash; Use Cray XC job containers.</li>
+<li><b>cgroup</b> &mdash; Use Linux cgroups for process tracking. This is the
+recommended mechanism for non CRAY systems. </li>
 <li><b>linuxproc</b> &mdash; Perform process tracking based upon a scan
 of the Linux process table and use the parent process ID to determine
 what processes are members of a Slurm job. NOTE: This mechanism is
 not entirely reliable for process tracking.</li>
-<li><b>lua</b> &mdash; Use site-defined <a href="http://www.lua.org">Lua</a>
-script for process tracking. Sample Lua scripts can be found with the
-Slurm distribution in the directory <i>contribs/lua</i>. The default
-installation location of the Lua scripts is the same location as the Slurm
-configuration file, <i>slurm.conf</i>.</li>
 <li><b>pgid</b> &mdash; Use process group ID to determine
 what processes are members of a Slurm job. NOTE: This mechanism is
 not entirely reliable for process tracking.</li>
-<li><b>rms</b> &mdash; Use a Quadrics RMS kernel patch to
-establish what processes are members of a Slurm job.
-NOTE: This requires a kernel patch that records
-every process creation and termination.</li>
-<li><b>sgj_job</b> &mdash; Use <a href="http://oss.sgi.com/projects/pagg/">
-SGI's Process Aggregates (PAGG) kernel module</a>.
-NOTE: This kernel module records every process creation
-and termination.</li>
 </ul>
 
 <p><span class="commandline">const char plugin_name[]</span><br>
@@ -55,7 +41,7 @@ There is no requirement with respect to its format.</p>
 If specified, identifies the version of Slurm used to build this plugin and
 any attempt to load the plugin from a different version of Slurm will result
 in an error.
-If not specified, then the plugin may be loadeed by Slurm commands and
+If not specified, then the plugin may be loaded by Slurm commands and
 daemons from any version, however this may result in difficult to diagnose
 failures due to changes in the arguments to plugin functions or changes
 in other Slurm functions used by the plugin.</p>
@@ -63,7 +49,6 @@ in other Slurm functions used by the plugin.</p>
 <p>The programmer is urged to study
 <span class="commandline">src/plugins/proctrack/pgid/proctrack_pgid.c</span>
 for an example implementation of a Slurm proctrack plugin.</p>
-<p class="footer"><a href="#top">top</a></p>
 
 <h2>Data Objects</h2>
 <p> The implementation must support a container id of type uint64_t.
@@ -80,7 +65,6 @@ The implementation should endeavor to provide useful and pertinent information
 by whatever means is practical.
 Successful API calls are not required to reset errno to a known value.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
 <h2>API Functions</h2>
 <p>The following functions must appear. Functions which are not implemented should
@@ -102,14 +86,14 @@ be stubbed.</p>
 <p><b>Note</b>: These init and fini functions are not the same as those
 described in the <span class="commandline">dlopen (3)</span> system library.
 The C run-time system co-opts those symbols for its own initialization.
-The system <span class="commandline">_init()</span> is called before the SLURM
-<span class="commandline">init()</span>, and the SLURM
+The system <span class="commandline">_init()</span> is called before the Slurm
+<span class="commandline">init()</span>, and the Slurm
 <span class="commandline">fini()</span> is called before the system's
 <span class="commandline">_fini()</span>.</p>
 
 <p class="commandline">int proctrack_p_create (stepd_step_rec_t *job);</p>
 <p style="margin-left:.2in"><b>Description</b>: Create a container.
-The caller should insure that be valid
+The caller should ensure that be valid
 <span class="commandline">proctrack_p_destroy()</span> is called.
 This function must put the container ID directory in the job structure's
 variable <i>cont_id</i>.</p>
@@ -146,7 +130,6 @@ was sent.
 If the signal can not be sent, the function should return SLURM_ERROR and set
 its errno to an appropriate value to indicate the reason for failure.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
 <p class="commandline">int proctrack_p_destroy (uint64_t id);</p>
 <p style="margin-left:.2in"><b>Description</b>: Destroy or otherwise
@@ -182,8 +165,7 @@ Count of process IDs in the container.</p>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if
   successful, SLURM_ERROR else.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 27 March 2015</p>
+<p style="text-align:center;">Last modified 14 January 2019</p>
 
 <!--#include virtual="footer.txt"-->

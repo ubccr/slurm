@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,23 +27,15 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#ifdef HAVE_SYS_SYSLOG_H
-#  include <sys/syslog.h>
-#endif
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -122,7 +114,7 @@ slurm_sprint_front_end_table (front_end_info_t * front_end_ptr,
 {
 	uint32_t my_state = front_end_ptr->node_state;
 	char *drain_str = "";
-	char tmp_line[512], time_str[32];
+	char time_str[32];
 	char *out = NULL;
 
 	if (my_state & NODE_STATE_DRAIN) {
@@ -131,27 +123,18 @@ slurm_sprint_front_end_table (front_end_info_t * front_end_ptr,
 	}
 
 	/****** Line 1 ******/
-	snprintf(tmp_line, sizeof(tmp_line), "FrontendName=%s ",
-		 front_end_ptr->name);
-	xstrcat(out, tmp_line);
-	snprintf(tmp_line, sizeof(tmp_line), "State=%s%s ",
-		 node_state_string(my_state), drain_str);
-	xstrcat(out, tmp_line);
-	snprintf(tmp_line, sizeof(tmp_line), "Version=%s ",
-		 front_end_ptr->version);
-	xstrcat(out, tmp_line);
+	xstrfmtcat(out, "FrontendName=%s ", front_end_ptr->name);
+	xstrfmtcat(out, "State=%s%s ", node_state_string(my_state), drain_str);
+	xstrfmtcat(out, "Version=%s ", front_end_ptr->version);
 	if (front_end_ptr->reason_time) {
 		char *user_name = uid_to_string(front_end_ptr->reason_uid);
 		slurm_make_time_str((time_t *)&front_end_ptr->reason_time,
 				    time_str, sizeof(time_str));
-		snprintf(tmp_line, sizeof(tmp_line), "Reason=%s [%s@%s]",
-			 front_end_ptr->reason, user_name, time_str);
-		xstrcat(out, tmp_line);
+		xstrfmtcat(out, "Reason=%s [%s@%s]",
+			   front_end_ptr->reason, user_name, time_str);
 		xfree(user_name);
 	} else {
-		snprintf(tmp_line, sizeof(tmp_line), "Reason=%s",
-			 front_end_ptr->reason);
-		xstrcat(out, tmp_line);
+		xstrfmtcat(out, "Reason=%s", front_end_ptr->reason);
 	}
 	if (one_liner)
 		xstrcat(out, " ");
@@ -161,12 +144,10 @@ slurm_sprint_front_end_table (front_end_info_t * front_end_ptr,
 	/****** Line 2 ******/
 	slurm_make_time_str((time_t *)&front_end_ptr->boot_time,
 			    time_str, sizeof(time_str));
-	snprintf(tmp_line, sizeof(tmp_line), "BootTime=%s ", time_str);
-	xstrcat(out, tmp_line);
+	xstrfmtcat(out, "BootTime=%s ", time_str);
 	slurm_make_time_str((time_t *)&front_end_ptr->slurmd_start_time,
 			    time_str, sizeof(time_str));
-	snprintf(tmp_line, sizeof(tmp_line), "SlurmdStartTime=%s", time_str);
-	xstrcat(out, tmp_line);
+	xstrfmtcat(out, "SlurmdStartTime=%s", time_str);
 	if (one_liner)
 		xstrcat(out, " ");
 	else
@@ -224,11 +205,13 @@ slurm_load_front_end (time_t update_time, front_end_info_msg_t **resp)
 
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
+	memset(&req, 0, sizeof(req));
 	req.last_update  = update_time;
 	req_msg.msg_type = REQUEST_FRONT_END_INFO;
 	req_msg.data     = &req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					   working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	switch (resp_msg.msg_type) {
@@ -247,5 +230,5 @@ slurm_load_front_end (time_t update_time, front_end_info_msg_t **resp)
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }

@@ -18,11 +18,11 @@ NOTES FOR GITHUB DEVELOPERS
 ---------------------------
 
 The official issue tracker for Slurm is at
-  http://bugs.schedmd.com/
+  https://bugs.schedmd.com/
 
 We welcome code contributions and patches, but **we do not accept Pull Requests
 through Github at this time.** Please submit patches as attachments to new
-bugs under "Contributions" category.
+issues under the "C - Contributions" severity level.
 
 SOURCE DISTRIBUTION HIERARCHY
 -----------------------------
@@ -68,15 +68,9 @@ COMPILING AND INSTALLING THE DISTRIBUTION
 -----------------------------------------
 
 Please see the instructions at
-  http://slurm.schedmd.com/quickstart_admin.html
+  https://slurm.schedmd.com/quickstart_admin.html
 Extensive documentation is available from our home page at
-  http://slurm.schedmd.com/slurm.html
-
-PROBLEMS
---------
-
-If you experience problems compiling, installing, or running Slurm, see
-   http://slurm.schedmd.com/help.html
+  https://slurm.schedmd.com/slurm.html
 
 LEGAL
 -----

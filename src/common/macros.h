@@ -6,11 +6,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,50 +26,29 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _MACROS_H
-#define _MACROS_H 	1
+#define _MACROS_H
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#ifndef NULL
-#  include <stddef.h>	/* for NULL */
-#endif
-
-#if HAVE_STDBOOL_H
-#  include <stdbool.h>
-#else
-#  ifndef bool
-     typedef enum {false, true} bool;
-#  endif
-#endif /* !HAVE_STDBOOL_H */
-
-#if HAVE_PTHREAD_H
-#  include <pthread.h>
-#endif
+#include "config.h"
 
 #include <errno.h>              /* for errno   */
+#include <pthread.h>
+#include <stdbool.h>		/* for bool type */
+#include <stddef.h>		/* for NULL */
 #include <stdlib.h>		/* for abort() */
+#include <string.h>
 #include "src/common/log.h"	/* for error() */
-
-#ifndef FALSE
-#  define FALSE	false
-#endif
-
-#ifndef TRUE
-#  define TRUE	true
-#endif
+#include "src/common/strlcpy.h"
 
 #ifndef MAX
 #  define MAX(a,b) ((a) > (b) ? (a) : (b))
@@ -120,21 +99,6 @@
 # define NTOH_uint64(x)   UINT64_SWAP_LE_BE (x)
 #endif	/* SLURM_BIGENDIAN */
 
-
-
-/*
-** define __CURRENT_FUNC__ macro for returning current function
-*/
-#if defined (__GNUC__) && (__GNUC__ < 3)
-#  define __CURRENT_FUNC__	__PRETTY_FUNCTION__
-#else  /* !__GNUC__ */
-#  ifdef _AIX
-#    define __CURRENT_FUNC__	__func__
-#  else
-#    define __CURRENT_FUNC__    ""
-#  endif /* _AIX */
-#endif /* __GNUC__ */
-
 #ifndef __STRING
 #  define __STRING(arg)		#arg
 #endif
@@ -142,99 +106,271 @@
 /* define macros for GCC function attributes if we're using gcc */
 
 #if __GNUC__ > 2 || (__GNUC__ == 2 && __GNUC_MINOR__ >= 4)
-#  define __PRINTF_ATTR( form_idx, arg_idx ) 	\
-          __attribute__((__format__ (__printf__, form_idx, arg_idx)))
 #  define __NORETURN_ATTR				\
           __attribute__((__noreturn__))
 #else  /* !__GNUC__ */
-#  define __PRINTF_ATTR( format_idx, arg_idx )	((void)0)
 #  define __NORETURN_ATTR			((void)0)
 #endif /* __GNUC__ */
 
-#ifdef WITH_PTHREADS
+#define slurm_cond_init(cond, cont_attr)				\
+	do {								\
+		int err = pthread_cond_init(cond, cont_attr);		\
+		if (err) {						\
+			errno = err;					\
+			fatal("%s:%d %s: pthread_cond_init(): %m",	\
+				__FILE__, __LINE__, __func__);		\
+			abort();					\
+		}							\
+	} while (0)
 
-#  define slurm_mutex_init(mutex)					\
+#define slurm_cond_signal(cond)					\
+	do {								\
+		int err = pthread_cond_signal(cond);			\
+		if (err) {						\
+			errno = err;					\
+			error("%s:%d %s: pthread_cond_signal(): %m",	\
+				__FILE__, __LINE__, __func__);		\
+		}							\
+	} while (0)
+
+#define slurm_cond_broadcast(cond)					\
+	do {								\
+		int err = pthread_cond_broadcast(cond);			\
+		if (err) {						\
+			errno = err;					\
+			error("%s:%d %s: pthread_cond_broadcast(): %m",	\
+				__FILE__, __LINE__, __func__);		\
+		}							\
+	} while (0)
+
+#define slurm_cond_wait(cond, mutex)					\
+	do {								\
+		int err = pthread_cond_wait(cond, mutex);		\
+		if (err) {						\
+			errno = err;					\
+			error("%s:%d %s: pthread_cond_wait(): %m",	\
+				__FILE__, __LINE__, __func__);		\
+		}							\
+	} while (0)
+
+/* ignore timeouts, you must be able to handle them if
+ * calling cond_timedwait instead of cond_wait */
+#define slurm_cond_timedwait(cond, mutex, abstime)			\
+	do {								\
+		int err = pthread_cond_timedwait(cond, mutex, abstime);	\
+		if (err && (err != ETIMEDOUT)) {			\
+			errno = err;					\
+			error("%s:%d %s: pthread_cond_timedwait(): %m",	\
+			      __FILE__, __LINE__, __func__);		\
+		}							\
+	} while (0)
+
+#define slurm_cond_destroy(cond)					\
+	do {								\
+		int err = pthread_cond_destroy(cond);			\
+		if (err) {						\
+			errno = err;					\
+			error("%s:%d %s: pthread_cond_destroy(): %m",	\
+				__FILE__, __LINE__, __func__);		\
+		}							\
+	} while (0)
+
+
+#define slurm_mutex_init(mutex)						\
 	do {								\
 		int err = pthread_mutex_init(mutex, NULL);		\
 		if (err) {						\
 			errno = err;					\
 			fatal("%s:%d %s: pthread_mutex_init(): %m",	\
-				__FILE__, __LINE__, __CURRENT_FUNC__);	\
+				__FILE__, __LINE__, __func__);		\
 			abort();					\
 		}							\
 	} while (0)
 
-#  define slurm_mutex_destroy(mutex)					\
+#define slurm_mutex_destroy(mutex)					\
 	do {								\
 		int err = pthread_mutex_destroy(mutex);			\
 		if (err) {						\
 			errno = err;					\
 			fatal("%s:%d %s: pthread_mutex_destroy(): %m",	\
-				__FILE__, __LINE__, __CURRENT_FUNC__);	\
+				__FILE__, __LINE__, __func__);		\
 			abort();					\
 		}							\
 	} while (0)
 
-#  define slurm_mutex_lock(mutex)					\
+#define slurm_mutex_lock(mutex)					\
 	do {								\
 		int err = pthread_mutex_lock(mutex);			\
 		if (err) {						\
 			errno = err;					\
 			fatal("%s:%d %s: pthread_mutex_lock(): %m",	\
-				__FILE__, __LINE__, __CURRENT_FUNC__);	\
+				__FILE__, __LINE__, __func__);		\
 			abort();					\
 		}							\
 	} while (0)
 
-#  define slurm_mutex_unlock(mutex)					\
+#define slurm_mutex_unlock(mutex)					\
 	do {								\
 		int err = pthread_mutex_unlock(mutex);			\
 		if (err) {						\
 			errno = err;					\
 			fatal("%s:%d %s: pthread_mutex_unlock(): %m",	\
-				__FILE__, __LINE__, __CURRENT_FUNC__);	\
+				__FILE__, __LINE__, __func__);		\
 			abort();					\
 		}							\
 	} while (0)
 
-#  ifdef PTHREAD_SCOPE_SYSTEM
-#  define slurm_attr_init(attr)						\
+#define slurm_rwlock_init(rwlock)					\
 	do {								\
-		if (pthread_attr_init(attr))				\
-			fatal("pthread_attr_init: %m");			\
-		/* we want 1:1 threads if there is a choice */		\
-		if (pthread_attr_setscope(attr, PTHREAD_SCOPE_SYSTEM))	\
-			error("pthread_attr_setscope: %m");		\
-		if (pthread_attr_setstacksize(attr, 1024*1024))		\
-			error("pthread_attr_setstacksize: %m");		\
-	 } while (0)
-#  else
-#  define slurm_attr_init(attr)						\
-	do {								\
-		if (pthread_attr_init(attr))				\
-			fatal("pthread_attr_init: %m");			\
-		if (pthread_attr_setstacksize(attr, 1024*1024))		\
-			error("pthread_attr_setstacksize: %m");		\
+		int err = pthread_rwlock_init(rwlock, NULL);		\
+		if (err) {						\
+			errno = err;					\
+			fatal("%s:%d %s: pthread_rwlock_init(): %m",	\
+			      __FILE__, __LINE__, __func__);		\
+		}							\
 	} while (0)
-#  endif
 
-#  define slurm_attr_destroy(attr)					\
+#define slurm_rwlock_destroy(rwlock)					\
 	do {								\
-		if (pthread_attr_destroy(attr))				\
+		int err = pthread_rwlock_destroy(rwlock);		\
+		if (err) {						\
+			errno = err;					\
+			fatal("%s:%d %s: pthread_rwlock_destroy(): %m",	\
+			      __FILE__, __LINE__, __func__);		\
+		}							\
+	} while (0)
+
+#define slurm_rwlock_rdlock(rwlock)					\
+	do {								\
+		int err = pthread_rwlock_rdlock(rwlock);		\
+		if (err) {						\
+			errno = err;					\
+			fatal("%s:%d %s: pthread_rwlock_rdlock(): %m",	\
+			      __FILE__, __LINE__, __func__);		\
+		}							\
+	} while (0)
+
+#define slurm_rwlock_wrlock(rwlock)					\
+	do {								\
+		int err = pthread_rwlock_wrlock(rwlock);		\
+		if (err) {						\
+			errno = err;					\
+			fatal("%s:%d %s: pthread_rwlock_wrlock(): %m",	\
+			      __FILE__, __LINE__, __func__);		\
+		}							\
+	} while (0)
+
+#define slurm_rwlock_unlock(rwlock)					\
+	do {								\
+		int err = pthread_rwlock_unlock(rwlock);		\
+		if (err) {						\
+			errno = err;					\
+			fatal("%s:%d %s: pthread_rwlock_unlock(): %m",	\
+			      __FILE__, __LINE__, __func__);		\
+		}							\
+	} while (0)
+
+#define slurm_rwlock_trywrlock(rwlock) pthread_rwlock_trywrlock(rwlock)
+#define slurm_rwlock_tryrdlock(rwlock) pthread_rwlock_tryrdlock(rwlock)
+
+#ifdef PTHREAD_SCOPE_SYSTEM
+#  define slurm_attr_init(attr)						\
+	do {								\
+		int err = pthread_attr_init(attr);			\
+		if (err) {						\
+			errno = err;					\
+			fatal("pthread_attr_init: %m");			\
+		}							\
+		/* we want 1:1 threads if there is a choice */		\
+		err = pthread_attr_setscope(attr, PTHREAD_SCOPE_SYSTEM);\
+		if (err) {						\
+			errno = err;					\
+			error("pthread_attr_setscope: %m");		\
+		}							\
+		err = pthread_attr_setstacksize(attr, 1024*1024);	\
+		if (err) {						\
+			errno = err;					\
+			error("pthread_attr_setstacksize: %m");		\
+		}							\
+	 } while (0)
+#else
+#  define slurm_attr_init(attr)						\
+	do {								\
+		int err = pthread_attr_init(attr);			\
+		if (err) {						\
+			errno = err;					\
+			fatal("pthread_attr_init: %m");			\
+		}							\
+		err = pthread_attr_setstacksize(attr, 1024*1024);	\
+		if (err) {						\
+			errno = err;					\
+			error("pthread_attr_setstacksize: %m");		\
+		}							\
+	} while (0)
+#endif
+
+#define slurm_attr_destroy(attr)					\
+	do {								\
+		int err = pthread_attr_destroy(attr);			\
+		if (err) {						\
+			errno = err;					\
 			error("pthread_attr_destroy failed, "		\
 				"possible memory leak!: %m");		\
+		}							\
 	} while (0)
 
-#else /* !WITH_PTHREADS */
+/*
+ * Note that the attr argument is intentionally omitted, as it will
+ * be setup within the macro to Slurm's default options.
+ */
+#define slurm_thread_create(id, func, arg)				\
+	do {								\
+		pthread_attr_t attr;					\
+		int err;						\
+		slurm_attr_init(&attr);					\
+		err = pthread_create(id, &attr, func, arg);		\
+		if (err) {						\
+			errno = err;					\
+			fatal("%s: pthread_create error %m", __func__);	\
+		}							\
+		slurm_attr_destroy(&attr);				\
+	} while (0)
 
-#  define slurm_mutex_init(mutex)
-#  define slurm_mutex_destroy(mutex)
-#  define slurm_mutex_lock(mutex)
-#  define slurm_mutex_unlock(mutex)
-#  define slurm_attr_init(attr)
-#  define slurm_attr_destroy(attr)
+/*
+ * If the id is NULL then the thread_id will be discarded without needing
+ * to create a local pthread_t object first.
+ *
+ * This is only made available for detached threads - if you're creating
+ * an attached thread that you don't need to keep the id of, then you
+ * should really be making it detached.
+ *
+ * The ternary operator that makes that work is intentionally overwrought
+ * to avoid compiler warnings about it always resolving to true, since
+ * this is a macro and the optimization pass will realize that a variable
+ * in the local scope will always have a non-zero memory address.
+ */
+#define slurm_thread_create_detached(id, func, arg)			\
+	do {								\
+		pthread_t *id_ptr, id_local;				\
+		pthread_attr_t attr;					\
+		int err;						\
+		id_ptr = (id != (pthread_t *) NULL) ? id : &id_local;	\
+		slurm_attr_init(&attr);					\
+		err = pthread_attr_setdetachstate(&attr,		\
+						  PTHREAD_CREATE_DETACHED); \
+		if (err) {						\
+			errno = err;					\
+			fatal("%s: pthread_attr_setdetachstate %m",	\
+			      __func__);				\
+		}							\
+		err = pthread_create(id_ptr, &attr, func, arg);		\
+		if (err) {						\
+			errno = err;					\
+			fatal("%s: pthread_create error %m", __func__);	\
+		}							\
+		slurm_attr_destroy(&attr);				\
+	} while (0)
 
-#endif /* WITH_PTHREADS */
 
 #define slurm_atoul(str) strtoul(str, NULL, 10)
 #define slurm_atoull(str) strtoull(str, NULL, 10)
@@ -244,16 +380,11 @@
 #    define strong_alias(name, aliasname) \
      extern __typeof (name) aliasname __attribute ((alias (#name)))
 #  else
-     /* dummy function definition,
-      * confirm "aliasname" is free and waste "name" */
 #    define strong_alias(name, aliasname) \
-     extern void aliasname(int name)
+     __asm__(".global _" #aliasname); \
+     __asm__(".set _" #aliasname ", _" #name); \
+     extern __typeof (name) aliasname
 #  endif
-#endif
-
-#ifndef HAVE_STRNDUP
-#  undef  strndup
-#  define strndup(src,size) strdup(src)
 #endif
 
 /* Results strftime() are undefined if buffer too small
@@ -265,7 +396,7 @@ do {									\
 		if (strftime(tmp_string, sizeof(tmp_string), format, tm) == 0) \
 			memset(tmp_string, '#', max);			\
 		tmp_string[max-1] = 0;					\
-		strncpy(s, tmp_string, max);				\
+		strlcpy(s, tmp_string, max);				\
 	}								\
 } while (0)
 

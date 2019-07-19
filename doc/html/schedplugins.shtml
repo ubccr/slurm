@@ -4,11 +4,11 @@
 
 <h2> Overview</h2>
 <p> This document describe. Slurm scheduler plugins and the API that defines
-them. It is intended as a resource to programmers wishing to write their own SLURM
+them. It is intended as a resource to programmers wishing to write their own Slurm
 scheduler plugins.</p>
 
 <p>It is noteworthy that two different models are used for job scheduling.
-The <b>backfill</b> scheduler let. Slurm establish the initial job priority
+The <b>backfill</b> scheduler let. Slurm establishes the initial job priority
 and can periodically alter job priorities to change their order within the queue.
 Developers may use the model that best fits their needs.
 Note that a separate <a href="selectplugins.html">node selection plugin</a>
@@ -35,36 +35,10 @@ There is no requirement with respect to its format.</p>
 If specified, identifies the version of Slurm used to build this plugin and
 any attempt to load the plugin from a different version of Slurm will result
 in an error.
-If not specified, then the plugin may be loadeed by Slurm commands and
+If not specified, then the plugin may be loaded by Slurm commands and
 daemons from any version, however this may result in difficult to diagnose
 failures due to changes in the arguments to plugin functions or changes
 in other Slurm functions used by the plugin.</p>
-
-<p class="footer"><a href="#top">top</a></p>
-
-<h2>Data Objects</h2>
-<p>The implementation must maintain (though not necessarily directly export) an
-enumerated <span class="commandline">errno</span>  to allow Slurm to discover
-as practically as possible the reason for any failed API call. Plugin-specific enumerated
-integer values should be used when appropriate. It is desirable that these values
-be mapped into the range ESLURM_SCHED_MIN and ESLURM_SCHED_MAX
-as defined in <span class="commandline">slurm/slurm_errno.h</span>.
-The error number should be returned by the function
-<a href="#get_errno"><span class="commandline">slurm_sched_get_errno()</span></a>
-and  string describing the error's meaning should be returned by the function
-<a href="#strerror"><span class="commandline">slurm_sched_strerror()</span></a>
-described below.</p>
-
-<p>These values must not be used as return values in integer-valued functions
-in the API. The proper error return value from integer-valued functions is SLURM_ERROR.
-The implementation should endeavor to provide useful and pertinent information by
-whatever means is practical. In some cases this means an errno for each credential,
-since plugins must be re-entrant. If a plugin maintains a global errno in place of or in
-addition to a per-credential errno, it is not required to enforce mutual exclusion on it.
-Successful API calls are not required to reset any errno to a known value. However,
-the initial value of any errno, prior to any error condition arising, should be
-SLURM_SUCCESS. </p>
-<p class="footer"><a href="#top">top</a></p>
 
 <h2>API Functions</h2>
 <p>The following functions must appear. Functions which are not implemented should
@@ -86,8 +60,8 @@ be stubbed.</p>
 <p><b>Note</b>: These init and fini functions are not the same as those
 described in the <span class="commandline">dlopen (3)</span> system library.
 The C run-time system co-opts those symbols for its own initialization.
-The system <span class="commandline">_init()</span> is called before the SLURM
-<span class="commandline">init()</span>, and the SLURM
+The system <span class="commandline">_init()</span> is called before the Slurm
+<span class="commandline">init()</span>, and the Slurm
 <span class="commandline">fini()</span> is called before the system's
 <span class="commandline">_fini()</span>.</p>
 
@@ -148,7 +122,6 @@ resource requirements, time limit, etc.</p>
 happened such as time or size limits.</p>
 <p style="margin-left:.2in"><b>Arguments</b>: None</p>
 <p style="margin-left:.2in"><b>Returns</b>: Nothing.</p>
-<p class="footer"><a href="#top">top</a></p>
 
 <p class="commandline">char *slurm_sched_p_get_conf (void);</p></a>
 <p style="margin-left:.2in"><b>Description</b>: Return scheduler specific
@@ -158,22 +131,6 @@ command.</p>
 <p style="margin-left:.2in"><b>Returns</b>: A string containing configuration
 information. The return value is released using the <i>xfree()</i> function.</p>
 
-<a name="get_errno"><p class="commandline">int slurm_sched_p_get_errno (void);</p></a>
-<p style="margin-left:.2in"><b>Description</b>: Return the number of a scheduler
-specific error.</p>
-<p style="margin-left:.2in"><b>Arguments</b>: None</p>
-<p style="margin-left:.2in"><b>Returns</b>: Error number for the last failure encountered by the scheduler plugin.</p>
-
-<p class="commandline"><a name="strerror">const char *slurm_sched_p_strerror(int errnum);</a></p>
-<p style="margin-left:.2in"><b>Description</b>: Return a string description of a scheduler
-specific error code.</p>
-<p style="margin-left:.2in"><b>Arguments</b>:<br>
-<b>errnum</b> (input) a scheduler
-specific error code.</p>
-<p style="margin-left:.2in"><b>Returns</b>: Pointer to string describing the error
-or NULL if no description found in this plugin.</p>
-<p class="footer"><a href="#top">top</a></p>
-
-<p style="text-align:center;">Last modified 15 December 2016</p>
+<p style="text-align:center;">Last modified 7 March 2019</p>
 
 <!--#include virtual="footer.txt"-->

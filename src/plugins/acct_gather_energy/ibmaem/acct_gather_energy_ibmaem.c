@@ -5,11 +5,11 @@
  *  Written by Axel Auweter <axel.auweter@lrz.de> who shamelessly stole the
  *  concepts & code from the rapl and cray plugins.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
 \*****************************************************************************/
@@ -52,14 +52,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "jobacct" for SLURM job completion logging) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "jobacct" for Slurm job completion logging) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
@@ -110,7 +110,8 @@ static uint64_t _get_latest_stats(int type)
 	}
 
 	fd = fileno(fp);
-	fcntl(fd, F_SETFD, FD_CLOEXEC);
+	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
+		error("%s: fcntl: %m", __func__);
 	num_read = read(fd, sbuf, (sizeof(sbuf) - 1));
 	if (num_read > 0) {
 		sbuf[num_read] = '\0';
@@ -139,6 +140,7 @@ static void _get_joules_task(acct_gather_energy_t *energy)
 	uint64_t curr_energy, diff_energy = 0;
 	uint32_t curr_power;
 	time_t now;
+	static uint32_t readings = 0;
 
 	if (energy->current_watts == NO_VAL)
 		return;
@@ -151,20 +153,21 @@ static void _get_joules_task(acct_gather_energy_t *energy)
 		diff_energy = (curr_energy - energy->previous_consumed_energy)
 			      / 1000000;
 		energy->consumed_energy += diff_energy;
-	} else
+		energy->ave_watts =  ((energy->ave_watts * readings) +
+				       energy->current_watts) / (readings + 1);
+	} else {
 		energy->base_consumed_energy = curr_energy / 1000000;
-
+		energy->ave_watts = 0;
+	}
+	readings++;
 	energy->current_watts = curr_power;
-
-	if (!energy->base_watts || (energy->base_watts > curr_power))
-		energy->base_watts = curr_power;
 
 	if (debug_flags & DEBUG_FLAG_ENERGY)
 		info("_get_joules_task: %"PRIu64" Joules consumed over last"
-		     " %ld secs. Currently at %u watts, lowest watts %u",
+		     " %ld secs. Currently at %u watts, ave watts %u",
 		     diff_energy,
 		     energy->poll_time ? now - energy->poll_time : 0,
-		     curr_power, energy->base_watts);
+		     curr_power, energy->ave_watts);
 
 	energy->previous_consumed_energy = curr_energy;
 	energy->poll_time = now;
@@ -277,7 +280,7 @@ extern int acct_gather_energy_p_get_data(enum acct_energy_type data_type,
 	case ENERGY_DATA_JOULES_TASK:
 	case ENERGY_DATA_NODE_ENERGY_UP:
 		if (local_energy->current_watts == NO_VAL)
-			energy->consumed_energy = NO_VAL;
+			energy->consumed_energy = NO_VAL64;
 		else
 			_get_joules_task(energy);
 		break;

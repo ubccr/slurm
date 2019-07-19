@@ -6,11 +6,11 @@
  *
  *  Written by Martin Perry <martin.perry@bull.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,21 +26,18 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \****************************************************************************/
+
 #ifndef _SLURMD_CGROUP_H
 #define _SLURMD_CGROUP_H
-
-#if HAVE_CONFIG_H
-#   include "config.h"
-#endif
 
 /* Initialize slurmd system cpuset cgroup */
 extern int init_system_cpuset_cgroup(void);
@@ -56,7 +53,7 @@ extern void fini_system_cgroup(void);
 extern int set_system_cgroup_cpus(char *phys_core_str);
 
 /* Set memory limit in system memory cgroup */
-extern int set_system_cgroup_mem_limit(uint32_t mem_spec_limit);
+extern int set_system_cgroup_mem_limit(uint64_t mem_spec_limit);
 
 /* Disable OOM killer in system memory cgroup */
 extern int disable_system_cgroup_mem_oom();
@@ -69,9 +66,6 @@ extern int attach_system_memory_pid(pid_t pid);
 
 /* Check that corespec cgroup job confinement is configured */
 extern bool check_corespec_cgroup_job_confinement(void);
-
-/* Check that memspec cgroup job confinement is configured */
-extern bool check_memspec_cgroup_job_confinement(void);
 
 /* Attach a pid to the system cgroups */
 extern void attach_system_cgroup_pid(pid_t pid);

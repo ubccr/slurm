@@ -1,4 +1,4 @@
-.TH scancel "1" "Slurm Commands" "April 2015" "Slurm Commands"
+.TH scancel "1" "Slurm Commands" "June 2018" "Slurm Commands"
 
 .SH "NAME"
 scancel \- Used to signal jobs or job steps that are under the control of Slurm.
@@ -15,6 +15,11 @@ If the job ID of a job array is specified with an array ID value then only that
 job array element will be cancelled.
 If the job ID of a job array is specified without an array ID value then all
 job array elements will be cancelled.
+While a heterogeneous job is in pending state, only the entire job can be
+cancelled rather than it's individual components.
+A request to cancel an individual component of a heterogeneous job not in
+pending state will return an error.
+After the job has begun execution, the individual component can be cancelled.
 A job or job step can only be signaled by the owner of that job or user root.
 If an attempt is made by an unauthorized user to signal a job or job step, an
 error message will be printed and the job will not be signaled.
@@ -42,7 +47,7 @@ Also see the \fB\-f\fR, \fB\-\-full\fR option.
 Send the job signal request to the slurmctld daemon rather than directly to the
 slurmd daemons. This increases overhead, but offers better fault tolerance.
 This is the default behavior on architectures using front end nodes (e.g.
-BlueGene and Cray computers) or when the \fB\-\-clusters\fR option is used.
+Cray ALPS computers) or when the \fB\-\-clusters\fR option is used.
 
 .TP
 \fB\-f\fR, \fB\-\-full\fR
@@ -56,12 +61,17 @@ Also see the \fB\-b\fR, \fB\-\-batch\fR option.
 Print a help message describing all \fBscancel\fR options.
 
 .TP
+\fB\-H\fR, \fB\-\-hurry\fR
+Do not stage out any burst buffer data.
+
+.TP
 \fB\-i\fR, \fB\-\-interactive\fR
 Interactive mode. Confirm each job_id.step_id before performing the cancel operation.
 
 .TP
 \fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
-Cluster to issue commands to.
+Clusters to issue commands to.
+Note that the SlurmDBD must be up for this option to work properly.
 
 .TP
 \fB\-n\fR, \fB\-\-jobname\fR=\fIjob_name\fR, \fB\-\-name\fR=\fIjob_name\fR
@@ -84,6 +94,10 @@ This option is incompatible with the \fB\-\-verbose\fR option.
 .TP
 \fB\-R\fR, \fB\-\-reservation\fR=\fIreservation_name\fR
 Restrict the scancel operation to jobs with this reservation name.
+
+.TP
+\fB\-\-sibling\fR=\fIcluster_name\fR
+Remove an active sibling job from a federated job.
 
 .TP
 \fB\-s\fR, \fB\-\-signal\fR=\fIsignal_name\fR
@@ -145,12 +159,12 @@ If neither \fB\-\-batch\fR nor \fB\-\-signal\fR are used,
 the entire job will be terminated.
 
 When \fB\-\-batch\fR is used, the batch shell processes will be signaled.
-The child processes of the shell will not be signalled by Slurm, but
+The child processes of the shell will not be signaled by Slurm, but
 the shell may forward the signal.
 
 When \fB\-\-batch\fR is not used but \fB\-\-signal\fR is used,
-then all job steps will be signalled, but the batch script itself
-will not be signalled.
+then all job steps will be signaled, but the batch script itself
+will not be signaled.
 
 .SH "ENVIRONMENT VARIABLES"
 .PP
@@ -169,6 +183,9 @@ environment variables, along with their corresponding options, are listed below.
 .TP
 \fBSCANCEL_FULL\fR
 \fB\-f, \-\-full\fR
+.TP
+\fBSCANCEL_HURRY\fR
+\fB\-H\fR, \fB\-\-hurry\fR
 .TP
 \fBSCANCEL_INTERACTIVE\fR
 \fB\-i\fR, \fB\-\-interactive\fR

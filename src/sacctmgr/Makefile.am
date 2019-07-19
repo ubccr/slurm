@@ -7,8 +7,9 @@ AM_CPPFLAGS = -I$(top_srcdir)
 
 bin_PROGRAMS = sacctmgr
 
-sacctmgr_LDADD =  $(top_builddir)/src/db_api/libslurmdb.o $(DL_LIBS) \
-	$(READLINE_LIBS)
+sacctmgr_DEPENDENCIES = $(LIB_SLURM_BUILD)
+
+sacctmgr_LDADD = $(LIB_SLURM) $(DL_LIBS) $(READLINE_LIBS)
 
 sacctmgr_SOURCES =	\
 	account_functions.c	\
@@ -18,6 +19,7 @@ sacctmgr_SOURCES =	\
 	cluster_functions.c	\
 	common.c                \
 	event_functions.c	\
+	federation_functions.c	\
 	file_functions.c	\
 	runaway_job_functions.c \
 	job_functions.c		\

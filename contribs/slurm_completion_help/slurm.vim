@@ -3,14 +3,14 @@
 " Vim syntax file for completion for Slurm
 "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-"  Copyright (C) 2012 Damien François. <damien.francois@uclouvain.Be>
-"  Written by Damien François. <damien.francois@uclouvain.Be>.
+"  Copyright (C) 2012 Damien Franois. <damien.francois@uclouvain.Be>
+"  Written by Damien Franois. <damien.francois@uclouvain.Be>.
 "
-"  This file is part of SLURM, a resource management program.
-"  For details, see <http://slurm.schedmd.com/>.
+"  This file is part of Slurm, a resource management program.
+"  For details, see <https://slurm.schedmd.com/>.
 "  Please also read the included file: DISCLAIMER.
 "
-"  SLURM is free software; you can redistribute it and/or modify it under
+"  Slurm is free software; you can redistribute it and/or modify it under
 "  the terms of the GNU General Public License as published by the Free
 "  Software Foundation; either version 2 of the License, or (at your option)
 "  any later version.
@@ -26,13 +26,13 @@
 "  version.  If you delete this exception statement from all source files in
 "  the program, then also delete it here.
 "
-"  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+"  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 "  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 "  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 "  details.
 "
 "  You should have received a copy of the GNU General Public License along
-"  with SLURM; if not, write to the Free Software Foundation, Inc.,
+"  with Slurm; if not, write to the Free Software Foundation, Inc.,
 "  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -119,7 +119,7 @@ syn match    	shSlurmOption	contained	'--nice=' nextgroup=shSlurmNumber
 syn match    	shSlurmOption	contained	'--no-requeue'
 syn match 	shSlurmOption	contained	'--ntasks-per-core=' nextgroup=shSlurmNumber
 syn match    	shSlurmOption	contained	'--ntasks-per-socket=' nextgroup=shSlurmNumber
-syn match    	shSlurmOption	contained	'--ntasls-per-node=' nextgroup=shSlurmNumber
+syn match    	shSlurmOption	contained	'--ntasks-per-node=' nextgroup=shSlurmNumber
 syn match    	shSlurmOption	contained	'--overcommit'
 syn match    	shSlurmOption	contained	'--output=' nextgroup=shSlurmString
 syn match    	shSlurmOption	contained	'--open-mode=' nextgroup=shSlurmMode
@@ -132,7 +132,6 @@ syn match    	shSlurmOption	contained	'--reservation=' nextgroup=shSlurmString
 syn match    	shSlurmOption	contained	'--share'
 syn match    	shSlurmOption	contained	'--signal=' nextgroup=shSlurmString
 syn match    	shSlurmOption	contained	'--time=' nextgroup=shSlurmDuration
-syn match    	shSlurmOption	contained	'--tasks-per-node=' nextgroup=shSlurmNumber
 syn match    	shSlurmOption	contained	'--tmp=' nextgroup=shSlurmString
 syn match    	shSlurmOption	contained	'--uid=' nextgroup=shSlurmString
 syn match    	shSlurmOption	contained	'--nodelist=' nextgroup=shSlurmString

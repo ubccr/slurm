@@ -7,11 +7,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -54,7 +54,7 @@
  * check_header_version checks to see that the specified header was sent
  * from a node running the same version of the protocol as the current node
  * IN header - the message header received
- * RET - SLURM error code
+ * RET - Slurm error code
  */
 int check_header_version(header_t * header)
 {
@@ -65,8 +65,8 @@ int check_header_version(header_t * header)
 
 	if (slurmdbd_conf) {
 		if ((header->version != SLURM_PROTOCOL_VERSION)     &&
-		    (header->version != SLURM_15_08_PROTOCOL_VERSION) &&
-		    (header->version != SLURM_14_11_PROTOCOL_VERSION)) {
+		    (header->version != SLURM_ONE_BACK_PROTOCOL_VERSION) &&
+		    (header->version != SLURM_MIN_PROTOCOL_VERSION)) {
 			debug("unsupported RPC version %hu msg type %s(%u)",
 			      header->version, rpc_num2string(header->msg_type),
 			      header->msg_type);
@@ -90,8 +90,9 @@ int check_header_version(header_t * header)
 			}
 		default:
 			if ((header->version != SLURM_PROTOCOL_VERSION)     &&
-			    (header->version != SLURM_15_08_PROTOCOL_VERSION) &&
-			    (header->version != SLURM_14_11_PROTOCOL_VERSION)) {
+			    (header->version !=
+			     SLURM_ONE_BACK_PROTOCOL_VERSION) &&
+			    (header->version != SLURM_MIN_PROTOCOL_VERSION)) {
 				debug("Unsupported RPC version %hu "
 				      "msg type %s(%u)", header->version,
 				      rpc_num2string(header->msg_type),
@@ -104,7 +105,7 @@ int check_header_version(header_t * header)
 		}
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -120,7 +121,7 @@ void init_header(header_t *header, slurm_msg_t *msg, uint16_t flags)
 	/* Since the slurmdbd could talk to a host of different
 	   versions of slurm this needs to be kept current when the
 	   protocol version changes. */
-	if (msg->protocol_version != (uint16_t)NO_VAL)
+	if (msg->protocol_version != NO_VAL16)
 		header->version = msg->protocol_version;
 	else if (working_cluster_rec)
 		msg->protocol_version = header->version =
@@ -166,6 +167,12 @@ void slurm_print_launch_task_msg(launch_tasks_request_msg_t *msg, char *name)
 
 	debug3("job_id: %u", msg->job_id);
 	debug3("job_step_id: %u", msg->job_step_id);
+	if (msg->pack_step_cnt != NO_VAL)
+		debug3("pack_step_cnt: %u", msg->pack_step_cnt);
+	if (msg->pack_jobid != NO_VAL)
+		debug3("pack_jobid: %u", msg->pack_jobid);
+	if (msg->pack_offset != NO_VAL)
+		debug3("pack_offset: %u", msg->pack_offset);
 	debug3("uid: %u", msg->uid);
 	debug3("gid: %u", msg->gid);
 	debug3("tasks_to_launch: %u", *(msg->tasks_to_launch));
@@ -180,7 +187,7 @@ void slurm_print_launch_task_msg(launch_tasks_request_msg_t *msg, char *name)
 	}
 	debug3("msg -> resp_port  = %u", *(msg->resp_port));
 	debug3("msg -> io_port    = %u", *(msg->io_port));
-	debug3("msg -> task_flags = %x", msg->task_flags);
+	debug3("msg -> flags      = %x", msg->flags);
 
 	for (i = 0; i < msg->tasks_to_launch[node_id]; i++) {
 		debug3("global_task_id[%d]: %u ", i,

@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Validate that preemption by qos is enforced
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -10,22 +10,22 @@
 # Copyright (C) 2011-2014 SchedMD LLC
 # Written by Nathan Yee <nyee32@schedmd.com>
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.
+# with Slurm; if not, write to the Free Software Foundation, Inc.
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -226,51 +226,10 @@ proc clean_up { rc } {
 	}
 }
 
-proc check_state { exp_state job_id } {
-
-	global scontrol exit_code
-
-	# Wait awhile for the jobs to change states
-	sleep 2
-
-	set state 0
-	spawn $scontrol show job $job_id
-	expect {
-		-re "JobState=$exp_state" {
-			set state 1
-			exp_continue
-		}
-		timeout {
-			send_user "\nFAILURE: scontrol is not responding\n"
-			set exit_code 1
-		}
-		eof {
-			wait
-		}
-	}
-
-	if { $state != 1 } {
-		send_user "\nFAILURE: job $job_id is not in the correct state\n"
-		set exit_code 1
-	}
-}
-
 make_bash_script $file_in "sleep 30"
 
-spawn $bin_id -un
-expect {
-	-re "($alpha_numeric_under)" {
-		set user $expect_out(1,string)
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: id is not responding\n"
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
+set user [get_my_user_name]
+
 
 ###################### Test preempt cancel ######################
 send_user "\n*** TEST PREEMPT CANCEL ***\n"
@@ -279,18 +238,19 @@ acct_setup $acct_1 $qos_1 "" cancel
 acct_setup $acct_2 $qos_2 $qos_1 cluster
 
 set qos_1_id [sub_job $acct_1]
-if { [wait_for_job $qos_1_id RUNNING] != 0} {
+if { [wait_for_job $qos_1_id "RUNNING"] != 0} {
 	send_user "\nFAILURE: job $qos_id_1 failed to start\n"
 	clean_up 1
 }
 
 set qos_2_id [sub_job $acct_2]
-if { [wait_for_job $qos_2_id RUNNING] != 0} {
+if { [wait_for_job $qos_2_id "RUNNING"] != 0} {
 	send_user "\nFAILURE: job $qos_id_2 failed to start\n"
 	clean_up 1
 }
 
-check_state PREEMPTED $qos_1_id
+sleep 2
+check_job_state $qos_1_id PREEMPTED
 
 cancel_job $qos_1_id
 cancel_job $qos_2_id
@@ -301,23 +261,32 @@ send_user "\n*** TEST PREEMPT REQUEUE ***\n"
 mod_qos $qos_1 requeue
 
 set qos_1_id [sub_job $acct_1]
-if { [wait_for_job $qos_1_id RUNNING] != 0} {
+if { [wait_for_job $qos_1_id "RUNNING"] != 0} {
 	send_user "\nFAILURE: job $qos_id_1 failed to start\n"
 	clean_up 1
 }
 
 set qos_2_id [sub_job $acct_2]
-if { [wait_for_job $qos_2_id RUNNING] != 0} {
+if { [wait_for_job $qos_2_id "RUNNING"] != 0} {
 	send_user "\nFAILURE: job $qos_id_2 failed to start\n"
 	clean_up 1
 }
 
-check_state PENDING $qos_1_id
+sleep 2
+check_job_state $qos_1_id PENDING
 
 # Wait for requeued job to restart
-wait_for_job $qos_2_id DONE
-wait_for_job $qos_1_id RUNNING
-check_state RUNNING $qos_1_id
+if { [wait_for_job $qos_2_id "DONE"] != 0} {
+	send_user "\nFAILURE: job $qos_2_id failed to complete\n"
+	clean_up 1
+}
+if { [wait_for_job $qos_1_id "RUNNING"] != 0} {
+	send_user "\nFAILURE: job $qos_1_id failed to start\n"
+	clean_up 1
+}
+
+sleep 2
+check_job_state $qos_1_id "RUNNING"
 
 cancel_job $qos_1_id
 cancel_job $qos_2_id

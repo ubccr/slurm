@@ -33,7 +33,6 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *****************************************************************************/
 
-
 #ifndef LSD_LIST_H
 #define LSD_LIST_H
 
@@ -43,38 +42,13 @@
 		_X	= NULL; 		\
 	} while (0)
 
-/***********
- *  Notes  *
- ***********/
-/*
- *  If NDEBUG is not defined, internal debug code will be enabled.  This is
- *  intended for development use only and production code should define NDEBUG.
- *
- *  If WITH_LSD_FATAL_ERROR_FUNC is defined, the linker will expect to
- *  find an external lsd_fatal_error(file,line,mesg) function.  By default,
- *  lsd_fatal_error(file,line,mesg) is a macro definition that outputs an
- *  error message to stderr.  This macro may be redefined to invoke another
- *  routine instead.
- *
- *  If WITH_LSD_NOMEM_ERROR_FUNC is defined, the linker will expect to
- *  find an external lsd_nomem_error(file,line,mesg) function.  By default,
- *  lsd_nomem_error(file,line,mesg) is a macro definition that returns NULL.
- *  This macro may be redefined to invoke another routine instead.
- *
- *  If WITH_PTHREADS is defined, these routines will be thread-safe.
- *
- *  SLURM's versions of these functions write directly to the log file, using
- *  fprintf to avoid consuming more memory.
- */
-
-
 /****************
  *  Data Types  *
  ****************/
 
 #ifndef   __list_datatypes_defined
 #  define __list_datatypes_defined
-typedef struct list * List;
+typedef struct xlist * List;
 
 /* FreeBSD does not define __compar_fn_t
  * and rightfully so!
@@ -190,6 +164,17 @@ void * list_find_first (List l, ListFindF f, void *key);
  *  Returns a ptr to the first item for which the function [f]
  *    returns non-zero, or NULL if no such item is found.
  *  Note: This function differs from list_find() in that it does not require
+ *    a list iterator; it should only be used when all list items are known
+ *    to be unique (according to the function [f]).
+ */
+
+void * list_remove_first (List l, ListFindF f, void *key);
+/*
+ *  Traverses list [l] using [f] to match each item with [key].
+ *  Returns a ptr to the first item for which the function [f]
+ *    returns non-zero and removes it from the list, or NULL if no such item is
+ *    found.
+ *  Note: This function differs from list_remove() in that it does not require
  *    a list iterator; it should only be used when all list items are known
  *    to be unique (according to the function [f]).
  */
@@ -337,7 +322,7 @@ int list_delete_item (ListIterator i);
 
 void list_install_fork_handlers (void);
 /*
- *  Install pthread_atfork() handlers if WITH_PTHREADS is defined.
+ *  Install pthread_atfork() handlers.
  *   These handlers will ensure that any mutexes internal to the list
  *   functions are in a proper state after a fork.
  */

@@ -48,6 +48,9 @@ running tasks from this job array to 4.</p>
 <p>Job arrays will have two additional environment variable set.
 <b>SLURM_ARRAY_JOB_ID</b> will be set to the first job ID of the array.
 <b>SLURM_ARRAY_TASK_ID</b> will be set to the job array index value.
+<b>SLURM_ARRAY_TASK_COUNT</b> will be set to the number of tasks in the job array.
+<b>SLURM_ARRAY_TASK_MAX</b> will be set to the highest job array index value.
+<b>SLURM_ARRAY_TASK_MIN</b> will be set to the lowest job array index value.
 For example a job submission of this sort<br>
 <i>sbatch --array=1-3 -N1 tmp</i><br>
 will generate a job array containing three jobs. If the sbatch command responds<br>
@@ -58,14 +61,23 @@ follows:<br>
 SLURM_JOB_ID=36<br>
 SLURM_ARRAY_JOB_ID=36<br>
 SLURM_ARRAY_TASK_ID=1<br>
+SLURM_ARRAY_TASK_COUNT=3<br>
+SLURM_ARRAY_TASK_MAX=3<br>
+SLURM_ARRAY_TASK_MIN=1<br>
 <br>
 SLURM_JOB_ID=37<br>
 SLURM_ARRAY_JOB_ID=36<br>
 SLURM_ARRAY_TASK_ID=2<br>
+SLURM_ARRAY_TASK_COUNT=3<br>
+SLURM_ARRAY_TASK_MAX=3<br>
+SLURM_ARRAY_TASK_MIN=1<br>
 <br>
 SLURM_JOB_ID=38<br>
 SLURM_ARRAY_JOB_ID=36<br>
 SLURM_ARRAY_TASK_ID=3<br>
+SLURM_ARRAY_TASK_COUNT=3<br>
+SLURM_ARRAY_TASK_MAX=3<br>
+SLURM_ARRAY_TASK_MIN=1<br>
 </p>
 
 <p>All Slurm commands and APIs recognize the SLURM_JOB_ID value.
@@ -265,6 +277,9 @@ exit code from any task in the job array.</p>
 The <i>after</i> clause is satisfied after all tasks in the job array start.<br>
 The <i>afterany</i> clause is satisfied after all tasks in the job array
 complete.<br>
+The <i>aftercorr</i> clause is satisfied after the corresponding task ID in the
+specified job has completed successfully (ran to completion with an exit code of
+zero).<br>
 The <i>afterok</i> clause is satisfied after all tasks in the job array
 complete successfully.<br>
 The <i>afternotok</i> clause is satisfied after all tasks in the job array
@@ -278,6 +293,9 @@ sbatch --depend=afterok:123_4:123_8 my.job2
 
 # Wait for entire job array to complete
 sbatch --depend=afterany:123 my.job
+
+# Wait for corresponding job array elements
+sbatch --depend=aftercorr:123 my.job
 
 # Wait for entire job array to complete successfully
 sbatch --depend=afterok:123 my.job
@@ -303,9 +321,7 @@ the job is not part of a job array.</p>
 job array size: <b>MaxArraySize</b>. The smallest index that can be specified
 by a user is zero and the maximum index is MaxArraySize minus one.
 The default value of MaxArraySize is 1001.
-The maximum MaxArraySize supported in Slurm version 14.03 and earlier is 65,533.
-Slurm version 14.11 has a new job array data structure, which can support
-job arrays with millions of tasks.
+The maximum MaxArraySize supported in Slurm is 4000001.
  Be mindful about the value of MaxArraySize as job arrays offer an easy way
 for users to submit large numbers of jobs very quickly.</p>
 
@@ -321,6 +337,6 @@ manage large job counts.
 Each task of the job array will have a unique Slurm "job_id", but
 all will have the same "array_job_id" value.</p>
 
-<p style="text-align:center;">Last modified 22 June 2016</p>
+<p style="text-align:center;">Last modified 7 November 2017</p>
 
 <!--#include virtual="footer.txt"-->

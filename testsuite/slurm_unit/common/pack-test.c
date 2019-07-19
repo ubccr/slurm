@@ -1,15 +1,5 @@
-#if HAVE_CONFIG_H
-#  include <config.h>
-#endif
-
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>
-#else
-#  if HAVE_STDINT_H
-#    include <stdint.h>
-#  endif
-#endif
 #include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -72,7 +62,7 @@ int main (int argc, char *argv[])
 	/* info("uint64\t %ld", test64); */
 	/* info("converted LD\t %Lf", test_double2); */
 
-	unpackstr_ptr(&outbytes, &byte_cnt, buffer);
+	unpackmem_ptr(&outbytes, &byte_cnt, buffer);
 	TEST( ( strcmp(testbytes, outbytes) != 0 ) , "un/packstr_ptr");
 
 	unpackstr_xmalloc(&outstring, &byte_cnt, buffer);
@@ -97,4 +87,3 @@ int main (int argc, char *argv[])
 	return failed;
 
 }
-

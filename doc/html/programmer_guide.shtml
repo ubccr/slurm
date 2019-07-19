@@ -2,6 +2,21 @@
 
 <h1><a name="top">Slurm Programmer's Guide</a></h1>
 
+<h2>Contents</h2>
+<a href="#Overview">Overview</a><br>
+<a href="#Plugins">Plugins</a><br>
+<a href="#Directory-Structure">Directory Structure</a><br>
+<a href="#Documentation">Documentation</a><br>
+<a href="#Source-Code">Source Code</a><br>
+<a href="#Source-Code-Management">Source Code Management</a><br>
+<a href="#Adding-New-Modules">Adding New Modules</a><br>
+<a href="#Compiling">Compiling</a><br>
+<a href="#Configuration">Configuration</a><br>
+<a href="#Test-Suite">Test Suite</a><br>
+<a href="#Adding-Files-and-Directories">Adding Files and Directories</a><br>
+<a href="#Tricks-of-the-Trade">Tricks of the Trade</a><br>
+
+<a id="Overview"></a>
 <h2>Overview</h2>
 
 <p>Slurm is an open source, fault-tolerant,
@@ -17,6 +32,7 @@ Linux kernel coding style</a>. <i>(Some components of Slurm have been taken from
 various sources. Some of these components do not conform to the Linux kernel
 coding style. However, new code written for Slurm should follow these standards.)</i>
 
+<a id="Plugins"></a>
 <h2>Plugins</h2>
 
 <p>To make the use of different infrastructures possible, Slurm uses a general
@@ -32,15 +48,15 @@ types also have their own documentation available, such as
 <a href="authplugins.html">Slurm Authentication Plugin API</a> and
 <a href="jobcompplugins.html">Slurm Job Completion Logging API</a>.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
+<a id="Directory-Structure"></a>
 <h2>Directory Structure</h2>
 
 <p>The contents of the Slurm directory structure will be described below in increasing
 detail as the structure is descended. The top level directory contains the scripts
 and tools required to build the entire Slurm system. It also contains a variety
 of subdirectories for each type of file.</p>
-<p>General build tools/files include: <b>acinclude.m4</b>, <b>autogen.sh</b>,
+<p>General build tools/files include: <b>acinclude.m4</b>,
 <b>configure.ac</b>, <b>Makefile.am</b>, <b>Make-rpm.mk</b>, <b>META</b>, <b>README</b>,
 <b>slurm.spec.in</b>, and the contents of the <b>auxdir</b> directory. <span class="commandline">autoconf</span>
 and <span class="commandline">make</span> commands are used to build and install
@@ -63,8 +79,8 @@ described above.<br>
 <b>testsuite</b> &mdash; DejaGnu and Expect are used for testing all of its files
 are here.</p>
 
-<p class="footer"><a href="#top">top</a></p>
 
+<a id="Documentation"></a>
 <h2>Documentation</h2>
 <p>All of the documentation is in the subdirectory <b>doc</b>.
 Two directories are of particular interest:</p>
@@ -74,10 +90,11 @@ Two directories are of particular interest:</p>
 configuration file, commands, and daemons.<br>
 <b>doc/html</b> &mdash; contains the web pages.</p>
 
+<a id="Source-Code"></a>
 <h2>Source Code</h2>
 
 <p>Functions are divided into several categories, each in its own subdirectory.
-The details of each directory's contents are proved below. The directories are
+The details of each directory's contents are provided below. The directories are
 as follows: </p>
 
 <p style="margin-left:.2in">
@@ -94,7 +111,7 @@ behavior. A separate subdirectory is used for each plugin class:<br>
 <li><b>accounting_storage</b> for specifying the type of storage for accounting,<br>
 <li><b>auth</b> for user authentication,<br>
 <li><b>checkpoint</b> for system-initiated checkpoint and restart of user jobs,<br>
-<li><b>crypto</b> for cryptographic functions,<br>
+<li><b>cred</b> for job credential functions,<br>
 <li><b>jobacct_gather</b> for job accounting,<br>
 <li><b>jobcomp</b> for job completion logging,<br>
 <li><b>mpi</b> for MPI support,<br>
@@ -126,7 +143,7 @@ the execution of user applications.<br>
 <b>slurmdbd</b> &mdash; Slurm database daemon managing access to the accounting
 storage database.<br>
 <b>smap</b> &mdash; User command to view layout of nodes, partitions, and jobs.
-This is particularly valuable on systems like Bluegene, which has a three
+This is particularly valuable on systems like Cray XT/XE, which has a three
 dimension torus topography.<br>
 <b>sprio</b> &mdash; User command to see the breakdown of a job's priority
 calculation when the Multifactor Job Priority plugin is installed.<br>
@@ -135,7 +152,6 @@ calculation when the Multifactor Job Priority plugin is installed.<br>
 usage across the enterprise.<br>
 <b>srun</b> &mdash; User command to submit a job, get an allocation, and/or
 initiation a parallel job step.<br>
-<b>srun_cr</b> &mdash; Checkpoint/Restart wrapper for srun.<br>
 <b>sshare</b> &mdash; User command to view shares and usage when the Multifactor
 Job Priority plugin is installed.<br>
 <b>sstat</b> &mdash; User command to view detailed statistics about running
@@ -144,32 +160,35 @@ jobs when a Job Accounting Gather plugin is installed.<br>
 <b>sview</b> &mdash; User command to view and update node, partition, and
 job state information.<br>
 
-<p class="footer"><a href="#top">top</a></p>
 
+<a id="Source-Code-Management"></a>
 <h2>Source Code Management</h2>
 <p>The latest code is in github:
 <a href="https://github.com/SchedMD/slurm">https://github.com/SchedMD/slurm</a>.
 Creating your own branch will make it easier to keep it synchronized
 with our work.</p>
 
+<a id="Adding-New-Modules"></a>
 <h2>Adding New Modules</h2>
 <p>Add the new file name to the Makefile.am file in the appropriate directory.
-Then execute autogen.sh (at the top level of the Slurm source directory).
+Then execute autoreconf (at the top level of the Slurm source directory).
 Note that a relatively current version of auotmake is required.
-The autogen.sh program will build Makefile.in files from the Makefile.am files.
+The autoreconf program will build Makefile.in files from the Makefile.am files.
 If any new files need to be installed, update the slurm.spec file to identify
 the RPM in which the new files should be placed</p>
 
 <p>If new directories need to be added, add to the configure.ac file the path
 to the Makefile to be built in the new directory. In summary:<br>
-<u>autogen.sh</u> translates <u>.am</u> files into <u>.in</u> files<br>
+<u>autoreconf</u> translates <u>.am</u> files into <u>.in</u> files<br>
 <u>configure</u> tranlates <u>.in</u> files, adding paths and version numbers.</p>
 
+<a id="Compiling"></a>
 <h2>Compiling</h2>
 <p>Sending the standard output of "make" to a file makes it easier to see any
 warning or error messages:<br>
 <i>"make -j install &gt;make.out"</i></p>
 
+<a id="Configuration"></a>
 <h2>Configuration</h2>
 <p>Sample configuration files are included in the <b>etc</b> subdirectory.
 The <b>slurm.conf</b> can be built using a <a href="configurator.html">configuration tool</a>.
@@ -177,8 +196,9 @@ See <b>doc/man/man5/slurm.conf.5</b> and the man pages for other configuration f
 for more details.
 <b>init.d.slurm</b> is a script that determines which
 Slurm daemon(s) should execute on any node based upon the configuration file contents.
-It will also manage these daemons: starting, signalling, restarting, and stopping them.</p>
+It will also manage these daemons: starting, signaling, restarting, and stopping them.</p>
 
+<a id="Test-Suite"></a>
 <h2>Test Suite</h2>
 <p>The <b>testsuite</b> files use a DejaGnu framework for testing. These tests
 are very limited in scope.</p>
@@ -198,13 +218,14 @@ starting these tests.  Tests may be executed individually by name
 or the full test suite may be executed with the single command <i>regression</i>.
 See <b>testsuite/expect/README</b> for more information.</p>
 
-
+<a id="Adding-Files-and-Directories"></a>
 <h2>Adding Files and Directories</h2>
 <p>If you are adding files and directories to Slurm, it will be necessary to
 re-build configuration files before executing the <b>configure</b> command.
 Update <b>Makefile.am</b> files as needed then execute
-<b>autogen.sh</b> before executing <b>configure</b>.
+<b>autoreconf</b> before executing <b>configure</b>.
 
+<a id="Tricks-of-the-Trade"></a>
 <h2>Tricks of the Trade</h2>
 <h3>HAVE_FRONT_END</h3>
 <p>You can make a single node appear to Slurm as a Linux cluster by running
@@ -255,7 +276,7 @@ SlurmdSpoolDir=/var/spool/slurmd.%n
 </pre>
 
 <p>
-It is up to you to start each slurmd daemon with the proper NodeName.
+You can manually start each slurmd daemon with the proper NodeName.
 For example, to start the slurmd daemons for host1 from the
 above slurm.conf example:</p>
 
@@ -265,8 +286,45 @@ host1> slurmd -N foo11
 host1> slurmd -N foo21
 </pre>
 
-<p class="footer"><a href="#top">top</a></p>
+<p>
+If you have SysV init scripts, slurmd daemons will automatically be started by
+whenever MULTIPLE_SLURMD is set to yes in /etc/sysconfig/slurm.
+If your distribution uses systemd, you may want to use templating feature to
+define one slurmd.service file and registering each of your virtual nodes
+within it, for example:</p>
 
-<p style="text-align:center;">Last modified 2 November 2016</p>
+<pre>
+[Unit]
+Description=Slurm node daemon
+After=network.target munge.service remote-fs.target
+ConditionPathExists=/etc/slurm.conf
+
+[Service]
+Type=forking
+EnvironmentFile=-/etc/sysconfig/slurmd
+ExecStart=/usr/sbin/slurmd -N%i $SLURMD_OPTIONS
+ExecReload=/bin/kill -HUP $MAINPID
+PIDFile=/var/run/slurmd-%i.pid
+KillMode=process
+LimitNOFILE=51200
+LimitMEMLOCK=infinity
+LimitSTACK=infinity
+Delegate=yes
+
+[Install]
+WantedBy=multi-user.target
+</pre>
+
+<p>Then, enabling/managing a service like this (what is <i>%i</i> in the file
+will be replaced by what is after the <i>@</i> in the command line):</p>
+
+<pre>
+systemctl enable slurmd@nodeXYZ
+systemctl start/stop/restart slurmd@nodeXYZ
+</pre>
+
+</p>
+
+<p style="text-align:center;">Last modified 27 Februrary 2019</p>
 
 <!--#include virtual="footer.txt"-->

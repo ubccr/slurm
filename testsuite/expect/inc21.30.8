@@ -1,38 +1,39 @@
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          to be called from test21.30
 #          Tests if the MaxJobSubmit limit is enforced
 ############################################################################
 # Copyright (C) 2012 SchedMD LLC
 # Written by Nathan Yee <nyee32@schedmd.com>
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 
 # Test MaxJobsSubmits limit
 proc inc21_30_8 {} {
 
-	global sbatch salloc srun acct bin_sleep jobmatch job_id1 job_id2 job_id3 number exit_code maxjobsub_num
+	global sbatch salloc srun acct bin_rm bin_sleep jobmatch
+	global job_id1 job_id2 job_id3 number exit_code maxjobsub_num
 
 	send_user "\nStarting MaxJobsSubmits limit test (Within: inc21.30.8)\n\n"
 	set check_num $maxjobsub_num
-	set file_in "in21.30.4_script"
+	set file_in "in21.30.8_script"
 	set tmp_job_id 0
 
 	make_bash_script $file_in "sleep 5"
@@ -125,5 +126,6 @@ proc inc21_30_8 {} {
 		set exit_code 1
 	}
 
+	exec $bin_rm -f $file_in
 	cancel_job $tmp_job_id
 }

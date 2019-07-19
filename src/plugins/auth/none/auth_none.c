@@ -7,11 +7,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,42 +27,21 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if STDC_HEADERS
-#    include <string.h>
-#  endif
-#  if HAVE_SYS_TYPES_H
-#    include <sys/types.h>
-#  endif /* HAVE_SYS_TYPES_H */
-#  if HAVE_UNISTD_H
-#    include <unistd.h>
-#  endif
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else /* ! HAVE_INTTYPES_H */
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif /* HAVE_INTTYPES_H */
-#else /* ! HAVE_CONFIG_H */
-#  include <sys/types.h>
-#  include <unistd.h>
-#  include <stdint.h>
-#  include <string.h>
-#endif /* HAVE_CONFIG_H */
-
+#include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "slurm/slurm_errno.h"
 #include "src/common/slurm_xlator.h"
@@ -78,23 +57,24 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "auth" for SLURM authentication) and <method> is a
- * description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "auth" for Slurm authentication) and <method> is a
+ * description of how this plugin satisfies that application.  Slurm will
  * only load authentication plugins if the plugin_type string has a prefix
  * of "auth/".
  *
  * plugin_version - an unsigned 32-bit integer containing the Slurm version
  * (major.minor.micro combined into a single number).
  */
-const char plugin_name[]       	= "Null authentication plugin";
-const char plugin_type[]       	= "auth/none";
-const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
+const char plugin_name[] = "Null authentication plugin";
+const char plugin_type[] = "auth/none";
+const uint32_t plugin_id = AUTH_PLUGIN_NONE;
+const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
 /*
  * An opaque type representing authentication credentials.  This type can be
@@ -116,7 +96,7 @@ const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
  * random memory.
  *
  * A word about thread safety.  The authentication plugin API specifies
- * that SLURM will exercise the plugin sanely.  That is, the authenticity
+ * that Slurm will exercise the plugin sanely.  That is, the authenticity
  * of a credential which has not been activated should not be tested.
  * However, the credential should be thread-safe.  This does not mean
  * necessarily that a plugin must recognize when an inconsistent sequence
@@ -128,40 +108,29 @@ const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
  *
  */
 typedef struct _slurm_auth_credential {
+	int index; /* MUST ALWAYS BE FIRST. DO NOT PACK. */
+	char *hostname;
 	uid_t uid;
 	gid_t gid;
-	int cr_errno;
 } slurm_auth_credential_t;
-
-/* A plugin-global errno. */
-static int plugin_errno = SLURM_SUCCESS;
-
-/*
- * New errno values particular to this plugin.  We declare the first
- * one to be SLURM_AUTH_FIRST_LOCAL_ERROR to avoid conflicting with
- * the general ones.
- */
-enum {
-	SLURM_AUTH_UNPACK
-};
 
 /*
  * init() is called when the plugin is loaded, before any other functions
  * are called.  Put global initialization here.
  */
-extern int init ( void )
+extern int init(void)
 {
 	debug("%s loaded", plugin_name);
 	return SLURM_SUCCESS;
 }
 
-extern int fini ( void )
+extern int fini(void)
 {
 	return SLURM_SUCCESS;
 }
 
 /*
- * The remainder of this file implements the standard SLURM authentication
+ * The remainder of this file implements the standard Slurm authentication
  * API.
  */
 
@@ -169,16 +138,15 @@ extern int fini ( void )
  * Allocate and initializes a credential.  This function should return
  * NULL if it cannot allocate a credential.
  */
-slurm_auth_credential_t *
-slurm_auth_create( void *argv[], char *auth_info )
+slurm_auth_credential_t *slurm_auth_create(char *auth_info)
 {
-	slurm_auth_credential_t *cred;
+	slurm_auth_credential_t *cred = xmalloc(sizeof(*cred));
 
-	cred = ((slurm_auth_credential_t *)
-		xmalloc( sizeof( slurm_auth_credential_t ) ));
-	cred->cr_errno = SLURM_SUCCESS;
 	cred->uid = geteuid();
 	cred->gid = getegid();
+
+	cred->hostname = xshort_hostname();
+
 	return cred;
 }
 
@@ -186,14 +154,14 @@ slurm_auth_create( void *argv[], char *auth_info )
  * Free a credential that was allocated with slurm_auth_create() or
  * slurm_auth_unpack().
  */
-int
-slurm_auth_destroy( slurm_auth_credential_t *cred )
+int slurm_auth_destroy(slurm_auth_credential_t *cred)
 {
-	if ( cred == NULL ) {
-		plugin_errno = SLURM_AUTH_MEMORY;
+	if (!cred) {
+		slurm_seterrno(ESLURM_AUTH_MEMORY);
 		return SLURM_ERROR;
 	}
-	xfree( cred );
+	xfree(cred->hostname);
+	xfree(cred);
 	return SLURM_SUCCESS;
 }
 
@@ -202,8 +170,7 @@ slurm_auth_destroy( slurm_auth_credential_t *cred )
  *
  * Return SLURM_SUCCESS if the credential is in order and valid.
  */
-int
-slurm_auth_verify( slurm_auth_credential_t *cred, char *auth_info )
+int slurm_auth_verify(slurm_auth_credential_t *cred, char *auth_info)
 {
 	return SLURM_SUCCESS;
 }
@@ -212,173 +179,129 @@ slurm_auth_verify( slurm_auth_credential_t *cred, char *auth_info )
  * Obtain the Linux UID from the credential.  The accuracy of this data
  * is not assured until slurm_auth_verify() has been called for it.
  */
-uid_t
-slurm_auth_get_uid( slurm_auth_credential_t *cred, char *auth_info )
+uid_t slurm_auth_get_uid(slurm_auth_credential_t *cred)
 {
-	if ( cred == NULL ) {
-		plugin_errno = SLURM_AUTH_BADARG;
+	if (!cred) {
+		slurm_seterrno(ESLURM_AUTH_BADARG);
 		return SLURM_AUTH_NOBODY;
-	} else {
-		return cred->uid;
 	}
+
+	return cred->uid;
 }
 
 /*
- * Obtain the Linux GID from the credential.  See slurm_auth_get_uid()
- * above for details on correct behavior.
+ * Obtain the Linux GID from the credential.
+ * See slurm_auth_get_uid() above for details on correct behavior.
  */
-gid_t
-slurm_auth_get_gid( slurm_auth_credential_t *cred, char *auth_info )
+gid_t slurm_auth_get_gid(slurm_auth_credential_t *cred)
 {
-	if ( cred == NULL ) {
-		plugin_errno = SLURM_AUTH_BADARG;
+	if (!cred) {
+		slurm_seterrno(ESLURM_AUTH_BADARG);
 		return SLURM_AUTH_NOBODY;
-	} else {
-		return cred->gid;
 	}
+
+	return cred->gid;
+}
+
+/*
+ * Obtain the originating hostname from the credential.
+ * See slurm_auth_get_uid() above for details on correct behavior.
+ */
+char *slurm_auth_get_host(slurm_auth_credential_t *cred)
+{
+	if (!cred) {
+		slurm_seterrno(ESLURM_AUTH_BADARG);
+		return NULL;
+	}
+
+	return xstrdup(cred->hostname);
 }
 
 /*
  * Marshall a credential for transmission over the network, according to
- * SLURM's marshalling protocol.
+ * Slurm's marshalling protocol.
  */
-int
-slurm_auth_pack( slurm_auth_credential_t *cred, Buf buf )
+int slurm_auth_pack(slurm_auth_credential_t *cred, Buf buf,
+		    uint16_t protocol_version)
 {
-	if ( ( cred == NULL ) || ( buf == NULL ) ) {
-		plugin_errno = SLURM_AUTH_BADARG;
+	if (!cred || !buf) {
+		slurm_seterrno(ESLURM_AUTH_BADARG);
 		return SLURM_ERROR;
 	}
 
-	/*
-	 * Prefix the credential with a description of the credential
-	 * type so that it can be sanity-checked at the receiving end.
-	 */
-	packmem( (char *) plugin_type, strlen( plugin_type ) + 1, buf );
-	pack32( plugin_version, buf );
-	/*
-	 * Pack the data values.
-	 */
-	pack32( (uint32_t) cred->uid, buf );
-	pack32( (uint32_t) cred->gid, buf );
+	if (protocol_version >= SLURM_19_05_PROTOCOL_VERSION) {
+		pack32((uint32_t) cred->uid, buf);
+		pack32((uint32_t) cred->gid, buf);
+		packstr(cred->hostname, buf);
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
+		pack32((uint32_t) cred->uid, buf);
+		pack32((uint32_t) cred->gid, buf);
+	} else {
+		error("%s: Unknown protocol version %d",
+		      __func__, protocol_version);
+		return SLURM_ERROR;
+	}
 
 	return SLURM_SUCCESS;
 }
 
 /*
  * Unmarshall a credential after transmission over the network according
- * to SLURM's marshalling protocol.
+ * to Slurm's marshalling protocol.
  */
-slurm_auth_credential_t *
-slurm_auth_unpack( Buf buf )
+slurm_auth_credential_t *slurm_auth_unpack(Buf buf, uint16_t protocol_version)
 {
 	slurm_auth_credential_t *cred = NULL;
-	char *tmpstr;
 	uint32_t tmpint;
-	uint32_t version;
-	uint32_t size;
+	uint32_t uint32_tmp = 0;
 
-	if ( buf == NULL ) {
-		plugin_errno = SLURM_AUTH_BADARG;
+	if (!buf) {
+		slurm_seterrno(ESLURM_AUTH_BADARG);
 		return NULL;
 	}
-
-	/*
-	 * Get the authentication type.
-	 */
-	safe_unpackmem_ptr( &tmpstr, &size, buf );
-	if (( tmpstr == NULL )
-	||  ( xstrcmp( tmpstr, plugin_type ) != 0 )) {
-		debug("slurm_auth_unpack error: packed by %s unpack by %s",
-		      tmpstr, plugin_type);
-		plugin_errno = SLURM_AUTH_MISMATCH;
-		return NULL;
-	}
-	safe_unpack32( &version, buf );
 
 	/* Allocate a new credential. */
-	cred = ((slurm_auth_credential_t *)
-		xmalloc( sizeof( slurm_auth_credential_t ) ));
-	cred->cr_errno = SLURM_SUCCESS;
+	cred = xmalloc(sizeof(*cred));
 
-	/*
-	 * We do it the hard way because we don't know anything about the
-	 * size of uid_t or gid_t, only that they are integer values.  We
-	 * pack them as 32-bit integers, but we can't pass addresses to them
-	 * directly to unpack as 32-bit integers because there will be bad
-	 * clobbering if they really aren't.  This technique ensures a
-	 * warning at compile time if the sizes are incompatible.
-	 */
-	safe_unpack32( &tmpint, buf );
-	cred->uid = tmpint;
-	safe_unpack32( &tmpint, buf );
-	cred->gid = tmpint;
+	if (protocol_version >= SLURM_19_05_PROTOCOL_VERSION) {
+		/*
+		 * We do it the hard way because we don't know anything about
+		 * the size of uid_t or gid_t, only that they are integer
+		 * values.  We pack them as 32-bit integers, but we can't pass
+		 * addresses to them directly to unpack as 32-bit integers
+		 * because there will be bad clobbering if they really aren't.
+		 * This technique ensures a warning at compile time if the sizes
+		 * are incompatible.
+		 */
+		safe_unpack32(&tmpint, buf);
+		cred->uid = tmpint;
+		safe_unpack32(&tmpint, buf);
+		cred->gid = tmpint;
+		safe_unpackstr_xmalloc(&cred->hostname, &uint32_tmp, buf);
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
+		/*
+		 * We do it the hard way because we don't know anything about
+		 * the size of uid_t or gid_t, only that they are integer
+		 * values.  We pack them as 32-bit integers, but we can't pass
+		 * addresses to them directly to unpack as 32-bit integers
+		 * because there will be bad clobbering if they really aren't.
+		 * This technique ensures a warning at compile time if the sizes
+		 * are incompatible.
+		 */
+		safe_unpack32(&tmpint, buf);
+		cred->uid = tmpint;
+		safe_unpack32(&tmpint, buf);
+		cred->gid = tmpint;
+	} else {
+		error("%s: unknown protocol version %u",
+		      __func__, protocol_version);
+		goto unpack_error;
+	}
 
 	return cred;
 
-  unpack_error:
-	plugin_errno = SLURM_AUTH_UNPACK;
-	xfree( cred );
+unpack_error:
+	slurm_auth_destroy(cred);
+	slurm_seterrno(ESLURM_AUTH_UNPACK);
 	return NULL;
-}
-
-/*
- * Print to a stdio stream a human-readable representation of the
- * credential for debugging or logging purposes.  The format is left
- * to the imagination of the plugin developer.
- */
-int
-slurm_auth_print( slurm_auth_credential_t *cred, FILE *fp )
-{
-	if ( ( cred == NULL) || ( fp == NULL ) ) {
-		plugin_errno = SLURM_AUTH_BADARG;
-		return SLURM_ERROR;
-	}
-
-	printf( "BEGIN SLURM BASIC AUTHENTICATION CREDENTIAL\n" );
-	printf( "\tUID = %u\n", cred->uid );
-	printf( "\tGID = %u\n", cred->gid );
-	printf( "END SLURM BASIC AUTHENTICATION CREDENTIAL\n" );
-
-	return SLURM_SUCCESS;
-}
-
-
-/*
- * Return the errno.  If no credential is given, return the errno
- * of the plugin.  This leads to possibly ambiguous situations, but
- * there really isn't any easy way of dealing with that.
- */
-int
-slurm_auth_errno( slurm_auth_credential_t *cred )
-{
-	if ( cred == NULL )
-		return plugin_errno;
-	else
-		return cred->cr_errno;
-}
-
-
-/*
- * Return a string corresponding to an error.  We are responsible only for
- * the errors we define here in the plugin.  The SLURM plugin wrappers
- * take care of the API-mandated errors.
- */
-const char *
-slurm_auth_errstr( int slurm_errno )
-{
-	static struct {
-		int err;
-		char *msg;
-	} tbl[] = {
-		{ SLURM_AUTH_UNPACK, "cannot unpack credential" },
-		{ 0, NULL }
-	};
-
-	int i;
-
-	for ( i = 0; ; ++i ) {
-		if ( tbl[ i ].msg == NULL ) return "unknown error";
-		if ( tbl[ i ].err == slurm_errno ) return tbl[ i ].msg;
-	}
 }

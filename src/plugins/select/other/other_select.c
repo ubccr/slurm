@@ -3,7 +3,7 @@
  *
  *  NOTE: The node selection plugin itself is intimately tied to slurmctld
  *  functions and data structures. Some related functions (e.g. data structure
- *  un/packing, environment variable setting) are required by most SLURM
+ *  un/packing, environment variable setting) are required by most Slurm
  *  commands. Since some of these commands must be executed on the BlueGene
  *  front-end nodes, the functions they require are here rather than within
  *  the plugin. This is because functions required by the plugin can not be
@@ -15,11 +15,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -35,22 +35,18 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#include <pthread.h>
 #include <dirent.h>
+#include <pthread.h>
 
 #include "other_select.h"
 #include "src/common/plugin.h"
@@ -58,6 +54,8 @@
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/xstring.h"
 #include "src/common/node_select.h"
+
+uint16_t other_select_type_param = 0;
 
 /*
  * Must be synchronized with slurm_select_ops_t in node_select.h.
@@ -73,7 +71,6 @@ const char *node_select_syms[] = {
 	"select_p_job_test",
 	"select_p_job_begin",
 	"select_p_job_ready",
-	"select_p_job_expand_allow",
 	"select_p_job_expand",
 	"select_p_job_resized",
 	"select_p_job_signal",
@@ -84,7 +81,6 @@ const char *node_select_syms[] = {
 	"select_p_step_pick_nodes",
 	"select_p_step_start",
 	"select_p_step_finish",
-	"select_p_pack_select_info",
 	"select_p_select_nodeinfo_pack",
 	"select_p_select_nodeinfo_unpack",
 	"select_p_select_nodeinfo_alloc",
@@ -101,19 +97,11 @@ const char *node_select_syms[] = {
 	"select_p_select_jobinfo_unpack",
 	"select_p_select_jobinfo_sprint",
 	"select_p_select_jobinfo_xstrdup",
-	"select_p_update_block",
-	"select_p_update_sub_node",
-	"select_p_fail_cnode",
 	"select_p_get_info_from_plugin",
 	"select_p_update_node_config",
 	"select_p_update_node_state",
-	"select_p_alter_node_cnt",
 	"select_p_reconfigure",
 	"select_p_resv_test",
-	"select_p_ba_init",
-	"select_p_ba_fini",
-	"select_p_ba_get_dims",
-	"select_p_ba_cnodelist2bitmap",
 };
 
 static slurm_select_ops_t ops;
@@ -139,8 +127,13 @@ extern int other_select_init(void)
 	if (g_context)
 		goto done;
 
-	if (slurmctld_conf.select_type_param & CR_OTHER_CONS_RES)
+	if (!other_select_type_param)
+		other_select_type_param = slurm_get_select_type_param();
+
+	if (other_select_type_param & CR_OTHER_CONS_RES)
 		type = "select/cons_res";
+	else if (other_select_type_param & CR_OTHER_CONS_TRES)
+		type = "select/cons_tres";
 	else
 		type = "select/linear";
 
@@ -310,17 +303,6 @@ extern int other_job_ready(struct job_record *job_ptr)
 }
 
 /*
- * Test if expanding a job is permitted
- */
-extern bool other_job_expand_allow(void)
-{
-	if (other_select_init() < 0)
-		return false;
-
-	return (*(ops.job_expand_allow))();
-}
-
-/*
  * Move the resource allocated to one job into that of another job.
  *	All resources are removed from "from_job_ptr" and moved into
  *	"to_job_ptr". Also see other_job_resized().
@@ -351,7 +333,7 @@ extern int other_job_resized(struct job_record *job_ptr,
 
 /*
  * Pass job-step signal to other plugin.
- * IN job_ptr - job to be signalled
+ * IN job_ptr - job to be signaled
  * IN signal  - signal(7) number
  */
 extern int other_job_signal(struct job_record *job_ptr, int signal)
@@ -364,7 +346,7 @@ extern int other_job_signal(struct job_record *job_ptr, int signal)
 
 /*
  * Pass job memory allocation confirmation request to other plugin.
- * IN job_ptr - job to be signalled
+ * IN job_ptr - job to be signaled
  */
 extern int other_job_mem_confirm(struct job_record *job_ptr)
 {
@@ -464,16 +446,6 @@ extern int other_step_finish(struct step_record *step_ptr, bool killing_step)
 
 	return (*(ops.step_finish))
 		(step_ptr, killing_step);
-}
-
-extern int other_pack_select_info(time_t last_query_time, uint16_t show_flags,
-				  Buf *buffer, uint16_t protocol_version)
-{
-	if (other_select_init() < 0)
-		return SLURM_ERROR;
-
-	return (*(ops.pack_select_info))
-		(last_query_time, show_flags, buffer, protocol_version);
 }
 
 extern int other_select_nodeinfo_pack(select_nodeinfo_t *nodeinfo,
@@ -657,43 +629,6 @@ extern char *other_select_jobinfo_xstrdup(
 }
 
 /*
- * Update specific block (usually something has gone wrong)
- * IN block_desc_ptr - information about the block
- */
-extern int other_update_block (update_block_msg_t *block_desc_ptr)
-{
-	if (other_select_init() < 0)
-		return SLURM_ERROR;
-
-	return (*(ops.update_block))(block_desc_ptr);
-}
-
-/*
- * Update specific sub nodes (usually something has gone wrong)
- * IN block_desc_ptr - information about the block
- */
-extern int other_update_sub_node (update_block_msg_t *block_desc_ptr)
-{
-	if (other_select_init() < 0)
-		return SLURM_ERROR;
-
-	return (*(ops.update_sub_node))(block_desc_ptr);
-}
-
-/*
- * Fail certain cnodes in a blocks midplane (usually comes from the
- *        IBM runjob mux)
- * IN step_ptr - step that failed
- */
-extern int other_fail_cnode (struct step_record *step_ptr)
-{
-	if (other_select_init() < 0)
-		return SLURM_ERROR;
-
-	return (*(ops.fail_cnode))(step_ptr);
-}
-
-/*
  * Get select data from a plugin
  * IN dinfo     - type of data to get from the node record
  *                (see enum select_plugindata_info)
@@ -740,18 +675,6 @@ extern int other_update_node_state (struct node_record *node_ptr)
 }
 
 /*
- * Alter the node count for a job given the type of system we are on
- * IN/OUT job_desc  - current job desc
- */
-extern int other_alter_node_cnt (enum select_node_cnt type, void *data)
-{
-	if (other_select_init() < 0)
-		return SLURM_ERROR;
-
-	return (*(ops.alter_node_cnt))(type, data);
-}
-
-/*
  * Note reconfiguration or change in partition configuration
  */
 extern int other_reconfigure (void)
@@ -772,36 +695,4 @@ extern bitstr_t * other_resv_test(resv_desc_msg_t *resv_desc_ptr,
 
 	return (*(ops.resv_test))(resv_desc_ptr, node_cnt,
 				  avail_bitmap, core_bitmap);
-}
-
-extern void other_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)
-{
-	if (other_select_init() < 0)
-		return;
-
-	(*(ops.ba_init))(node_info_ptr, sanity_check);
-}
-
-extern void other_ba_fini(void)
-{
-	if (other_select_init() < 0)
-		return;
-
-	(*(ops.ba_fini))();
-}
-
-extern int *other_ba_get_dims(void)
-{
-	if (other_select_init() < 0)
-		return NULL;
-
-	return (*(ops.ba_get_dims))();
-}
-
-extern bitstr_t *other_ba_cnodelist2bitmap(char *cnodelist)
-{
-	if (other_select_init() < 0)
-		return NULL;
-
-	return (*(ops.ba_cnodelist2bitmap))(cnodelist);
 }

@@ -9,7 +9,7 @@ Slurm has also been packaged for
 <a href="http://packages.ubuntu.com/search?keywords=slurm-wlm">Ubuntu</a>
 (named <i>slurm-wlm</i> or <i>slurm-llnl</i> depending upon the version) and
 <a href="http://www.pkgsrc.org">NetBSD</a> (in pkgsrc) and
-<a href="http://www.freshports.org/sysutils/slurm-hpc/">FreeBSD</a>.</p>
+<a href="http://www.freshports.org/sysutils/slurm-wlm/">FreeBSD</a>.</p>
 
 <!--
 Slurm interface to PHP
@@ -28,7 +28,7 @@ a message.</li>
 <li><b>MUNGE</b> (recommended)<br>
 In order to compile the "auth/munge" authentication plugin for Slurm,
 you will need to build and install MUNGE, available from
-<a href="http://dun.github.io/munge/">http://dun.github.io/munge/</a> and
+<a href="https://dun.github.io/munge/">https://dun.github.io/munge/</a> and
 <a href="http://packages.debian.org/src:munge">Debian</a> and
 <a href="http://fedoraproject.org/">Fedora</a> and
 <a href="http://packages.ubuntu.com/src:munge">Ubuntu</a>.</li>
@@ -46,12 +46,10 @@ for the application to manage Kerberos V credentials.</li>
 
 <li><b>Checkpoint/Restart</b></li>
 <ul>
-<li><a href="https://upc-bugs.lbl.gov/blcr/doc/html/">
-<b> BLCR (Berkeley Lab Checkpoint/Restart)</a></b>
 <li><a href="http://dmtcp.sourceforge.net/">
-<b>DMTCP (Distributed MultiThreaded CheckPointing)</a></b>
+<b>DMTCP (Distributed MultiThreaded CheckPointing)</a></b></li>
 <li><a href="https://computation.llnl.gov/project/scr/">
-<b>Scalable Checkpoint/Restart (SCR) for MPI</a></b>
+<b>Scalable Checkpoint/Restart (SCR) for MPI</a></b></li>
 </ul><br>
 
 <li><b>Databases</b> can be used to store accounting information.
@@ -60,14 +58,6 @@ See our <a href="accounting.html">Accounting</a> web page for more information.
 <li><a href="http://www.mysql.com/">MySQL</a></li>
 <li><a href="https://mariadb.org/">MariaDB</a></li>
 </ul><br>
-In addition, job completion data can be written to an
-<a href="http://www.elasticsearch.org/">elasticsearch</a> server using the
-"job_comp/elasticsearch" plugin.
-The plugin is currently available from
-<a href="https://github.com/asanchez1987/jobcomp-elasticsearch.git">
-https://github.com/asanchez1987/jobcomp-elasticsearch.git</a>
-and merged with the Slurm distribution.
-It may be included directly in a future release of Slurm.</li><br>
 
 <li><b>Debuggers</b> and debugging tools</li>
 <ul>
@@ -76,17 +66,6 @@ is a GUI-based source code debugger well suited for parallel applications.</li>
 <li><a href="http://padb.pittman.org.uk/"><b>Padb</b></a>
 is a job inspection tool for examining and debugging parallel programs, primarily it simplifies the process of gathering stack traces but also supports a wide range of other functions.
 It's an open source, non-interactive, command line, scriptable tool intended for use by programmers and system administrators alike.</li>
-</ul><br>
-
-<li><b>Digital signatures</b> (Cypto plugin) are used to insure message are not altered.</li>
-<ul>
-<li><b>MUNGE</b> (recommended)<br>
-MUNGE can be used at an alternative to OpenSSL.
-MUNGE is available under the Gnu General Public License.
-See MUNGE download information above.</li>
-<li><b>OpenSSL</b><br>
-OpenSSL may be used as an alternative to MUNGE for generation of digital signatures.
-Download it from <a href="http://www.openssl.org/">http://www.openssl.org/</a>.</li>
 </ul><br>
 
 <li><b>DRMAA (Distributed Resource Management Application API)</b><br>
@@ -99,7 +78,11 @@ Using DRMAA, grid applications builders, portal developers and ISVs can use
 the same high-level API to link their software with different cluster/resource
 management systems.<br><br>
 There is a variant of PSNC DRMAA providing support for Slurm's --cluster option
-avaiable <a href="https://github.com/natefoo/slurm-drmaa">here</a>.</li><br>
+available from
+<a href="https://github.com/natefoo/slurm-drmaa">https://github.com/natefoo/slurm-drmaa</a>.<br><br>
+Perl 6 DRMAA bindings are available from
+<a href="https://github.com/scovit/Scheduler-DRMAA">https://github.com/scovit/Scheduler-DRMAA</a>.
+</li><br>
 
 <li><b>Hostlist</b><br>
 A Python program used for manipulation of Slurm hostlists including
@@ -110,9 +93,8 @@ http://www.nsc.liu.se/~kent/python-hostlist</a><br><br>
 Lua bindings for hostlist functions are also available here:<br>
 <a href="https://github.com/grondo/lua-hostlist">
 https://github.com/grondo/lua-hostlist</a><br>
-<b>NOTE:</b> The Lua  hostlist functions do not support the
-IBM Bluegene naming convention or bracketed numeric ranges
-anywhere except at the end of the name (i.e. "bgq[0000x1333]"
+<b>NOTE:</b> The Lua  hostlist functions do not support the bracketed numeric
+ranges anywhere except at the end of the name (i.e. "tux[0001-0100]"
 and "rack[0-3]_blade[0-63]" are not supported).</li><br>
 
 <li><b>Interactive Script</b><br>
@@ -124,9 +106,11 @@ https://github.com/alanorth/hpc_infrastructure_scripts/blob/master/slurm/interac
 <li><b>Interconnect</b> plugins (Switch plugin)</li>
 <ul>
 <li><b>Infiniband</b><br>
-The <b>topology.conf</b> file for an Infiniband switch can be automatically
-generated using the <b>ib2slurm</b> tool found here:
-<a href="https://github.com/fintler/ib2slurm">https://github.com/fintler/ib2slurm</a>.
+The <b>topology.conf</b> file for an Infiniband switch can be
+automatically generated using the <b>slurmibtopology</b> tool found here:<br>
+<a href="https://ftp.fysik.dtu.dk/Slurm/slurmibtopology.sh">
+https://ftp.fysik.dtu.dk/Slurm/slurmibtopology.sh</a>.
+
 </ul><br>
 
 <li><b>I/O Watchdog</b><br>
@@ -136,24 +120,16 @@ activity. This facility attempts to monitor all write activity of an
 application and trigger a set of user-defined actions when write activity
 as ceased for a configurable period of time. A SPANK plugin is provided
 for use with Slurm. See the README and man page in the package for more
-details. Download the latest source from:<br>
-<a href="http://io-watchdog.googlecode.com/files/io-watchdog-0.6.tar.bz2">
-http://io-watchdog.googlecode.com/files/io-watchdog-0.6.tar.bz2</a></li><br>
+details.
+<a href="https://github.com/grondo/io-watchdog">
+https://github.com/grondo/io-watchdog</a></li><br>
 
 <li><b>MPI</b> versions supported</li>
 <ul>
-<li><a href="http://www.mpi-softtech.com/">ChaMPIon, MPI Software Technology</a></li>
-<li><a href="http://www.hp.com/go/mpi">HP-MPI</a></li>
-<li><a href="http://software.intel.com/en-us/articles/intel-mpi-library/">Intel-MPI</a></li>
-<li><a href="http://www.lam-mpi.org/">LAM/MPI</a></li>
-<li><a href="http://www-unix.mcs.anl.gov/mpi/mpich1/">MPICH1</a></li>
-<li><a href="http://www.mcs.anl.gov/research/projects/mpich2/">MPICH2</a></li>
-<li><a href="http://www.myri.com/scs/download-mpichgm.html">MPICH-GM</a></li>
-<li><a href="http://www.myri.com/scs/download-mpichmx.html">MPICH-MX</a></li>
-<li><a href="http://mvapich.cse.ohio-state.edu/">MVAPICH</a></li>
-<li><a href="http://nowlab.cse.ohio-state.edu/projects/mpi-iba">MVAPICH2</a></li>
-<li><a href="http://www.open-mpi.org">Open MPI</a></li>
-<li><a href="http://www.quadrics.com/">Quadrics MPI</a></li>
+<li><a href="https://software.intel.com/en-us/intel-mpi-library">Intel MPI</a></li>
+<li><a href="https://www.mpich.org/">MPICH (a.k.a. MPICH2 / MPICH2)</a></li>
+<li><a href="http://mvapich.cse.ohio-state.edu/">MVAPICH (a.k.a MVAPICH2)</a></li>
+<li><a href="https://www.open-mpi.org">Open MPI</a></li>
 </ul><br>
 
 <li><b>Workload Simulator</b><br>
@@ -219,11 +195,8 @@ during the next job launch. Thus, the SPANK infrastructure provides
 administrators and other developers a low cost, low effort ability to
 dynamically modify the runtime behavior of Slurm job launch.
 As assortment of SPANK plugins are available from<br>
-<a href="http://code.google.com/p/slurm-spank-plugins/">
-http://code.google.com/p/slurm-spank-plugins/</a>.<br>
-The current source for the plugins can be checked out of the subversion
-repository with the following command:<br>
-<i>svn checkout http://slurm-spank-plugins.googlecode.com/svn/trunk/slurm-plugins</i><br><br>
+<a href="https://github.com/grondo/slurm-spank-plugins">
+https://github.com/grondo/slurm-spank-plugins</a>.<br>
 
 A SPANK plugin called "spunnel" to support ssh port forwarding is available
 from Harvard University.
@@ -234,7 +207,8 @@ It can be downloaded from the
 A set of scripts that leverages Slurm's job completion logging facility
 in provide information about what jobs were running at any point in the
 past as well as what resources they used. Download the code from:<br>
-<a href="http://sqlog.googlecode.com">http://sqlog.googlecode.com</a></li><br>
+<a href="https://github.com/grondo/sqlog">
+https://github.com/grondo/sqlog</a></li><br>
 
 <li><b>Task Affinity</b> plugins</li>
 <ul>
@@ -245,7 +219,7 @@ Portable Hardware Locality (HWLOC)</a></li>
 <li><b>Node Health Check</b><br>
 Probably the most comprehensive and lightweight health check tool out
 there is
-<a href="http://warewulf.lbl.gov/trac/wiki/Node%20Health%20Check">Node Health Check</a>.
+<a href="https://github.com/mej/nhc">LBNL Node Health Check</a>.
 It has integration with Slurm as well as Torque resource managers.</li><br>
 
 <li><b>Accounting Tools</b><br>
@@ -328,6 +302,11 @@ STUBL is a collection of supplemental tools and utility scripts for Slurm.<br>
     Max RAM Used.</dd>
 </dl></li><br>
 
+<li><b>pestat</b><br>
+Prints a consolidated compute node status line, with one line per node including a list of jobs.<br>
+<a href="https://github.com/OleHolmNielsen/Slurm_tools/tree/master/pestat">Home page</a></li><br>
+<!-- It would be nice to provide our own perl-based version of pestat -->
+
 <li><b>Slurmmon</b><br>
 Slurmmon is a system for gathering and plotting data about Slurm scheduling and
 job characteristics. It currently simply sends the data to ganglia, but it
@@ -365,7 +344,7 @@ easy and elegantly manner.
 </ul></li><br>
 
 <li><a name="json"><b>JSON</b></a><br>
-Some Slurm plugins (burst_buffer/cray and power/cray) plugins
+Some Slurm plugins (burst_buffer/datawarp and power/cray_aries) plugins
 parse JSON format data.
 These plugins are designed to make use of the JSON-C library for this purpose.
 Instructions for the build are as follows:
@@ -412,6 +391,6 @@ Slurm-based HPC supercomputers. The website of Slurm-web, with screenshots:<br>
 
 </ul>
 
-<p style="text-align:center;">Last modified 9 July 2016</p>
+<p style="text-align:center;">Last modified 7 March 2019</p>
 
 <!--#include virtual="footer.txt"-->

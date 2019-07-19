@@ -4,11 +4,11 @@
  *  Copyright (C) 2015 CEA/DAM/DIF
  *  Written by Aline Roy <aline.roy@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,19 +24,15 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
 
 #include <grp.h>
 #include <string.h>
@@ -59,14 +55,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *      <application>/<method>
  *
  * where <application> is a description of the intended application of
  * the plugin (e.g., "task" for task control) and <method> is a description
- * of how this plugin satisfies that application.  SLURM will only load
+ * of how this plugin satisfies that application.  Slurm will only load
  * a task plugin if the plugin_type string has a prefix of "task/".
  *
  * plugin_version - an unsigned 32-bit integer containing the Slurm version
@@ -96,12 +92,15 @@ extern int init(void)
 {
 	debug("%s loaded", plugin_name);
 	mcs_params_specific = slurm_mcs_get_params_specific();
+
 	if (_check_and_load_params() != 0) {
-		info("mcs: plugin warning : no group in %s", mcs_params_specific);
+		info("mcs: plugin warning : no group in %s",
+		     mcs_params_specific);
 		xfree(mcs_params_specific);
 		/* no need to check others options : default values used */
 		return SLURM_SUCCESS;
 	}
+
 	xfree(mcs_params_specific);
 	return SLURM_SUCCESS;
 }
@@ -128,7 +127,16 @@ static int _get_user_groups(uint32_t user_id, uint32_t group_id,
 
 	user_name = uid_to_string((uid_t) user_id);
 	*ngroups = max_groups;
+#if defined(__APPLE__)
+	/*
+	 * macOS has (int *) for the third argument instead
+	 * of (gid_t *) like FreeBSD, NetBSD, and Linux.
+	 */
+	rc = getgrouplist(user_name, (gid_t) group_id, (int *) groups, ngroups);
+#else
 	rc = getgrouplist(user_name, (gid_t) group_id, groups, ngroups);
+#endif
+
 	if (rc < 0) {
 		error("getgrouplist(%s): %m", user_name);
 		rc = SLURM_ERROR;
@@ -136,6 +144,7 @@ static int _get_user_groups(uint32_t user_id, uint32_t group_id,
 		*ngroups = rc;
 		rc = SLURM_SUCCESS;
 	}
+
 	xfree(user_name);
 	return rc;
 }
@@ -158,17 +167,19 @@ static int _check_and_load_params(void)
 		slurm_mcs_reset_params();
 		return SLURM_ERROR;
 	}
+
 	n = strlen(mcs_params_specific);
 	for (i = 0 ; i < n ; i++) {
 		if (mcs_params_specific[i] == '|')
 			nb_mcs_groups = nb_mcs_groups + 1;
 	}
+
 	if (nb_mcs_groups == 0) {
 		/* no | in param : just one group */
 		if (mcs_params_specific != NULL) {
-			if ( gid_from_string(mcs_params_specific, &gid ) != 0 ) {
-				info("mcs: Only one invalid group : %s. "
-				"ondemand, ondemandselect set", groups_names);
+			if (gid_from_string(mcs_params_specific, &gid ) != 0 ) {
+				info("mcs: Only one invalid group : %s. ondemand, ondemandselect set",
+				     mcs_params_specific);
 				nb_mcs_groups = 0;
 				array_mcs_parameter = xmalloc(nb_mcs_groups *
 							      sizeof(uint32_t));
@@ -183,9 +194,7 @@ static int _check_and_load_params(void)
 			}
 		} else {
 			/* no group */
-			info("mcs: no group in MCSParameters : %s. "
-			     "ondemand, ondemandselect set",
-			     mcs_params_specific);
+			info("mcs: no group in MCSParameters. ondemand, ondemandselect set");
 			nb_mcs_groups = 0;
 			array_mcs_parameter = xmalloc(nb_mcs_groups *
 						      sizeof(uint32_t));
@@ -194,10 +203,12 @@ static int _check_and_load_params(void)
 		}
 		return SLURM_SUCCESS;
 	}
+
 	nb_mcs_groups = nb_mcs_groups + 1;
 	array_mcs_parameter = xmalloc(nb_mcs_groups * sizeof(uint32_t));
 	tmp_params = xstrdup(mcs_params_specific);
 	groups_names = strtok_r(tmp_params, "|", &name_ptr);
+
 	i = 0;
 	while (groups_names) {
 		if (i == (nb_mcs_groups - 1)) {
@@ -217,6 +228,7 @@ static int _check_and_load_params(void)
 		i = i + 1;
 		groups_names = strtok_r(NULL, "|", &name_ptr);
 	}
+
 	/* if no valid group : deselect all params */
 	if (nb_valid_group == 0) {
 		slurm_mcs_reset_params();
@@ -224,6 +236,7 @@ static int _check_and_load_params(void)
 		xfree(tmp_params);
 		return SLURM_ERROR;
 	}
+
 	xfree(tmp_params);
 	return SLURM_SUCCESS;
 }
@@ -240,20 +253,25 @@ static int _find_mcs_label(gid_t *groups, int ngroups, char **result)
 	struct group *gr;
 
 	if (ngroups == 0)
-		rc = SLURM_ERROR;
-	else {
-		for( i = 0 ; i < nb_mcs_groups ; i++) {
-			for ( j = 0 ; j < ngroups ; j++) {
-				tmp_group = (uint32_t) groups[j];
-				if (array_mcs_parameter[i] == tmp_group ) {
-					gr = getgrgid(groups[j]);
+		return SLURM_ERROR;
+
+	for (i = 0; i < nb_mcs_groups; i++) {
+		for (j = 0; j < ngroups; j++) {
+			tmp_group = (uint32_t) groups[j];
+			if (array_mcs_parameter[i] == tmp_group) {
+				if ((gr = getgrgid(groups[j]))) {
 					*result = gr->gr_name;
-					return rc;
+				} else {
+					error("%s: getgrgid(%u): %m",
+					      __func__, (uint32_t) groups[j]);
+					rc = SLURM_ERROR;
 				}
+				return rc;
 			}
 		}
-		rc = SLURM_ERROR;
 	}
+	rc = SLURM_ERROR;
+
 	return rc;
 }
 
@@ -270,7 +288,7 @@ static int _check_mcs_label (struct job_record *job_ptr, char *label)
 	int ngroups = -1;
 
 	/* test if real unix group */
-	if ( gid_from_string(label, &gid ) != 0 )
+	if (gid_from_string(label, &gid ) != 0)
 		return rc;
 
 	/* test if this group is owned by the user */
@@ -278,6 +296,7 @@ static int _check_mcs_label (struct job_record *job_ptr, char *label)
 			      groups, MAX_GROUPS, &ngroups);
 	if (rc)	 /* Failed to get groups */
 		return rc;
+
 	rc = SLURM_ERROR;
 	for (i = 0; i < ngroups; i++) {
 		tmp_group = (uint32_t) groups[i];
@@ -286,16 +305,19 @@ static int _check_mcs_label (struct job_record *job_ptr, char *label)
 			break;
 		}
 	}
+
 	if (rc == SLURM_ERROR)
 		return rc;
+
 	rc = SLURM_ERROR;
 	/* test if mcs_label is in list of possible mcs_label */
-	for( i = 0 ; i < nb_mcs_groups ; i++) {
-		if (array_mcs_parameter[i] == gid ) {
+	for (i = 0; i < nb_mcs_groups; i++) {
+		if (array_mcs_parameter[i] == gid) {
 			rc = SLURM_SUCCESS;
 			return rc;
 		}
 	}
+
 	return rc;
 }
 
@@ -312,9 +334,10 @@ extern int mcs_p_set_mcs_label (struct job_record *job_ptr, char *label)
 	int rc;
 
 	if (label == NULL) {
-		if ((slurm_mcs_get_enforced() == 0) &&
-		   job_ptr->details && (job_ptr->details->whole_node != 3))
+		if ((slurm_mcs_get_enforced() == 0) && job_ptr->details &&
+		    (job_ptr->details->whole_node != WHOLE_NODE_MCS))
 			return SLURM_SUCCESS;
+
 		rc = _get_user_groups(job_ptr->user_id,job_ptr->group_id,
 			groups, MAX_GROUPS, &ngroups);
 		if (rc) {	/* Failed to get groups */
@@ -323,6 +346,7 @@ extern int mcs_p_set_mcs_label (struct job_record *job_ptr, char *label)
 			else
 				return SLURM_ERROR;
 		}
+
 		rc = _find_mcs_label(groups, ngroups, &result);
 		if (rc) {
 			return SLURM_ERROR;
@@ -355,9 +379,9 @@ extern int mcs_p_check_mcs_label (uint32_t user_id, char *mcs_label)
 
 	if (mcs_label != NULL) {
 		/* test if real unix group */
-		if ( gid_from_string(mcs_label, &gid ) != 0 ) {
+		if (gid_from_string(mcs_label, &gid ) != 0)
 			return rc;
-		}
+
 		/* test if this group is owned by the user */
 		slurm_user_gid = gid_from_uid(user_id);
 		group_id = (uint32_t) slurm_user_gid;
@@ -365,6 +389,7 @@ extern int mcs_p_check_mcs_label (uint32_t user_id, char *mcs_label)
 				      &ngroups);
 		if (rc)	/* Failed to get groups */
 			return rc;
+
 		rc = SLURM_ERROR;
 		for (i = 0; i < ngroups; i++) {
 			tmp_group = (uint32_t) groups[i];
@@ -373,8 +398,8 @@ extern int mcs_p_check_mcs_label (uint32_t user_id, char *mcs_label)
 				break;
 			}
 		}
-	} else {
+	} else
 		rc = SLURM_SUCCESS;
-	}
+
 	return rc;
 }

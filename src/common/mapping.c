@@ -6,11 +6,11 @@
  *  Written by Artem Polyakov <artpol84@gmail.com>.
  *  All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -40,7 +40,21 @@
 
 #include "src/common/mapping.h"
 
-/* pack_process_mapping()
+static void _dump_config(uint32_t node_cnt, uint32_t task_cnt,
+			 uint16_t *tasks, uint32_t **tids, int offset)
+{
+	int i, j;
+
+	error("%s: Unable to find task offset %d", __func__, offset);
+	for (i = 0; i < node_cnt; i++) {
+		for (j = 0; j < tasks[i]; j++) {
+			error("TIDS[%d][%d]:%u", i, j, tids[i][j]);
+		}
+	}
+}
+
+/*
+ * pack_process_mapping()
  */
 char *
 pack_process_mapping(uint32_t node_cnt,
@@ -52,7 +66,8 @@ pack_process_mapping(uint32_t node_cnt,
 	int start_node, end_node;
 	char *packing = NULL;
 
-	/* next_task[i] - next process for processing
+	/*
+	 * next_task[i] - next process for processing
 	 */
 	uint16_t *next_task = xmalloc(node_cnt * sizeof(uint16_t));
 
@@ -64,15 +79,19 @@ pack_process_mapping(uint32_t node_cnt,
 		int j;
 		start_node = end_node = 0;
 
-		/* find the task with id == offset
-		 */
+		/* find the task with id == offset */
 		for (i = 0; i < node_cnt; i++) {
 
 			if (next_task[i] < tasks[i]) {
-				/* if we didn't consume entire
+				/*
+				 * if we didn't consume entire
 				 * quota on this node
 				 */
-				xassert(offset >= tids[i][next_task[i]]);
+				if (offset > tids[i][next_task[i]]) {
+					_dump_config(node_cnt, task_cnt,
+						     tasks, tids, offset);
+					abort();
+				}
 				if (offset == tids[i][next_task[i]]) {
 					start_node = i;
 					break;
@@ -83,7 +102,8 @@ pack_process_mapping(uint32_t node_cnt,
 		end_node = node_cnt;
 		for (i = start_node; i < end_node; i++) {
 			if (next_task[i] >= tasks[i] ) {
-				/* Save first non-matching node index
+				/*
+				 * Save first non-matching node index
 				 * and interrupt loop
 				 */
 				end_node = i;
@@ -93,12 +113,14 @@ pack_process_mapping(uint32_t node_cnt,
 			for (j = next_task[i]; ((j + 1) < tasks[i])
 				     && ((tids[i][j]+1) == tids[i][j+1]); j++);
 			j++;
-			/* First run determines the depth
+			/*
+			 * First run determines the depth
 			 */
 			if (depth < 0) {
 				depth = j - next_task[i];
 			} else {
-				/* If this is not the first node in the bar
+				/*
+				 * If this is not the first node in the bar
 				 * check that: 1. First tid on this node is
 				 * sequentially next after last tid
 				 *    on the previous node
@@ -114,8 +136,8 @@ pack_process_mapping(uint32_t node_cnt,
 				mapped += depth;
 				next_task[i] = j;
 			} else {
-				/* Save first non-matching node index
-				 *
+				/*
+				 * Save first non-matching node index
 				 * and interrupt loop
 				 */
 				end_node = i;
@@ -125,6 +147,7 @@ pack_process_mapping(uint32_t node_cnt,
 			   start_node, end_node - start_node, depth);
 		offset += mapped;
 	}
+	xfree(next_task);
 	xstrcat(packing,")");
 	return packing;
 }
@@ -135,7 +158,8 @@ unpack_process_mapping_flat(char *map,
 			    uint32_t task_cnt,
 			    uint16_t *tasks)
 {
-	/* Start from the flat array. For i'th task is located
+	/*
+	 * Start from the flat array. For i'th task is located
 	 * on the task_map[i]'th node
 	 */
 	uint32_t *task_map = xmalloc(sizeof(int) * task_cnt);
@@ -154,7 +178,8 @@ unpack_process_mapping: The mapping string should start from %s", prefix);
 		goto err_exit;
 	}
 
-	/* Skip prefix
+	/*
+	 * Skip prefix
 	 */
 	p += strlen(prefix);
 	taskid = 0;
@@ -170,7 +195,8 @@ unpack_process_mapping: The mapping string should start from %s", prefix);
 			for (i = 0; i < depth; i++){
 				task_map[taskid++] = node;
 				if (tasks != NULL) {
-					/*Cont tasks on each node if was
+					/*
+					 * Cont tasks on each node if was
 					 * requested
 					 */
 					tasks[node]++;
@@ -191,9 +217,10 @@ unpack_process_mapping(char *map,
 		       uint16_t *tasks,
 		       uint32_t **tids)
 {
-	/* Start from the flat array. For i'th task is located
+	/*
+	 * Start from the flat array. For i'th task is located
 	 * on the task_map[i]'th node
-	*/
+	 */
 	uint32_t *task_map = NULL;
 	uint16_t *node_task_cnt = NULL;
 	uint32_t i;
@@ -238,7 +265,8 @@ exit:
  * Mutual check for both routines
  */
 
-/* Emulate 16-core nodes
+/*
+ * Emulate 16-core nodes
  */
 #define NCPUS 16
 #define NODES 200

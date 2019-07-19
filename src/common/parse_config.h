@@ -8,11 +8,11 @@
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -109,8 +109,10 @@
  *	otherwise an error will be raised.
  * S_P_UINT16 - The value for a given key must be a valid
  *	string representation of an unsigned 16-bit integer.
- * S_P_LONG - The value for a given key must be be a valid
+ * S_P_UINT32 - The value for a given key must be be a valid
  *	string representation of an unsigned 32-bit integer.
+ * S_P_UINT64 - The value for a given key must be be a valid
+ *	string representation of an unsigned 64-bit integer.
  * S_P_POINTER - The parser makes no assumption about the type of the value.
  *    	The s_p_get_pointer() function will return a pointer to the
  *	s_p_hashtbl_t's internal copy of the value.  By default, the value
@@ -247,6 +249,7 @@ typedef enum slurm_parser_enum {
 	S_P_LONG,
 	S_P_UINT16,
 	S_P_UINT32,
+	S_P_UINT64,
 	S_P_POINTER,
 	S_P_ARRAY,
 	S_P_BOOLEAN,
@@ -463,6 +466,23 @@ int s_p_get_uint32(uint32_t *num, const char *key,
 		   const s_p_hashtbl_t *hashtbl);
 
 /*
+ * s_p_get_uint64
+ *
+ * Search for a key in a s_p_hashtbl_t with value of type
+ * uint64.  If the key is found and has a set value, the
+ * value is retuned in "num".
+ *
+ * OUT num - pointer to a uint64_t where the value is returned
+ * IN key - hash table key
+ * IN hashtbl - hash table created by s_p_hashtbl_create()
+ *
+ * Returns 1 when a value was set for "key" during parsing and "num"
+ *   was successfully set, otherwise returns 0;
+ */
+int s_p_get_uint64(uint64_t *num, const char *key,
+		   const s_p_hashtbl_t *hashtbl);
+
+/*
  * s_p_get_float
  *
  * Search for a key in a s_p_hashtbl_t with value of type
@@ -601,6 +621,22 @@ int s_p_get_boolean(bool *flag, const char *key, const s_p_hashtbl_t *hashtbl);
 void s_p_dump_values(const s_p_hashtbl_t *hashtbl,
 		     const s_p_options_t options[]);
 
+
+/*
+ * Given an "options" array, pack the key, type of options along with values and
+ * op of the hashtbl.
+ *
+ * Primarily for sending a table across the network so you don't have to read a
+ * file in.
+ */
+extern Buf s_p_pack_hashtbl(const s_p_hashtbl_t *hashtbl,
+			   const s_p_options_t options[],
+			   const uint32_t cnt);
+
+/*
+ * Given a buffer, unpack key, type, op and value into a hashtbl.
+ */
+extern s_p_hashtbl_t *s_p_unpack_hashtbl(Buf buffer);
 
 /*
  * copy options onto the end of full_options

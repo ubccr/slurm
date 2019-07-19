@@ -9,22 +9,22 @@
  *
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -33,8 +33,6 @@
 #define _DEBUG 0
 #define ECLIPSE_RT 0
 
-int cpus_per_node = 1;
-int g_node_scaling = 1;
 //static int _l_topo_color_ndx = MAKE_TOPO_1;
 //static int _l_sw_color_ndx = 0;
 
@@ -44,28 +42,28 @@ enum {
 	SORTID_ACTIVE_FEATURES,
 	SORTID_ARCH,
 	SORTID_AVAIL_FEATURES,
+	SORTID_AVE_WATTS,
 	SORTID_BOARDS,
 	SORTID_BOOT_TIME,
 	SORTID_CAP_WATTS,
+	SORTID_CLUSTER_NAME,
 	SORTID_COLOR,
 	SORTID_CPUS,
 	SORTID_CPU_LOAD,
-	SORTID_CONSUMED_ENERGY,
 	SORTID_CORES,
 	SORTID_CURRENT_WATTS,
 	SORTID_ERR_CPUS,
 	SORTID_FREE_MEM,
 	SORTID_GRES,
 	SORTID_IDLE_CPUS,
-	SORTID_LOWEST_JOULES,
 	SORTID_MCS_LABEL,
 	SORTID_NAME,
 	SORTID_NODE_ADDR,
 	SORTID_NODE_HOSTNAME,
 	SORTID_OWNER,
+	SORTID_PORT,
 	SORTID_REAL_MEMORY,
 	SORTID_REASON,
-	SORTID_RACK_MP,
 	SORTID_SLURMD_START_TIME,
 	SORTID_SOCKETS,
 	SORTID_STATE,
@@ -80,8 +78,6 @@ enum {
 	SORTID_CNT
 };
 
-
-
 typedef struct {
 	int node_col;
 	char *nodelist;
@@ -94,119 +90,99 @@ static char *_initial_page_opts = "Name,RackMidplane,State,CPU_Count,"
 	"Real_Memory,Tmp_Disk";
 
 static display_data_t display_data_node[] = {
-	{G_TYPE_INT, SORTID_POS, NULL, FALSE, EDIT_NONE, refresh_node,
+	{G_TYPE_INT, SORTID_POS, NULL, false, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_NAME, "Name", FALSE, EDIT_NONE, refresh_node,
+	{G_TYPE_STRING, SORTID_CLUSTER_NAME, "ClusterName", false, EDIT_NONE,
+	 refresh_node, create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_NAME, "Name", false, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_COLOR, NULL, TRUE, EDIT_COLOR, refresh_node,
+	{G_TYPE_STRING, SORTID_COLOR, NULL, true, EDIT_COLOR, refresh_node,
 	 create_model_node, admin_edit_node},
-#ifdef HAVE_BG
-	{G_TYPE_STRING, SORTID_RACK_MP, "RackMidplane", FALSE, EDIT_NONE,
+	{G_TYPE_STRING, SORTID_NODE_ADDR, "NodeAddr", false, EDIT_NONE,
 	 refresh_node, create_model_node, admin_edit_node},
-#else
-	{G_TYPE_STRING, SORTID_RACK_MP, NULL, TRUE, EDIT_NONE, refresh_node,
+	{G_TYPE_STRING, SORTID_NODE_HOSTNAME, "NodeHostName", false, EDIT_NONE,
+	 refresh_node, create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_OWNER, "Owner", false, EDIT_NONE,
+	 refresh_node, create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_MCS_LABEL, "MCS_Label", false, EDIT_NONE,
+	 refresh_node, create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_STATE, "State", false, EDIT_MODEL, refresh_node,
 	 create_model_node, admin_edit_node},
-#endif
-	{G_TYPE_STRING, SORTID_NODE_ADDR, "NodeAddr", FALSE, EDIT_NONE,
-	 refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_NODE_HOSTNAME, "NodeHostName", FALSE, EDIT_NONE,
-	 refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_OWNER, "Owner", FALSE, EDIT_NONE,
-	 refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_MCS_LABEL, "MCS_Label", FALSE, EDIT_NONE,
-	 refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_STATE, "State", FALSE, EDIT_MODEL, refresh_node,
+	{G_TYPE_INT, SORTID_STATE_NUM, NULL, false, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_STATE_NUM, NULL, FALSE, EDIT_NONE, refresh_node,
-	 create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_CPUS, "CPU Count", FALSE,
+	{G_TYPE_STRING, SORTID_CPUS, "CPU Count", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_USED_CPUS, "Used CPU Count", FALSE,
+	{G_TYPE_STRING, SORTID_USED_CPUS, "Used CPU Count", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_ERR_CPUS, "Error CPU Count", FALSE,
+	{G_TYPE_STRING, SORTID_ERR_CPUS, "Error CPU Count", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_IDLE_CPUS, "Idle CPU Count", FALSE,
+	{G_TYPE_STRING, SORTID_IDLE_CPUS, "Idle CPU Count", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_BOARDS, "Boards", FALSE,
+	{G_TYPE_INT, SORTID_BOARDS, "Boards", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_SOCKETS, "Sockets", FALSE,
+	{G_TYPE_INT, SORTID_SOCKETS, "Sockets", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_CORES, "CoresPerSocket", FALSE,
+	{G_TYPE_INT, SORTID_CORES, "CoresPerSocket", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_THREADS, "ThreadsPerCore", FALSE,
+	{G_TYPE_INT, SORTID_THREADS, "ThreadsPerCore", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_REAL_MEMORY, "Real Memory", FALSE,
+	{G_TYPE_STRING, SORTID_REAL_MEMORY, "Real Memory", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_USED_MEMORY, "Used Memory", FALSE,
+	{G_TYPE_STRING, SORTID_USED_MEMORY, "Used Memory", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_FREE_MEM, "Free Memory", FALSE, EDIT_NONE,
+	{G_TYPE_STRING, SORTID_FREE_MEM, "Free Memory", false, EDIT_NONE,
 	 refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_TMP_DISK, "Tmp Disk", FALSE, EDIT_NONE,
+	{G_TYPE_STRING, SORTID_PORT, "Port", false, EDIT_NONE,
 	 refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_ACTIVE_FEATURES, "Active Features", FALSE,
+	{G_TYPE_STRING, SORTID_TMP_DISK, "Tmp Disk", false, EDIT_NONE,
+	 refresh_node, create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_ACTIVE_FEATURES, "Active Features", false,
 	 EDIT_TEXTBOX, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_ARCH, "Arch", FALSE,
+	{G_TYPE_STRING, SORTID_ARCH, "Arch", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_AVAIL_FEATURES, "Available Features", FALSE,
+	{G_TYPE_STRING, SORTID_AVAIL_FEATURES, "Available Features", false,
 	 EDIT_TEXTBOX, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_BOOT_TIME, "BootTime", FALSE,
+	{G_TYPE_STRING, SORTID_BOOT_TIME, "BootTime", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_CPU_LOAD, "CPU Load", FALSE, EDIT_NONE,
+	{G_TYPE_STRING, SORTID_CPU_LOAD, "CPU Load", false, EDIT_NONE,
 	 refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_GRES, "Gres", FALSE,
+	{G_TYPE_STRING, SORTID_GRES, "Gres", false,
 	 EDIT_TEXTBOX, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_REASON, "Reason", FALSE,
+	{G_TYPE_STRING, SORTID_REASON, "Reason", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_SLURMD_START_TIME, "SlurmdStartTime", FALSE,
+	{G_TYPE_STRING, SORTID_SLURMD_START_TIME, "SlurmdStartTime", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_LOWEST_JOULES, "Lowest Joules", FALSE,
+	{G_TYPE_STRING, SORTID_CURRENT_WATTS, "Current Watts", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_CONSUMED_ENERGY,"Consumed Joules", FALSE,
+	{G_TYPE_STRING, SORTID_AVE_WATTS, "Average Watts", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_CURRENT_WATTS, "Current Watts", FALSE,
+	{G_TYPE_STRING, SORTID_CAP_WATTS,"Cap Watts", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_CAP_WATTS,"Cap Watts", FALSE,
+	{G_TYPE_STRING, SORTID_VERSION, "Version", false,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_VERSION, "Version", FALSE,
-	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_WEIGHT,"Weight", FALSE, EDIT_NONE, refresh_node,
+	{G_TYPE_INT, SORTID_WEIGHT,"Weight", false, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_UPDATED, NULL, FALSE, EDIT_NONE, refresh_node,
+	{G_TYPE_INT, SORTID_UPDATED, NULL, false, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
-	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
+	{G_TYPE_NONE, -1, NULL, false, EDIT_NONE}
 };
 
 static display_data_t options_data_node[] = {
-	{G_TYPE_INT, SORTID_POS, NULL, FALSE, EDIT_NONE},
-	{G_TYPE_STRING, INFO_PAGE, "Full Info", TRUE, NODE_PAGE},
-#ifdef HAVE_BG
-	{G_TYPE_STRING, NODE_PAGE, "Drain Midplane", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Undrain Midplane", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Resume Midplane", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Set Midplane Down",
-	 TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Make Midplane Idle",
-	 TRUE, ADMIN_PAGE},
-#else
-	{G_TYPE_STRING, NODE_PAGE, "Drain Node", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Undrain Node", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Resume Node", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Set Node(s) Down", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Make Node(s) Idle", TRUE, ADMIN_PAGE},
-#endif
-	{G_TYPE_STRING, NODE_PAGE, "Update Active Features", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Update Available Features", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Update Gres", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, JOB_PAGE,  "Jobs", TRUE, NODE_PAGE},
-#ifdef HAVE_BG
-	{G_TYPE_STRING, BLOCK_PAGE, "Blocks", TRUE, NODE_PAGE},
-#else
-	{G_TYPE_STRING, BLOCK_PAGE, NULL, TRUE, NODE_PAGE},
-#endif
-	{G_TYPE_STRING, PART_PAGE, "Partitions", TRUE, NODE_PAGE},
-	{G_TYPE_STRING, RESV_PAGE, "Reservations", TRUE, NODE_PAGE},
-	//{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", FALSE, NODE_PAGE},
-	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
+	{G_TYPE_INT, SORTID_POS, NULL, false, EDIT_NONE},
+	{G_TYPE_STRING, INFO_PAGE, "Full Info", true, NODE_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Drain Node", true, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Undrain Node", true, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Resume Node", true, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Set Node(s) Down", true, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Make Node(s) Idle", true, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Update Active Features", true, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Update Available Features", true, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Update Gres", true, ADMIN_PAGE},
+	{G_TYPE_STRING, JOB_PAGE,  "Jobs", true, NODE_PAGE},
+	{G_TYPE_STRING, PART_PAGE, "Partitions", true, NODE_PAGE},
+	{G_TYPE_STRING, RESV_PAGE, "Reservations", true, NODE_PAGE},
+	//{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", false, NODE_PAGE},
+	{G_TYPE_NONE, -1, NULL, false, EDIT_NONE}
 };
 
 static display_data_t *local_display_data = NULL;
@@ -218,14 +194,13 @@ static void _layout_node_record(GtkTreeView *treeview,
 {
 	char tmp_cnt[50];
 	char tmp_current_watts[50];
-	char tmp_base_watts[50];
-	char tmp_consumed_energy[50];
+	char tmp_ave_watts[50];
 	char tmp_cap_watts[50], tmp_owner[32];
 	char tmp_version[50];
 	char *upper = NULL, *lower = NULL;
 	GtkTreeIter iter;
-	uint16_t err_cpus = 0, alloc_cpus = 0;
-	uint32_t alloc_memory = 0;
+	uint16_t alloc_cpus = 0;
+	uint64_t alloc_memory = 0;
 	node_info_t *node_ptr = sview_node_info_ptr->node_ptr;
 	int idle_cpus = node_ptr->cpus;
 	GtkTreeStore *treestore =
@@ -235,14 +210,13 @@ static void _layout_node_record(GtkTreeView *treeview,
 
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
+						 SORTID_CLUSTER_NAME),
+				   node_ptr->cluster_name);
+
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_node,
 						 SORTID_NAME),
 				   node_ptr->name);
-
-	if (sview_node_info_ptr->rack_mp)
-		add_display_treestore_line(update, treestore, &iter,
-					   find_col_name(display_data_node,
-							 SORTID_RACK_MP),
-					   sview_node_info_ptr->rack_mp);
 
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
@@ -291,10 +265,10 @@ static void _layout_node_record(GtkTreeView *treeview,
 						 SORTID_CPU_LOAD),
 				   tmp_cnt);
 
-	if (node_ptr->free_mem == NO_VAL) {
+	if (node_ptr->free_mem == NO_VAL64) {
 		snprintf(tmp_cnt, sizeof(tmp_cnt), "N/A");
 	} else {
-		snprintf(tmp_cnt, sizeof(tmp_cnt), "%uM",
+		snprintf(tmp_cnt, sizeof(tmp_cnt), "%"PRIu64"M",
 		         node_ptr->free_mem);
 	}
 	add_display_treestore_line(update, treestore, &iter,
@@ -306,14 +280,6 @@ static void _layout_node_record(GtkTreeView *treeview,
 				     SELECT_NODEDATA_SUBCNT,
 				     NODE_STATE_ALLOCATED,
 				     &alloc_cpus);
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		if (!alloc_cpus
-		    && ((node_ptr->node_state & NODE_STATE_ALLOCATED)
-			||  (node_ptr->node_state & NODE_STATE_COMPLETING)))
-			alloc_cpus = node_ptr->cpus;
-		else
-			alloc_cpus *= cpus_per_node;
-	}
 	idle_cpus -= alloc_cpus;
 	convert_num_unit((float)alloc_cpus, tmp_cnt,
 			 sizeof(tmp_cnt), UNIT_NONE, NO_VAL,
@@ -321,22 +287,6 @@ static void _layout_node_record(GtkTreeView *treeview,
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
 						 SORTID_USED_CPUS),
-				   tmp_cnt);
-
-	select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
-				     SELECT_NODEDATA_SUBCNT,
-				     NODE_STATE_ERROR,
-				     &err_cpus);
-
-	if (cluster_flags & CLUSTER_FLAG_BG)
-		err_cpus *= cpus_per_node;
-
-	idle_cpus -= err_cpus;
-	convert_num_unit((float)err_cpus, tmp_cnt, sizeof(tmp_cnt), UNIT_NONE,
-			 NO_VAL, working_sview_config.convert_flags);
-	add_display_treestore_line(update, treestore, &iter,
-				   find_col_name(display_data_node,
-						 SORTID_ERR_CPUS),
 				   tmp_cnt);
 
 	convert_num_unit((float)idle_cpus, tmp_cnt, sizeof(tmp_cnt), UNIT_NONE,
@@ -376,6 +326,13 @@ static void _layout_node_record(GtkTreeView *treeview,
 						 SORTID_CORES),
 				   tmp_cnt);
 
+	convert_num_unit((float)node_ptr->port, tmp_cnt, sizeof(tmp_cnt),
+			 UNIT_NONE, NO_VAL, working_sview_config.convert_flags);
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_node,
+						 SORTID_PORT),
+				   tmp_cnt);
+
 	convert_num_unit((float)node_ptr->threads, tmp_cnt, sizeof(tmp_cnt),
 			 UNIT_NONE, NO_VAL, working_sview_config.convert_flags);
 	add_display_treestore_line(update, treestore, &iter,
@@ -394,7 +351,7 @@ static void _layout_node_record(GtkTreeView *treeview,
 				     SELECT_NODEDATA_MEM_ALLOC,
 				     NODE_STATE_ALLOCATED,
 				     &alloc_memory);
-	snprintf(tmp_cnt, sizeof(tmp_cnt), "%uM", alloc_memory);
+	snprintf(tmp_cnt, sizeof(tmp_cnt), "%"PRIu64"M", alloc_memory);
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
 						 SORTID_USED_MEMORY),
@@ -443,32 +400,24 @@ static void _layout_node_record(GtkTreeView *treeview,
 	if (node_ptr->energy->current_watts == NO_VAL) {
 		snprintf(tmp_current_watts, sizeof(tmp_current_watts),
 			 "N/A");
-		snprintf(tmp_base_watts, sizeof(tmp_base_watts),
-			 "N/A");
-		snprintf(tmp_consumed_energy, sizeof(tmp_consumed_energy),
+		snprintf(tmp_ave_watts, sizeof(tmp_ave_watts),
 			 "N/A");
 	} else {
 		snprintf(tmp_current_watts, sizeof(tmp_current_watts),
 			 "%u", node_ptr->energy->current_watts);
-		snprintf(tmp_base_watts, sizeof(tmp_base_watts),
-			 "%u", node_ptr->energy->base_watts);
-		snprintf(tmp_consumed_energy, sizeof(tmp_consumed_energy),
-			 "%"PRIu64"", node_ptr->energy->consumed_energy);
+		snprintf(tmp_ave_watts, sizeof(tmp_ave_watts),
+			 "%u", node_ptr->energy->ave_watts);
 	}
-	add_display_treestore_line(update, treestore, &iter,
-				   find_col_name(display_data_node,
-						 SORTID_LOWEST_JOULES),
-				   tmp_base_watts);
-
-	add_display_treestore_line(update, treestore, &iter,
-				   find_col_name(display_data_node,
-						 SORTID_CONSUMED_ENERGY),
-				   tmp_consumed_energy);
 
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
 						 SORTID_CURRENT_WATTS),
 				   tmp_current_watts);
+
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_node,
+						 SORTID_AVE_WATTS),
+				   tmp_ave_watts);
 
 	if (!node_ptr->power || (node_ptr->power->cap_watts == NO_VAL)) {
 		snprintf(tmp_cap_watts, sizeof(tmp_cap_watts), "N/A");
@@ -497,13 +446,13 @@ static void _layout_node_record(GtkTreeView *treeview,
 static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 				GtkTreeStore *treestore)
 {
-	uint16_t alloc_cpus = 0, err_cpus = 0, idle_cpus;
-	uint32_t alloc_memory;
+	uint16_t alloc_cpus = 0, idle_cpus;
+	uint64_t alloc_memory;
 	node_info_t *node_ptr = sview_node_info_ptr->node_ptr;
-	char tmp_disk[20], tmp_cpus[20], tmp_err_cpus[20], tmp_idle_cpus[20];
+	char tmp_disk[20], tmp_cpus[20], tmp_idle_cpus[20];
 	char tmp_mem[20], tmp_used_memory[20];
 	char tmp_used_cpus[20], tmp_cpu_load[20], tmp_free_mem[20], tmp_owner[32];
-	char tmp_current_watts[50], tmp_base_watts[50], tmp_consumed_energy[50];
+	char tmp_current_watts[50], tmp_ave_watts[50];
 	char tmp_cap_watts[50], tmp_version[50];
 	char *tmp_state_lower, *tmp_state_upper;
 
@@ -511,17 +460,13 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 	if (node_ptr->energy->current_watts == NO_VAL) {
 		snprintf(tmp_current_watts, sizeof(tmp_current_watts),
 			 "N/A");
-		snprintf(tmp_base_watts, sizeof(tmp_base_watts),
-			 "N/A");
-		snprintf(tmp_consumed_energy, sizeof(tmp_consumed_energy),
+		snprintf(tmp_ave_watts, sizeof(tmp_ave_watts),
 			 "N/A");
 	} else {
 		snprintf(tmp_current_watts, sizeof(tmp_current_watts),
 			 "%u ", node_ptr->energy->current_watts);
-		snprintf(tmp_base_watts, sizeof(tmp_base_watts),
-			 "%u", node_ptr->energy->base_watts);
-		snprintf(tmp_consumed_energy, sizeof(tmp_consumed_energy),
-			 "%"PRIu64"", node_ptr->energy->consumed_energy);
+		snprintf(tmp_ave_watts, sizeof(tmp_ave_watts),
+			 "%u", node_ptr->energy->ave_watts);
 	}
 
 	if (!node_ptr->power || (node_ptr->power->cap_watts == NO_VAL)) {
@@ -532,17 +477,17 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 	}
 
 	if (node_ptr->cpu_load == NO_VAL) {
-		strcpy(tmp_cpu_load, "N/A");
+		strlcpy(tmp_cpu_load, "N/A", sizeof(tmp_cpu_load));
 	} else {
 		snprintf(tmp_cpu_load, sizeof(tmp_cpu_load),
 			 "%.2f", (node_ptr->cpu_load / 100.0));
 	}
 
-	if (node_ptr->free_mem == NO_VAL) {
-		strcpy(tmp_free_mem, "N/A");
+	if (node_ptr->free_mem == NO_VAL64) {
+		strlcpy(tmp_free_mem, "N/A", sizeof(tmp_free_mem));
 	} else {
 		snprintf(tmp_free_mem, sizeof(tmp_free_mem),
-		         "%uM", node_ptr->free_mem);
+		         "%"PRIu64"M", node_ptr->free_mem);
 	}
 
 	convert_num_unit((float)node_ptr->cpus, tmp_cpus,
@@ -553,14 +498,7 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 				     SELECT_NODEDATA_SUBCNT,
 				     NODE_STATE_ALLOCATED,
 				     &alloc_cpus);
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		if (!alloc_cpus &&
-		    (IS_NODE_ALLOCATED(node_ptr) ||
-		     IS_NODE_COMPLETING(node_ptr)))
-			alloc_cpus = node_ptr->cpus;
-		else
-			alloc_cpus *= cpus_per_node;
-	}
+
 	idle_cpus = node_ptr->cpus - alloc_cpus;
 	convert_num_unit((float)alloc_cpus, tmp_used_cpus,
 			 sizeof(tmp_used_cpus), UNIT_NONE, NO_VAL,
@@ -570,21 +508,11 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 				     SELECT_NODEDATA_MEM_ALLOC,
 				     NODE_STATE_ALLOCATED,
 				     &alloc_memory);
-	snprintf(tmp_used_memory, sizeof(tmp_used_memory), "%uM", alloc_memory);
+	snprintf(tmp_used_memory, sizeof(tmp_used_memory), "%"PRIu64"M", alloc_memory);
 
 	convert_num_unit((float)alloc_cpus, tmp_used_cpus,
 			 sizeof(tmp_used_cpus), UNIT_NONE, NO_VAL,
 			 working_sview_config.convert_flags);
-
-	select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
-				     SELECT_NODEDATA_SUBCNT,
-				     NODE_STATE_ERROR,
-				     &err_cpus);
-	if (cluster_flags & CLUSTER_FLAG_BG)
-		err_cpus *= cpus_per_node;
-	idle_cpus -= err_cpus;
-	convert_num_unit((float)err_cpus, tmp_err_cpus, sizeof(tmp_err_cpus),
-			 UNIT_NONE, NO_VAL, working_sview_config.convert_flags);
 
 	convert_num_unit((float)idle_cpus, tmp_idle_cpus, sizeof(tmp_idle_cpus),
 			 UNIT_NONE, NO_VAL, working_sview_config.convert_flags);
@@ -592,8 +520,7 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 	if (IS_NODE_DRAIN(node_ptr)) {
 		/* don't worry about mixed since the
 		 * whole node is being drained. */
-	} else if ((alloc_cpus && err_cpus) ||
-		   (idle_cpus  && (idle_cpus != node_ptr->cpus))) {
+	} else if (idle_cpus && (idle_cpus != node_ptr->cpus)) {
 		node_ptr->node_state &= NODE_STATE_FLAGS;
 		node_ptr->node_state |= NODE_STATE_MIXED;
 	}
@@ -628,21 +555,20 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 			   SORTID_ACTIVE_FEATURES, node_ptr->features_act,
 			   SORTID_ARCH,      node_ptr->arch,
 			   SORTID_AVAIL_FEATURES,  node_ptr->features,
-			   SORTID_LOWEST_JOULES, tmp_base_watts,
+			   SORTID_AVE_WATTS, tmp_ave_watts,
 			   SORTID_BOARDS,    node_ptr->boards,
 			   SORTID_BOOT_TIME, sview_node_info_ptr->boot_time,
+			   SORTID_CLUSTER_NAME, node_ptr->cluster_name,
 			   SORTID_CAP_WATTS, tmp_cap_watts,
 			   SORTID_COLOR,
 				sview_colors[sview_node_info_ptr->pos
 				% sview_colors_cnt],
-			   SORTID_CONSUMED_ENERGY, tmp_consumed_energy,
 			   SORTID_CORES,     node_ptr->cores,
 			   SORTID_CPUS,      tmp_cpus,
 			   SORTID_CURRENT_WATTS, tmp_current_watts,
 			   SORTID_CPU_LOAD,  tmp_cpu_load,
 			   SORTID_FREE_MEM,  tmp_free_mem,
 			   SORTID_TMP_DISK,  tmp_disk,
-			   SORTID_ERR_CPUS,  tmp_err_cpus,
 			   SORTID_IDLE_CPUS, tmp_idle_cpus,
 			   SORTID_GRES,      node_ptr->gres,
 			   SORTID_MCS_LABEL, (node_ptr->mcs_label == NULL) ?
@@ -652,7 +578,6 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 			   SORTID_NODE_ADDR, node_ptr->node_addr,
 			   SORTID_NODE_HOSTNAME, node_ptr->node_hostname,
 			   SORTID_OWNER,     tmp_owner,
-			   SORTID_RACK_MP,   sview_node_info_ptr->rack_mp,
 			   SORTID_REASON,    sview_node_info_ptr->reason,
 			   SORTID_SLURMD_START_TIME,
 				sview_node_info_ptr->slurmd_start_time,
@@ -691,7 +616,7 @@ static void _update_info_node(List info_list, GtkTreeView *tree_view)
 	set_for_update(model, SORTID_UPDATED);
 
 	itr = list_iterator_create(info_list);
-	while ((sview_node_info = (sview_node_info_t*) list_next(itr))) {
+	while ((sview_node_info = list_next(itr))) {
 		/* This means the tree_store changed (added new column
 		 * or something). */
 		if (last_model != model)
@@ -771,7 +696,7 @@ need_refresh:
 	}
 
 	itr = list_iterator_create(info_list);
-	while ((sview_node_info = (sview_node_info_t*) list_next(itr))) {
+	while ((sview_node_info = list_next(itr))) {
 		node_ptr = sview_node_info->node_ptr;
 		i++;
 		if (!xstrcmp(node_ptr->name, name)) {
@@ -789,10 +714,7 @@ need_refresh:
 			GtkTreeIter iter;
 			GtkTreeModel *model = NULL;
 
-			if (cluster_flags & CLUSTER_FLAG_BG)
-				temp = "MIDPLANE NOT FOUND\n";
-			else
-				temp = "NODE NOT FOUND\n";
+			temp = "NODE NOT FOUND\n";
 			/* only time this will be run so no update */
 			model = gtk_tree_view_get_model(treeview);
 			add_display_treestore_line(0,
@@ -820,7 +742,8 @@ static void _selected_page(GtkMenuItem *menuitem,
 {
 	switch(display_data->extra) {
 	case NODE_PAGE:
-		popup_all_node_name(display_data->user_data, display_data->id);
+		popup_all_node_name(display_data->user_data, display_data->id,
+				    NULL);
 		break;
 	case ADMIN_PAGE:
 		admin_node_name(display_data->user_data,
@@ -885,15 +808,10 @@ extern List create_node_info_list(node_info_msg_t *node_info_ptr,
 		last_list = info_list;
 
 	info_list = list_create(_node_info_list_del);
-	if (!info_list) {
-		g_print("malloc error\n");
-		return NULL;
-	}
 
 	if (last_list)
 		last_list_itr = list_iterator_create(last_list);
 	for (i=0; i<node_info_ptr->record_count; i++) {
-		char *select_reason_str = NULL;
 		node_ptr = &(node_info_ptr->node_array[i]);
 
 		if (!node_ptr->name || (node_ptr->name[0] == '\0'))
@@ -930,10 +848,6 @@ extern List create_node_info_list(node_info_msg_t *node_info_ptr,
 		sview_node_info_ptr->node_ptr = node_ptr;
 		sview_node_info_ptr->pos = i;
 
-		slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
-					  SELECT_NODEDATA_RACK_MP,
-					  0, &sview_node_info_ptr->rack_mp);
-
 		if (node_ptr->reason &&
 		    (node_ptr->reason_uid != NO_VAL) && node_ptr->reason_time) {
 			struct passwd *pw = NULL;
@@ -949,21 +863,6 @@ extern List create_node_info_list(node_info_msg_t *node_info_ptr,
 				"%s [%s@%s]", node_ptr->reason, user, time_str);
 		} else if (node_ptr->reason)
 			sview_node_info_ptr->reason = xstrdup(node_ptr->reason);
-
-		slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
-					  SELECT_NODEDATA_EXTRA_INFO,
-					  0, &select_reason_str);
-		if (select_reason_str && select_reason_str[0]) {
-			if (sview_node_info_ptr->reason)
-				xstrfmtcat(sview_node_info_ptr->reason, "\n%s",
-					   select_reason_str);
-			else {
-				sview_node_info_ptr->reason = select_reason_str;
-				select_reason_str = NULL;
-			}
-		}
-		xfree(select_reason_str);
-
 
 		if (node_ptr->boot_time) {
 			slurm_make_time_str(&node_ptr->boot_time,
@@ -1018,6 +917,8 @@ extern int get_new_info_node(node_info_msg_t **info_ptr, int force)
 	}
 	last = now;
 
+	if (cluster_flags & CLUSTER_FLAG_FED)
+		show_flags |= SHOW_FEDERATION;
 	//if (working_sview_config.show_hidden)
 	show_flags |= SHOW_ALL;
 	if (g_node_info_ptr) {
@@ -1049,12 +950,9 @@ extern int get_new_info_node(node_info_msg_t **info_ptr, int force)
  	if (new_node_ptr && new_node_ptr->node_array && changed) {
 		int i;
 		node_info_t *node_ptr = NULL;
-		uint16_t err_cpus = 0, alloc_cpus = 0;
+		uint16_t alloc_cpus = 0;
 		int idle_cpus;
 
-		g_node_scaling = new_node_ptr->node_scaling;
-		cpus_per_node =
-			new_node_ptr->node_array[0].cpus / g_node_scaling;
 		for (i=0; i<g_node_info_ptr->record_count; i++) {
 			node_ptr = &(g_node_info_ptr->node_array[i]);
 			if (!node_ptr->name || (node_ptr->name[0] == '\0'))
@@ -1066,54 +964,16 @@ extern int get_new_info_node(node_info_msg_t **info_ptr, int force)
 				SELECT_NODEDATA_SUBCNT,
 				NODE_STATE_ALLOCATED,
 				&alloc_cpus);
-			if (cluster_flags & CLUSTER_FLAG_BG) {
-				if (!alloc_cpus
-				    && (IS_NODE_ALLOCATED(node_ptr)
-					|| IS_NODE_COMPLETING(node_ptr)))
-					alloc_cpus = node_ptr->cpus;
-				else
-					alloc_cpus *= cpus_per_node;
-			}
 			idle_cpus -= alloc_cpus;
-
-			slurm_get_select_nodeinfo(
-				node_ptr->select_nodeinfo,
-				SELECT_NODEDATA_SUBCNT,
-				NODE_STATE_ERROR,
-				&err_cpus);
-			if (cluster_flags & CLUSTER_FLAG_BG)
-				err_cpus *= cpus_per_node;
-
-			idle_cpus -= err_cpus;
 
 			if (IS_NODE_DRAIN(node_ptr)) {
 				/* don't worry about mixed since the
 				   whole node is being drained. */
-			} else if ((alloc_cpus && err_cpus) ||
-				   (idle_cpus &&
-				    (idle_cpus != node_ptr->cpus))) {
+			} else if (idle_cpus &&
+				   (idle_cpus != node_ptr->cpus)) {
 				node_ptr->node_state &= NODE_STATE_FLAGS;
-				if (err_cpus)
-					node_ptr->node_state |= NODE_STATE_ERROR;
 				node_ptr->node_state |= NODE_STATE_MIXED;
-			} else if (err_cpus) {
-				node_ptr->node_state &= NODE_STATE_FLAGS;
-				node_ptr->node_state |= NODE_STATE_ERROR;
 			}
-
-/* 			if (alloc_cpus && err_cpus && !idle_cpus) { */
-/* 				node_ptr->node_state &= NODE_STATE_FLAGS; */
-/* 				node_ptr->node_state |= NODE_STATE_AE; */
-/* 			} else if (alloc_cpus && err_cpus && idle_cpus) { */
-/* 				node_ptr->node_state &= NODE_STATE_FLAGS; */
-/* 				node_ptr->node_state |= NODE_STATE_AEI; */
-/* 			} else if (alloc_cpus && !err_cpus && idle_cpus) { */
-/* 				node_ptr->node_state &= NODE_STATE_FLAGS; */
-/* 				node_ptr->node_state |= NODE_STATE_AI; */
-/* 			} else if (!alloc_cpus && err_cpus && idle_cpus) { */
-/* 				node_ptr->node_state &= NODE_STATE_FLAGS; */
-/* 				node_ptr->node_state |= NODE_STATE_EI; */
-/* 			} */
 		}
 	}
 
@@ -1160,6 +1020,8 @@ extern int update_active_features_node(GtkDialog *dialog, const char *nodelist,
 	}
 	label = gtk_dialog_add_button(dialog,
 				      GTK_STOCK_YES, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(dialog),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(dialog), label);
 	gtk_dialog_add_button(dialog,
 			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
@@ -1171,7 +1033,7 @@ extern int update_active_features_node(GtkDialog *dialog, const char *nodelist,
 		 "Active Features for Node(s) %s?", nodelist);
 	label = gtk_label_new(tmp_char);
 	gtk_box_pack_start(GTK_BOX(dialog->vbox),
-			   label, FALSE, FALSE, 0);
+			   label, false, false, 0);
 
 	entry = create_entry();
 	if (!entry)
@@ -1180,7 +1042,7 @@ extern int update_active_features_node(GtkDialog *dialog, const char *nodelist,
 	if (old_features)
 		gtk_entry_set_text(GTK_ENTRY(entry), old_features);
 
-	gtk_box_pack_start(GTK_BOX(dialog->vbox), entry, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(dialog->vbox), entry, true, true, 0);
 	gtk_widget_show_all(GTK_WIDGET(dialog));
 
 	response = gtk_dialog_run(dialog);
@@ -1250,6 +1112,8 @@ extern int update_avail_features_node(GtkDialog *dialog, const char *nodelist,
 	}
 	label = gtk_dialog_add_button(dialog,
 				      GTK_STOCK_YES, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(dialog),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(dialog), label);
 	gtk_dialog_add_button(dialog,
 			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
@@ -1261,7 +1125,7 @@ extern int update_avail_features_node(GtkDialog *dialog, const char *nodelist,
 		 "Available Features for Node(s) %s?", nodelist);
 	label = gtk_label_new(tmp_char);
 	gtk_box_pack_start(GTK_BOX(dialog->vbox),
-			   label, FALSE, FALSE, 0);
+			   label, false, false, 0);
 
 	entry = create_entry();
 	if (!entry)
@@ -1270,7 +1134,7 @@ extern int update_avail_features_node(GtkDialog *dialog, const char *nodelist,
 	if (old_features)
 		gtk_entry_set_text(GTK_ENTRY(entry), old_features);
 
-	gtk_box_pack_start(GTK_BOX(dialog->vbox), entry, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(dialog->vbox), entry, true, true, 0);
 	gtk_widget_show_all(GTK_WIDGET(dialog));
 
 	response = gtk_dialog_run(dialog);
@@ -1338,6 +1202,8 @@ extern int update_gres_node(GtkDialog *dialog, const char *nodelist,
 		no_dialog = 1;
 	}
 	label = gtk_dialog_add_button(dialog, GTK_STOCK_YES, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(dialog),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(dialog), label);
 	gtk_dialog_add_button(dialog, GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
 
@@ -1347,7 +1213,7 @@ extern int update_gres_node(GtkDialog *dialog, const char *nodelist,
 	snprintf(tmp_char, sizeof(tmp_char), "Gres for Node(s) %s?", nodelist);
 
 	label = gtk_label_new(tmp_char);
-	gtk_box_pack_start(GTK_BOX(dialog->vbox), label, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(dialog->vbox), label, false, false, 0);
 
 	entry = create_entry();
 	if (!entry)
@@ -1356,7 +1222,7 @@ extern int update_gres_node(GtkDialog *dialog, const char *nodelist,
 	if (old_gres)
 		gtk_entry_set_text(GTK_ENTRY(entry), old_gres);
 
-	gtk_box_pack_start(GTK_BOX(dialog->vbox), entry, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(dialog->vbox), entry, true, true, 0);
 	gtk_widget_show_all(GTK_WIDGET(dialog));
 
 	response = gtk_dialog_run(dialog);
@@ -1394,7 +1260,7 @@ end_it:
 extern int update_state_node(GtkDialog *dialog,
 			     const char *nodelist, const char *type)
 {
-	uint16_t state = (uint16_t) NO_VAL;
+	uint16_t state = NO_VAL16;
 	char *upper = NULL, *lower = NULL;
 	int i = 0;
 	int rc = SLURM_SUCCESS;
@@ -1415,13 +1281,15 @@ extern int update_state_node(GtkDialog *dialog,
 		no_dialog = 1;
 	}
 	label = gtk_dialog_add_button(dialog, GTK_STOCK_YES, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(dialog),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(dialog), label);
 	gtk_dialog_add_button(dialog, GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
 
 	slurm_init_update_node_msg(node_msg);
 	node_msg->node_names = xstrdup(nodelist);
 
-	if (!strncasecmp("drain", type, 5)) {
+	if (!xstrncasecmp("drain", type, 5)) {
 		snprintf(tmp_char, sizeof(tmp_char),
 			 "Are you sure you want to drain node(s) %s?\n\n"
 			 "Please put reason.",
@@ -1429,13 +1297,13 @@ extern int update_state_node(GtkDialog *dialog,
 		entry = create_entry();
 		label = gtk_label_new(tmp_char);
 		state = NODE_STATE_DRAIN;
-	} else if (!strncasecmp("resume", type, 5)) {
+	} else if (!xstrncasecmp("resume", type, 5)) {
 		snprintf(tmp_char, sizeof(tmp_char),
 			 "Are you sure you want to resume node(s) %s?",
 			 nodelist);
 		label = gtk_label_new(tmp_char);
 		state = NODE_RESUME;
-	} else if (!strncasecmp("set", type, 3)) {
+	} else if (!xstrncasecmp("set", type, 3)) {
 		snprintf(tmp_char, sizeof(tmp_char),
 			 "Are you sure you want to down node(s) %s?\n\n"
 			 "Please put reason.",
@@ -1443,7 +1311,7 @@ extern int update_state_node(GtkDialog *dialog,
 		entry = create_entry();
 		label = gtk_label_new(tmp_char);
 		state = NODE_STATE_DOWN;
-	} else if (!strncasecmp("undrain", type, 5)) {
+	} else if (!xstrncasecmp("undrain", type, 5)) {
 		snprintf(tmp_char, sizeof(tmp_char),
 			 "Are you sure you want to undrain node(s) %s?",
 			 nodelist);
@@ -1451,7 +1319,7 @@ extern int update_state_node(GtkDialog *dialog,
 		state = NODE_STATE_UNDRAIN;
 	} else {
 
-		if (!strncasecmp("make", type, 4))
+		if (!xstrncasecmp("make", type, 4))
 			type = "idle";
 		for(i = 0; i < NODE_STATE_END; i++) {
 			upper = node_state_string(i);
@@ -1472,9 +1340,9 @@ extern int update_state_node(GtkDialog *dialog,
 	if (!label)
 		goto end_it;
 	node_msg->node_state = (uint16_t)state;
-	gtk_box_pack_start(GTK_BOX(dialog->vbox), label, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(dialog->vbox), label, false, false, 0);
 	if (entry)
-		gtk_box_pack_start(GTK_BOX(dialog->vbox), entry, TRUE, TRUE, 0);
+		gtk_box_pack_start(GTK_BOX(dialog->vbox), entry, true, true, 0);
 	gtk_widget_show_all(GTK_WIDGET(dialog));
 	i = gtk_dialog_run(dialog);
 	if (i == GTK_RESPONSE_OK) {
@@ -1569,16 +1437,25 @@ extern void admin_edit_node(GtkCellRendererText *cell,
 			    const char *new_text,
 			    gpointer data)
 {
-	GtkTreeStore *treestore = GTK_TREE_STORE(data);
-	GtkTreePath *path = gtk_tree_path_new_from_string(path_string);
+	GtkTreeStore *treestore = NULL;
+	GtkTreePath *path = NULL;
 	GtkTreeIter iter;
 	char *nodelist = NULL;
-	int column = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cell),
-						       "column"));
+	int column;
+
 	if (!new_text || !xstrcmp(new_text, ""))
 		goto no_input;
 
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		display_fed_disabled_popup(new_text);
+		goto no_input;
+	}
+
+	treestore = GTK_TREE_STORE(data);
+	path = gtk_tree_path_new_from_string(path_string);
 	gtk_tree_model_get_iter(GTK_TREE_MODEL(treestore), &iter, path);
+
+	column = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cell), "column"));
 	switch(column) {
 	case SORTID_STATE:
 		gtk_tree_model_get(GTK_TREE_MODEL(treestore), &iter,
@@ -1591,8 +1468,9 @@ extern void admin_edit_node(GtkCellRendererText *cell,
 	default:
 		break;
 	}
-no_input:
+
 	gtk_tree_path_free(path);
+no_input:
 	g_mutex_unlock(sview_mutex);
 }
 
@@ -1610,12 +1488,12 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data)
 	sview_node_info_t *sview_node_info_ptr = NULL;
 	ListIterator itr = NULL;
 	GtkTreePath *path = NULL;
-	static bool set_opts = FALSE;
+	static bool set_opts = false;
 
 	if (!set_opts)
 		set_page_opts(NODE_PAGE, display_data_node,
 			      SORTID_CNT, _initial_page_opts);
-	set_opts = TRUE;
+	set_opts = true;
 
 	/* reset */
 	if (!table && !display_data) {
@@ -1660,7 +1538,7 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data)
 	}
 
 display_it:
-	info_list = create_node_info_list(node_info_ptr, FALSE);
+	info_list = create_node_info_list(node_info_ptr, false);
 	if (!info_list)
 		goto reset_curs;
 	i = 0;
@@ -1732,7 +1610,7 @@ display_it:
 	/* gtk_widget_set_size_request(display_widget, -1, -1); */
 	_update_info_node(info_list, GTK_TREE_VIEW(display_widget));
 end_it:
-	toggled = FALSE;
+	toggled = false;
 	force_refresh = 1;
 reset_curs:
 	if (main_window && main_window->window)
@@ -1794,7 +1672,7 @@ extern void specific_info_node(popup_info_t *popup_win)
 	}
 display_it:
 
-	info_list = create_node_info_list(node_info_ptr, FALSE);
+	info_list = create_node_info_list(node_info_ptr, false);
 
 	if (!info_list)
 		return;
@@ -1861,28 +1739,18 @@ display_it:
 			else if (search_info->int_data
 				 != node_ptr->node_state) {
 				if (IS_NODE_MIXED(node_ptr)) {
-					uint16_t alloc_cnt = 0, err_cnt = 0;
+					uint16_t alloc_cnt = 0;
 					uint16_t idle_cnt = node_ptr->cpus;
 					select_g_select_nodeinfo_get(
 						node_ptr->select_nodeinfo,
 						SELECT_NODEDATA_SUBCNT,
 						NODE_STATE_ALLOCATED,
 						&alloc_cnt);
-					select_g_select_nodeinfo_get(
-						node_ptr->select_nodeinfo,
-						SELECT_NODEDATA_SUBCNT,
-						NODE_STATE_ERROR,
-						&err_cnt);
-					idle_cnt -= (alloc_cnt + err_cnt);
+					idle_cnt -= alloc_cnt;
 					if ((search_info->int_data
 					     & NODE_STATE_BASE)
 					    == NODE_STATE_ALLOCATED) {
 						if (alloc_cnt)
-							break;
-					} else if ((search_info->int_data
-						    & NODE_STATE_BASE)
-						   == NODE_STATE_ERROR) {
-						if (err_cnt)
 							break;
 					} else if ((search_info->int_data
 						    & NODE_STATE_BASE)
@@ -1984,50 +1852,52 @@ extern void set_menus_node(void *arg, void *arg2, GtkTreePath *path, int type)
 
 extern void popup_all_node(GtkTreeModel *model, GtkTreeIter *iter, int id)
 {
-	char *name = NULL;
+	char *name = NULL, *cluster_name = NULL;
 
 	gtk_tree_model_get(model, iter, SORTID_NAME, &name, -1);
+	gtk_tree_model_get(model, iter, SORTID_CLUSTER_NAME, &cluster_name, -1);
 	if (_DEBUG)
 		g_print("popup_all_node: name = %s\n", name);
-	popup_all_node_name(name, id);
+	popup_all_node_name(name, id, cluster_name);
 	/* this name gets g_strdup'ed in the previous function */
 	g_free(name);
+	g_free(cluster_name);
 }
 
-extern void popup_all_node_name(char *name, int id)
+extern void popup_all_node_name(char *name, int id, char *cluster_name)
 {
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 	GError *error = NULL;
-	char *node;
-
-	if (cluster_flags & CLUSTER_FLAG_BG)
-		node = "Midplane";
-	else
-		node = "Node";
 
 	switch(id) {
 	case JOB_PAGE:
-		snprintf(title, 100, "Job(s) with %s %s", node, name);
+		snprintf(title, 100, "Job(s) with Node %s", name);
 		break;
 	case PART_PAGE:
-		snprintf(title, 100, "Partition(s) with %s %s", node, name);
+		snprintf(title, 100, "Partition(s) with Node %s", name);
 		break;
 	case RESV_PAGE:
-		snprintf(title, 100, "Reservation(s) with %s %s", node, name);
-		break;
-	case BLOCK_PAGE:
-		snprintf(title, 100, "Blocks(s) with %s %s", node, name);
+		snprintf(title, 100, "Reservation(s) with Node %s", name);
 		break;
 	case SUBMIT_PAGE:
-		snprintf(title, 100, "Submit job on %s %s", node, name);
+		snprintf(title, 100, "Submit job on Node %s", name);
 		break;
 	case INFO_PAGE:
-		snprintf(title, 100, "Full Info for %s %s", node, name);
+		snprintf(title, 100, "Full Info for Node %s", name);
 		break;
 	default:
-		g_print("%s got %d\n", node, id);
+		g_print("Node got %d\n", id);
+	}
+
+	if (cluster_name && federation_name &&
+	    (cluster_flags & CLUSTER_FLAG_FED)) {
+		char *tmp_cname =
+			xstrdup_printf(" (%s:%s)",
+				       federation_name, cluster_name);
+		strncat(title, tmp_cname, sizeof(title) - strlen(title) - 1);
+		xfree(tmp_cname);
 	}
 
 	itr = list_iterator_create(popup_list);
@@ -2045,8 +1915,12 @@ extern void popup_all_node_name(char *name, int id)
 		else
 			popup_win = create_popup_info(NODE_PAGE, id, title);
 		popup_win->spec_info->search_info->gchar_data = g_strdup(name);
+
+		if (cluster_flags & CLUSTER_FLAG_FED)
+			popup_win->spec_info->search_info->cluster_name =
+				g_strdup(cluster_name);
 		if (!sview_thread_new((gpointer)popup_thr, popup_win,
-				      FALSE, &error)) {
+				      false, &error)) {
 			g_printerr ("Failed to create node popup thread: "
 				    "%s\n",
 				    error->message);
@@ -2128,11 +2002,20 @@ extern void select_admin_nodes(GtkTreeModel *model,
 
 extern void admin_node_name(char *name, char *old_value, char *type)
 {
-	GtkWidget *popup = gtk_dialog_new_with_buttons(
+	GtkWidget *popup = NULL;
+
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		display_fed_disabled_popup(type);
+		return;
+	}
+
+	popup = gtk_dialog_new_with_buttons(
 		type,
 		GTK_WINDOW(main_window),
 		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
 		NULL);
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_transient_for(GTK_WINDOW(popup), NULL);
 
 	if (!xstrcasecmp("Update Available Features", type)
@@ -2158,68 +2041,20 @@ extern void cluster_change_node(void)
 	while (display_data++) {
 		if (display_data->id == -1)
 			break;
-		if (cluster_flags & CLUSTER_FLAG_BG) {
+		if (cluster_flags & CLUSTER_FLAG_FED) {
 			switch(display_data->id) {
-			case SORTID_RACK_MP:
-				display_data->name = "RackMidplane";
+			case SORTID_CLUSTER_NAME:
+				display_data->show = true;
 				break;
 			}
 		} else {
 			switch(display_data->id) {
-			case SORTID_RACK_MP:
-				display_data->name = NULL;
+			case SORTID_CLUSTER_NAME:
+				display_data->show = false;
 				break;
 			}
 		}
 	}
 
-	display_data = options_data_node;
-	while (display_data++) {
-		if (display_data->id == -1)
-			break;
-		if (cluster_flags & CLUSTER_FLAG_BG) {
-			switch(display_data->id) {
-			case BLOCK_PAGE:
-				display_data->name = "Blocks";
-				break;
-			}
-
-			if (!display_data->name) {
-			} else if (!xstrcmp(display_data->name, "Drain Node"))
-				display_data->name = "Drain Midplane";
-			else if (!xstrcmp(display_data->name, "Undrain Node"))
-				display_data->name = "Undrain Midplane";
-			else if (!xstrcmp(display_data->name, "Resume Node"))
-				display_data->name = "Resume Midplane";
-			else if (!xstrcmp(display_data->name, "Put Node Down"))
-				display_data->name = "Put Midplane Down";
-			else if (!xstrcmp(display_data->name, "Make Node Idle"))
-				display_data->name =
-					"Make Midplane Idle";
-		} else {
-			switch(display_data->id) {
-			case BLOCK_PAGE:
-				display_data->name = NULL;
-				break;
-			}
-
-			if (!display_data->name) {
-			} else if (!xstrcmp(display_data->name,
-					   "Drain Midplanes"))
-				display_data->name = "Drain Nodes";
-			else if (!xstrcmp(display_data->name,
-					   "Undrain Midplanes"))
-				display_data->name = "Undrain Nodes";
-			else if (!xstrcmp(display_data->name,
-					 "Resume Midplanes"))
-				display_data->name = "Resume Nodes";
-			else if (!xstrcmp(display_data->name,
-					 "Put Midplanes Down"))
-				display_data->name = "Put Nodes Down";
-			else if (!xstrcmp(display_data->name,
-					 "Make Midplanes Idle"))
-				display_data->name = "Make Nodes Idle";
-		}
-	}
 	get_info_node(NULL, NULL);
 }

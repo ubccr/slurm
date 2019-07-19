@@ -3,15 +3,16 @@
  *****************************************************************************
  *  Copyright (C) 2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Copyright (C) 2010-2016 SchedMD LLC.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,32 +28,27 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
 
 #include <errno.h>
 #include <fcntl.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#ifdef HAVE_STRINGS_H
-#  include <strings.h>
-#endif
+
 #include "slurm/slurm_errno.h"
 #include "slurm/slurm.h"
 
@@ -68,7 +64,7 @@ static char *_trig_flags(uint16_t flags);
 static int   _trig_offset(uint16_t offset);
 static char *_trig_user(uint32_t user_id);
 
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
 	int rc = 0;
 	log_options_t opts = LOG_OPTS_STDERR_ONLY;
@@ -141,6 +137,8 @@ static int _set_trigger(void)
 			ti.trig_type |= TRIGGER_TYPE_TIME;
 	} else if (params.front_end) {
 		ti.res_type = TRIGGER_RES_TYPE_FRONT_END;
+	} else if (params.burst_buffer) {
+		ti.res_type = TRIGGER_RES_TYPE_OTHER;
 	} else {
 		ti.res_type = TRIGGER_RES_TYPE_NODE;
 		if (params.node_id)
@@ -148,8 +146,8 @@ static int _set_trigger(void)
 		else
 			ti.res_id = "*";
 	}
-	if (params.block_err)
-		ti.trig_type |= TRIGGER_TYPE_BLOCK_ERR;
+	if (params.burst_buffer)
+		ti.trig_type |= TRIGGER_TYPE_BURST_BUFFER;
 	if (params.node_down)
 		ti.trig_type |= TRIGGER_TYPE_DOWN;
 	if (params.node_drained)
@@ -236,9 +234,9 @@ static int _get_trigger(void)
 
 	for (i=0; i<trig_msg->record_count; i++) {
 		/* perform filtering */
-		if (params.block_err) {
+		if (params.burst_buffer) {
 			if (trig_msg->trigger_array[i].trig_type
-					!= TRIGGER_TYPE_BLOCK_ERR)
+					!= TRIGGER_TYPE_BURST_BUFFER)
 				continue;
 		}
 		if (params.job_fini) {

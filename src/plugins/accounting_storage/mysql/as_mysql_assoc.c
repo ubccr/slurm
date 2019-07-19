@@ -7,11 +7,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -56,6 +56,7 @@ char *assoc_req_inx[] = {
 	"grp_tres_run_mins",
 	"grp_tres",
 	"grp_jobs",
+	"grp_jobs_accrue",
 	"grp_submit_jobs",
 	"grp_wall",
 	"max_tres_mins_pj",
@@ -63,9 +64,12 @@ char *assoc_req_inx[] = {
 	"max_tres_pj",
 	"max_tres_pn",
 	"max_jobs",
+	"max_jobs_accrue",
+	"min_prio_thresh",
 	"max_submit_jobs",
 	"max_wall_pj",
 	"parent_acct",
+	"priority",
 	"def_qos_id",
 	"qos",
 	"delta_qos",
@@ -83,6 +87,7 @@ enum {
 	ASSOC_REQ_GTRM,
 	ASSOC_REQ_GT,
 	ASSOC_REQ_GJ,
+	ASSOC_REQ_GJA,
 	ASSOC_REQ_GSJ,
 	ASSOC_REQ_GW,
 	ASSOC_REQ_MTMPJ,
@@ -90,9 +95,12 @@ enum {
 	ASSOC_REQ_MTPJ,
 	ASSOC_REQ_MTPN,
 	ASSOC_REQ_MJ,
+	ASSOC_REQ_MJA,
+	ASSOC_REQ_MPT,
 	ASSOC_REQ_MSJ,
 	ASSOC_REQ_MWPJ,
 	ASSOC_REQ_PARENT,
+	ASSOC_REQ_PRIO,
 	ASSOC_REQ_DEF_QOS,
 	ASSOC_REQ_QOS,
 	ASSOC_REQ_DELTA_QOS,
@@ -101,13 +109,15 @@ enum {
 };
 
 static char *get_parent_limits_select =
-	"select @par_id, @mj, @msj, "
+	"select @par_id, @mj, @mja, @mpt, @msj, "
 	"@mwpj, @mtpj, @mtpn, @mtmpj, @mtrm, "
-	"@def_qos_id, @qos, @delta_qos;";
+	"@def_qos_id, @qos, @delta_qos, @prio;";
 
 enum {
 	ASSOC2_REQ_PARENT_ID,
 	ASSOC2_REQ_MJ,
+	ASSOC2_REQ_MJA,
+	ASSOC2_REQ_MPT,
 	ASSOC2_REQ_MSJ,
 	ASSOC2_REQ_MWPJ,
 	ASSOC2_REQ_MTPJ,
@@ -117,6 +127,7 @@ enum {
 	ASSOC2_REQ_DEF_QOS,
 	ASSOC2_REQ_QOS,
 	ASSOC2_REQ_DELTA_QOS,
+	ASSOC2_REQ_PRIO,
 };
 
 static char *aassoc_req_inx[] = {
@@ -717,10 +728,16 @@ static int _set_assoc_limits_for_add(
 
 	if (row[ASSOC2_REQ_MJ] && assoc->max_jobs == INFINITE)
 		assoc->max_jobs = slurm_atoul(row[ASSOC2_REQ_MJ]);
+	if (row[ASSOC2_REQ_MJA] && assoc->max_jobs_accrue == INFINITE)
+		assoc->max_jobs_accrue = slurm_atoul(row[ASSOC2_REQ_MJA]);
+	if (row[ASSOC2_REQ_MPT] && assoc->min_prio_thresh == INFINITE)
+		assoc->min_prio_thresh = slurm_atoul(row[ASSOC2_REQ_MPT]);
 	if (row[ASSOC2_REQ_MSJ] && assoc->max_submit_jobs == INFINITE)
 		assoc->max_submit_jobs = slurm_atoul(row[ASSOC2_REQ_MSJ]);
 	if (row[ASSOC2_REQ_MWPJ] && assoc->max_wall_pj == INFINITE)
 		assoc->max_wall_pj = slurm_atoul(row[ASSOC2_REQ_MWPJ]);
+	if (row[ASSOC2_REQ_PRIO] && assoc->priority == INFINITE)
+		assoc->priority = slurm_atoul(row[ASSOC2_REQ_PRIO]);
 
 	/* For the tres limits we just concatted the limits going up
 	 * the hierarchy slurmdb_tres_list_from_string will just skip
@@ -806,12 +823,15 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 		"acct",
 		"`partition`",
 		"max_jobs",
+		"max_jobs_accrue",
+		"min_prio_thresh",
 		"max_submit_jobs",
 		"max_tres_pj",
 		"max_tres_pn",
 		"max_wall_pj",
 		"max_tres_mins_pj",
 		"max_tres_run_mins",
+		"priority",
 		"def_qos_id",
 		"qos",
 		"delta_qos",
@@ -825,12 +845,15 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 		ASSOC_ACCT,
 		ASSOC_PART,
 		ASSOC_MJ,
+		ASSOC_MJA,
+		ASSOC_MPT,
 		ASSOC_MSJ,
 		ASSOC_MTPJ,
 		ASSOC_MTPN,
 		ASSOC_MWPJ,
 		ASSOC_MTMPJ,
 		ASSOC_MTRM,
+		ASSOC_PRIO,
 		ASSOC_DEF_QOS,
 		ASSOC_QOS,
 		ASSOC_DELTA_QOS,
@@ -888,6 +911,16 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 			modified = 1;
 		}
 
+		if (!row[ASSOC_MJA] && assoc->max_jobs_accrue != NO_VAL) {
+			mod_assoc->max_jobs_accrue = assoc->max_jobs_accrue;
+			modified = 1;
+		}
+
+		if (!row[ASSOC_MPT] && assoc->min_prio_thresh != NO_VAL) {
+			mod_assoc->min_prio_thresh = assoc->min_prio_thresh;
+			modified = 1;
+		}
+
 		if (!row[ASSOC_MSJ] && assoc->max_submit_jobs != NO_VAL) {
 			mod_assoc->max_submit_jobs = assoc->max_submit_jobs;
 			modified = 1;
@@ -895,6 +928,11 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 
 		if (!row[ASSOC_MWPJ] && assoc->max_wall_pj != NO_VAL) {
 			mod_assoc->max_wall_pj = assoc->max_wall_pj;
+			modified = 1;
+		}
+
+		if (!row[ASSOC_PRIO] && assoc->priority != NO_VAL) {
+			mod_assoc->priority = assoc->priority;
 			modified = 1;
 		}
 
@@ -1023,6 +1061,7 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 			}
 
 			list_append(ret_list, object);
+			object = NULL;
 
 			if (moved_parent)
 				slurmdb_destroy_assoc_rec(mod_assoc);
@@ -1112,11 +1151,14 @@ static int _setup_assoc_cond_limits(
 	if (!assoc_cond)
 		return 0;
 
+	/*
+	 * Don't use prefix here, always use t1 or we could get extra "deleted"
+	 * entries we don't want.
+	 */
 	if (assoc_cond->with_deleted)
-		xstrfmtcat(*extra, " (%s.deleted=0 || %s.deleted=1)",
-			   prefix, prefix);
+		xstrfmtcat(*extra, " (t1.deleted=0 || t1.deleted=1)");
 	else
-		xstrfmtcat(*extra, " %s.deleted=0", prefix);
+		xstrfmtcat(*extra, " t1.deleted=0");
 
 	if (assoc_cond->only_defs) {
 		set = 1;
@@ -1354,7 +1396,6 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 						assoc->parent_acct)) {
 					error("You can't make an account be a "
 					      "child of it's self");
-					xfree(object);
 					continue;
 				}
 				rc = _move_parent(mysql_conn, user->uid,
@@ -1386,6 +1427,7 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 			account_type = 1;
 		}
 		list_append(ret_list, object);
+		object = NULL;
 		added++;
 
 		if (name_char)
@@ -1424,6 +1466,14 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 				    && row2[ASSOC2_REQ_MJ])
 					alt_assoc.max_jobs = slurm_atoul(
 						row2[ASSOC2_REQ_MJ]);
+				if ((assoc->max_jobs_accrue == INFINITE)
+				    && row2[ASSOC2_REQ_MJA])
+					alt_assoc.max_jobs_accrue = slurm_atoul(
+						row2[ASSOC2_REQ_MJA]);
+				if ((assoc->min_prio_thresh == INFINITE)
+				    && row2[ASSOC2_REQ_MPT])
+					alt_assoc.min_prio_thresh = slurm_atoul(
+						row2[ASSOC2_REQ_MPT]);
 				if ((assoc->max_submit_jobs == INFINITE)
 				    && row2[ASSOC2_REQ_MSJ])
 					alt_assoc.max_submit_jobs = slurm_atoul(
@@ -1432,6 +1482,10 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 				    && row2[ASSOC2_REQ_MWPJ])
 					alt_assoc.max_wall_pj = slurm_atoul(
 						row2[ASSOC2_REQ_MWPJ]);
+				if ((assoc->priority == INFINITE)
+				    && row2[ASSOC2_REQ_PRIO])
+					alt_assoc.priority = slurm_atoul(
+						row2[ASSOC2_REQ_PRIO]);
 
 				/* We don't have to copy these strings
 				 * or check for there existance,
@@ -1478,6 +1532,7 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 			     mod_assoc->id, 1);
 
 		mod_assoc->grp_jobs = assoc->grp_jobs;
+		mod_assoc->grp_jobs_accrue = assoc->grp_jobs_accrue;
 		mod_assoc->grp_submit_jobs = assoc->grp_submit_jobs;
 		mod_assoc->grp_wall = assoc->grp_wall;
 
@@ -1505,6 +1560,14 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 			mod_assoc->max_jobs = alt_assoc.max_jobs;
 		else
 			mod_assoc->max_jobs = assoc->max_jobs;
+		if (alt_assoc.max_jobs_accrue != NO_VAL)
+			mod_assoc->max_jobs_accrue = alt_assoc.max_jobs_accrue;
+		else
+			mod_assoc->max_jobs_accrue = assoc->max_jobs_accrue;
+		if (alt_assoc.min_prio_thresh != NO_VAL)
+			mod_assoc->min_prio_thresh = alt_assoc.min_prio_thresh;
+		else
+			mod_assoc->min_prio_thresh = assoc->min_prio_thresh;
 		if (alt_assoc.max_submit_jobs != NO_VAL)
 			mod_assoc->max_submit_jobs = alt_assoc.max_submit_jobs;
 		else
@@ -1513,6 +1576,10 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 			mod_assoc->max_wall_pj = alt_assoc.max_wall_pj;
 		else
 			mod_assoc->max_wall_pj = assoc->max_wall_pj;
+		if (alt_assoc.priority != NO_VAL)
+			mod_assoc->priority = alt_assoc.priority;
+		else
+			mod_assoc->priority = assoc->priority;
 
 		/* no need to get the parent id since if we moved
 		 * parent id's we will get it when we send the total list */
@@ -1588,18 +1655,18 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 			}
 			xfree(tmp_qos);
 
-			set_qos_vals=1;
+			set_qos_vals = 1;
 		}
 
 
-		if (account_type)
+		if (account_type) {
 			_modify_unset_users(mysql_conn,
 					    mod_assoc,
 					    row[MASSOC_ACCT],
 					    lft, rgt,
 					    ret_list,
 					    moved_parent);
-		else if ((assoc->is_def == 1) && row[MASSOC_USER][0]) {
+		} else if ((assoc->is_def == 1) && row[MASSOC_USER][0]) {
 			/* Use fresh one here so we don't have to
 			   worry about dealing with bad values.
 			*/
@@ -1613,6 +1680,7 @@ static int _process_modify_assoc_results(mysql_conn_t *mysql_conn,
 				     mysql_conn, &tmp_assoc, &reset_query,
 				     moved_parent ? 0 : 1))
 			    != SLURM_SUCCESS) {
+				slurmdb_destroy_assoc_rec(mod_assoc);
 				xfree(reset_query);
 				goto end_it;
 			}
@@ -1841,8 +1909,11 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 	MYSQL_ROW row;
 	uint32_t parent_def_qos_id = 0;
 	uint32_t parent_mj = INFINITE;
+	uint32_t parent_mja = INFINITE;
+	uint32_t parent_mpt = INFINITE;
 	uint32_t parent_msj = INFINITE;
 	uint32_t parent_mwpj = INFINITE;
+	uint32_t parent_prio = INFINITE;
 	char *parent_mtpj = NULL;
 	char *parent_mtpn = NULL;
 	char *parent_mtmpj = NULL;
@@ -1976,6 +2047,12 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 		else
 			assoc->grp_jobs = INFINITE;
 
+		if (row[ASSOC_REQ_GJA])
+			assoc->grp_jobs_accrue =
+				slurm_atoul(row[ASSOC_REQ_GJA]);
+		else
+			assoc->grp_jobs_accrue = INFINITE;
+
 		if (row[ASSOC_REQ_GSJ])
 			assoc->grp_submit_jobs =
 				slurm_atoul(row[ASSOC_REQ_GSJ]);
@@ -2052,6 +2129,18 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 				else
 					parent_mj = INFINITE;
 
+				if (row2[ASSOC2_REQ_MJA])
+					parent_mja = slurm_atoul(
+						row2[ASSOC2_REQ_MJA]);
+				else
+					parent_mja = INFINITE;
+
+				if (row2[ASSOC2_REQ_MPT])
+					parent_mpt = slurm_atoul(
+						row2[ASSOC2_REQ_MPT]);
+				else
+					parent_mpt = INFINITE;
+
 				if (row2[ASSOC2_REQ_MSJ])
 					parent_msj = slurm_atoul(
 						row2[ASSOC2_REQ_MSJ]);
@@ -2063,6 +2152,13 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 						row2[ASSOC2_REQ_MWPJ]);
 				else
 					parent_mwpj = INFINITE;
+
+
+				if (row2[ASSOC2_REQ_PRIO])
+					parent_prio = slurm_atoul(
+						row2[ASSOC2_REQ_PRIO]);
+				else
+					parent_prio = INFINITE;
 
 				xfree(parent_mtpj);
 				if (row2[ASSOC2_REQ_MTPJ][0])
@@ -2110,6 +2206,18 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 		else
 			assoc->max_jobs = parent_mj;
 
+		if (row[ASSOC_REQ_MJA])
+			assoc->max_jobs_accrue =
+				slurm_atoul(row[ASSOC_REQ_MJA]);
+		else
+			assoc->max_jobs_accrue = parent_mja;
+
+		if (row[ASSOC_REQ_MPT])
+			assoc->min_prio_thresh = slurm_atoul(
+				row[ASSOC_REQ_MPT]);
+		else
+			assoc->min_prio_thresh = parent_mpt;
+
 		if (row[ASSOC_REQ_MSJ])
 			assoc->max_submit_jobs = slurm_atoul(
 				row[ASSOC_REQ_MSJ]);
@@ -2120,6 +2228,11 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 			assoc->max_wall_pj = slurm_atoul(row[ASSOC_REQ_MWPJ]);
 		else
 			assoc->max_wall_pj = parent_mwpj;
+
+		if (row[ASSOC_REQ_PRIO])
+			assoc->priority = slurm_atoul(row[ASSOC_REQ_PRIO]);
+		else
+			assoc->priority = parent_prio;
 
 		if (row[ASSOC_REQ_MTPJ][0])
 			assoc->max_tres_pj = xstrdup(row[ASSOC_REQ_MTPJ]);
@@ -2140,20 +2253,16 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 		 */
 		slurmdb_combine_tres_strings(
 			&assoc->max_tres_pj, parent_mtpj,
-			TRES_STR_FLAG_NONE);
-		xfree(parent_mtpj);
+			TRES_STR_FLAG_SORT_ID);
 		slurmdb_combine_tres_strings(
 			&assoc->max_tres_pn, parent_mtpn,
-			TRES_STR_FLAG_NONE);
-		xfree(parent_mtpn);
+			TRES_STR_FLAG_SORT_ID);
 		slurmdb_combine_tres_strings(
 			&assoc->max_tres_mins_pj, parent_mtmpj,
-			TRES_STR_FLAG_NONE);
-		xfree(parent_mtmpj);
+			TRES_STR_FLAG_SORT_ID);
 		slurmdb_combine_tres_strings(
 			&assoc->max_tres_run_mins, parent_mtrm,
-			TRES_STR_FLAG_NONE);
-		xfree(parent_mtrm);
+			TRES_STR_FLAG_SORT_ID);
 
 		assoc->qos_list = list_create(slurm_destroy_char);
 
@@ -2240,6 +2349,10 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 		//info("parent id is %d", assoc->parent_id);
 		//log_assoc_rec(assoc);
 	}
+	xfree(parent_mtpj);
+	xfree(parent_mtpn);
+	xfree(parent_mtmpj);
+	xfree(parent_mtrm);
 	mysql_free_result(result);
 
 	FREE_NULL_LIST(delta_qos_list);
@@ -2386,6 +2499,17 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			continue;
 		}
 
+		/*
+		 * If the user issuing the command is a coordinator,
+		 * do not allow changing the default account
+		 */
+		if (is_coord && (object->is_def == 1)) {
+			error("Coordinator %s(%d) tried to change the default account of user %s to account %s",
+			      user_name, uid, object->user, object->acct);
+			rc = ESLURM_ACCESS_DENIED;
+			break;
+		}
+
 		if (is_coord && _check_coord_qos(mysql_conn, object->cluster,
 						 object->acct, user_name,
 						 object->qos_list)
@@ -2468,8 +2592,18 @@ extern int as_mysql_add_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			xstrfmtcat(extra, ", id_assoc='%u'", object->id);
 		}
 
-		setup_assoc_limits(object, &cols, &vals, &extra,
-				   QOS_LEVEL_NONE, 1);
+		if ((rc = setup_assoc_limits(object, &cols, &vals, &extra,
+					     QOS_LEVEL_NONE, 1))) {
+			error("%s: Failed, setup_assoc_limits functions returned error",
+			      __func__);
+			xfree(query);
+			xfree(cols);
+			xfree(vals);
+			xfree(extra);
+			xfree(update);
+			break;
+		}
+
 
 		xstrcat(tmp_char, aassoc_req_inx[0]);
 		for(i=1; i<AASSOC_COUNT; i++)
@@ -2999,8 +3133,17 @@ is_same_user:
 		xstrcat(extra, " && user = '' ");
 	}
 
-	setup_assoc_limits(assoc, &tmp_char1, &tmp_char2,
-			   &vals, QOS_LEVEL_MODIFY, 0);
+	if ((rc = setup_assoc_limits(assoc, &tmp_char1, &tmp_char2,
+				     &vals, QOS_LEVEL_MODIFY, 0))) {
+		xfree(tmp_char1);
+		xfree(tmp_char2);
+		xfree(vals);
+		xfree(extra);
+		errno = rc;
+		error("%s: Failed, setup_assoc_limits functions returned error",
+		      __func__);
+		return NULL;
+	}
 	xfree(tmp_char1);
 	xfree(tmp_char2);
 
@@ -3267,7 +3410,7 @@ extern List as_mysql_get_assocs(mysql_conn_t *mysql_conn, uid_t uid,
 			   _cluster_get_assocs.
 			*/
 			assoc_mgr_fill_in_user(
-				mysql_conn, &user, 1, NULL);
+				mysql_conn, &user, 1, NULL, false);
 		}
 		if (!is_admin && !user.name) {
 			debug("User %u has no associations, and is not admin, "

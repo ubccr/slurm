@@ -6,11 +6,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,29 +26,19 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#if HAVE_STDINT_H
-#  include <stdint.h>
-#endif
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>
-#endif
-
-#include <stdio.h>
+#include <inttypes.h>
 #include <math.h>
+#include <stdio.h>
 
 #include "slurm/slurm_errno.h"
 
@@ -60,7 +50,7 @@
  * overwritten when linking with the slurmctld.
  */
 #if defined (__APPLE__)
-int slurmctld_tres_cnt __attribute__((weak_import)) = 0;
+extern int slurmctld_tres_cnt __attribute__((weak_import));
 #else
 int slurmctld_tres_cnt = 0;
 #endif
@@ -76,14 +66,14 @@ int slurmctld_tres_cnt = 0;
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "jobcomp" for SLURM job completion logging) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "jobcomp" for Slurm job completion logging) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobcomp/".
  *
@@ -110,7 +100,7 @@ int fini ( void )
 }
 
 /*
- * The remainder of this file implements the standard SLURM priority API.
+ * The remainder of this file implements the standard Slurm priority API.
  */
 
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
@@ -190,8 +180,7 @@ extern void priority_p_job_end(struct job_record *job_ptr)
 
 	assoc_mgr_lock(&locks);
 	if (job_ptr->qos_ptr) {
-		slurmdb_qos_rec_t *qos_ptr =
-			(slurmdb_qos_rec_t *)job_ptr->qos_ptr;
+		slurmdb_qos_rec_t *qos_ptr = job_ptr->qos_ptr;
 		for (i=0; i<slurmctld_tres_cnt; i++) {
 			if (unused_tres_run_secs[i] >
 			    qos_ptr->usage->grp_used_tres_run_secs[i]) {
@@ -206,7 +195,7 @@ extern void priority_p_job_end(struct job_record *job_ptr)
 					unused_tres_run_secs[i];
 		}
 	}
-	assoc_ptr = (slurmdb_assoc_rec_t *)job_ptr->assoc_ptr;
+	assoc_ptr = job_ptr->assoc_ptr;
 	while (assoc_ptr) {
 		/* If the job finished early remove the extra time now. */
 		for (i=0; i<slurmctld_tres_cnt; i++) {

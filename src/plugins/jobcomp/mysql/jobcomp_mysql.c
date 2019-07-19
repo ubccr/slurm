@@ -6,11 +6,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -55,14 +55,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "jobacct" for SLURM job completion logging) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "jobacct" for Slurm job completion logging) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
@@ -100,21 +100,6 @@ storage_field_t jobcomp_table_fields[] = {
 	{ "blockid", "tinytext" },
 	{ NULL, NULL}
 };
-
-
-/* Type for error string table entries */
-typedef struct {
-	int xe_number;
-	char *xe_message;
-} slurm_errtab_t;
-
-static slurm_errtab_t slurm_errtab[] = {
-	{0, "No error"},
-	{-1, "Unspecified error"}
-};
-
-/* A plugin-global errno. */
-static int plugin_errno = SLURM_SUCCESS;
 
 /* File descriptor used for logging */
 static pthread_mutex_t  jobcomp_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -170,24 +155,6 @@ static char *_get_group_name(uint32_t group_id)
 	slurm_mutex_unlock(&jobcomp_lock);
 
 	return ret_name;
-}
-
-/*
- * Linear search through table of errno values and strings,
- * returns NULL on error, string on success.
- */
-static char *_lookup_slurm_api_errtab(int errnum)
-{
-	char *res = NULL;
-	int i;
-
-	for (i = 0; i < sizeof(slurm_errtab) / sizeof(slurm_errtab_t); i++) {
-		if (slurm_errtab[i].xe_number == errnum) {
-			res = slurm_errtab[i].xe_message;
-			break;
-		}
-	}
-	return res;
 }
 
 /*
@@ -248,6 +215,8 @@ extern int slurm_jobcomp_set_location(char *location)
 	}
 
 	debug2("mysql_connect() called for db %s", db_name);
+	/* Just make sure our connection is gone. */
+	fini();
 	jobcomp_mysql_conn = create_mysql_conn(0, 0, NULL);
 
 	db_info = create_mysql_db_info(SLURM_MYSQL_PLUGIN_JC);
@@ -274,7 +243,7 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 		*geometry = NULL, *start = NULL,
 		*blockid = NULL;
 	uint32_t job_state;
-	char *query = NULL;
+	char *query = NULL, *on_dup = NULL;
 	uint32_t time_limit, start_time, end_time;
 
 	if (!jobcomp_mysql_conn || mysql_db_ping(jobcomp_mysql_conn) != 0) {
@@ -338,13 +307,8 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 						   SELECT_PRINT_GEOMETRY);
 	start = select_g_select_jobinfo_xstrdup(job_ptr->select_jobinfo,
 						SELECT_PRINT_START);
-#ifdef HAVE_BG
-	blockid = select_g_select_jobinfo_xstrdup(job_ptr->select_jobinfo,
-						  SELECT_PRINT_BG_ID);
-#else
 	blockid = select_g_select_jobinfo_xstrdup(job_ptr->select_jobinfo,
 						  SELECT_PRINT_RESV_ID);
-#endif
 	query = xstrdup_printf(
 		"insert into %s (jobid, uid, user_name, gid, group_name, "
 		"name, state, proc_cnt, `partition`, timelimit, "
@@ -374,37 +338,56 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 		   job_state, job_ptr->total_cpus, job_ptr->partition, lim_str,
 		   start_time, end_time, job_ptr->node_cnt);
 
-	if (job_ptr->nodes)
+	xstrfmtcat(on_dup, "uid=%u, user_name='%s', gid=%u, group_name='%s', "
+		   "name='%s', state=%u, proc_cnt=%u, `partition`='%s', "
+		   "timelimit='%s', nodecnt=%u",
+		   job_ptr->user_id, usr_str, job_ptr->group_id, grp_str, jname,
+		   job_state, job_ptr->total_cpus, job_ptr->partition, lim_str,
+		   job_ptr->node_cnt);
+
+	if (job_ptr->nodes) {
 		xstrfmtcat(query, ", '%s'", job_ptr->nodes);
+		xstrfmtcat(on_dup, ", nodelist='%s'", job_ptr->nodes);
+	}
 
 	if (connect_type) {
 		xstrfmtcat(query, ", '%s'", connect_type);
+		xstrfmtcat(on_dup, ", connect_type='%s'", connect_type);
 		xfree(connect_type);
 	}
 	if (reboot) {
 		xstrfmtcat(query, ", '%s'", reboot);
+		xstrfmtcat(on_dup, ", reboot='%s'", reboot);
 		xfree(reboot);
 	}
 	if (rotate) {
 		xstrfmtcat(query, ", '%s'", rotate);
+		xstrfmtcat(on_dup, ", rotate='%s'", rotate);
 		xfree(rotate);
 	}
-	if (job_ptr->details && (job_ptr->details->max_cpus != NO_VAL))
+	if (job_ptr->details && (job_ptr->details->max_cpus != NO_VAL)) {
 		xstrfmtcat(query, ", '%u'", job_ptr->details->max_cpus);
+		xstrfmtcat(on_dup, ", maxprocs='%u'",
+			   job_ptr->details->max_cpus);
+	}
 
 	if (geometry) {
 		xstrfmtcat(query, ", '%s'", geometry);
+		xstrfmtcat(on_dup, ", geometry='%s'", geometry);
 		xfree(geometry);
 	}
 	if (start) {
 		xstrfmtcat(query, ", '%s'", start);
+		xstrfmtcat(on_dup, ", start='%s'", start);
 		xfree(start);
 	}
 	if (blockid) {
 		xstrfmtcat(query, ", '%s'", blockid);
+		xstrfmtcat(on_dup, ", blockid='%s'", blockid);
 		xfree(blockid);
 	}
-	xstrcat(query, ")");
+	xstrfmtcat(query, ") ON DUPLICATE KEY UPDATE %s;", on_dup);
+
 	debug3("(%s:%d) query\n%s",
 	       THIS_FILE, __LINE__, query);
 	rc = mysql_db_query(jobcomp_mysql_conn, query);
@@ -412,19 +395,9 @@ extern int slurm_jobcomp_log_record(struct job_record *job_ptr)
 	xfree(grp_str);
 	xfree(jname);
 	xfree(query);
+	xfree(on_dup);
 
 	return rc;
-}
-
-extern int slurm_jobcomp_get_errno(void)
-{
-	return plugin_errno;
-}
-
-extern char *slurm_jobcomp_strerror(int errnum)
-{
-	char *res = _lookup_slurm_api_errtab(errnum);
-	return (res ? res : strerror(errnum));
 }
 
 /*

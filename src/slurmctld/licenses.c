@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -61,7 +61,7 @@ static pthread_mutex_t license_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void _pack_license(struct licenses *lic, Buf buffer, uint16_t protocol_version);
 
 /* Print all licenses on a list */
-static inline void _licenses_print(char *header, List licenses, int job_id)
+static void _licenses_print(char *header, List licenses, struct job_record *job_ptr)
 {
 	ListIterator iter;
 	licenses_t *license_entry;
@@ -73,13 +73,13 @@ static inline void _licenses_print(char *header, List licenses, int job_id)
 
 	iter = list_iterator_create(licenses);
   	while ((license_entry = (licenses_t *) list_next(iter))) {
-		if (job_id == 0) {
+		if (!job_ptr) {
 			info("licenses: %s=%s total=%u used=%u",
 			     header, license_entry->name,
 			     license_entry->total, license_entry->used);
 		} else {
-			info("licenses: %s=%s job_id=%u available=%u used=%u",
-			     header, license_entry->name, job_id,
+			info("licenses: %s=%s %pJ available=%u used=%u",
+			     header, license_entry->name, job_ptr,
 			     license_entry->total, license_entry->used);
 		}
 	}
@@ -142,15 +142,22 @@ static List _build_license_list(char *licenses, bool *valid)
 				*valid = false;
 				break;
 			}
-			/* ':' is used as a separator in version 2.5 or later
+			/*
+			 * The '*' was still in use internally until 18.08, so
+			 * the check for '*' must stay until 20.02 at least.
+			 *
+			 * ':' is used as a separator in version 2.5 or later
 			 * '*' is used as a separator in version 2.4 or earlier
 			 */
 			if ((token[i] == ':') || (token[i] == '*')) {
 				token[i++] = '\0';
 				num = (int32_t)strtol(&token[i], &end_num, 10);
+				if (*end_num != '\0')
+					 *valid = false;
+				break;
 			}
 		}
-		if (num < 0) {
+		if (num < 0 || !(*valid)) {
 			*valid = false;
 			break;
 		}
@@ -175,12 +182,18 @@ static List _build_license_list(char *licenses, bool *valid)
 	return lic_list;
 }
 
-/* Given a list of license_t records, return a license string.
+/*
+ * Given a list of license_t records, return a license string.
+ *
  * This can be combined with _build_license_list() to eliminate duplicates
- * (e.g. "tux*2,tux*3" gets changed to "tux*5"). */
-static char * _build_license_string(List license_list)
+ *
+ * IN license_list - list of license_t records
+ *
+ * RET string represenation of licenses. Must be destroyed by caller.
+ */
+extern char *license_list_to_string(List license_list)
 {
-	char buf[128], *sep;
+	char *sep = "";
 	char *licenses = NULL;
 	ListIterator iter;
 	licenses_t *license_entry;
@@ -190,13 +203,9 @@ static char * _build_license_string(List license_list)
 
 	iter = list_iterator_create(license_list);
 	while ((license_entry = (licenses_t *) list_next(iter))) {
-		if (licenses)
-			sep = ",";
-		else
-			sep = "";
-		snprintf(buf, sizeof(buf), "%s%s*%u", sep, license_entry->name,
-			 license_entry->total);
-		xstrcat(licenses, buf);
+		xstrfmtcat(licenses, "%s%s:%u",
+			   sep, license_entry->name, license_entry->total);
+		sep = ",";
 	}
 	list_iterator_destroy(iter);
 
@@ -257,7 +266,7 @@ extern int license_init(char *licenses)
 	if (!valid)
 		fatal("Invalid configured licenses: %s", licenses);
 
-	_licenses_print("init_license", license_list, 0);
+	_licenses_print("init_license", license_list, NULL);
 	slurm_mutex_unlock(&license_mutex);
 	return SLURM_SUCCESS;
 }
@@ -314,7 +323,7 @@ extern int license_update(char *licenses)
 
         FREE_NULL_LIST(license_list);
         license_list = new_list;
-        _licenses_print("update_license", license_list, 0);
+        _licenses_print("update_license", license_list, NULL);
         slurm_mutex_unlock(&license_mutex);
         return SLURM_SUCCESS;
 }
@@ -511,6 +520,10 @@ extern void license_free(void)
 /*
  * license_validate - Test if the required licenses are valid
  * IN licenses - required licenses
+ * IN validate_configured - if true, validate that there are enough configured
+ *                          licenses for the requested amount.
+ * IN validate_existing - if true, validate that licenses exist, otherwise don't
+ *                        return them in the final list.
  * OUT tres_req_cnt - appropriate counts for each requested gres,
  *                    since this only matters on pending jobs you can
  *                    send in NULL otherwise
@@ -518,7 +531,8 @@ extern void license_free(void)
  *             are configured (though not necessarily available now)
  * RET license_list, must be destroyed by caller
  */
-extern List license_validate(char *licenses,
+extern List license_validate(char *licenses, bool validate_configured,
+			     bool validate_existing,
 			     uint64_t *tres_req_cnt, bool *valid)
 {
 	ListIterator iter;
@@ -540,7 +554,7 @@ extern List license_validate(char *licenses,
 	}
 
 	slurm_mutex_lock(&license_mutex);
-	_licenses_print("request_license", job_license_list, 0);
+	_licenses_print("request_license", job_license_list, NULL);
 	iter = list_iterator_create(job_license_list);
 	while ((license_entry = (licenses_t *) list_next(iter))) {
 		if (license_list) {
@@ -552,9 +566,14 @@ extern List license_validate(char *licenses,
 		if (!match) {
 			debug("License name requested (%s) does not exist",
 			      license_entry->name);
+			if (!validate_existing) {
+				list_delete_item(iter);
+				continue;
+			}
 			*valid = false;
 			break;
-		} else if (license_entry->total > match->total) {
+		} else if (validate_configured &&
+			   (license_entry->total > match->total)) {
 			debug("Licenses count requested higher than configured "
 			      "(%s: %u > %u)",
 			      match->name, license_entry->total, match->total);
@@ -592,16 +611,18 @@ extern void license_job_merge(struct job_record *job_ptr)
 	FREE_NULL_LIST(job_ptr->license_list);
 	job_ptr->license_list = _build_license_list(job_ptr->licenses, &valid);
 	xfree(job_ptr->licenses);
-	job_ptr->licenses = _build_license_string(job_ptr->license_list);
+	job_ptr->licenses = license_list_to_string(job_ptr->license_list);
 }
 
 /*
  * license_job_test - Test if the licenses required for a job are available
  * IN job_ptr - job identification
  * IN when    - time to check
+ * IN reboot    - true if node reboot required to start job
  * RET: SLURM_SUCCESS, EAGAIN (not available now), SLURM_ERROR (never runnable)
  */
-extern int license_job_test(struct job_record *job_ptr, time_t when)
+extern int license_job_test(struct job_record *job_ptr, time_t when,
+			    bool reboot)
 {
 	ListIterator iter;
 	licenses_t *license_entry, *match;
@@ -630,9 +651,11 @@ extern int license_job_test(struct job_record *job_ptr, time_t when)
 			rc = EAGAIN;
 			break;
 		} else {
+			/* Assume node reboot required since we have not
+			 * selected the compute nodes yet */
 			resv_licenses = job_test_lic_resv(job_ptr,
 							  license_entry->name,
-							  when);
+							  when, reboot);
 			if ((license_entry->total + match->used +
 			     resv_licenses) > match->total) {
 				rc = EAGAIN;
@@ -702,7 +725,7 @@ extern int license_job_get(struct job_record *job_ptr)
 		}
 	}
 	list_iterator_destroy(iter);
-	_licenses_print("acquire_license", license_list, job_ptr->job_id);
+	_licenses_print("acquire_license", license_list, job_ptr);
 	slurm_mutex_unlock(&license_mutex);
 	return rc;
 }
@@ -745,7 +768,7 @@ extern int license_job_return(struct job_record *job_ptr)
 		}
 	}
 	list_iterator_destroy(iter);
-	_licenses_print("return_license", license_list, job_ptr->job_id);
+	_licenses_print("return_license", license_list, job_ptr);
 	slurm_mutex_unlock(&license_mutex);
 	return rc;
 }
@@ -850,20 +873,6 @@ extern uint32_t get_total_license_cnt(char *name)
 	return count;
 }
 
-/* Get how many of a given license are in a list */
-extern uint32_t license_get_total_cnt_from_list(List license_list, char *name)
-{
-	licenses_t *license_entry;
-	uint32_t total = 0;
-
-	license_entry = list_find_first(
-		license_list, _license_find_rec, name);
-
-	if(license_entry)
-		total = license_entry->total;
-	return total;
-}
-
 /* node_read should be locked before coming in here
  * returns 1 if change happened.
  */
@@ -875,8 +884,7 @@ extern char *licenses_2_tres_str(List license_list)
 	char *tres_str = NULL;
 	static bool first_run = 1;
 	static slurmdb_tres_rec_t tres_req;
-	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
-				   READ_LOCK, NO_LOCK, NO_LOCK };
+	assoc_mgr_lock_t locks = { .tres = READ_LOCK };
 
 	if (!license_list)
 		return NULL;
@@ -918,8 +926,7 @@ extern void license_set_job_tres_cnt(List license_list,
 	static bool first_run = 1;
 	static slurmdb_tres_rec_t tres_rec;
 	int tres_pos;
-	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
-				   READ_LOCK, NO_LOCK, NO_LOCK };
+	assoc_mgr_lock_t locks = { .tres = READ_LOCK };
 
 	/* we only need to init this once */
 	if (first_run) {

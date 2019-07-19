@@ -11,11 +11,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -31,13 +31,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -89,7 +89,7 @@ extern void stop_builtin_agent(void)
 {
 	slurm_mutex_lock(&term_lock);
 	stop_builtin = true;
-	pthread_cond_signal(&term_cond);
+	slurm_cond_signal(&term_cond);
 	slurm_mutex_unlock(&term_lock);
 }
 
@@ -103,21 +103,20 @@ static void _my_sleep(int secs)
 	ts.tv_nsec = now.tv_usec * 1000;
 	slurm_mutex_lock(&term_lock);
 	if (!stop_builtin)
-		pthread_cond_timedwait(&term_cond, &term_lock, &ts);
+		slurm_cond_timedwait(&term_cond, &term_lock, &ts);
 	slurm_mutex_unlock(&term_lock);
 }
 
 static void _load_config(void)
 {
-	char *sched_params, *select_type, *tmp_ptr;
+	char *sched_params = slurm_get_sched_params();
+	char *tmp_ptr;
 
 	sched_timeout = slurm_get_msg_timeout() / 2;
 	sched_timeout = MAX(sched_timeout, 1);
 	sched_timeout = MIN(sched_timeout, 10);
 
-	sched_params = slurm_get_sched_params();
-
-	if (sched_params && (tmp_ptr=strstr(sched_params, "interval=")))
+	if ((tmp_ptr = xstrcasestr(sched_params, "interval=")))
 		builtin_interval = atoi(tmp_ptr + 9);
 	if (builtin_interval < 1) {
 		error("Invalid SchedulerParameters interval: %d",
@@ -125,9 +124,9 @@ static void _load_config(void)
 		builtin_interval = BACKFILL_INTERVAL;
 	}
 
-	if (sched_params && (tmp_ptr=strstr(sched_params, "max_job_bf=")))
+	if ((tmp_ptr = xstrcasestr(sched_params, "max_job_bf=")))
 		max_sched_job_cnt = atoi(tmp_ptr + 11);
-	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_max_job_test=")))
+	if ((tmp_ptr = xstrcasestr(sched_params, "bf_max_job_test=")))
 		max_sched_job_cnt = atoi(tmp_ptr + 16);
 	if (max_sched_job_cnt < 1) {
 		error("Invalid SchedulerParameters bf_max_job_test: %d",
@@ -135,15 +134,6 @@ static void _load_config(void)
 		max_sched_job_cnt = 50;
 	}
 	xfree(sched_params);
-
-	select_type = slurm_get_select_type();
-	if (!xstrcmp(select_type, "select/serial")) {
-		/* Do not spend time computing expected start time for
-		 * pending jobs */
-		max_sched_job_cnt = 0;
-		stop_builtin_agent();
-	}
-	xfree(select_type);
 }
 
 static void _compute_start_times(void)
@@ -203,7 +193,7 @@ static void _compute_start_times(void)
 		}
 
 		j = job_test_resv(job_ptr, &now, true, &avail_bitmap,
-				  &exc_core_bitmap, &resv_overlap);
+				  &exc_core_bitmap, &resv_overlap, false);
 		if (j != SLURM_SUCCESS) {
 			FREE_NULL_BITMAP(avail_bitmap);
 			FREE_NULL_BITMAP(exc_core_bitmap);
@@ -260,7 +250,7 @@ extern void *builtin_agent(void *args)
 	static time_t last_sched_time = 0;
 	/* Read config, nodes and partitions; Write jobs */
 	slurmctld_lock_t all_locks = {
-		READ_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
+		READ_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK, READ_LOCK };
 
 	_load_config();
 	last_sched_time = time(NULL);

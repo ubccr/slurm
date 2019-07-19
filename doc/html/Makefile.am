@@ -11,35 +11,36 @@ generated_html = \
 	authplugins.html \
 	bb_plugins.html \
 	big_sys.html \
-	bluegene.html \
 	burst_buffer.html \
 	cgroups.html \
-	checkpoint_blcr.html \
 	checkpoint_plugins.html \
+	classic_fair_share.html \
+	cli_filter_plugins.html \
 	cons_res.html \
 	cons_res_share.html \
+	containers.html \
 	contributor.html \
 	core_spec.html \
 	core_spec_plugins.html \
 	cpu_management.html \
 	cray.html \
-	cray_alps.html \
-	crypto_plugins.html \
+	cred_plugins.html \
 	disclaimer.html \
 	dist_plane.html \
 	documentation.html \
 	download.html \
+	elasticsearch.html \
 	elastic_computing.html \
 	ext_sensorsplugins.html \
 	faq.html \
+	federation.html \
 	gang_scheduling.html \
 	gres.html \
 	gres_design.html \
 	gres_plugins.html \
 	hdf5_profile_user_guide.html \
+	heterogeneous_jobs.html \
 	high_throughput.html \
-	ibm.html \
-	ibm-pe.html \
 	intel_knl.html \
 	jobacct_gatherplugins.html \
 	job_array.html \
@@ -61,8 +62,10 @@ generated_html = \
 	mpiplugins.html \
 	multi_cluster.html \
 	news.html \
+	nss_slurm.html \
 	node_features_plugins.html \
 	overview.html \
+	pam_slurm_adopt.html \
 	platforms.html \
 	plugins.html \
 	power_mgmt.html \
@@ -81,6 +84,7 @@ generated_html = \
 	quickstart_admin.html \
 	quickstart.html \
 	reservations.html \
+	resource_binding.html \
 	resource_limits.html \
 	rosetta.html \
 	route_plugin.html \
@@ -89,6 +93,7 @@ generated_html = \
 	schedplugins.html \
 	select_design.html \
 	selectplugins.html \
+	site_factor.html \
 	slurm.html \
 	slurmctld_plugstack.html \
 	slurm_ug_agenda.html \

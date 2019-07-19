@@ -176,9 +176,8 @@ feature that every selected node must contain.</p>
 whole nodes.
 This capability permits the administrator to identify the core count to be
 reserved on each node as shown in the examples below.<br>
-<b>NOTE:</b> Core reservations are not available on IBM BlueGene or
-Cray/ALPS systems, nor when the system is configured to use the select/linear
-or select/serial plugins.</p>
+<b>NOTE:</b> Core reservations are not available when the system is configured
+to use the select/linear plugin.</p>
 <pre>
 # Create a two core reservation for user alan
 $ scontrol create reservation StartTime=now Duration=60 \
@@ -261,13 +260,20 @@ jobs running in it.</p>
 <pre>
 $ scontrol delete ReservationName=alan_6
 </pre>
+<p>
+
+<b>NOTE:</b> By default, when a reservation ends the reservation request will be
+removed from any pending jobs submitted to the reservation and will be put into
+a held state.  Use the NO_HOLD_JOBS_AFTER_END reservation flag to let jobs run
+outside of the reservation after the reservation is gone.
+</p>
 
 <h2>Overlapping Reservations</h2>
 
 <p>By default, reservations must not overlap. They must either include
 different nodes or operate at different times. If specific nodes
 are not specified when a reservation is created, Slurm will
-automatically select nodes to avoid overlap and insure that
+automatically select nodes to avoid overlap and ensure that
 the selected nodes are available when the reservation begins.</p>
 
 <p>There is very limited support for overlapping reservations
@@ -290,7 +296,7 @@ reservation except that is it not logged in the accounting system as nodes
 reserved for maintenance.
 It requires the use of the "overlap" flag when creating the second
 reservation.
-This might be used to insure availability of resources for a specific
+This might be used to ensure availability of resources for a specific
 user within a group having a reservation.
 Using the previous example of alan and brenda having a 10 node reservation
 for 60 minutes, we might want to reserve 4 nodes of that for for brenda
@@ -354,7 +360,7 @@ $ scontrol create reservation user=operator nodes=tux8 \
 to jobs are automatically replaced with new idle nodes.
 The effect of this is to always maintain a constant size pool of resources.
 This is accomplished by using a "replace" flag as shown in the example below.
-This option is not supported on IBM Bluegene systems or for reservations
+This option is not supported for reservations
 of individual cores which span more than one node rather than full nodes 
 (e.g. a 1 core reservation on node "tux1" will be moved if node "tux1" goes
 down, but a reservation containing 2 cores on node "tux1" and 3 cores on "tux2"
@@ -429,7 +435,7 @@ considering the initiation of jobs.
 This will prevent the initiation of some jobs which would complete execution
 before a reservation given fewer jobs to time-slice with.</p>
 
-<p style="text-align: center;">Last modified 15 December 2016</p>
+<p style="text-align: center;">Last modified 18 October 2018</p>
 
 <!--#include virtual="footer.txt"-->
 

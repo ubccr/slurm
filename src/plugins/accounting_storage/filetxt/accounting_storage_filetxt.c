@@ -6,11 +6,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,17 +26,19 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#include <strings.h>
+#include <string.h>
+#include <unistd.h>
+
 #include "src/common/slurm_xlator.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "filetxt_jobacct_process.h"
@@ -52,14 +54,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "jobacct" for SLURM job completion logging) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "jobacct" for Slurm job completion logging) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
@@ -132,36 +134,26 @@ static int _print_record(struct job_record *job_ptr,
 			 time_t time, char *data)
 {
 	static int   rc=SLURM_SUCCESS;
-	char *block_id = NULL;
 	if (!job_ptr->details) {
 		error("job_acct: job=%u doesn't exist", job_ptr->job_id);
 		return SLURM_ERROR;
 	}
 	debug2("_print_record, job=%u, \"%s\"",
 	       job_ptr->job_id, data);
-#ifdef HAVE_BG
-	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
-			     SELECT_JOBDATA_BLOCK_ID,
-			     &block_id);
-
-#endif
-	if (!block_id)
-		block_id = xstrdup("-");
 
 	slurm_mutex_lock( &logfile_lock );
 
 	if (fprintf(LOGFILE,
-		    "%u %s %d %d %u %u %s - %s\n",
+		    "%u %s %d %d %u %u - - %s\n",
 		    job_ptr->job_id, job_ptr->partition,
 		    (int)job_ptr->details->submit_time, (int)time,
-		    job_ptr->user_id, job_ptr->group_id, block_id, data)
+		    job_ptr->user_id, job_ptr->group_id, data)
 	    < 0)
 		rc=SLURM_ERROR;
 #ifdef HAVE_FDATASYNC
 	fdatasync(LOGFILE_FD);
 #endif
 	slurm_mutex_unlock( &logfile_lock );
-	xfree(block_id);
 
 	return rc;
 }
@@ -204,7 +196,8 @@ extern int init ( void )
 		      "Please use a database plugin");
 	}
 
-	/* This check for the slurm user id is a quick and dirty patch
+	/*
+	 * This check for the slurm user id is a quick and dirty patch
 	 * to see if the controller is calling this, since we open the
 	 * file in append mode stats could fail on it if the file
 	 * isn't world writable.
@@ -230,8 +223,10 @@ extern int init ( void )
 			xfree(log_file);
 			slurm_mutex_unlock( &logfile_lock );
 			return SLURM_ERROR;
-		} else
-			chmod(log_file, prot);
+		} else {
+			if (chmod(log_file, prot))
+				error("%s: chmod(%s):%m", __func__, log_file);
+		}
 
 		xfree(log_file);
 
@@ -240,8 +235,10 @@ extern int init ( void )
 		LOGFILE_FD = fileno(LOGFILE);
 		slurm_mutex_unlock( &logfile_lock );
 		storage_init = 1;
-		/* since this can be loaded from many different places
-		   only tell us once. */
+		/*
+		 * since this can be loaded from many different places
+		 * only tell us once.
+		 */
 		verbose("%s loaded", plugin_name);
 		first = 0;
 	} else {
@@ -258,9 +255,10 @@ extern int fini ( void )
 	return SLURM_SUCCESS;
 }
 
-extern void * acct_storage_p_get_connection(const slurm_trigger_callbacks_t *cb, 
-                                            int conn_num, bool rollback, 
-                                            char *cluster_name)
+extern void * acct_storage_p_get_connection(
+	const slurm_trigger_callbacks_t *cb,
+	int conn_num, uint16_t *persist_conn_flags,
+	bool rollback, char *cluster_name)
 {
 	return NULL;
 }
@@ -295,6 +293,12 @@ extern int acct_storage_p_add_accts(void *db_conn, uint32_t uid,
 
 extern int acct_storage_p_add_clusters(void *db_conn, uint32_t uid,
 				       List cluster_list)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_add_federations(void *db_conn, uint32_t uid,
+					  List federation_list)
 {
 	return SLURM_SUCCESS;
 }
@@ -359,6 +363,14 @@ extern List acct_storage_p_modify_clusters(void *db_conn, uint32_t uid,
 extern List acct_storage_p_modify_assocs(void *db_conn, uint32_t uid,
 					      slurmdb_assoc_cond_t *assoc_q,
 					      slurmdb_assoc_rec_t *assoc)
+{
+	return SLURM_SUCCESS;
+}
+
+extern List acct_storage_p_modify_federations(
+				void *db_conn, uint32_t uid,
+				slurmdb_federation_cond_t *fed_cond,
+				slurmdb_federation_rec_t *fed)
 {
 	return SLURM_SUCCESS;
 }
@@ -428,6 +440,13 @@ extern List acct_storage_p_remove_assocs(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
+extern List acct_storage_p_remove_federations(
+					void *db_conn, uint32_t uid,
+					slurmdb_federation_cond_t *fed_cond)
+{
+	return SLURM_SUCCESS;
+}
+
 extern List acct_storage_p_remove_qos(void *db_conn, uint32_t uid,
 				      slurmdb_qos_cond_t *qos_cond)
 {
@@ -470,6 +489,12 @@ extern List acct_storage_p_get_clusters(void *db_conn, uid_t uid,
 	return NULL;
 }
 
+extern List acct_storage_p_get_federations(void *db_conn, uid_t uid,
+					   slurmdb_federation_cond_t *fed_cond)
+{
+	return NULL;
+}
+
 extern List acct_storage_p_get_config(void *db_conn, char *config_name)
 {
 	return NULL;
@@ -478,7 +503,51 @@ extern List acct_storage_p_get_config(void *db_conn, char *config_name)
 extern List acct_storage_p_get_tres(void *db_conn, uid_t uid,
 				      slurmdb_tres_cond_t *tres_cond)
 {
-	return NULL;
+	slurmdb_tres_rec_t *tres_rec;
+	List ret_list = list_create(slurmdb_destroy_tres_rec);
+
+	tres_rec = xmalloc(sizeof(slurmdb_tres_rec_t));
+	list_append(ret_list, tres_rec);
+	tres_rec->id = TRES_CPU;
+	tres_rec->type = xstrdup("cpu");
+
+	tres_rec = xmalloc(sizeof(slurmdb_tres_rec_t));
+	list_append(ret_list, tres_rec);
+	tres_rec->id = TRES_MEM;
+	tres_rec->type = xstrdup("mem");
+
+	tres_rec = xmalloc(sizeof(slurmdb_tres_rec_t));
+	list_append(ret_list, tres_rec);
+	tres_rec->id = TRES_ENERGY;
+	tres_rec->type = xstrdup("energy");
+
+	tres_rec = xmalloc(sizeof(slurmdb_tres_rec_t));
+	list_append(ret_list, tres_rec);
+	tres_rec->id = TRES_NODE;
+	tres_rec->type = xstrdup("node");
+
+	tres_rec = xmalloc(sizeof(slurmdb_tres_rec_t));
+	list_append(ret_list, tres_rec);
+	tres_rec->id = TRES_BILLING;
+	tres_rec->type = xstrdup("billing");
+
+	tres_rec = xmalloc(sizeof(slurmdb_tres_rec_t));
+	list_append(ret_list, tres_rec);
+	tres_rec->id = TRES_FS_DISK;
+	tres_rec->type = xstrdup("fs");
+	tres_rec->name = xstrdup("disk");
+
+	tres_rec = xmalloc(sizeof(slurmdb_tres_rec_t));
+	list_append(ret_list, tres_rec);
+	tres_rec->id = TRES_VMEM;
+	tres_rec->type = xstrdup("vmem");
+
+	tres_rec = xmalloc(sizeof(slurmdb_tres_rec_t));
+	list_append(ret_list, tres_rec);
+	tres_rec->id = TRES_PAGES;
+	tres_rec->type = xstrdup("pages");
+
+	return ret_list;
 }
 
 extern List acct_storage_p_get_assocs(void *db_conn, uid_t uid,
@@ -540,7 +609,8 @@ extern int acct_storage_p_get_usage(void *db_conn, uid_t uid,
 
 extern int acct_storage_p_roll_usage(void *db_conn,
 				     time_t sent_start, time_t sent_end,
-				     uint16_t archive_data)
+				     uint16_t archive_data,
+				     rollup_stats_t *rollup_stats)
 {
 	int rc = SLURM_SUCCESS;
 
@@ -588,7 +658,8 @@ extern int clusteracct_storage_p_fini_ctld(void *db_conn,
 extern int clusteracct_storage_p_cluster_tres(void *db_conn,
 					      char *cluster_nodes,
 					      char *tres_str_in,
-					      time_t event_time)
+					      time_t event_time,
+					      uint16_t rpc_version)
 {
 	return SLURM_SUCCESS;
 }
@@ -691,7 +762,7 @@ extern int jobacct_storage_p_job_complete(void *db_conn,
 
 	exit_code = job_ptr->exit_code;
 	if (exit_code == 1) {
-		/* This wasn't signalled, it was set by Slurm so don't
+		/* This wasn't signaled, it was set by Slurm so don't
 		 * treat it like a signal.
 		 */
 		exit_code = 256;
@@ -715,9 +786,6 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 	char buf[BUFFER_SIZE];
 	int cpus = 0, rc;
 	char node_list[BUFFER_SIZE];
-#ifdef HAVE_BG
-	char *ionodes = NULL;
-#endif
 	float float_tmp = 0;
 	char *account, *step_name;
 
@@ -726,23 +794,6 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 		return SLURM_ERROR;
 	}
 
-#ifdef HAVE_BG
-	if (step_ptr->job_ptr->details)
-		cpus = step_ptr->job_ptr->details->min_cpus;
-	else
-		cpus = step_ptr->job_ptr->cpu_cnt;
-	select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
-			     SELECT_JOBDATA_IONODES,
-			     &ionodes);
-	if (ionodes) {
-		snprintf(node_list, BUFFER_SIZE,
-			 "%s[%s]", step_ptr->job_ptr->nodes, ionodes);
-		xfree(ionodes);
-	} else
-		snprintf(node_list, BUFFER_SIZE, "%s",
-			 step_ptr->job_ptr->nodes);
-
-#else
 	if (!step_ptr->step_layout || !step_ptr->step_layout->task_cnt) {
 		cpus = step_ptr->job_ptr->total_cpus;
 		snprintf(node_list, BUFFER_SIZE, "%s", step_ptr->job_ptr->nodes);
@@ -751,7 +802,7 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 		snprintf(node_list, BUFFER_SIZE, "%s",
 			 step_ptr->step_layout->node_list);
 	}
-#endif
+
 	account   = _safe_dup(step_ptr->job_ptr->account);
 	step_name = _safe_dup(step_ptr->name);
 
@@ -827,14 +878,12 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 	char node_list[BUFFER_SIZE];
 	struct jobacctinfo *jobacct = (struct jobacctinfo *)step_ptr->jobacct;
 	struct jobacctinfo dummy_jobacct;
-#ifdef HAVE_BG
-	char *ionodes = NULL;
-#endif
 	float ave_vsize = 0, ave_rss = 0, ave_pages = 0;
 	float ave_cpu = 0;
 	uint32_t ave_cpu2 = 0;
 	char *account, *step_name;
 	uint32_t exit_code;
+	bool null_jobacct = false;
 
 	if (!storage_init) {
 		debug("jobacct init was not called or it failed");
@@ -847,6 +896,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		/* JobAcctGather=slurmdb_gather/none, no data to process */
 		memset(&dummy_jobacct, 0, sizeof(dummy_jobacct));
 		jobacct = &dummy_jobacct;
+		null_jobacct = true;
 	}
 
 	if ((elapsed=now-step_ptr->start_time)<0)
@@ -864,23 +914,6 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 			comp_status = JOB_COMPLETE;
 	}
 
-#ifdef HAVE_BG
-	if (step_ptr->job_ptr->details)
-		cpus = step_ptr->job_ptr->details->min_cpus;
-	else
-		cpus = step_ptr->job_ptr->cpu_cnt;
-	select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
-			     SELECT_JOBDATA_IONODES,
-			     &ionodes);
-	if (ionodes) {
-		snprintf(node_list, BUFFER_SIZE,
-			 "%s[%s]", step_ptr->job_ptr->nodes, ionodes);
-		xfree(ionodes);
-	} else
-		snprintf(node_list, BUFFER_SIZE, "%s",
-			 step_ptr->job_ptr->nodes);
-
-#else
 	if (!step_ptr->step_layout || !step_ptr->step_layout->task_cnt) {
 		cpus = step_ptr->job_ptr->total_cpus;
 		snprintf(node_list, BUFFER_SIZE, "%s", step_ptr->job_ptr->nodes);
@@ -890,21 +923,23 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		snprintf(node_list, BUFFER_SIZE, "%s",
 			 step_ptr->step_layout->node_list);
 	}
-#endif
-	/* figure out the ave of the totals sent */
-	if (cpus > 0) {
-		ave_vsize = jobacct->tot_vsize;
-		ave_vsize /= cpus;
-		ave_rss = jobacct->tot_rss;
-		ave_rss /= cpus;
-		ave_pages = jobacct->tot_pages;
-		ave_pages /= cpus;
-		ave_cpu = jobacct->tot_cpu;
-		ave_cpu /= cpus;
-	}
 
-	if (jobacct->min_cpu != (uint32_t)NO_VAL) {
-		ave_cpu2 = jobacct->min_cpu;
+	if (!null_jobacct) {
+		/* figure out the ave of the totals sent */
+		if (cpus > 0) {
+			ave_vsize = jobacct->tres_usage_in_tot[TRES_ARRAY_VMEM];
+			ave_vsize /= cpus;
+			ave_rss = jobacct->tres_usage_in_tot[TRES_ARRAY_MEM];
+			ave_rss /= cpus;
+			ave_pages = jobacct->tres_usage_in_tot[
+				TRES_ARRAY_PAGES];
+			ave_pages /= cpus;
+			ave_cpu = jobacct->tres_usage_in_tot[TRES_ARRAY_CPU];
+			ave_cpu /= cpus;
+		}
+
+		if (jobacct->tres_usage_in_max[TRES_ARRAY_CPU] != INFINITE64)
+			ave_cpu2 = jobacct->tres_usage_in_max[TRES_ARRAY_CPU];
 	}
 
 	account   = _safe_dup(step_ptr->job_ptr->account);
@@ -942,24 +977,33 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		 0,	/* total nsignals */
 		 0,	/* total nvcsw */
 		 0,	/* total nivcsw */
-		 jobacct->max_vsize,	/* max vsize */
-		 jobacct->max_vsize_id.taskid,	/* max vsize node */
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max[TRES_ARRAY_VMEM],
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max_taskid[
+			 TRES_ARRAY_VMEM],
 		 ave_vsize,	/* ave vsize */
-		 jobacct->max_rss,	/* max vsize */
-		 jobacct->max_rss_id.taskid,	/* max rss node */
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max[TRES_ARRAY_MEM],
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max_taskid[
+			 TRES_ARRAY_MEM],
 		 ave_rss,	/* ave rss */
-		 jobacct->max_pages,	/* max pages */
-		 jobacct->max_pages_id.taskid,	/* max pages node */
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max[
+			 TRES_ARRAY_PAGES],
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max_taskid[
+			 TRES_ARRAY_PAGES],
 		 ave_pages,	/* ave pages */
 		 ave_cpu2,	/* min cpu */
-		 jobacct->min_cpu_id.taskid,	/* min cpu node */
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max_taskid[
+			 TRES_ARRAY_CPU],
 		 ave_cpu,	/* ave cpu */
 		 step_name,	/* step exe name */
 		 node_list, /* name of nodes step running on */
-		 jobacct->max_vsize_id.nodeid,	/* max vsize task */
-		 jobacct->max_rss_id.nodeid,	/* max rss task */
-		 jobacct->max_pages_id.nodeid,	/* max pages task */
-		 jobacct->min_cpu_id.nodeid,	/* min cpu task */
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max_nodeid[
+			 TRES_ARRAY_VMEM],
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max_nodeid[
+			 TRES_ARRAY_MEM],
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max_nodeid[
+			 TRES_ARRAY_PAGES],
+		 null_jobacct ? 0 : jobacct->tres_usage_in_max_nodeid[
+			 TRES_ARRAY_CPU],
 		 account,
 		 step_ptr->job_ptr->requid); /* requester user id */
 
@@ -970,7 +1014,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 }
 
 /*
- * load into the storage a suspention of a job
+ * load into the storage a suspension of a job
  */
 extern int jobacct_storage_p_suspend(void *db_conn,
 				     struct job_record *job_ptr)
@@ -1055,6 +1099,27 @@ extern int acct_storage_p_reconfig(void *db_conn)
 
 extern int acct_storage_p_reset_lft_rgt(void *db_conn, uid_t uid,
 					List cluster_list)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_get_stats(void *db_conn, bool dbd)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_clear_stats(void *db_conn, bool dbd)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_get_data(void *db_conn, acct_storage_info_t dinfo,
+				   void *data)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_shutdown(void *db_conn, bool dbd)
 {
 	return SLURM_SUCCESS;
 }

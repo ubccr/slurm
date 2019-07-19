@@ -37,7 +37,7 @@ per partition/queue.</TD>
 </TR><TR>
 <TD>OverSubscribe=YES</TD>
 <TD>By default same as OverSubscribe=NO. Nodes allocated to a job may be shared with
-other jobs if each job allows sharing via the <CODE>srun --shared</CODE>
+other jobs if each job allows sharing via the <CODE>srun --oversubscribe</CODE>
 option.</TD>
 </TR><TR>
 <TD>OverSubscribe=FORCE</TD>
@@ -54,11 +54,11 @@ per partition/queue.</TD>
 </TR><TR>
 <TD>OverSubscribe=YES</TD>
 <TD>By default same as OverSubscribe=NO. Cores allocated to a job may be shared with
-other jobs if each job allows sharing via the <CODE>srun --shared</CODE>
+other jobs if each job allows sharing via the <CODE>srun --oversubscribe</CODE>
 option.</TD>
 </TR><TR>
 <TD>OverSubscribe=FORCE</TD>
-<TD>Each core can be allocated to multple jobs up to the count specified
+<TD>Each core can be allocated to multiple jobs up to the count specified
 per partition/queue (default 4 jobs per core).</TD>
 </TR><TR>
 <TD ROWSPAN=3>SelectType=<B>select/cons_res</B><BR>
@@ -71,11 +71,11 @@ per partition/queue.</TD>
 </TR><TR>
 <TD>OverSubscribe=YES</TD>
 <TD>By default same as OverSubscribe=NO. CPUs allocated to a job may be shared with
-other jobs if each job allows sharing via the <CODE>srun --shared</CODE>
+other jobs if each job allows sharing via the <CODE>srun --oversubscribe</CODE>
 option.</TD>
 </TR><TR>
 <TD>OverSubscribe=FORCE</TD>
-<TD>Each CPU can be allocated to multple jobs up to the count specified
+<TD>Each CPU can be allocated to multiple jobs up to the count specified
 per partition/queue (default 4 jobs per CPU).</TD>
 </TR><TR>
 <TD ROWSPAN=3>SelectType=<B>select/cons_res</B><BR>
@@ -88,11 +88,11 @@ per partition/queue.</TD>
 </TR><TR>
 <TD>OverSubscribe=YES</TD>
 <TD>By default same as OverSubscribe=NO. Sockets allocated to a job may be shared with
-other jobs if each job allows sharing via the <CODE>srun --shared</CODE>
+other jobs if each job allows sharing via the <CODE>srun --oversubscribe</CODE>
 option.</TD>
 </TR><TR>
 <TD>OverSubscribe=FORCE</TD>
-<TD>Each socket can be allocated to multple jobs up to the count specified
+<TD>Each socket can be allocated to multiple jobs up to the count specified
 per partition/queue (default 4 jobs per socket).</TD>
 </TR>
 </TABLE>
@@ -132,7 +132,7 @@ Slurm has supported configuring nodes in more than one partition since version
 different <CODE>OverSubscribe</CODE> settings will be allocated to jobs. Note that
 "shared" jobs are jobs that are submitted to partitions configured with
 <CODE>OverSubscribe=FORCE</CODE> or with <CODE>OverSubscribe=YES</CODE> and the job requested
-sharing with the <CODE>srun --shared</CODE> option. Conversely, "non-shared"
+sharing with the <CODE>srun --oversubscribe</CODE> option. Conversely, "non-shared"
 jobs are jobs that are submitted to partitions configured with
 <CODE>OverSubscribe=NO</CODE> or <CODE>OverSubscribe=YES</CODE> and the job did <U>not</U>
 request sharable resources.
@@ -260,7 +260,6 @@ the accounting plugin, which periodically gathers data about running jobs. Set
 <CODE>JobAcctGather</CODE> and <CODE>JobAcctFrequency</CODE> to
 values suitable for your system.</P>
 
-<p class="footer"><a href="#top">top</a></p>
 
 <p style="text-align:center;">Last modified 31 March 2016</p>
 

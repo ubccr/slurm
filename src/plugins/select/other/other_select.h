@@ -7,11 +7,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -46,6 +46,8 @@
 #include "src/common/slurm_xlator.h"	/* Must be first */
 #include "src/common/list.h"
 #include "src/slurmctld/slurmctld.h"
+
+extern uint16_t other_select_type_param;
 
 /*
  * Initialize context for node selection plugin
@@ -90,25 +92,6 @@ extern int other_node_init(struct node_record *node_ptr, int node_cnt);
 extern int other_block_init(List part_list);
 
 /*
- * Update specific block (usually something has gone wrong)
- * IN block_desc_ptr - information about the block
- */
-extern int other_update_block(update_block_msg_t *block_desc_ptr);
-
-/*
- * Update specific sub nodes(usually something has gone wrong)
- * IN block_desc_ptr - information about the block
- */
-extern int other_update_sub_node(update_block_msg_t *block_desc_ptr);
-
-/*
- * Fail certain cnodes in a blocks midplane (usually comes from the
- *        IBM runjob mux)
- * IN step_ptr - step that failed
- */
-extern int other_fail_cnode (struct step_record *step_ptr);
-
-/*
  * Get select data from a plugin
  * IN node_pts  - current node record
  * IN dinfo   - type of data to get from the node record
@@ -136,12 +119,6 @@ extern int other_update_node_config(int index);
  * RETURN SLURM_SUCCESS on success || SLURM_ERROR else wise
  */
 extern int other_update_node_state(struct node_record *node_ptr);
-
-/*
- * Alter the node count for a job given the type of system we are on
- * IN/OUT job_desc  - current job desc
- */
-extern int other_alter_node_cnt(enum select_node_cnt type, void *data);
 
 /*
  * Select the "best" nodes for given job from those available
@@ -184,11 +161,6 @@ extern int other_job_begin(struct job_record *job_ptr);
 extern int other_job_ready(struct job_record *job_ptr);
 
 /*
- * Test if expanding a job is permitted
- */
-extern bool other_job_expand_allow(void);
-
-/*
  * Move the resource allocated to one job into that of another job.
  *	All resources are removed from "from_job_ptr" and moved into
  *	"to_job_ptr". Also see other_job_resized().
@@ -207,14 +179,14 @@ extern int other_job_resized(struct job_record *job_ptr,
 
 /*
  * Pass job-step signal to other plugin.
- * IN job_ptr - job to be signalled
+ * IN job_ptr - job to be signaled
  * IN signal  - signal(7) number
  */
 extern int other_job_signal(struct job_record *job_ptr, int signal);
 
 /*
  * Pass job memory allocation confirmation request to other plugin.
- * IN job_ptr - job to be signalled
+ * IN job_ptr - job to be signaled
  */
 extern int other_job_mem_confirm(struct job_record *job_ptr);
 
@@ -377,17 +349,6 @@ extern int other_select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
  * NODE-SELECT PLUGIN SPECIFIC INFORMATION FUNCTIONS  *
 \******************************************************/
 
-/* pack node-select plugin specific information into a buffer in
- *	machine independent form
- * IN last_update_time - time of latest information consumer has
- * IN show_flags - flags to control information output
- * OUT buffer - location to hold the data, consumer must free
- * IN protocol_version - slurm protocol version of client
- * RET - slurm error code
- */
-extern int other_pack_select_info(time_t last_query_time, uint16_t show_flags,
-				  Buf *buffer, uint16_t protocol_version);
-
 /* Note reconfiguration or change in partition configuration */
 extern int other_reconfigure(void);
 
@@ -395,10 +356,5 @@ extern bitstr_t * other_resv_test(resv_desc_msg_t *resv_desc_ptr,
 				  uint32_t node_cnt,
 				  bitstr_t *avail_bitmap,
 				  bitstr_t **core_bitmap);
-
-extern void other_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check);
-extern void other_ba_fini(void);
-extern int *other_ba_get_dims(void);
-extern bitstr_t *other_ba_cnodelist2bitmap(char *cnodelist);
 
 #endif /* _CRAY_OTHER_SELECT_H */

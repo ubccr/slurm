@@ -7,8 +7,8 @@
  * LLNL-CODE-670614
  * All rights reserved.
  *
- * This file is part of SLURM, a resource management program.
- * For details, see <http://slurm.schedmd.com/>.
+ * This file is part of Slurm, a resource management program.
+ * For details, see <https://slurm.schedmd.com/>.
  * Please also read the included file: DISCLAIMER.
  * 
  * LLNL Preamble Notice

@@ -29,21 +29,27 @@ Display information for specific accounts (comma separated list).
 Display information for all users.
 
 .TP
-\fB\-h\fR, \fB\-\-noheader\fR
-No header will be added to the beginning of the output.
-
-.TP
 \fB\-l\fR, \fB\-\-long\fR
 Long listing - includes the normalized usage information.
 
 .TP
 \fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
 Clusters to issue commands to.
+Note that the SlurmDBD must be up for this option to work properly.
 
 .TP
 \fB\-m\fR, \fB\-\-partition\fR
-Is there are association based partition in the system
+If there are association based partitions in the system
 print their names.
+
+.TP
+\fB\-n\fR, \fB\-\-noheader\fR
+No header will be added to the beginning of the output.
+
+.TP
+\fB\-o\fR, \fB\-\-format=\fR
+Comma separated list of fields (use
+"--helpformat" for a list of available fields).
 
 .TP
 \fB\-p\fR, \fB\-\-parsable\fR
@@ -96,13 +102,13 @@ number of assigned shares.
 
 .TP
 \f3Raw Usage\fP
-The number of cpu-seconds of all the jobs that charged the account by
-the user.  This number will decay over time when PriorityDecayHalfLife
-is defined.
+The number of tres-seconds (cpu-seconds if TRESBillingWeights is not defined)
+of all the jobs charged to the account or user. This number will decay over
+time when PriorityDecayHalfLife is defined.
 
 .TP
 \f3Norm Usage\fP (only appears with \fBsshare \-l\fR option)
-The Raw Usage normalized to the total number of cpu-seconds of all
+The Raw Usage normalized to the total number of tres-seconds of all
 jobs run on the cluster, subject to the PriorityDecayHalfLife decay
 when defined.
 
@@ -123,6 +129,11 @@ minutes that can possibly be used by past, present and future jobs
 running from this account and its children.
 
 .TP
+\f3GrpTRESRaw\fP
+The raw TRES usage that has been used by jobs running from
+this account and its children.
+
+.TP
 \f3TRESRunMins\fP
 The number of TRES-minutes allocated by jobs currently running against
 the account. Used to limit the combined total number of TRES minutes
@@ -132,7 +143,8 @@ if the limit is reached no new jobs are started until other jobs finish
 to allow time to free up.
 
 .SH "FAIR_TREE MODIFICATIONS"
-When PriorityFlags=FAIR_TREE is set, calculations are done differently.
+When PriorityFlags=FAIR_TREE is set (the default, unless NO_FAIR_TREE is set),
+calculations are done differently.
 As a result, the following fields are added or modified:
 
 .TP

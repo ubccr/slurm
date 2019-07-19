@@ -4,11 +4,11 @@
  *  Copyright (C) 2013 SchedMD LLC
  *  Written by Morris Jette
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -62,10 +62,10 @@ extern int job_container_fini(void);
 /* Create a container for the specified job */
 extern int container_g_create(uint32_t job_id);
 
-/* Add a process to the specified job's container.
- * A proctrack containter will be generated containing the process
+/* Add the calling process's pid to the specified job's container.
+ * A proctrack container will be generated containing the process
  * before container_g_add_cont() is called (see below). */
-extern int container_g_add_pid(uint32_t job_id, pid_t pid, uid_t uid);
+extern int container_g_join(uint32_t job_id, uid_t uid);
 
 /* Add a proctrack container (PAGG) to the specified job's container
  * The PAGG will be the job's cont_id returned by proctrack/sgi_job */

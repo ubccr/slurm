@@ -1,4 +1,4 @@
-.TH squeue "1" "Slurm Commands" "April 2016" "Slurm Commands"
+.TH squeue "1" "Slurm Commands" "April 2019" "Slurm Commands"
 
 .SH "NAME"
 squeue \- view information about jobs located in the Slurm scheduling queue.
@@ -29,6 +29,17 @@ Display one job array element per line.
 Without this option, the display will be optimized for use with job arrays
 (pending job array elements will be combined on one line of output with the
 array index values printed using a regular expression).
+
+.TP
+\fB\-\-array-unique\fR
+Display one unique pending job array element per line. Without this option,
+the pending job array elements will be grouped into the master array job to
+optimize the display.  This can also be set with the environment variable
+SQUEUE_ARRAY_UNIQUE.
+
+.TP
+\fB\-\-federation\fR
+Show jobs from the federation if a member of one.
 
 .TP
 \fB\-h\fR, \fB\-\-noheader\fR
@@ -68,6 +79,11 @@ Use the environment variable SLURM_BITSTR_LEN to specify larger field sizes.
 
 
 .TP
+\fB\-\-local\fR
+Show only jobs local to this cluster. Ignore other clusters in this federation
+(if any). Overrides \-\-federation.
+
+.TP
 \fB\-l\fR, \fB\-\-long\fR
 Report more of the available information for the selected jobs or job steps,
 subject to any constraints specified.
@@ -81,6 +97,7 @@ The license list consists of a comma separated list of license names.
 \fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
 Clusters to issue commands to.  Multiple cluster names may be comma separated.
 A value of of '\fIall\fR' will query to run on all clusters.
+This option implicitly sets the \fB\-\-local\fR option.
 
 .TP
 \fB\-n\fR, \fB\-\-name=<name_list>\fR
@@ -151,16 +168,12 @@ Job id.
 This will have a unique value for each element of job arrays.
 (Valid for jobs only)
 .TP
-\fB%b\fR
-Generic resources (gres) required by the job or step.
-(Valid for jobs and job steps)
-.TP
 \fB%B\fR
 Executing (batch) host. For an allocated session, this is the host on which
 the session is executing (i.e. the node from which the \fBsrun\fR or the
 \fBsalloc\fR command was executed). For a batch job, this is the node executing
 the batch script. In the case of a typical Linux cluster, this would be the
-compute node zero of the allocation. In the case of a BlueGene or a Cray
+compute node zero of the allocation. In the case of a Cray ALPS
 system, this would be the front\-end host whose slurmd daemon executes the job
 script.
 .TP
@@ -245,6 +258,9 @@ In the case of job arrays, the job ID format will be of the form
 By default, the job array index field size will be limited to 64 bytes.
 Use the environment variable SLURM_BITSTR_LEN to specify larger field sizes.
 (Valid for jobs and job steps)
+In the case of heterogeneous job allocations, the job ID format will be of the
+form "#+#" where the first number is the "heterogeneous job leader" and the
+second number the zero origin offset for each component of the job.
 .TP
 \fB%I\fR
 Number of cores per socket requested by the job.
@@ -298,8 +314,7 @@ If the time is obviously wrong (e.g. negative), it displays as "INVALID".
 (Valid for jobs and job steps)
 .TP
 \fB%n\fR
-List of node names (or base partitions on BlueGene systems) explicitly
-requested by the job.
+List of node names explicitly requested by the job.
 (Valid for jobs only)
 .TP
 \fB%N\fR
@@ -360,18 +375,13 @@ Actual or expected start time of the job or job step.
 (Valid for jobs and job steps)
 .TP
 \fB%t\fR
-Job state, compact form:
-PD (pending), R (running), CA (cancelled), CF(configuring),
-CG (completing), CD (completed),
-F (failed), TO (timeout), NF (node failure) and SE (special exit state).
-See the \fBJOB STATE CODES\fR section below for more information.
+Job state in compact form.
+See the \fBJOB STATE CODES\fR section below for a list of possible states.
 (Valid for jobs only)
 .TP
 \fB%T\fR
-Job state, extended form:
-PENDING, RUNNING, SUSPENDED, CANCELLED, COMPLETING, COMPLETED, CONFIGURING,
-FAILED, TIMEOUT, PREEMPTED, NODE_FAIL and SPECIAL_EXIT.
-See the \fBJOB STATE CODES\fR section below for more information.
+Job state in extended form.
+See the \fBJOB STATE CODES\fR section below for a list of possible states.
 (Valid for jobs only)
 .TP
 \fB%u\fR
@@ -455,6 +465,14 @@ Valid \fItype\fR specifications include:
 Print the account associated with the job.
 (Valid for jobs only)
 .TP
+\fBaccruetime\fR
+Print the accrue time associated with the job.
+(Valid for jobs only)
+.TP
+\fBadmin_comment\fR
+Administrator comment associated with the job.
+(Valid for jobs only)
+.TP
 \fBallocnodes\fR
 Print the nodes allocated to the job.
 (Valid for jobs only)
@@ -481,10 +499,10 @@ Prints whether the batch flag has been set.
 .TP
 \fBbatchhost\fR
 Executing (batch) host. For an allocated session, this is the host on which
-the session is executing (i.e. the node from which the the \fBsrun\fR or the
+the session is executing (i.e. the node from which the \fBsrun\fR or the
 \fBsalloc\fR command was executed). For a batch job, this is the node executing
 the batch script. In the case of a typical Linux cluster, this would be the
-compute node zero of the allocation. In the case of a BlueGene or a Cray/ALPS
+compute node zero of the allocation. In the case of a Cray ALPS
 system, this would be the front\-end host whose slurmd daemon executes the job
 script.
 (Valid for jobs only)
@@ -497,6 +515,10 @@ Prints the number of boards per node allocated to the job.
 Burst Buffer specification
 (Valid for jobs only)
 .TP
+\fBburstbufferstate\fR
+Burst Buffer state
+(Valid for jobs only)
+.TP
 \fBchptdir\fR
 Prints the directory where the job checkpoint will be written to.
 (Valid for job steps only)
@@ -504,6 +526,13 @@ Prints the directory where the job checkpoint will be written to.
 \fBchptinter\fR
 Prints the time interval of the checkpoint.
 (Valid for job steps only)
+.TP
+\fBcluster\fR
+Name of the cluster that is running the job or job step.
+.TP
+\fBclusterfeature\fR
+Cluster features required by the job.
+(Valid for jobs only)
 .TP
 \fBcommand\fR
 The command to be executed.
@@ -531,9 +560,12 @@ Count of cores reserved on each node for system use (core specialization).
 Prints the frequency of the allocated CPUs.
 (Valid for job steps only)
 .TP
-\fBcpuspertask\fR
+\fBcpus\-per\-task\fR
 Prints the number of CPUs per tasks allocated to the job.
 (Valid for jobs only)
+.TP
+\fBcpus\-per\-tres\fR
+Print the memory required per trackable resources allocated to the job or job step.
 .TP
 \fBdeadline\fR
 Prints the deadline affected to the job
@@ -545,6 +577,10 @@ dependent jobs complete. In the case of a job that can not run due to job
 dependencies never being satisfied, the full original job dependency
 specification will be reported. A value of NULL implies this job has no
 dependencies.
+(Valid for jobs only)
+.TP
+\fBdelayboot\fR
+Delay boot time.
 (Valid for jobs only)
 .TP
 \fBderivedec\fR
@@ -567,10 +603,6 @@ The exit code for the job.
 Features required by the job.
 (Valid for jobs only)
 .TP
-\fBgres\fR
-Generic resources (gres) required by the job or step.
-(Valid for jobs and job steps)
-.TP
 \fBgroupid\fR
 Group ID of the job.
 (Valid for jobs only)
@@ -586,7 +618,12 @@ For non\-array jobs, this is the job ID.
 .TP
 \fBjobid\fR
 Job id.
-This will have a unique value for each element of job arrays.
+This will have a unique value for each element of job arrays and each
+component of heterogeneous jobs.
+(Valid for jobs only)
+.TP
+\fBlastschedeval\fR
+Prints the last time the job was evaluated for scheduling.
 (Valid for jobs only)
 .TP
 \fBlicenses\fR
@@ -604,6 +641,10 @@ Prints the max number of nodes allocated to the job.
 \fBmcslabel\fR
 Prints the MCS_label of the job.
 (Valid for jobs only)
+.TP
+\fBmem\-per-tres\fR
+Print the memory (in MB) required per trackable resources allocated to the job
+or job step.
 .TP
 \fBminmemory\fR
 Minimum size of memory (in MB) requested by the job.
@@ -674,16 +715,24 @@ reflect the current number of CPUs allocated.
 Number of nodes allocated to the job or the minimum number of nodes
 required by a pending job. The actual number of nodes allocated to a pending
 job may exceed this number if the job specified a node range count (e.g.
-minimum and maximum node counts) or the the job specifies a processor
+minimum and maximum node counts) or the job specifies a processor
 count instead of a node count and the cluster contains nodes with varying
 processor counts. As a job is completing this number will reflect the
 current number of nodes allocated.
 (Valid for jobs only)
 .TP
-\fBnumtask\fR
+\fBnumtasks\fR
 Number of tasks requested by a job or job step.
 This reports the value of the \fB\-\-ntasks\fR option.
 (Valid for jobs and job steps)
+.TP
+\fBorigin\fR
+Cluster name where federated job originated from.
+(Valid for federated jobs only)
+.TP
+\fBoriginraw\fR
+Cluster ID where federated job originated from.
+(Valid for federated jobs only)
 .TP
 \fBoversubscribe\fR
 Can the compute resources allocated to the job be over subscribed by other jobs.
@@ -697,6 +746,15 @@ or the partition is configured with OverSubscribe=Force,
 (See MCSPlugin and MCSParameters configuration parameters for more information),
 "OK" otherwise (typically allocated dedicated CPUs),
 (Valid for jobs only)
+.TP
+\fBpackjobid\fR
+Job ID of the heterogeneous job leader.
+.TP
+\fBpackjoboffset\fR
+Zero origin offset within a collection of heterogeneous jobs.
+.TP
+\fBpackjobidset\fR
+Expression identifying all job IDs within a heterogeneous job.
 .TP
 \fBpartition\fR
 Partition of the job or job step.
@@ -743,8 +801,7 @@ Indicates if the allocated nodes should be rebooted before starting the job.
 (Valid on jobs only)
 .TP
 \fBreqnodes\fR
-List of node names (or base partitions on BlueGene systems) explicitly
-requested by the job.
+List of node names explicitly requested by the job.
 (Valid for jobs only)
 .TP
 \fBreqswitch\fR
@@ -789,6 +846,22 @@ Permit rotation of geometry (yes or no),
 Node use (VIRTUAL or COPROCESSOR), etc.
 (Valid for jobs only)
 .TP
+\fBsiblingsactive\fR
+Cluster names of where federated sibling jobs exist.
+(Valid for federated jobs only)
+.TP
+\fBsiblingsactiveraw\fR
+Cluster IDs of where federated sibling jobs exist.
+(Valid for federated jobs only)
+.TP
+\fBsiblingsviable\fR
+Cluster names of where federated sibling jobs are viable to run.
+(Valid for federated jobs only)
+.TP
+\fBsiblingsviableraw\fR
+Cluster IDs of where federated sibling jobs viable to run.
+(Valid for federated jobs only)
+.TP
 \fBsockets\fR
 Number of sockets per node requested by the job.
 This reports the value of the \fBsrun \-\-sockets\-per\-node\fR option.
@@ -804,18 +877,13 @@ Actual or expected start time of the job or job step.
 (Valid for jobs and job steps)
 .TP
 \fBstate\fR
-Job state, extended form:
-PENDING, RUNNING, STOPPED, SUSPENDED, CANCELLED, COMPLETING, COMPLETED,
-CONFIGURING, FAILED, TIMEOUT, PREEMPTED, NODE_FAIL and SPECIAL_EXIT.
-See the \fBJOB STATE CODES\fR section below for more information.
+Job state in extended form.
+See the \fBJOB STATE CODES\fR section below for a list of possible states.
 (Valid for jobs only)
 .TP
 \fBstatecompact\fR
-Job state, compact form:
-PD (pending), R (running), CA (cancelled), CF(configuring),
-CG (completing), CD (completed),
-F (failed), TO (timeout), NF (node failure) and SE (special exit state).
-See the \fBJOB STATE CODES\fR section below for more information.
+Job state in compact form.
+See the \fBJOB STATE CODES\fR section below for a list of possible states.
 (Valid for jobs only)
 .TP
 \fBstderr\fR
@@ -848,6 +916,10 @@ The state of the job step.
 The time that the job was submitted at.
 (Valid for jobs only)
 .TP
+\fBsystem_comment\fR
+System comment associated with the job.
+(Valid for jobs only)
+.TP
 \fBthreads\fR
 Number of threads per core requested by the job.
 This reports the value of the \fBsrun \-\-threads\-per\-core\fR option.
@@ -874,8 +946,30 @@ Clock skew between nodes in the cluster will cause the time to be inaccurate.
 If the time is obviously wrong (e.g. negative), it displays as "INVALID".
 (Valid for jobs and job steps)
 .TP
-\fBtres\fR
-Print the trackable resources allocated to the job.
+\fBtres\-alloc\fR
+Print the trackable resources allocated to the job if running.
+If not running, then print the trackable resources requested by the job.
+.TP
+\fBtres\-bind\fR
+Print the trackable resources task binding requested by the job or job step.
+.TP
+\fBtres\-freq\fR
+Print the trackable resources frequencies requested by the job or job step.
+.TP
+\fBtres\-per\-job\fR
+Print the trackable resources requested by the job.
+.TP
+\fBtres\-per\-node\fR
+Print the trackable resources per node requested by the job or job step.
+.TP
+\fBtres\-per\-socket\fR
+Print the trackable resources per socket requested by the job or job step.
+.TP
+\fBtres\-per\-step\fR
+Print the trackable resources requested by the job step.
+.TP
+\fBtres\-per\-task\fR
+Print the trackable resources per task requested by the job or job step.
 .TP
 \fBuserid\fR
 User ID for a job or job step.
@@ -931,9 +1025,15 @@ and not include a space between them. For example "\-s1008.0" and not
 "\-s 1008.0".
 
 .TP
+\fB\-\-sibling\fR
+Show all sibling jobs on a federated cluster. Implies \-\-federation.
+
+.TP
 \fB\-S <sort_list>\fR, \fB\-\-sort=<sort_list>\fR
 Specification of the order in which records should be reported.
 This uses the same field specification as the <output_format>.
+The long format option "cluster" can also be used to sort jobs or job steps by
+cluster name (e.g. federated jobs).
 Multiple sorts may be performed by listing multiple sort fields
 separated by commas.
 The field specifications may be preceded by "+" or "\-" for
@@ -964,14 +1064,10 @@ Slurm is configured to use the backfill scheduling plugin.
 Specify the states of jobs to view.  Accepts a comma separated list of
 state names or "all". If "all" is specified then jobs of all states will be
 reported. If no state is specified then pending, running, and completing
-jobs are reported. Valid states (in both extended and compact form) include:
-PENDING (PD), RUNNING (R), SUSPENDED (S), STOPPED (ST),
-COMPLETING (CG), COMPLETED (CD), CONFIGURING (CF), CANCELLED (CA),
-FAILED (F), TIMEOUT (TO), PREEMPTED (PR), BOOT_FAIL (BF) , NODE_FAIL (NF)
-and SPECIAL_EXIT (SE).
+jobs are reported. See the \fBJOB STATE CODES\fR section below for a list of
+valid states. Both extended and compact forms are valid.
 Note the \fB<state_list>\fR supplied is case insensitive ("pd" and "PD" are
 equivalent).
-See the \fBJOB STATE CODES\fR section below for more information.
 
 .TP
 \fB\-u <user_list>\fR, \fB\-\-user=<user_list>\fR
@@ -1018,12 +1114,6 @@ The job's constraints can not be satisfied.
 .TP
 \fBBeginTime\fR
 The job's earliest start time has not yet been reached.
-.TP
-\fBBlockFreeAction\fR
-An IBM BlueGene block is being freed and can not allow more jobs to start.
-.TP
-\fBBlockMaxError\fR
-An IBM BlueGene block has too many cnodes in error state to allow more jobs to start.
 .TP
 \fBCleaning\fR
 The job is being requeued and still cleaning up from its previous execution.
@@ -1143,11 +1233,17 @@ Job has been allocated resources, but are waiting for them to become ready for u
 \fBCG  COMPLETING\fR
 Job is in the process of completing. Some processes on some nodes may still be active.
 .TP
+\fBDL  DEADLINE\fR
+Job terminated on deadline.
+.TP
 \fBF   FAILED\fR
 Job terminated with non\-zero exit code or other failure condition.
 .TP
 \fBNF  NODE_FAIL\fR
 Job terminated due to failure of one or more allocated nodes.
+.TP
+\fBOOM OUT_OF_MEMORY\fR
+Job experienced out of memory error.
 .TP
 \fBPD  PENDING\fR
 Job is awaiting resource allocation.
@@ -1158,10 +1254,34 @@ Job terminated due to preemption.
 \fBR   RUNNING\fR
 Job currently has an allocation.
 .TP
+\fBRD  RESV_DEL_HOLD\fR
+Job is held.
+.TP
+\fBRF  REQUEUE_FED\fR
+Job is being requeued by a federation.
+.TP
+\fBRH  REQUEUE_HOLD\fR
+Held job is being requeued.
+.TP
+\fBRQ  REQUEUED\fR
+Completing job is being requeued.
+.TP
+\fBRS  RESIZING\fR
+Job is about to change size.
+.TP
+\fBRV  REVOKED\fR
+Sibling was removed from cluster due to other cluster starting the job.
+.TP
+\fBSI  SIGNALING\fR
+Job is being signaled.
+.TP
 \fBSE  SPECIAL_EXIT\fR
 The job was requeued in a special state. This state can be set by
 users, typically in EpilogSlurmctld, if the job has terminated with
 a particular exit value.
+.TP
+\fBSO  STAGE_OUT\fR
+Job is staging out files.
 .TP
 \fBST  STOPPED\fR
 Job has an allocation, but execution has been stopped with SIGSTOP signal.
@@ -1219,6 +1339,9 @@ A valid strftime() format can also be specified. For example, a value of
 \fBSQUEUE_NAMES\fR
 \fB\-\-name=<name_list>\fR
 .TP
+\fBSQUEUE_FEDERATION\fR
+\fB\-\-federation\fR
+.TP
 \fBSQUEUE_FORMAT\fR
 \fB\-o <output_format>, \-\-format=<output_format>\fR
 .TP
@@ -1228,6 +1351,9 @@ A valid strftime() format can also be specified. For example, a value of
 \fBSQUEUE_LICENSES\fR
 \fB\-p-l <license_list>, \-\-license=<license_list>\fR
 .TP
+\fBSQUEUE_LOCAL\fR
+\fB\-\-local\fR
+.TP
 \fBSQUEUE_PARTITION\fR
 \fB\-p <part_list>, \-\-partition=<part_list>\fR
 .TP
@@ -1236,6 +1362,9 @@ A valid strftime() format can also be specified. For example, a value of
 .TP
 \fBSQUEUE_QOS\fR
 \fB\-p <qos_list>, \-\-qos=<qos_list>\fR
+.TP
+\fBSQUEUE_SIBLING\fR
+\\fB\-\-sibling\fR
 .TP
 \fBSQUEUE_SORT\fR
 \fB\-S <sort_list>, \-\-sort=<sort_list>\fR

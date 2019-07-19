@@ -10,11 +10,11 @@
  *  Written by Jim Garlick <garlick@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -30,13 +30,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -57,35 +57,21 @@
 #ifndef _BITSTRING_H_
 #define	_BITSTRING_H_
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif  /* HAVE_INTTYPES_H */
-#else	/* !HAVE_CONFIG_H */
-#  include <inttypes.h>
-#endif  /*  HAVE_CONFIG_H */
+#include <inttypes.h>
 
 #define BITSTR_SHIFT_WORD8	3
-#define BITSTR_SHIFT_WORD32	5
 #define BITSTR_SHIFT_WORD64	6
+#define BITSTR_MAXVAL           0xffffffffffffffff
+#define BITSTR_FMT		PRId64
 
+/* Below are also defined in src/slurm/slurm.h.in.  If it changes please update
+ * that as well.
+ */
 #ifndef   __bitstr_datatypes_defined
 #  define __bitstr_datatypes_defined
 
-#ifdef USE_64BIT_BITSTR
 typedef int64_t bitstr_t;
 #define BITSTR_SHIFT 		BITSTR_SHIFT_WORD64
-#define BITSTR_MAXVAL           0xffffffffffffffff
-#else
-typedef int32_t bitstr_t;
-#define BITSTR_SHIFT 		BITSTR_SHIFT_WORD32
-#define BITSTR_MAXVAL           0xffffffff
-#endif
 
 typedef bitstr_t bitoff_t;
 
@@ -127,8 +113,10 @@ void	bit_free(bitstr_t *b);
 bitstr_t *bit_realloc(bitstr_t *b, bitoff_t nbits);
 bitoff_t bit_size(bitstr_t *b);
 void	bit_and(bitstr_t *b1, bitstr_t *b2);
+void	bit_and_not(bitstr_t *b1, bitstr_t *b2);
 void	bit_not(bitstr_t *b);
 void	bit_or(bitstr_t *b1, bitstr_t *b2);
+void	bit_or_not(bitstr_t *b1, bitstr_t *b2);
 int32_t	bit_set_count(bitstr_t *b);
 int32_t	bit_set_count_range(bitstr_t *b, int32_t start, int32_t end);
 int32_t	bit_clear_count(bitstr_t *b);
@@ -137,10 +125,13 @@ int32_t	bit_nset_max_count(bitstr_t *b);
 bitstr_t *bit_rotate_copy(bitstr_t *b1, int32_t n, bitoff_t nbits);
 void	bit_rotate(bitstr_t *b1, int32_t n);
 char	*bit_fmt(char *str, int32_t len, bitstr_t *b);
+char    *bit_fmt_full(bitstr_t *b);
+char    *bit_fmt_range(bitstr_t *b, int offset, int len);
 int	bit_unfmt(bitstr_t *b, char *str);
 int32_t	*bitfmt2int (char *bit_str_ptr);
 char *  inx2bitfmt (int32_t *inx);
 int     inx2bitstr(bitstr_t *b, int32_t *inx);
+int32_t *bitstr2inx(bitstr_t *b);
 char	*bit_fmt_hexmask(bitstr_t *b);
 int 	bit_unfmt_hexmask(bitstr_t *b, const char *str);
 char	*bit_fmt_binmask(bitstr_t *b);

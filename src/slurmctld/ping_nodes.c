@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,26 +27,21 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
-#ifdef WITH_PTHREADS
-#  include <pthread.h>
-#endif
-
-#include <time.h>
+#include <pthread.h>
 #include <string.h>
+#include <time.h>
 
 #include "src/common/hostlist.h"
 #include "src/common/node_select.h"
@@ -55,9 +50,6 @@
 #include "src/slurmctld/front_end.h"
 #include "src/slurmctld/ping_nodes.h"
 #include "src/slurmctld/slurmctld.h"
-
-/* Attempt to fork a thread at most MAX_RETRIES times before aborting */
-#define MAX_RETRIES 10
 
 /* Request that nodes re-register at most every MAX_REG_FREQUENCY pings */
 #define MAX_REG_FREQUENCY 20
@@ -120,11 +112,15 @@ void ping_begin (void)
 void ping_end (void)
 {
 	slurm_mutex_lock(&lock_mutex);
+
 	if (ping_count > 0)
 		ping_count--;
 	else
-		fatal ("ping_count < 0");
-	ping_start = 0;
+		error("%s: ping_count < 0", __func__);
+
+	if (ping_count == 0) /* no more running ping cycles */
+		ping_start = 0;
+
 	slurm_mutex_unlock(&lock_mutex);
 }
 
@@ -143,6 +139,7 @@ void ping_nodes (void)
 	int i;
 	time_t now = time(NULL), still_live_time, node_dead_time;
 	static time_t last_ping_time = (time_t) 0;
+	static time_t last_ping_timeout = (time_t) 0;
 	hostlist_t down_hostlist = NULL;
 	char *host_str = NULL;
 	agent_arg_t *ping_agent_args = NULL;
@@ -176,15 +173,15 @@ void ping_nodes (void)
 	 * Because of this, we extend the SlurmdTimeout by the
 	 * time needed to complete a ping of all nodes.
 	 */
-	if ((slurmctld_conf.slurmd_timeout == 0) ||
+	if ((last_ping_timeout == 0) ||
 	    (last_ping_time == (time_t) 0)) {
 		node_dead_time = (time_t) 0;
 	} else {
-		node_dead_time = last_ping_time -
-				 slurmctld_conf.slurmd_timeout;
+		node_dead_time = last_ping_time - last_ping_timeout;
 	}
 	still_live_time = now - (slurmctld_conf.slurmd_timeout / 3);
 	last_ping_time  = now;
+	last_ping_timeout = slurmctld_conf.slurmd_timeout;
 
 	if (max_reg_threads == 0) {
 		max_reg_threads = MAX(slurm_get_tree_width(), 1);
@@ -268,7 +265,9 @@ void ping_nodes (void)
 #else
 	for (i = 0, node_ptr = node_record_table_ptr;
 	     i < node_record_count; i++, node_ptr++) {
-		if (IS_NODE_FUTURE(node_ptr) || IS_NODE_POWER_SAVE(node_ptr))
+		if (IS_NODE_FUTURE(node_ptr) ||
+		    IS_NODE_POWER_SAVE(node_ptr) ||
+		    IS_NODE_POWER_UP(node_ptr))
 			continue;
 		if ((slurmctld_conf.slurmd_timeout == 0) &&
 		    (!restart_flag)			 &&
@@ -401,12 +400,12 @@ extern void run_health_check(void)
 	 */
 	select_g_select_nodeinfo_set_all();
 
+#ifdef HAVE_FRONT_END
 	check_agent_args = xmalloc (sizeof (agent_arg_t));
 	check_agent_args->msg_type = REQUEST_HEALTH_CHECK;
 	check_agent_args->retry = 0;
 	check_agent_args->protocol_version = SLURM_PROTOCOL_VERSION;
 	check_agent_args->hostlist = hostlist_create(NULL);
-#ifdef HAVE_FRONT_END
 	for (i = 0, front_end_ptr = front_end_nodes;
 	     i < front_end_node_cnt; i++, front_end_ptr++) {
 		if (IS_NODE_NO_RESPOND(front_end_ptr))
@@ -448,6 +447,11 @@ extern void run_health_check(void)
 		select_g_select_nodeinfo_set_all();
 	}
 
+	check_agent_args = xmalloc (sizeof (agent_arg_t));
+	check_agent_args->msg_type = REQUEST_HEALTH_CHECK;
+	check_agent_args->retry = 0;
+	check_agent_args->protocol_version = SLURM_PROTOCOL_VERSION;
+	check_agent_args->hostlist = hostlist_create(NULL);
 	for (i = 0; i < node_record_count; i++) {
 		if (run_cyclic) {
 			if (node_test_cnt++ >= node_limit)

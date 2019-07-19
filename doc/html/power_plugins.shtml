@@ -23,7 +23,7 @@ The minor type can be any suitable name for the type of power management
 package.
 The following power management plugins are included in the Slurm distribution
 <ul>
-<li><b>cray</b> &mdash; Use Cray APIs to provide power management.</li>
+<li><b>cray_aries</b> &mdash; Use Cray XC APIs to provide power management.</li>
 <li><b>none</b> &mdash; Can be configured to log calls to its functions, but
 otherwise does nothing.</li>
 </ul>
@@ -32,14 +32,13 @@ otherwise does nothing.</li>
 If specified, identifies the version of Slurm used to build this plugin and
 any attempt to load the plugin from a different version of Slurm will result
 in an error.
-If not specified, then the plugin may be loadeed by Slurm commands and
+If not specified, then the plugin may be loaded by Slurm commands and
 daemons from any version, however this may result in difficult to diagnose
 failures due to changes in the arguments to plugin functions or changes
 in other Slurm functions used by the plugin.</p>
 
 <p>Slurm can be configured to use multiple power management plugins if desired.</p>
 
-<p class="footer"><a href="#top">top</a>
 
 <h2>API Functions</h2>
 <p>All of the following functions are required. Functions which are not
@@ -89,7 +88,6 @@ Called by the slurmctld daemon.
 <span class="commandline">job_ptr</span>
 (input) pointer to the job record being started.
 
-<p class="footer"><a href="#top">top</a>
 
 <p style="text-align:center;">Last modified 27 March 2015</p>
 

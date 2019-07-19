@@ -8,11 +8,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +28,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
  *  This file is patterned after jobcomp_linux.c, written by Morris Jette and
@@ -69,10 +69,10 @@ extern List mysql_jobcomp_process_get_jobs(slurmdb_job_cond_t *job_cond)
 		set = 0;
 		xstrcat(extra, " where (");
 		itr = list_iterator_create(job_cond->step_list);
-		while((selected_step = list_next(itr))) {
+		while ((selected_step = list_next(itr))) {
 			if (set)
 				xstrcat(extra, " || ");
-			tmp = xstrdup_printf("jobid=%d",
+			tmp = xstrdup_printf("jobid=%u",
 					      selected_step->jobid);
 			xstrcat(extra, tmp);
 			set = 1;
@@ -90,7 +90,7 @@ extern List mysql_jobcomp_process_get_jobs(slurmdb_job_cond_t *job_cond)
 			xstrcat(extra, " where (");
 
 		itr = list_iterator_create(job_cond->partition_list);
-		while((selected_part = list_next(itr))) {
+		while ((selected_part = list_next(itr))) {
 			if (set)
 				xstrcat(extra, " || ");
 			tmp = xstrdup_printf("`partition`='%s'",
@@ -104,10 +104,10 @@ extern List mysql_jobcomp_process_get_jobs(slurmdb_job_cond_t *job_cond)
 	}
 
 	i = 0;
-	while(jobcomp_table_fields[i].name) {
+	while (jobcomp_table_fields[i].name) {
 		if (i)
 			xstrcat(tmp, ", ");
-		xstrcat(tmp, jobcomp_table_fields[i].name);
+		xstrfmtcat(tmp, "`%s`", jobcomp_table_fields[i].name);
 		i++;
 	}
 
@@ -128,7 +128,7 @@ extern List mysql_jobcomp_process_get_jobs(slurmdb_job_cond_t *job_cond)
 	}
 	xfree(query);
 
-	while((row = mysql_fetch_row(result))) {
+	while ((row = mysql_fetch_row(result))) {
 		lc++;
 
 		job = xmalloc(sizeof(jobcomp_job_rec_t));

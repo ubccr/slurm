@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,22 +27,18 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _NODE_SELECT_H
 #define _NODE_SELECT_H
-
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif /* HAVE_CONFIG_H */
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -70,63 +66,6 @@ typedef struct {
 } select_will_run_t;
 
 /*
- * structure that holds the configuration settings for each request
- */
-typedef struct {
-	bitstr_t *avail_mp_bitmap;   /* pointer to available mps */
-	char *blrtsimage;            /* BlrtsImage for this block */
-	uint16_t conn_type[HIGHEST_DIMENSIONS]; /* mesh, torus, or small */
-	bool elongate;                 /* whether allow elongation or not */
-	int elongate_count;            /* place in elongate_geos list
-					  we are at */
-	List elongate_geos;            /* used on L and P systems for
-					  geos */
-	void *geo_table;               /* pointer to a list of
-					* pointer to different geos */
-	uint16_t geometry[HIGHEST_DIMENSIONS]; /* size of block in geometry */
-	char *linuximage;              /* LinuxImage for this block */
-	char *mloaderimage;            /* mloaderImage for this block */
-	uint16_t deny_pass;            /* PASSTHROUGH_FOUND is set if there are
-					  passthroughs in the block
-					  created you can deny
-					  passthroughs by setting the
-					  appropriate bits */
-	int procs;                     /* Number of Real processors in
-					  block */
-	char *ramdiskimage;            /* RamDiskImage for this block */
-	bool rotate;                   /* whether allow elongation or not */
-	int rotate_count;              /* number of times rotated */
-	char *save_name;               /* name of midplanes in block */
-	int size;                      /* count of midplanes in block */
-	uint16_t small16;              /* number of blocks using 16 cnodes in
-					* block, only used for small
-					* block creation */
-	uint16_t small32;              /* number of blocks using 32 cnodes in
-					* block, only used for small
-					* block creation */
-	uint16_t small64;              /* number of blocks using 64 cnodes in
-					* block, only used for small
-					* block creation */
-	uint16_t small128;             /* number of blocks using 128 cnodes in
-					* block, only used for small
-					* block creation */
-	uint16_t small256;             /* number of blocks using 256 cnodes in
-					* block, only used for small
-					* block creation */
-	uint16_t start[HIGHEST_DIMENSIONS]; /* where to start creation of
-					    block */
-	int start_req;                 /* state there was a start
-					  request */
-	bool full_check;               /* This request is to check all
-					* nodes and wires no matter
-					* what.  Primarily added to
-					* handle when a nodeboard
-					* goes down to avoid using
-					* the midplane for
-					* passthrough. */
-} select_ba_request_t;
-
-/*
  * Local data
  */
 typedef struct slurm_select_ops {
@@ -150,7 +89,6 @@ typedef struct slurm_select_ops {
 						 bitstr_t *exc_core_bitmap);
 	int		(*job_begin)		(struct job_record *job_ptr);
 	int		(*job_ready)		(struct job_record *job_ptr);
-	bool		(*job_expand_allow)	(void);
 	int		(*job_expand)		(struct job_record *from_job_ptr,
 						 struct job_record *to_job_ptr);
 	int		(*job_resized)		(struct job_record *job_ptr,
@@ -170,10 +108,6 @@ typedef struct slurm_select_ops {
 	int             (*step_start)           (struct step_record *step_ptr);
 	int             (*step_finish)          (struct step_record *step_ptr,
 						 bool killing_step);
-	int		(*pack_select_info)	(time_t last_query_time,
-						 uint16_t show_flags,
-						 Buf *buffer_ptr,
-						 uint16_t protocol_version);
 	int		(*nodeinfo_pack)	(select_nodeinfo_t *nodeinfo,
 						 Buf buffer,
 						 uint16_t protocol_version);
@@ -211,29 +145,17 @@ typedef struct slurm_select_ops {
 						 int mode);
 	char *		(*jobinfo_xstrdup)	(select_jobinfo_t *jobinfo,
 						 int mode);
-	int		(*update_block)		(update_block_msg_t
-						 *block_desc_ptr);
-	int		(*update_sub_node)	(update_block_msg_t
-						 *block_desc_ptr);
-	int             (*fail_cnode)           (struct step_record *step_ptr);
 	int		(*get_info_from_plugin)	(enum
 						 select_plugindata_info dinfo,
 						 struct job_record *job_ptr,
 						 void *data);
 	int		(*update_node_config)	(int index);
 	int		(*update_node_state)	(struct node_record *node_ptr);
-	int		(*alter_node_cnt)	(enum select_node_cnt type,
-						 void *data);
 	int		(*reconfigure)		(void);
 	bitstr_t *      (*resv_test)            (resv_desc_msg_t *resv_desc_ptr,
 						 uint32_t node_cnt,
 						 bitstr_t *avail_bitmap,
 						 bitstr_t **core_bitmap);
-	void            (*ba_init)              (node_info_msg_t *node_info_ptr,
-						 bool sanity_check);
-	void            (*ba_fini)              (void);
-	int *           (*ba_get_dims)          (void);
-	bitstr_t *      (*ba_cnodelist2bitmap)  (char *cnodelist);
 } slurm_select_ops_t;
 
 /*
@@ -261,7 +183,7 @@ extern int slurm_select_init(bool only_default);
  */
 extern int slurm_select_fini(void);
 
-/* Get this plugin's sequence number in SLURM's internal tables */
+/* Get this plugin's sequence number in Slurm's internal tables */
 extern int select_get_plugin_id_pos(uint32_t plugin_id);
 
 /* Get the plugin ID number. Unique for each select plugin type */
@@ -304,7 +226,7 @@ extern int select_g_block_init(List part_list);
 /*
  * Note the initialization of job records, issued upon restart of
  * slurmctld and used to synchronize any job state.
- * IN job_list - List of SLURM jobs from slurmctld
+ * IN job_list - List of Slurm jobs from slurmctld
  */
 extern int select_g_job_init(List job_list);
 
@@ -393,37 +315,6 @@ extern bool select_g_node_ranking(struct node_record *node_ptr, int node_cnt);
  * RETURN SLURM_SUCCESS on success || SLURM_ERROR else wise
  */
 extern int select_g_update_node_state (struct node_record *node_ptr);
-
-/*
- * Alter the node count based upon system architecture (i.e. on Bluegene
- * systems, one node/midplane is equivalent to 512 compute nodes
- * IN type - an enum describing how to transform the count
- * IN/OUT data - The data to be modified
- */
-extern int select_g_alter_node_cnt (enum select_node_cnt type, void *data);
-
-/***************************\
- * BLOCK SPECIFIC FUNCIONS *
-\***************************/
-
-/*
- * Update specific sub nodes (usually something has gone wrong)
- * IN block_desc_ptr - information about the block
- */
-extern int select_g_update_sub_node (update_block_msg_t *block_desc_ptr);
-
-/*
- * Update specific block (usually something has gone wrong)
- * IN block_desc_ptr - information about the block
- */
-extern int select_g_update_block (update_block_msg_t *block_desc_ptr);
-
-/*
- * Fail certain cnodes in a blocks midplane (usually comes from the
- *        IBM runjob mux)
- * IN step_ptr - step with failed cnodes
- */
-extern int select_g_fail_cnode (struct step_record *step_ptr);
 
 /******************************************************\
  * JOB SPECIFIC SELECT CREDENTIAL MANAGEMENT FUNCIONS *
@@ -600,9 +491,9 @@ extern int select_g_job_ready(struct job_record *job_ptr);
 extern int select_g_job_fini(struct job_record *job_ptr);
 
 /*
- * Pass job-step signal to plugin before signalling any job steps, so that
+ * Pass job-step signal to plugin before signaling any job steps, so that
  * any signal-dependent actions can be taken.
- * IN job_ptr - job to be signalled
+ * IN job_ptr - job to be signaled
  * IN signal  - signal(7) number
  */
 extern int select_g_job_signal(struct job_record *job_ptr, int signal);
@@ -633,11 +524,6 @@ extern int select_g_job_suspend(struct job_record *job_ptr, bool indf_susp);
  * RET SLURM_SUCCESS or error code
  */
 extern int select_g_job_resume(struct job_record *job_ptr, bool indf_susp);
-
-/*
- * Test if job expansion is supported
- */
-extern bool select_g_job_expand_allow(void);
 
 /*
  * Move the resource allocated to one job into that of another job.
@@ -733,42 +619,5 @@ extern bitstr_t * select_g_resv_test(resv_desc_msg_t *resv_desc_ptr,
 extern int select_g_get_info_from_plugin (enum select_plugindata_info dinfo,
 					  struct job_record *job_ptr,
 					  void *data);
-
-/* pack node-select plugin specific information into a buffer in
- *	machine independent form
- * IN last_update_time - time of latest information consumer has
- * IN show_flags - flags to control information output
- * OUT buffer - location to hold the data, consumer must free
- * IN protocol_version - slurm protocol version of client
- * RET - slurm error code
- *
- * NOTE: The unpack for this is in common/slurm_protocol_pack.c
- */
-extern int select_g_pack_select_info(time_t last_query_time,
-				     uint16_t show_flags, Buf *buffer,
-				     uint16_t protocol_version);
-
-/* Free ba_request value's memory which was allocted by
- * select_g_pack_select_info() */
-extern void destroy_select_ba_request(void *arg);
-
-/* Log's the ba_request value generated by select_g_pack_select_info() */
-extern void print_select_ba_request(select_ba_request_t* ba_request);
-
-/* Get the number of elements in each dimension of a system
- * RET - An array of element counts, one element per dimension */
-extern int *select_g_ba_get_dims(void);
-
-/* Construct an internal block allocation table
- * IN node_info_ptr - Node state information read from slurmctld daemon
- * IN sanity_check - If set, then verify each node's suffix contains values
- *                   within the system dimension limits */
-extern void select_g_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check);
-
-/* Free storage allocated by select_g_ba_init() */
-extern void select_g_ba_fini(void);
-
-/* returns a bitmap with the cnodelist bits in a midplane not set */
-extern bitstr_t *select_g_ba_cnodelist2bitmap(char *cnodelist);
 
 #endif /*__SELECT_PLUGIN_API_H__*/

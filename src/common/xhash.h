@@ -2,13 +2,12 @@
  *  xtree.h - functions used for hash table manament
  *****************************************************************************
  *  Copyright (C) 2012 CEA/DAM/DIF
- *  Copyright (C) 2013 SchedMD LLC. Written by David Bigagli
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +23,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -53,9 +52,9 @@ typedef struct xhash_st xhash_t;
   *
   * @param item takes one of the items stored by the lists in the hash
   *             table.
-  * @returns an unique identifier used for making hashes.
+  * @returns unique identifier in 'key' and the length of the key in 'key_len'
   */
-typedef const char* (*xhash_idfunc_t)(void* item);
+typedef void (*xhash_idfunc_t)(void* item, const char** key, uint32_t* key_len);
 
 /**
   * @param id is the unique identifier an item can be identified with.
@@ -81,15 +80,19 @@ typedef void (*xhash_freefunc_t)(void* item);
  *
  * @returns the newly allocated hash table. Must be freed with xhash_free.
  */
-xhash_t* xhash_init(xhash_idfunc_t idfunc,
-		    xhash_freefunc_t freefunc,
-		    xhash_hashfunc_t hashfunc, /* Currently: should be NULL */
-		    uint32_t table_size);      /* Currently: unused         */
+xhash_t *xhash_init(xhash_idfunc_t idfunc, xhash_freefunc_t freefunc);
 
 /** @returns an item from a key searching through the hash table. NULL if not
  * found.
  */
-void* xhash_get(xhash_t* table, const char* key);
+void* xhash_get(xhash_t* table, const char* key, uint32_t len);
+
+/** @returns an item from a key string searching through the hash table.
+ *  NULL if not found. Wrapper to xhash_get
+ *  @param key is null-terminated unique key
+ *  @returns item from key
+ */
+void* xhash_get_str(xhash_t* table, const char* key);
 
 /** Add an item to the hash table.
  * @param table is the hash table you want to add the item to.
@@ -104,12 +107,26 @@ void* xhash_add(xhash_t* table, void* item);
  * memory associated with the item even if freefunc was not null at init time.
  * @returns the removed item value.
  */
-void* xhash_pop(xhash_t* table, const char* key);
+void* xhash_pop(xhash_t* table, const char* key, uint32_t len);
+
+/** Remove an item associated with a key string from the hash table but
+ *      does not call the table's free_func on the item. 
+ *  Wrapper to xhash_pop
+ *  @param key is null-terminated unique key
+ *  @returns the removed item
+ */
+void* xhash_pop_str(xhash_t* table, const char* key);
 
 /** Remove an item associated with a key from the hash table.
  * If found and freefunc at init time was not null, free the item's memory.
  */
-void xhash_delete(xhash_t* table, const char* key);
+void xhash_delete(xhash_t* table, const char* key, uint32_t len);
+
+/** Remove an item associated with a string key from the hash table
+ *      Wrapper to xhash_delete
+ *  @param key is null-terminated unique key
+ */
+void xhash_delete_str(xhash_t* table, const char* key);
 
 /** @returns the number of items stored in the hash table */
 uint32_t xhash_count(xhash_t* table);
@@ -130,57 +147,4 @@ void xhash_clear(xhash_t* table);
  */
 void xhash_free_ptr(xhash_t** table);
 
-/* String hash table using the pjw hashing algorithm
- * and chaining conflict resolution.
- * Includes a double linked list implementation.
- */
-struct hash_entry {
-	struct hash_entry *forw;
-	struct hash_entry *back;
-	char *key;
-	void *data;
-};
-
-struct hash_tab {
-	uint32_t size;
-	uint32_t num_ents;
-	struct list_ **lists;
-};
-
-struct list_ {
-    struct list_ *forw;
-    struct list_ *back;
-    uint32_t num_ents;
-    char *name;
-};
-
-#define LIST_NUM_ENTS(L) ((L)->num_ents)
-
-/* Double link list implementation is
- * part of the hash library.
- */
-extern struct list_ *list_make_(const char *);
-extern int  list_insert_(struct list_ *,
-			 struct list_ *,
-			 struct list_ *);
-extern int list_push_(struct list_ *,
-		      struct list_ *);
-extern int list_enque_(struct list_ *,
-		       struct list_ *);
-extern struct list_ *list_rm_(struct list_ *,
-			      struct list_ *);
-struct list_ *list_pop_(struct list_ *);
-extern struct list_ *list_deque_(struct list_ *);
-extern void list_free_(struct list_ *, void (*f)(void *));
-
-/* Hash table interface.
- */
-extern struct hash_tab *hash_make(uint32_t);
-extern int hash_install(struct hash_tab *, const char *, void *);
-extern void *hash_lookup(struct hash_tab *, const char *);
-extern void *hash_remove(struct hash_tab *, const char *);
-extern void hash_free(struct hash_tab *, void (*f)(char *key, void *data));
-
-
 #endif
-

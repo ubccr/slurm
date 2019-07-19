@@ -12,11 +12,11 @@
  *  Written by Artem Y. Polyakov <artemp@mellanox.com>.
  *  All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -32,23 +32,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if     HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <unistd.h>
+
 #include "src/common/slurm_xlator.h"
 #include "src/common/slurm_protocol_interface.h"
 #include "src/common/slurm_protocol_api.h"
@@ -138,7 +135,7 @@ _handle_kvs_fence(int fd, Buf buf)
 
 	temp_kvs_merge(buf);
 
-	if (children_to_wait == 0 && tasks_to_wait == 0) {
+	if ((children_to_wait == 0) && (tasks_to_wait == 0)) {
 		rc = temp_kvs_send();
 		if (rc != SLURM_SUCCESS) {
 			if (in_stepd()) {
@@ -182,13 +179,13 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	debug3("mpi/pmi2: in _handle_kvs_fence_resp");
 
 	safe_unpack32(&seq, buf);
-	if( seq == kvs_seq - 2) {
+	if (seq == kvs_seq - 2) {
 		debug("mpi/pmi2: duplicate KVS_FENCE_RESP "
 		      "seq %d kvs_seq %d from srun ignored", seq, kvs_seq);
 		return rc;
 	} else if (seq != kvs_seq - 1) {
-		error("mpi/pmi2: invalid kvs seq from srun, expect %u"
-		      " got %u", kvs_seq - 1, seq);
+		error("mpi/pmi2: invalid kvs seq from srun, expect %u got %u",
+		      kvs_seq - 1, seq);
 		rc = SLURM_ERROR;;
 		errmsg = "mpi/pmi2: invalid kvs seq from srun";
 		goto resp;
@@ -431,8 +428,7 @@ out:
 	resp_buf = init_buf(32);
 	pack32((uint32_t) rc, resp_buf);
 	rc = slurm_msg_sendto(fd, get_buf_data(resp_buf),
-			      get_buf_offset(resp_buf),
-			      SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+			      get_buf_offset(resp_buf));
 	free_buf(resp_buf);
 
 	debug3("mpi/pmi2: out _handle_name_publish");
@@ -464,8 +460,7 @@ out:
 	resp_buf = init_buf(32);
 	pack32((uint32_t) rc, resp_buf);
 	rc = slurm_msg_sendto(fd, get_buf_data(resp_buf),
-			      get_buf_offset(resp_buf),
-			      SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+			      get_buf_offset(resp_buf));
 	free_buf(resp_buf);
 
 	debug3("mpi/pmi2: out _handle_name_unpublish");
@@ -496,8 +491,7 @@ out:
 	resp_buf = init_buf(1024);
 	packstr(port, resp_buf);
 	rc2 = slurm_msg_sendto(fd, get_buf_data(resp_buf),
-			       get_buf_offset(resp_buf),
-			       SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+			       get_buf_offset(resp_buf));
 	rc = MAX(rc, rc2);
 	free_buf(resp_buf);
 	xfree(name);
@@ -643,7 +637,7 @@ tree_msg_to_srun(uint32_t len, char *msg)
 	fd = slurm_open_stream(tree_info.srun_addr, true);
 	if (fd < 0)
 		return SLURM_ERROR;
-	rc = slurm_msg_sendto(fd, msg, len, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+	rc = slurm_msg_sendto(fd, msg, len);
 	if (rc == len) /* all data sent */
 		rc = SLURM_SUCCESS;
 	else
@@ -664,7 +658,7 @@ tree_msg_to_srun_with_resp(uint32_t len, char *msg, Buf *resp_ptr)
 	fd = slurm_open_stream(tree_info.srun_addr, true);
 	if (fd < 0)
 		return SLURM_ERROR;
-	rc = slurm_msg_sendto(fd, msg, len, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+	rc = slurm_msg_sendto(fd, msg, len);
 	if (rc == len) { 	/* all data sent */
 		safe_read(fd, &len, sizeof(len));
 		len = ntohl(len);
@@ -699,8 +693,7 @@ tree_msg_to_spawned_sruns(uint32_t len, char *msg)
 		fd = slurm_open_stream(&srun_addr, true);
 		if (fd < 0)
 			return SLURM_ERROR;
-		sent = slurm_msg_sendto(fd, msg, len,
-					SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+		sent = slurm_msg_sendto(fd, msg, len);
 		if (sent != len)
 			rc = SLURM_ERROR;
 		close(fd);

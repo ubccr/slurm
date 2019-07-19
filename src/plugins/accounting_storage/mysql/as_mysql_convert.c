@@ -1,16 +1,16 @@
 /*****************************************************************************\
  *  as_mysql_convert.c - functions dealing with converting from tables in
- *                    slurm <= 14.11.
+ *                    slurm <= 17.02.
  *****************************************************************************
  *
  *  Copyright (C) 2015 SchedMD LLC.
  *  Written by Danny Auble <da@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,183 +26,85 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #include "as_mysql_convert.h"
+#include "as_mysql_tres.h"
+#include "src/common/slurm_jobacct_gather.h"
 
-static int _rename_usage_columns(mysql_conn_t *mysql_conn, char *table)
+List bad_tres_list = NULL;
+
+/*
+ * Any time you have to add to an existing convert update this number.
+ * NOTE: 6 was the first version of 18.08.
+ * NOTE: 7 was the first version of 19.05.
+ */
+#define CONVERT_VERSION 7
+
+typedef struct {
+	uint64_t count;
+	uint32_t id;
+} local_tres_t;
+
+static uint32_t db_curr_ver = NO_VAL;
+
+static void _set_tres_value(char *tres_str, uint64_t *tres_array)
 {
-	MYSQL_ROW row;
-	MYSQL_RES *result = NULL;
-	char *query = NULL;
-	int rc = SLURM_SUCCESS;
+	char *tmp_str = tres_str;
+	int id;
 
-	query = xstrdup_printf(
-		"show columns from %s where field like '%%cpu_%%' "
-		"|| field like 'id_assoc' || field like 'id_wckey';",
-		table);
+	xassert(tres_array);
 
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	result = mysql_db_query_ret(mysql_conn, query, 0);
-	xfree(query);
+	if (!tres_str || !tres_str[0])
+		return;
 
-	if (!result)
-		return SLURM_ERROR;
+	while (tmp_str) {
+		id = atoi(tmp_str);
+		/* 0 isn't a valid tres id */
+		if (id <= 0) {
+			error("%s: no id found at %s",
+			      __func__, tmp_str);
+			break;
+		}
+		if (!(tmp_str = strchr(tmp_str, '='))) {
+			error("%s: no value found %s", __func__, tres_str);
+			break;
+		}
 
-	while ((row = mysql_fetch_row(result))) {
-		char *new_char = xstrdup(row[0]);
-		xstrsubstitute(new_char, "cpu_", "");
-		xstrsubstitute(new_char, "_assoc", "");
-		xstrsubstitute(new_char, "_wckey", "");
+		/*
+		 * The id's of static tres will be one more than the array
+		 * position.
+		 */
+		id--;
 
-		if (!query)
-			query = xstrdup_printf("alter table %s ", table);
+		if (id >= g_tres_count)
+			debug2("%s: Unknown tres location %d", __func__, id);
 		else
-			xstrcat(query, ", ");
+			tres_array[id] = slurm_atoull(++tmp_str);
 
-		if (!xstrcmp("id", new_char))
-			xstrfmtcat(query, "change %s %s int unsigned not null",
-				   row[0], new_char);
-		else
-			xstrfmtcat(query,
-				   "change %s %s bigint unsigned default "
-				   "0 not null",
-				   row[0], new_char);
-		xfree(new_char);
+		if (!(tmp_str = strchr(tmp_str, ',')))
+			break;
+
+		tmp_str++;
 	}
-	mysql_free_result(result);
-
-	if (query) {
-		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-		if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-			error("Can't update %s %m", table);
-		xfree(query);
-	}
-
-	return rc;
 }
 
-static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
-				      char *cluster_name,
-				      char *count_col_name)
+static int _convert_step_table_pre(mysql_conn_t *mysql_conn, char *cluster_name)
 {
-	/* These tables are the 14_11 defs plus things we added in 15.08 */
-	storage_field_t assoc_usage_table_fields_14_11[] = {
-		{ "creation_time", "int unsigned not null" },
-		{ "mod_time", "int unsigned default 0 not null" },
+	int rc = SLURM_SUCCESS;
+	MYSQL_RES *result = NULL;
+	MYSQL_ROW row;
+	storage_field_t step_table_fields_17_11[] = {
+		{ "job_db_inx", "bigint unsigned not null" },
 		{ "deleted", "tinyint default 0 not null" },
-		{ "id_assoc", "int not null" },
-		{ "id_tres", "int default 1 not null" },
-		{ "time_start", "int unsigned not null" },
-		{ "alloc_cpu_secs", "bigint default 0 not null" },
-		{ "consumed_energy", "bigint unsigned default 0 not null" },
-		{ NULL, NULL}
-	};
-
-	storage_field_t cluster_usage_table_fields_14_11[] = {
-		{ "creation_time", "int unsigned not null" },
-		{ "mod_time", "int unsigned default 0 not null" },
-		{ "deleted", "tinyint default 0 not null" },
-		{ "id_tres", "int default 1 not null" },
-		{ "time_start", "int unsigned not null" },
-		{ count_col_name, "int default 0 not null" },
-		{ "alloc_cpu_secs", "bigint default 0 not null" },
-		{ "down_cpu_secs", "bigint default 0 not null" },
-		{ "pdown_cpu_secs", "bigint default 0 not null" },
-		{ "idle_cpu_secs", "bigint default 0 not null" },
-		{ "resv_cpu_secs", "bigint default 0 not null" },
-		{ "over_cpu_secs", "bigint default 0 not null" },
-		{ "consumed_energy", "bigint unsigned default 0 not null" },
-		{ NULL, NULL}
-	};
-
-	storage_field_t event_table_fields_14_11[] = {
-		{ "time_start", "int unsigned not null" },
-		{ "time_end", "int unsigned default 0 not null" },
-		{ "node_name", "tinytext default '' not null" },
-		{ "cluster_nodes", "text not null default ''" },
-		{ count_col_name, "int not null" },
-		{ "reason", "tinytext not null" },
-		{ "reason_uid", "int unsigned default 0xfffffffe not null" },
-		{ "state", "smallint unsigned default 0 not null" },
-		{ "tres", "text not null default ''" },
-		{ NULL, NULL}
-	};
-
-	storage_field_t job_table_fields_14_11[] = {
-		{ "job_db_inx", "int not null auto_increment" },
-		{ "mod_time", "int unsigned default 0 not null" },
-		{ "deleted", "tinyint default 0 not null" },
-		{ "account", "tinytext" },
-		{ "array_task_str", "text" },
-		{ "array_max_tasks", "int unsigned default 0 not null" },
-		{ "array_task_pending", "int unsigned default 0 not null" },
-		{ "cpus_req", "int unsigned not null" },
-		{ "cpus_alloc", "int unsigned not null" },
-		{ "derived_ec", "int unsigned default 0 not null" },
-		{ "derived_es", "text" },
-		{ "exit_code", "int unsigned default 0 not null" },
-		{ "job_name", "tinytext not null" },
-		{ "id_assoc", "int unsigned not null" },
-		{ "id_array_job", "int unsigned default 0 not null" },
-		{ "id_array_task", "int unsigned default 0xfffffffe not null" },
-		{ "id_block", "tinytext" },
-		{ "id_job", "int unsigned not null" },
-		{ "id_qos", "int unsigned default 0 not null" },
-		{ "id_resv", "int unsigned not null" },
-		{ "id_wckey", "int unsigned not null" },
-		{ "id_user", "int unsigned not null" },
-		{ "id_group", "int unsigned not null" },
-		{ "kill_requid", "int default -1 not null" },
-		{ "mem_req", "int unsigned default 0 not null" },
-		{ "nodelist", "text" },
-		{ "nodes_alloc", "int unsigned not null" },
-		{ "node_inx", "text" },
-		{ "partition", "tinytext not null" },
-		{ "priority", "int unsigned not null" },
-		{ "state", "smallint unsigned not null" },
-		{ "timelimit", "int unsigned default 0 not null" },
-		{ "time_submit", "int unsigned default 0 not null" },
-		{ "time_eligible", "int unsigned default 0 not null" },
-		{ "time_start", "int unsigned default 0 not null" },
-		{ "time_end", "int unsigned default 0 not null" },
-		{ "time_suspended", "int unsigned default 0 not null" },
-		{ "gres_req", "text not null default ''" },
-		{ "gres_alloc", "text not null default ''" },
-		{ "gres_used", "text not null default ''" },
-		{ "wckey", "tinytext not null default ''" },
-		{ "track_steps", "tinyint not null" },
-		{ "tres_alloc", "text not null default ''" },
-		{ NULL, NULL}
-	};
-
-	storage_field_t resv_table_fields_14_11[] = {
-		{ "id_resv", "int unsigned default 0 not null" },
-		{ "deleted", "tinyint default 0 not null" },
-		{ "assoclist", "text not null default ''" },
-		{ "cpus", "int unsigned not null" },
-		{ "flags", "smallint unsigned default 0 not null" },
-		{ "nodelist", "text not null default ''" },
-		{ "node_inx", "text not null default ''" },
-		{ "resv_name", "text not null" },
-		{ "time_start", "int unsigned default 0 not null"},
-		{ "time_end", "int unsigned default 0 not null" },
-		{ "tres", "text not null default ''" },
-		{ NULL, NULL}
-	};
-
-	storage_field_t step_table_fields_14_11[] = {
-		{ "job_db_inx", "int not null" },
-		{ "deleted", "tinyint default 0 not null" },
-		{ "cpus_alloc", "int unsigned not null" },
 		{ "exit_code", "int default 0 not null" },
 		{ "id_step", "int not null" },
 		{ "kill_requid", "int default -1 not null" },
@@ -213,9 +115,9 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 		{ "step_name", "text not null" },
 		{ "task_cnt", "int unsigned not null" },
 		{ "task_dist", "smallint default 0 not null" },
-		{ "time_start", "int unsigned default 0 not null" },
-		{ "time_end", "int unsigned default 0 not null" },
-		{ "time_suspended", "int unsigned default 0 not null" },
+		{ "time_start", "bigint unsigned default 0 not null" },
+		{ "time_end", "bigint unsigned default 0 not null" },
+		{ "time_suspended", "bigint unsigned default 0 not null" },
 		{ "user_sec", "int unsigned default 0 not null" },
 		{ "user_usec", "int unsigned default 0 not null" },
 		{ "sys_sec", "int unsigned default 0 not null" },
@@ -237,8 +139,10 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 		{ "min_cpu_node", "int unsigned default 0 not null" },
 		{ "ave_cpu", "double unsigned default 0.0 not null" },
 		{ "act_cpufreq", "double unsigned default 0.0 not null" },
-		{ "consumed_energy", "double unsigned default 0.0 not null" },
-		{ "req_cpufreq", "int unsigned default 0 not null" },
+		{ "consumed_energy", "bigint unsigned default 0 not null" },
+		{ "req_cpufreq_min", "int unsigned default 0 not null" },
+		{ "req_cpufreq", "int unsigned default 0 not null" }, /* max */
+		{ "req_cpufreq_gov", "int unsigned default 0 not null" },
 		{ "max_disk_read", "double unsigned default 0.0 not null" },
 		{ "max_disk_read_task", "int unsigned default 0 not null" },
 		{ "max_disk_read_node", "int unsigned default 0 not null" },
@@ -248,706 +152,689 @@ static int _update_old_cluster_tables(mysql_conn_t *mysql_conn,
 		{ "max_disk_write_node", "int unsigned default 0 not null" },
 		{ "ave_disk_write", "double unsigned default 0.0 not null" },
 		{ "tres_alloc", "text not null default ''" },
+		{ "tres_usage_in_ave", "text not null default ''" },
+		{ "tres_usage_in_max", "text not null default ''" },
+		{ "tres_usage_in_max_taskid", "text not null default ''" },
+		{ "tres_usage_in_max_nodeid", "text not null default ''" },
+		{ "tres_usage_in_min", "text not null default ''" },
+		{ "tres_usage_in_min_taskid", "text not null default ''" },
+		{ "tres_usage_in_min_nodeid", "text not null default ''" },
+		{ "tres_usage_in_tot", "text not null default ''" },
+		{ "tres_usage_out_ave", "text not null default ''" },
+		{ "tres_usage_out_max", "text not null default ''" },
+		{ "tres_usage_out_max_taskid", "text not null default ''" },
+		{ "tres_usage_out_max_nodeid", "text not null default ''" },
+		{ "tres_usage_out_min", "text not null default ''" },
+		{ "tres_usage_out_min_taskid", "text not null default ''" },
+		{ "tres_usage_out_min_nodeid", "text not null default ''" },
+		{ "tres_usage_out_tot", "text not null default ''" },
 		{ NULL, NULL}
 	};
 
-	storage_field_t wckey_usage_table_fields_14_11[] = {
-		{ "creation_time", "int unsigned not null" },
-		{ "mod_time", "int unsigned default 0 not null" },
-		{ "deleted", "tinyint default 0 not null" },
-		{ "id_wckey", "int not null" },
-		{ "id_tres", "int default 1 not null" },
-		{ "time_start", "int unsigned not null" },
-		{ "alloc_cpu_secs", "bigint default 0" },
-		{ "resv_cpu_secs", "bigint default 0" },
-		{ "over_cpu_secs", "bigint default 0" },
-		{ "consumed_energy", "bigint unsigned default 0 not null" },
-		{ NULL, NULL}
-	};
-
+	char *query = NULL, *tmp = NULL;
 	char table_name[200];
+	int i;
 
-	xassert(cluster_name);
-	xassert(count_col_name);
+	if (db_curr_ver < 6) {
+		char *step_req_inx[] = {
+			"job_db_inx",
+			"id_step",
+			"max_disk_read",
+			"max_disk_read_task",
+			"max_disk_read_node",
+			"ave_disk_read",
+			"max_disk_write",
+			"max_disk_write_task",
+			"max_disk_write_node",
+			"ave_disk_write",
+			"max_vsize",
+			"max_vsize_task",
+			"max_vsize_node",
+			"ave_vsize",
+			"max_rss",
+			"max_rss_task",
+			"max_rss_node",
+			"ave_rss",
+			"max_pages",
+			"max_pages_task",
+			"max_pages_node",
+			"ave_pages",
+			"min_cpu",
+			"min_cpu_task",
+			"min_cpu_node",
+			"ave_cpu",
+			"tres_usage_in_max",
+			"tres_usage_in_max_taskid",
+			"tres_usage_in_max_nodeid",
+			"tres_usage_in_ave",
+			"tres_usage_out_max",
+			"tres_usage_out_max_taskid",
+			"tres_usage_out_max_nodeid",
+			"tres_usage_out_ave"
+		};
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, assoc_day_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  assoc_usage_table_fields_14_11,
-				  ", primary key (id_assoc, "
-				  "id_tres, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+		enum {
+			STEP_REQ_INX,
+			STEP_REQ_STEPID,
+			STEP_REQ_MAX_DISK_READ,
+			STEP_REQ_MAX_DISK_READ_TASK,
+			STEP_REQ_MAX_DISK_READ_NODE,
+			STEP_REQ_AVE_DISK_READ,
+			STEP_REQ_MAX_DISK_WRITE,
+			STEP_REQ_MAX_DISK_WRITE_TASK,
+			STEP_REQ_MAX_DISK_WRITE_NODE,
+			STEP_REQ_AVE_DISK_WRITE,
+			STEP_REQ_MAX_VSIZE,
+			STEP_REQ_MAX_VSIZE_TASK,
+			STEP_REQ_MAX_VSIZE_NODE,
+			STEP_REQ_AVE_VSIZE,
+			STEP_REQ_MAX_RSS,
+			STEP_REQ_MAX_RSS_TASK,
+			STEP_REQ_MAX_RSS_NODE,
+			STEP_REQ_AVE_RSS,
+			STEP_REQ_MAX_PAGES,
+			STEP_REQ_MAX_PAGES_TASK,
+			STEP_REQ_MAX_PAGES_NODE,
+			STEP_REQ_AVE_PAGES,
+			STEP_REQ_MIN_CPU,
+			STEP_REQ_MIN_CPU_TASK,
+			STEP_REQ_MIN_CPU_NODE,
+			STEP_REQ_AVE_CPU,
+			STEP_REQ_TRES_USAGE_IN_MAX,
+			STEP_REQ_TRES_USAGE_IN_MAX_TASKID,
+			STEP_REQ_TRES_USAGE_IN_MAX_NODEID,
+			STEP_REQ_TRES_USAGE_IN_AVE,
+			STEP_REQ_TRES_USAGE_OUT_MAX,
+			STEP_REQ_TRES_USAGE_OUT_MAX_TASKID,
+			STEP_REQ_TRES_USAGE_OUT_MAX_NODEID,
+			STEP_REQ_TRES_USAGE_OUT_AVE,
+			STEP_REQ_COUNT
+		};
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, assoc_hour_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  assoc_usage_table_fields_14_11,
-				  ", primary key (id_assoc, "
-				  "id_tres, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+		jobacctinfo_t *jobacct = NULL;
+		char *tres_usage_in_ave;
+		char *tres_usage_in_max;
+		char *tres_usage_in_max_nodeid;
+		char *tres_usage_in_max_taskid;
+		char *tres_usage_out_ave;
+		char *tres_usage_out_max;
+		char *tres_usage_out_max_nodeid;
+		char *tres_usage_out_max_taskid;
+		int cnt = 0;
+		uint32_t tmp32;
+		double tmpd, div = 1024;
+		char *extra = NULL;
+		uint32_t flags = TRES_STR_FLAG_SIMPLE |
+			TRES_STR_FLAG_ALLOW_REAL;
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, assoc_month_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  assoc_usage_table_fields_14_11,
-				  ", primary key (id_assoc, "
-				  "id_tres, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+		snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
+			 cluster_name, step_table);
+		if (mysql_db_create_table(mysql_conn, table_name,
+					  step_table_fields_17_11,
+					  ", primary key (job_db_inx, id_step))")
+		    == SLURM_ERROR)
+			return SLURM_ERROR;
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, cluster_day_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  cluster_usage_table_fields_14_11,
-				  ", primary key (id_tres, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+		xstrfmtcat(tmp, "%s", step_req_inx[0]);
+		for (i = 1; i < STEP_REQ_COUNT; i++) {
+			xstrfmtcat(tmp, ", %s", step_req_inx[i]);
+		}
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, cluster_hour_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  cluster_usage_table_fields_14_11,
-				  ", primary key (id_tres, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+		query = xstrdup_printf(
+			"select %s from \"%s_%s\"",
+			tmp, cluster_name, step_table);
+		xfree(tmp);
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, cluster_month_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  cluster_usage_table_fields_14_11,
-				  ", primary key (id_tres, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+		if (debug_flags & DEBUG_FLAG_DB_QUERY)
+			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+		result = mysql_db_query_ret(mysql_conn, query, 0);
+		xfree(query);
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, event_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  event_table_fields_14_11,
-				  ", primary key (node_name(20), time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+		if (!result)
+			return SLURM_ERROR;
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, job_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  job_table_fields_14_11,
-				  ", primary key (job_db_inx), "
-				  "unique index (id_job, "
-				  "id_assoc, time_submit), "
-				  "key rollup (time_eligible, time_end), "
-				  "key wckey (id_wckey), "
-				  "key qos (id_qos), "
-				  "key association (id_assoc), "
-				  "key array_job (id_array_job), "
-				  "key reserv (id_resv), "
-				  "key sacct_def (id_user, time_start, "
-				  "time_end))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+		while ((row = mysql_fetch_row(result))) {
+			jobacct = jobacctinfo_create(NULL);
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, resv_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  resv_table_fields_14_11,
-				  ", primary key (id_resv, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+			/* Just in case something is already there */
+			_set_tres_value(row[STEP_REQ_TRES_USAGE_IN_MAX],
+					jobacct->tres_usage_in_max);
+			_set_tres_value(row[STEP_REQ_TRES_USAGE_IN_MAX_TASKID],
+					jobacct->tres_usage_in_max_taskid);
+			_set_tres_value(row[STEP_REQ_TRES_USAGE_IN_MAX_NODEID],
+					jobacct->tres_usage_in_max_nodeid);
+			_set_tres_value(row[STEP_REQ_TRES_USAGE_IN_AVE],
+					jobacct->tres_usage_in_tot);
+			_set_tres_value(row[STEP_REQ_TRES_USAGE_OUT_MAX],
+					jobacct->tres_usage_out_max);
+			_set_tres_value(row[STEP_REQ_TRES_USAGE_OUT_MAX_TASKID],
+					jobacct->tres_usage_out_max_taskid);
+			_set_tres_value(row[STEP_REQ_TRES_USAGE_OUT_MAX_NODEID],
+					jobacct->tres_usage_out_max_nodeid);
+			_set_tres_value(row[STEP_REQ_TRES_USAGE_OUT_AVE],
+					jobacct->tres_usage_out_tot);
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, step_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  step_table_fields_14_11,
-				  ", primary key (job_db_inx, id_step))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+			/* TRES_CPU */
+			tmp32 = slurm_atoul(row[STEP_REQ_MIN_CPU]);
+			if (tmp32 != NO_VAL) {
+				jobacct->tres_usage_in_min[TRES_ARRAY_CPU] =
+					tmp32;
+				jobacct->tres_usage_in_min[TRES_ARRAY_CPU] *=
+					CPU_TIME_ADJ;
+				jobacct->tres_usage_in_min_nodeid[
+					TRES_ARRAY_CPU] =
+					slurm_atoull(
+						row[STEP_REQ_MIN_CPU_NODE]);
+				jobacct->tres_usage_in_min_taskid[
+					TRES_ARRAY_CPU] =
+					slurm_atoull(
+						row[STEP_REQ_MIN_CPU_TASK]);
+				tmpd = atof(row[STEP_REQ_AVE_CPU]);
+				jobacct->tres_usage_in_tot[TRES_ARRAY_CPU] =
+					(uint64_t)(tmpd * CPU_TIME_ADJ);
+			}
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, wckey_day_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  wckey_usage_table_fields_14_11,
-				  ", primary key (id_wckey, "
-				  "id_tres, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+			/* TRES_MEM */
+			tmpd = atof(row[STEP_REQ_MAX_RSS]);
+			if (tmpd) {
+				jobacct->tres_usage_in_max[TRES_ARRAY_MEM] =
+					(uint64_t)(tmpd * div);
+				jobacct->tres_usage_in_max_nodeid[
+					TRES_ARRAY_MEM] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_RSS_NODE]);
+				jobacct->tres_usage_in_max_taskid[
+					TRES_ARRAY_MEM] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_RSS_TASK]);
+				tmpd = atof(row[STEP_REQ_AVE_RSS]);
+				jobacct->tres_usage_in_tot[TRES_ARRAY_MEM] =
+					(uint64_t)(tmpd * div);
+			}
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, wckey_hour_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  wckey_usage_table_fields_14_11,
-				  ", primary key (id_wckey, "
-				  "id_tres, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+			/* TRES_VMEM */
+			tmpd = atof(row[STEP_REQ_MAX_VSIZE]);
+			if (tmpd) {
+				jobacct->tres_usage_in_max[TRES_ARRAY_VMEM] =
+					(uint64_t)(tmpd * div);
+				jobacct->tres_usage_in_max_nodeid[
+					TRES_ARRAY_VMEM] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_VSIZE_NODE]);
+				jobacct->tres_usage_in_max_taskid[
+					TRES_ARRAY_VMEM] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_VSIZE_TASK]);
+				tmpd = atof(row[STEP_REQ_AVE_VSIZE]);
+				jobacct->tres_usage_in_tot[TRES_ARRAY_VMEM] =
+					(uint64_t)(tmpd * div);
+			}
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, wckey_month_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  wckey_usage_table_fields_14_11,
-				  ", primary key (id_wckey, "
-				  "id_tres, time_start))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+			/* TRES_PAGES */
+			tmp32 = slurm_atoul(row[STEP_REQ_MAX_PAGES]);
+			if (tmp32) {
+				jobacct->tres_usage_in_max[TRES_ARRAY_PAGES] =
+					tmp32;
+				jobacct->tres_usage_in_max_nodeid[
+					TRES_ARRAY_PAGES] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_PAGES_NODE]);
+				jobacct->tres_usage_in_max_taskid[
+					TRES_ARRAY_PAGES] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_PAGES_TASK]);
+				jobacct->tres_usage_in_tot[TRES_ARRAY_PAGES] =
+					(uint64_t)atof(row[STEP_REQ_AVE_PAGES]);
+			}
 
-	return SLURM_SUCCESS;
-}
+			/* TRES_FS_DISK (READ/IN) */
+			tmpd = atof(row[STEP_REQ_MAX_DISK_READ]);
+			if (tmpd) {
+				jobacct->tres_usage_in_max[TRES_ARRAY_FS_DISK] =
+					(uint64_t)(tmpd * div);
+				jobacct->tres_usage_in_max_nodeid[
+					TRES_ARRAY_FS_DISK] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_DISK_READ_NODE]);
+				jobacct->tres_usage_in_max_taskid[
+					TRES_ARRAY_FS_DISK] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_DISK_READ_TASK]);
+				tmpd = atof(row[STEP_REQ_AVE_DISK_READ]);
+				jobacct->tres_usage_in_tot[TRES_ARRAY_FS_DISK] =
+					(uint64_t)(tmpd * div);
+			}
+			/* TRES_FS_DISK (WRITE/OUT) */
+			tmpd = atof(row[STEP_REQ_MAX_DISK_WRITE]);
+			if (tmpd) {
+				jobacct->tres_usage_out_max[
+					TRES_ARRAY_FS_DISK] =
+					(uint64_t)(tmpd * div);
+				jobacct->tres_usage_out_max_nodeid[
+					TRES_ARRAY_FS_DISK] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_DISK_READ_NODE]);
+				jobacct->tres_usage_out_max_taskid[
+					TRES_ARRAY_FS_DISK] =
+					slurm_atoull(
+						row[STEP_REQ_MAX_DISK_READ_TASK]);
+				tmpd = atof(row[STEP_REQ_AVE_DISK_WRITE]);
+				jobacct->tres_usage_out_tot[
+					TRES_ARRAY_FS_DISK] =
+					(uint64_t)(tmpd * div);
+			}
 
-static int _update2_old_cluster_tables(mysql_conn_t *mysql_conn,
-				       char *cluster_name)
-{
-	/* These tables are the 14_11 defs plus things we added in 15.08 */
+			tres_usage_in_max = assoc_mgr_make_tres_str_from_array(
+				jobacct->tres_usage_in_max, flags, true);
+			tres_usage_in_max_nodeid =
+				assoc_mgr_make_tres_str_from_array(
+				jobacct->tres_usage_in_max_nodeid, flags, true);
+			tres_usage_in_max_taskid =
+				assoc_mgr_make_tres_str_from_array(
+				jobacct->tres_usage_in_max_taskid, flags, true);
+			tres_usage_in_ave = assoc_mgr_make_tres_str_from_array(
+				jobacct->tres_usage_in_tot, flags, true);
+			tres_usage_out_max = assoc_mgr_make_tres_str_from_array(
+				jobacct->tres_usage_out_max, flags, true);
+			tres_usage_out_max_nodeid =
+				assoc_mgr_make_tres_str_from_array(
+				jobacct->tres_usage_out_max_nodeid,
+				flags, true);
+			tres_usage_out_max_taskid =
+				assoc_mgr_make_tres_str_from_array(
+				jobacct->tres_usage_out_max_taskid,
+				flags, true);
+			tres_usage_out_ave = assoc_mgr_make_tres_str_from_array(
+				jobacct->tres_usage_out_tot, flags, true);
 
-	storage_field_t assoc_table_fields_14_11[] = {
-		{ "creation_time", "int unsigned not null" },
-		{ "mod_time", "int unsigned default 0 not null" },
-		{ "deleted", "tinyint default 0 not null" },
-		{ "is_def", "tinyint default 0 not null" },
-		{ "id_assoc", "int not null auto_increment" },
-		{ "user", "tinytext not null default ''" },
-		{ "acct", "tinytext not null" },
-		{ "partition", "tinytext not null default ''" },
-		{ "parent_acct", "tinytext not null default ''" },
-		{ "lft", "int not null" },
-		{ "rgt", "int not null" },
-		{ "shares", "int default 1 not null" },
-		{ "max_jobs", "int default NULL" },
-		{ "max_submit_jobs", "int default NULL" },
-		{ "max_cpus_pj", "int default NULL" },
-		{ "max_nodes_pj", "int default NULL" },
-		{ "max_tres_pj", "text not null default ''" },
-		{ "max_tres_mins_pj", "text not null default ''" },
-		{ "max_tres_run_mins", "text not null default ''" },
-		{ "max_wall_pj", "int default NULL" },
-		{ "max_cpu_mins_pj", "bigint default NULL" },
-		{ "max_cpu_run_mins", "bigint default NULL" },
-		{ "grp_jobs", "int default NULL" },
-		{ "grp_submit_jobs", "int default NULL" },
-		{ "grp_cpus", "int default NULL" },
-		{ "grp_mem", "int default NULL" },
-		{ "grp_nodes", "int default NULL" },
-		{ "grp_tres", "text not null default ''" },
-		{ "grp_tres_mins", "text not null default ''" },
-		{ "grp_tres_run_mins", "text not null default ''" },
-		{ "grp_wall", "int default NULL" },
-		{ "grp_cpu_mins", "bigint default NULL" },
-		{ "grp_cpu_run_mins", "bigint default NULL" },
-		{ "def_qos_id", "int default NULL" },
-		{ "qos", "blob not null default ''" },
-		{ "delta_qos", "blob not null default ''" },
-		{ NULL, NULL}
-	};
+			jobacctinfo_destroy(jobacct);
 
-	char table_name[200];
+			if (tres_usage_in_max) {
+				xstrfmtcat(extra, "%stres_usage_in_max='%s'",
+					   extra ? ", " : "",
+					   tres_usage_in_max);
+				xfree(tres_usage_in_max);
+			}
 
-	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
-		 cluster_name, assoc_table);
-	if (mysql_db_create_table(mysql_conn, table_name,
-				  assoc_table_fields_14_11,
-				  ", primary key (id_assoc), "
-				  "unique index (user(20), acct(20), "
-				  "`partition`(20)), "
-				  "key lft (lft), key account (acct(20)))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+			if (tres_usage_in_max_nodeid) {
+				xstrfmtcat(extra,
+					   "%stres_usage_in_max_nodeid='%s'",
+					   extra ? ", " : "",
+					   tres_usage_in_max_nodeid);
+				xfree(tres_usage_in_max_nodeid);
+			}
+			if (tres_usage_in_max_taskid) {
+				xstrfmtcat(extra,
+					   "%stres_usage_in_max_taskid='%s'",
+					   extra ? ", " : "",
+					   tres_usage_in_max_taskid);
+				xfree(tres_usage_in_max_taskid);
+			}
+			if (tres_usage_in_ave) {
+				xstrfmtcat(extra, "%stres_usage_in_ave='%s'",
+					   extra ? ", " : "",
+					   tres_usage_in_ave);
+				xfree(tres_usage_in_ave);
+			}
 
-	return SLURM_SUCCESS;
-}
+			if (tres_usage_out_max) {
+				xstrfmtcat(extra, "%stres_usage_out_max='%s'",
+					   extra ? ", " : "",
+					   tres_usage_out_max);
+				xfree(tres_usage_out_max);
+			}
 
-static int _update2_old_tables(mysql_conn_t *mysql_conn)
-{
-	/* These tables are the 14_11 defs plus things we added in 15.08 */
-	storage_field_t qos_table_fields_14_11[] = {
-		{ "creation_time", "int unsigned not null" },
-		{ "mod_time", "int unsigned default 0 not null" },
-		{ "deleted", "tinyint default 0" },
-		{ "id", "int not null auto_increment" },
-		{ "name", "tinytext not null" },
-		{ "description", "text" },
-		{ "flags", "int unsigned default 0" },
-		{ "grace_time", "int unsigned default NULL" },
-		{ "max_jobs_per_user", "int default NULL" },
-		{ "max_submit_jobs_per_user", "int default NULL" },
-		{ "max_tres_pj", "text not null default ''" },
-		{ "max_tres_pu", "text not null default ''" },
-		{ "max_tres_mins_pj", "text not null default ''" },
-		{ "max_tres_run_mins_pu", "text not null default ''" },
-		{ "min_tres_pj", "text not null default ''" },
-		{ "max_cpus_per_job", "int default NULL" },
-		{ "max_cpus_per_user", "int default NULL" },
-		{ "max_nodes_per_job", "int default NULL" },
-		{ "max_nodes_per_user", "int default NULL" },
-		{ "max_wall_duration_per_job", "int default NULL" },
-		{ "max_cpu_mins_per_job", "bigint default NULL" },
-		{ "max_cpu_run_mins_per_user", "bigint default NULL" },
-		{ "grp_jobs", "int default NULL" },
-		{ "grp_submit_jobs", "int default NULL" },
-		{ "grp_tres", "text not null default ''" },
-		{ "grp_tres_mins", "text not null default ''" },
-		{ "grp_tres_run_mins", "text not null default ''" },
-		{ "grp_cpus", "int default NULL" },
-		{ "grp_mem", "int default NULL" },
-		{ "grp_nodes", "int default NULL" },
-		{ "grp_wall", "int default NULL" },
-		{ "grp_cpu_mins", "bigint default NULL" },
-		{ "grp_cpu_run_mins", "bigint default NULL" },
-		{ "preempt", "text not null default ''" },
-		{ "preempt_mode", "int default 0" },
-		{ "priority", "int unsigned default 0" },
-		{ "usage_factor", "double default 1.0 not null" },
-		{ "usage_thres", "double default NULL" },
-		{ "min_cpus_per_job", "int unsigned default 1 not null" },
-		{ NULL, NULL}
-	};
+			if (tres_usage_out_max_nodeid) {
+				xstrfmtcat(extra,
+					   "%stres_usage_out_max_nodeid='%s'",
+					   extra ? ", " : "",
+					   tres_usage_out_max_nodeid);
+				xfree(tres_usage_out_max_nodeid);
+			}
+			if (tres_usage_out_max_taskid) {
+				xstrfmtcat(extra,
+					   "%stres_usage_out_max_taskid='%s'",
+					   extra ? ", " : "",
+					   tres_usage_out_max_taskid);
+				xfree(tres_usage_out_max_taskid);
+			}
+			if (tres_usage_out_ave) {
+				xstrfmtcat(extra, "%stres_usage_out_ave='%s'",
+					   extra ? ", " : "",
+					   tres_usage_out_ave);
+				xfree(tres_usage_out_ave);
+			}
 
-	if (mysql_db_create_table(mysql_conn, qos_table,
-				  qos_table_fields_14_11,
-				  ", primary key (id), "
-				  "unique index (name(20)))")
-	    == SLURM_ERROR)
-		return SLURM_ERROR;
+			if (!extra)
+				continue;
 
-	return SLURM_SUCCESS;
-}
+			xstrfmtcat(query, "update \"%s_%s\" set %s where job_db_inx=%s and id_step=%s;",
+				   cluster_name, step_table, extra,
+				   row[STEP_REQ_INX],
+				   row[STEP_REQ_STEPID]);
+			xfree(extra);
 
-static int _convert_assoc_table(mysql_conn_t *mysql_conn, char *cluster_name)
-{
-	char *query = NULL;
-	int rc;
+			if (cnt > 1000) {
+				cnt = 0;
+				if (debug_flags & DEBUG_FLAG_DB_QUERY)
+					DB_DEBUG(mysql_conn->conn, "query\n%s",
+						 query);
+				rc = mysql_db_query(mysql_conn, query);
+				xfree(query);
+				if (rc != SLURM_SUCCESS) {
+					error("%s: Can't convert %s_%s info: %m",
+					      __func__,
+					      cluster_name, step_table);
+					break;
+				}
+			} else
+				cnt++;
+		}
+		mysql_free_result(result);
+	}
 
-	query = xstrdup_printf(
-		"update \"%s_%s\" set grp_tres=concat_ws(',', "
-		"concat('%d=', grp_cpus), concat('%d=', grp_mem), "
-		"concat('%d=', grp_nodes)), "
-		"grp_tres_mins=concat_ws(',', concat('%d=', grp_cpu_mins)), "
-		"grp_tres_run_mins=concat_ws(',', "
-		"concat('%d=', grp_cpu_run_mins)), "
-		"max_tres_pj=concat_ws(',', concat('%d=', max_cpus_pj), "
-		"concat('%d=', max_nodes_pj)), "
-		"max_tres_mins_pj=concat_ws(',', "
-		"concat('%d=', max_cpu_mins_pj)), "
-		"max_tres_run_mins=concat_ws(',', "
-		"concat('%d=', max_cpu_run_mins)); ",
-		cluster_name, assoc_table,
-		TRES_CPU, TRES_MEM, TRES_NODE, TRES_CPU, TRES_CPU,
-		TRES_CPU, TRES_NODE, TRES_CPU, TRES_CPU);
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-		error("Can't convert assoc_table for %s: %m", cluster_name);
-	xfree(query);
+	if (query) {
+		if (debug_flags & DEBUG_FLAG_DB_QUERY)
+			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 
-	return rc;
-}
-
-static int _convert_qos_table(mysql_conn_t *mysql_conn)
-{
-	char *query = NULL;
-	int rc;
-
-	query = xstrdup_printf(
-		"update %s set grp_tres=concat_ws(',', "
-		"concat('%d=', grp_cpus), concat('%d=', grp_mem), "
-		"concat('%d=', grp_nodes)), "
-		"grp_tres_mins=concat_ws(',', concat('%d=', grp_cpu_mins)), "
-		"grp_tres_run_mins=concat_ws(',', "
-		"concat('%d=', grp_cpu_run_mins)), "
-		"max_tres_pj=concat_ws(',', concat('%d=', max_cpus_per_job), "
-		"concat('%d=', max_nodes_per_job)), "
-		"max_tres_pu=concat_ws(',', concat('%d=', max_cpus_per_user), "
-		"concat('%d=', max_nodes_per_user)), "
-		"min_tres_pj=concat_ws(',', concat('%d=', min_cpus_per_job)), "
-		"max_tres_mins_pj=concat_ws(',', "
-		"concat('%d=', max_cpu_mins_per_job)), "
-		"max_tres_run_mins_pu=concat_ws(',', "
-		"concat('%d=', max_cpu_run_mins_per_user)); ",
-		qos_table,
-		TRES_CPU, TRES_MEM, TRES_NODE, TRES_CPU, TRES_CPU,
-		TRES_CPU, TRES_NODE, TRES_CPU, TRES_NODE, TRES_CPU,
-		TRES_CPU, TRES_CPU);
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-		error("Can't convert qos_table: %m");
-	xfree(query);
-
-	return rc;
-}
-
-static int _convert_event_table(mysql_conn_t *mysql_conn, char *cluster_name,
-				char *count_col_name)
-{
-	int rc = SLURM_SUCCESS;
-	char *query = xstrdup_printf(
-		"update \"%s_%s\" set tres=concat('%d=', %s);",
-		cluster_name, event_table, TRES_CPU, count_col_name);
-
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-		error("Can't convert %s_%s info: %m",
-		      cluster_name, event_table);
-	xfree(query);
-
-	return rc;
-}
-
-static int _convert_cluster_usage_table(mysql_conn_t *mysql_conn,
-					char *table)
-{
-	char *query = NULL;
-	int rc;
-
-	if ((rc = _rename_usage_columns(mysql_conn, table)) != SLURM_SUCCESS)
-		return rc;
-
-	query = xstrdup_printf("insert into %s (creation_time, mod_time, "
-			       "deleted, id_tres, time_start, alloc_secs) "
-			       "select creation_time, mod_time, deleted, "
-			       "%d, time_start, consumed_energy from %s where "
-			       "consumed_energy != 0 on duplicate key update "
-			       "mod_time=%ld, alloc_secs=VALUES(alloc_secs);",
-			       table, TRES_ENERGY, table, time(NULL));
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-		error("Can't convert %s info: %m", table);
-	xfree(query);
-
-	return rc;
-}
-
-static int _convert_id_usage_table(mysql_conn_t *mysql_conn, char *table)
-{
-	char *query = NULL;
-	int rc;
-
-	if ((rc = _rename_usage_columns(mysql_conn, table)) != SLURM_SUCCESS)
-		return rc;
-
-	query = xstrdup_printf("insert into %s (creation_time, mod_time, "
-			       "deleted, id, id_tres, time_start, alloc_secs) "
-			       "select creation_time, mod_time, deleted, id, "
-			       "%d, time_start, consumed_energy from %s where "
-			       "consumed_energy != 0 on duplicate key update "
-			       "mod_time=%ld, alloc_secs=VALUES(alloc_secs);",
-			       table, TRES_ENERGY, table, time(NULL));
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-		error("Can't convert %s info: %m", table);
-	xfree(query);
-
-	return rc;
-}
-
-static int _convert_cluster_usage_tables(mysql_conn_t *mysql_conn,
-					 char *cluster_name)
-{
-	char table[200];
-	int rc;
-
-	snprintf(table, sizeof(table), "\"%s_%s\"",
-		 cluster_name, cluster_day_table);
-	if ((rc = _convert_cluster_usage_table(mysql_conn, table))
-	    != SLURM_SUCCESS)
-		return rc;
-
-	snprintf(table, sizeof(table), "\"%s_%s\"",
-		 cluster_name, cluster_hour_table);
-	if ((rc = _convert_cluster_usage_table(mysql_conn, table))
-	    != SLURM_SUCCESS)
-		return rc;
-
-	snprintf(table, sizeof(table), "\"%s_%s\"",
-		 cluster_name, cluster_month_table);
-	if ((rc = _convert_cluster_usage_table(mysql_conn, table))
-	    != SLURM_SUCCESS)
-		return rc;
-
-	/* assoc tables */
-	snprintf(table, sizeof(table), "\"%s_%s\"",
-		 cluster_name, assoc_day_table);
-	if ((rc = _convert_id_usage_table(mysql_conn, table))
-	    != SLURM_SUCCESS)
-		return rc;
-
-	snprintf(table, sizeof(table), "\"%s_%s\"",
-		 cluster_name, assoc_hour_table);
-	if ((rc = _convert_id_usage_table(mysql_conn, table))
-	    != SLURM_SUCCESS)
-		return rc;
-
-	snprintf(table, sizeof(table), "\"%s_%s\"",
-		 cluster_name, assoc_month_table);
-	if ((rc = _convert_id_usage_table(mysql_conn, table))
-	    != SLURM_SUCCESS)
-		return rc;
-
-	/* wckey tables */
-	snprintf(table, sizeof(table), "\"%s_%s\"",
-		 cluster_name, wckey_day_table);
-	if ((rc = _convert_id_usage_table(mysql_conn, table))
-	    != SLURM_SUCCESS)
-		return rc;
-
-	snprintf(table, sizeof(table), "\"%s_%s\"",
-		 cluster_name, wckey_hour_table);
-	if ((rc = _convert_id_usage_table(mysql_conn, table))
-	    != SLURM_SUCCESS)
-		return rc;
-
-	snprintf(table, sizeof(table), "\"%s_%s\"",
-		 cluster_name, wckey_month_table);
-	if ((rc = _convert_id_usage_table(mysql_conn, table))
-	    != SLURM_SUCCESS)
-		return rc;
+		rc = mysql_db_query(mysql_conn, query);
+		xfree(query);
+		if (rc != SLURM_SUCCESS)
+			error("%s: Can't convert %s_%s info: %m",
+			      __func__, cluster_name, step_table);
+	}
 
 	return rc;
 }
 
-static int _convert_job_table(mysql_conn_t *mysql_conn, char *cluster_name)
-{
-	int rc = SLURM_SUCCESS;
-	char *query = xstrdup_printf("update \"%s_%s\" set tres_alloc="
-				     "concat(concat('%d=', cpus_alloc));",
-				     cluster_name, job_table, TRES_CPU);
-
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-		error("Can't convert %s_%s info: %m",
-		      cluster_name, job_table);
-	xfree(query);
-
-	return rc;
-}
-
-static int _convert_step_table(mysql_conn_t *mysql_conn, char *cluster_name)
-{
-	int rc = SLURM_SUCCESS;
-	char *query = xstrdup_printf(
-		"update \"%s_%s\" set tres_alloc=concat('%d=', cpus_alloc);",
-		cluster_name, step_table, TRES_CPU);
-
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-		error("Can't convert %s_%s info: %m",
-		      cluster_name, step_table);
-	xfree(query);
-
-	return rc;
-}
-
-static int _convert_resv_table(mysql_conn_t *mysql_conn, char *cluster_name)
-{
-	int rc = SLURM_SUCCESS;
-	char *query = xstrdup_printf(
-		"update \"%s_%s\" set tres=concat('%d=', cpus);",
-		cluster_name, resv_table, TRES_CPU);
-
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
-		error("Can't convert %s_%s info: %m",
-		      cluster_name, resv_table);
-	xfree(query);
-
-	return rc;
-}
-
-static int _convert2_tables(mysql_conn_t *mysql_conn)
+static int _set_db_curr_ver(mysql_conn_t *mysql_conn)
 {
 	char *query;
 	MYSQL_RES *result = NULL;
-	int i = 0, rc = SLURM_SUCCESS;
-	ListIterator itr;
-	char *cluster_name;
+	MYSQL_ROW row;
+	int rc = SLURM_SUCCESS;
 
-	/* no valid clusters, just return */
-	if (!(cluster_name = list_peek(as_mysql_total_cluster_list)))
+	if (db_curr_ver != NO_VAL)
 		return SLURM_SUCCESS;
 
-	/* See if the old table exist first.  If already ran here
-	   default_acct and default_wckey won't exist.
-	*/
-	query = xstrdup_printf("show columns from \"%s_%s\" where "
-			       "Field='grp_cpus';",
-			       cluster_name, assoc_table);
-
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
+	query = xstrdup_printf("select version from %s", convert_version_table);
+	debug4("%d(%s:%d) query\n%s", mysql_conn->conn,
+	       THIS_FILE, __LINE__, query);
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
 		return SLURM_ERROR;
 	}
 	xfree(query);
-	i = mysql_num_rows(result);
-	mysql_free_result(result);
-	result = NULL;
+	row = mysql_fetch_row(result);
 
-	if (!i)
-		return 2;
-
-	info("Updating database tables, this may take some time, "
-	     "do not stop the process.");
-
-	/* make it up to date */
-	itr = list_iterator_create(as_mysql_total_cluster_list);
-	while ((cluster_name = list_next(itr))) {
-		query = xstrdup_printf("show columns from \"%s_%s\" where "
-				       "Field='grp_cpus';",
-				       cluster_name, assoc_table);
-
-		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-		if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-			xfree(query);
-			error("QUERY BAD: No count col name for cluster %s, "
-			      "this should never happen", cluster_name);
-			continue;
-		}
-		xfree(query);
-
-		if (!mysql_num_rows(result)) {
-			error("No grp_cpus col name in assoc_table "
-			      "for cluster %s, this should never happen",
-			      cluster_name);
-			continue;
-		}
-
-		/* make sure old tables are up to date */
-		if ((rc = _update2_old_cluster_tables(mysql_conn, cluster_name)
-		     != SLURM_SUCCESS)) {
-			mysql_free_result(result);
-			break;
-		}
-
-		/* Convert the event table first */
-		info("converting assoc table for %s", cluster_name);
-		if ((rc = _convert_assoc_table(mysql_conn, cluster_name)
-		     != SLURM_SUCCESS)) {
-			mysql_free_result(result);
-			break;
-		}
+	if (row) {
+		db_curr_ver = slurm_atoul(row[0]);
 		mysql_free_result(result);
+	} else {
+		int tmp_ver = 0;
+		mysql_free_result(result);
+
+		/* no valid clusters, just return */
+		if (as_mysql_total_cluster_list &&
+		    !list_count(as_mysql_total_cluster_list))
+			tmp_ver = CONVERT_VERSION;
+
+		query = xstrdup_printf("insert into %s (version) values (%d);",
+				       convert_version_table, tmp_ver);
+		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
+		rc = mysql_db_query(mysql_conn, query);
+		xfree(query);
+		if (rc != SLURM_SUCCESS)
+			return SLURM_ERROR;
+		db_curr_ver = tmp_ver;
 	}
-	list_iterator_destroy(itr);
-
-	/* make sure old non-cluster tables are up to date */
-	if ((rc = _update2_old_tables(mysql_conn)) != SLURM_SUCCESS)
-		return rc;
-
-	if ((rc = _convert_qos_table(mysql_conn)) != SLURM_SUCCESS)
-		return rc;
 
 	return rc;
 }
 
-extern int as_mysql_convert_tables(mysql_conn_t *mysql_conn)
+extern int as_mysql_convert_get_bad_tres(mysql_conn_t *mysql_conn)
 {
-	char *query;
+	char *query = NULL;
+	char *tmp = NULL;
+	int rc = SLURM_SUCCESS;
+	int i=0, auto_inc = TRES_OFFSET;
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
-	int i = 0, rc = SLURM_SUCCESS;
+
+	/* if this changes you will need to edit the corresponding enum */
+	char *tres_req_inx[] = {
+		"id",
+		"type",
+		"name"
+	};
+	enum {
+		SLURMDB_REQ_ID,
+		SLURMDB_REQ_TYPE,
+		SLURMDB_REQ_NAME,
+		SLURMDB_REQ_COUNT
+	};
+
+	if ((rc = _set_db_curr_ver(mysql_conn)) != SLURM_SUCCESS)
+		return rc;
+
+	/* This is only for db's not having converted to 5 yet */
+	if (db_curr_ver >= 5) {
+		debug4("%s: No conversion needed, Horray!", __func__);
+		return SLURM_SUCCESS;
+	} else if (backup_dbd) {
+		/*
+		 * We do not want to create/check the database if we are the
+		 * backup (see Bug 3827). This is only handled on the primary.
+		 *
+		 * To avoid situations where someone might upgrade the database
+		 * through the backup we want to fatal so they know what
+		 * happened instead of potentially starting with the older
+		 * database.
+		 */
+		fatal("Backup DBD can not convert database, please start the primary DBD before starting the backup.");
+		return SLURM_ERROR;
+	}
+
+	/*
+	 * Check to see if we have a bad one to start with.
+	 * Any bad one will be in id=5 and will also have a name.  If we
+	 * don't have this then we are ok.  Otherwise fatal since it may
+	 * involve manually altering the database.
+	 */
+	query = xstrdup_printf(
+		"select id from %s where id=%d && type='billing' && name!=''",
+		tres_table, TRES_BILLING);
+
+	if (debug_flags & DEBUG_FLAG_DB_QUERY)
+		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
+		xfree(query);
+		return SLURM_ERROR;
+	}
+	xfree(query);
+
+	if ((row = mysql_fetch_row(result))) {
+		fatal("%s: There is a known bug dealing with MySQL and auto_increment numbers, unfortunately your system has hit this bug.  To temporarily resolve the issue please revert back to your last version of SlurmDBD.  Fixing this issue correctly will require manual intervention with the database.  SchedMD can assist with this.  Supported sites please open a ticket at https://bugs.schedmd.com/.  Non-supported sites please contact SchedMD at sales@schedmd.com if you would like to discuss commercial support options.",
+		      __func__);
+		return SLURM_ERROR;
+	}
+	mysql_free_result(result);
+
+	/*
+	 * Get the largest id in the tres table.
+	 */
+	query = xstrdup_printf("select MAX(id) from %s;", tres_table);
+	if (debug_flags & DEBUG_FLAG_DB_QUERY)
+		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
+		xfree(query);
+		return SLURM_ERROR;
+	}
+	xfree(query);
+
+	if (!(row = mysql_fetch_row(result))) {
+		fatal("%s: Couldn't get auto_increment for some reason",
+		      __func__);
+		return SLURM_ERROR;
+	}
+
+	/*
+	 * Make sure it is at least TRES_OFFSET (blank/new databases will return
+	 * NULL.
+	 */
+	if (row[0] && row[0][0]) {
+		uint32_t max_id = slurm_atoul(row[0]);
+		auto_inc = MAX(auto_inc, max_id);
+	}
+
+	/*
+	 * Now get all the ones that need to me moved.
+	 */
+	xfree(tmp);
+	xstrfmtcat(tmp, "%s", tres_req_inx[i]);
+	for (i = 1; i < SLURMDB_REQ_COUNT; i++)
+		xstrfmtcat(tmp, ", %s", tres_req_inx[i]);
+
+	query = xstrdup_printf("select %s from %s where (id between 5 and 999) && type!='billing'",
+			       tmp, tres_table);
+	xfree(tmp);
+
+	if (debug_flags & DEBUG_FLAG_DB_QUERY)
+		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
+		xfree(query);
+		return SLURM_ERROR;
+	}
+	xfree(query);
+
+	while ((row = mysql_fetch_row(result))) {
+		slurmdb_tres_rec_t *tres;
+
+		if (!bad_tres_list)
+			bad_tres_list = list_create(slurmdb_destroy_tres_rec);
+
+		tres = xmalloc(sizeof(slurmdb_tres_rec_t));
+		list_append(bad_tres_list, tres);
+
+		tres->id = slurm_atoul(row[SLURMDB_REQ_ID]);
+		/* use this to say where we are moving it to */
+		tres->rec_count = ++auto_inc;
+		if (row[SLURMDB_REQ_TYPE] && row[SLURMDB_REQ_TYPE][0])
+			tres->type = xstrdup(row[SLURMDB_REQ_TYPE]);
+		if (row[SLURMDB_REQ_NAME] && row[SLURMDB_REQ_NAME][0])
+			tres->name = xstrdup(row[SLURMDB_REQ_NAME]);
+		xstrfmtcat(query,
+			   "update %s set id=%u where id=%u;",
+			   tres_table, tres->rec_count, tres->id);
+	}
+	mysql_free_result(result);
+
+	if (query) {
+		if (debug_flags & DEBUG_FLAG_DB_QUERY)
+			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+		rc = mysql_db_query(mysql_conn, query);
+		xfree(query);
+	}
+
+	return rc;
+}
+
+extern int as_mysql_convert_tables_pre_create(mysql_conn_t *mysql_conn)
+{
+	int rc = SLURM_SUCCESS;
 	ListIterator itr;
 	char *cluster_name;
 
 	xassert(as_mysql_total_cluster_list);
 
-	if ((rc = _convert2_tables(mysql_conn)) == 2) {
-		debug2("It appears the table conversions have already "
-		       "taken place, hooray!");
-		return SLURM_SUCCESS;
-	} else if (rc != SLURM_SUCCESS)
+	if ((rc = _set_db_curr_ver(mysql_conn)) != SLURM_SUCCESS)
 		return rc;
 
-	/* no valid clusters, just return */
-	if (!(cluster_name = list_peek(as_mysql_total_cluster_list)))
+	if (db_curr_ver == CONVERT_VERSION) {
+		debug4("%s: No conversion needed, Horray!", __func__);
 		return SLURM_SUCCESS;
-
-
-	/* See if the old table exist first.  If already ran here
-	   default_acct and default_wckey won't exist.
-	*/
-	query = xstrdup_printf("show columns from \"%s_%s\" where "
-			       "Field='cpu_count' || Field='count';",
-			       cluster_name, event_table);
-
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-		xfree(query);
+	} else if (backup_dbd) {
+		/*
+		 * We do not want to create/check the database if we are the
+		 * backup (see Bug 3827). This is only handled on the primary.
+		 *
+		 * To avoid situations where someone might upgrade the database
+		 * through the backup we want to fatal so they know what
+		 * happened instead of potentially starting with the older
+		 * database.
+		 */
+		fatal("Backup DBD can not convert database, please start the primary DBD before starting the backup.");
 		return SLURM_ERROR;
 	}
-	xfree(query);
-	i = mysql_num_rows(result);
-	mysql_free_result(result);
-	result = NULL;
 
-	if (!i) {
-		info("Conversion done: success!");
-		return SLURM_SUCCESS;
+	if (db_curr_ver < 6) {
+		/*
+		 * We have to fake it here to make things work correctly since
+		 * the assoc_mgr isn't set up yet.
+		 */
+		List tres_list = as_mysql_get_tres(mysql_conn, getuid(), NULL);
+		assoc_mgr_post_tres_list(tres_list);
 	}
 
 	/* make it up to date */
 	itr = list_iterator_create(as_mysql_total_cluster_list);
 	while ((cluster_name = list_next(itr))) {
-		query = xstrdup_printf("show columns from \"%s_%s\" where "
-				       "Field='cpu_count' || Field='count';",
-				       cluster_name, event_table);
-
-		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-		if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-			xfree(query);
-			error("QUERY BAD: No count col name for cluster %s, "
-			      "this should never happen", cluster_name);
-			continue;
-		}
-		xfree(query);
-
-		if (!(row = mysql_fetch_row(result)) || !row[0] || !row[0][0]) {
-			error("No count col name for cluster %s, "
-			      "this should never happen", cluster_name);
-			continue;
-		}
-
-		/* make sure old tables are up to date */
-		if ((rc = _update_old_cluster_tables(mysql_conn, cluster_name,
-						     row[0])
-		     != SLURM_SUCCESS)) {
-			mysql_free_result(result);
-			break;
-		}
-
-		/* Convert the event table first */
-		info("converting event table for %s", cluster_name);
-		if ((rc = _convert_event_table(mysql_conn, cluster_name, row[0])
-		     != SLURM_SUCCESS)) {
-			mysql_free_result(result);
-			break;
-		}
-		mysql_free_result(result);
-
-
-		/* Now convert the cluster usage tables */
-		info("converting cluster usage tables for %s", cluster_name);
-		if ((rc = _convert_cluster_usage_tables(
-			     mysql_conn, cluster_name) != SLURM_SUCCESS))
-			break;
-
-		/* Now convert the job tables */
-		info("converting job table for %s", cluster_name);
-		if ((rc = _convert_job_table(mysql_conn, cluster_name)
-		     != SLURM_SUCCESS))
-			break;
-
-		/* Now convert the reservation tables */
-		info("converting reservation table for %s", cluster_name);
-		if ((rc = _convert_resv_table(mysql_conn, cluster_name)
-		     != SLURM_SUCCESS))
-			break;
-
-		/* Now convert the step tables */
-		info("converting step table for %s", cluster_name);
-		if ((rc = _convert_step_table(mysql_conn, cluster_name)
+		info("pre-converting step table for %s", cluster_name);
+		if ((rc = _convert_step_table_pre(mysql_conn, cluster_name)
 		     != SLURM_SUCCESS))
 			break;
 	}
 	list_iterator_destroy(itr);
 
-	if (rc == SLURM_SUCCESS)
+	if (db_curr_ver < 6)
+		assoc_mgr_fini(false);
+
+	return rc;
+}
+
+extern int as_mysql_convert_tables_post_create(mysql_conn_t *mysql_conn)
+{
+	int rc = SLURM_SUCCESS;
+	return rc;
+}
+
+extern int as_mysql_convert_non_cluster_tables_post_create(
+	mysql_conn_t *mysql_conn)
+{
+	int rc = SLURM_SUCCESS;
+
+	if ((rc = _set_db_curr_ver(mysql_conn)) != SLURM_SUCCESS)
+		return rc;
+
+	if (db_curr_ver == CONVERT_VERSION) {
+		debug4("%s: No conversion needed, Horray!", __func__);
+		return SLURM_SUCCESS;
+	}
+
+	if (db_curr_ver < 7) {
+		/*
+		 * In 19.05 we changed the name of the TRES bb/cray to be
+		 * bb/datawarp.
+		 */
+		char *query = xstrdup_printf(
+			"update %s set name='datawarp' where type='bb' and name='cray'",
+			tres_table);
+		rc = mysql_db_query(mysql_conn, query);
+		xfree(query);
+	}
+
+
+	if (rc == SLURM_SUCCESS) {
+		char *query = xstrdup_printf(
+			"update %s set version=%d, mod_time=UNIX_TIMESTAMP()",
+			convert_version_table, CONVERT_VERSION);
+
 		info("Conversion done: success!");
+
+		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
+		rc = mysql_db_query(mysql_conn, query);
+		xfree(query);
+	}
 
 	return rc;
 }

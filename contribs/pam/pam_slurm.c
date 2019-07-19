@@ -8,11 +8,11 @@
  *
  *  Written by Chris Dunlap <cdunlap@llnl.gov>
  *         and Jim Garlick  <garlick@llnl.gov>
- *         modified for SLURM by Moe Jette <jette@llnl.gov>.
+ *         modified for Slurm by Moe Jette <jette@llnl.gov>.
  *
  *  This file is part of pam_slurm, a PAM module for restricting access to
  *  the compute nodes within a cluster based on information obtained from
- *  Simple Linux Utility for Resource Managment (SLURM).  For details, see
+ *  Simple Linux Utility for Resource Managment (Slurm).  For details, see
  *  <http://www.llnl.gov/linux/slurm/>.
  *
  *  pam_slurm is free software; you can redistribute it and/or modify it
@@ -229,8 +229,8 @@ _parse_args(struct _options *opts, int argc, const char **argv)
 }
 
 /*
- *  Return 1 if 'hostname' is a member of 'str', a SLURM-style host list as
- *  returned by SLURM database queries, else 0.  The 'str' argument is
+ *  Return 1 if 'hostname' is a member of 'str', a Slurm-style host list as
+ *  returned by Slurm database queries, else 0.  The 'str' argument is
  *  truncated to the base prefix as a side-effect.
  */
 static int
@@ -288,7 +288,7 @@ _gethostname_short (char *name, size_t len)
 
 
 /*
- *  Query the SLURM database to find out if 'uid' has been allocated
+ *  Query the Slurm database to find out if 'uid' has been allocated
  *  this node. If so, return 1 indicating that 'uid' is authorized to
  *  this node else return 0.
  */
@@ -341,6 +341,20 @@ _slurm_match_allocation(uid_t uid)
 				     uid, nodename, j->job_id);
 				authorized = 1;
 				break;
+			} else {
+				char *nodename;
+				nodename = slurm_conf_get_nodename(hostname);
+				if (nodename) {
+					if (_hostrange_member(nodename,
+							      j->nodes)) {
+						DBG ("user %ld allocated node %s in job %ld",
+						     uid, nodename, j->job_id);
+						authorized = 1;
+						xfree(nodename);
+						break;
+					}
+					xfree(nodename);
+				}
 			}
 		}
 	}
@@ -352,7 +366,7 @@ _slurm_match_allocation(uid_t uid)
 
 /*
  *  Sends a message to the application informing the user
- *  that access was denied due to SLURM.
+ *  that access was denied due to Slurm.
  */
 static void
 _send_denial_msg(pam_handle_t *pamh, struct _options *opts,

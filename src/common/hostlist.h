@@ -6,11 +6,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,18 +26,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _HOSTLIST_H
 #define _HOSTLIST_H
+
+#include "config.h"
 
 #include <unistd.h>		/* load ssize_t definition */
 
@@ -65,8 +67,6 @@
 		_X	= NULL; 		\
 	} while (0)
 
-extern char *alpha_num;
-
 /* Notes:
  *
  * If WITH_LSD_FATAL_ERROR_FUNC is defined, the linker will expect to
@@ -83,7 +83,7 @@ extern char *alpha_num;
  * lsd_nomem_error(file,line,mesg) is a macro definition that returns NULL.
  * This macro may be redefined to invoke another routine instead.
  *
- * If WITH_PTHREADS is defined, these routines will be thread-safe.
+ * These routines are thread-safe.
  *
  */
 
@@ -221,7 +221,10 @@ int hostlist_push_list(hostlist_t hl1, hostlist_t hl2);
  */
 char * hostlist_pop(hostlist_t hl);
 
-
+/*
+ * Return n-th element from hostlist
+ * Release memory using free()
+ */
 char * hostlist_nth(hostlist_t hl, int n);
 
 /* hostlist_shift():
@@ -247,6 +250,16 @@ char * hostlist_shift(hostlist_t hl);
  */
 char * hostlist_pop_range(hostlist_t hl);
 
+/* hostlist_pop_range_values():
+ *
+ * Pop the last range of hosts of the hostlist hl and fill in lo and hi with the
+ * values of the range.
+ * Returns 0 if no ranges exist 1 otherwise.
+ * The range associated with the returned lo and hi is removed from hl.
+ */
+int hostlist_pop_range_values(
+	hostlist_t hl, unsigned long *lo, unsigned long *hi);
+
 /* hostlist_shift_range():
  *
  * Shift the first bracketed hostlist (improperly: range) off the
@@ -267,6 +280,7 @@ char * hostlist_shift_range(hostlist_t hl);
  * Returns -1 if host is not found.
  *
  */
+int hostlist_find_dims(hostlist_t hl, const char *hostname, int dims);
 int hostlist_find(hostlist_t hl, const char *hostname);
 
 /* hostlist_delete():
@@ -535,6 +549,10 @@ int hostset_count(hostset_t set);
  */
 int hostset_find(hostset_t set, const char *hostname);
 
+/*
+ * Return n-th element from hostset
+ * Release memory using free()
+ */
 char * hostset_nth(hostset_t set, int n);
 
 /* hostset_ranged_string():

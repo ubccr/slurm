@@ -7,11 +7,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,38 +27,24 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #ifndef __PRINT_FIELDS_H__
 #define __PRINT_FIELDS_H__
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#if HAVE_GETOPT_H
-#  include <getopt.h>
-#else
-#  include "src/common/getopt.h"
-#endif
-
 #include <ctype.h>
 #include <errno.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_STRING_H
-#  include <string.h>
-#endif
-#ifdef HAVE_STRINGS_H
-#  include <strings.h>
-#endif
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -89,10 +75,7 @@ extern void destroy_print_field(void *object);
 extern void print_fields_header(List print_fields_list);
 extern void print_fields_date(print_field_t *field, time_t value, int last);
 extern void print_fields_str(print_field_t *field, char *value, int last);
-extern void print_fields_int(print_field_t *field, int value, int last);
 extern void print_fields_double(print_field_t *field, double value, int last);
-extern void print_fields_long_double(
-	print_field_t *field, long double value, int last);
 /* print_fields_t->print_routine does not like uint16_t being passed
  * in so pass in a uint32_t and typecast.
  */
@@ -101,8 +84,6 @@ extern void print_fields_uint16(
 extern void print_fields_uint32(
 	print_field_t *field, uint32_t value, int last);
 extern void print_fields_uint64(
-	print_field_t *field, uint64_t value, int last);
-extern void print_fields_hex064(
 	print_field_t *field, uint64_t value, int last);
 extern void print_fields_time_from_mins(print_field_t *field,
 					uint32_t value, int last);

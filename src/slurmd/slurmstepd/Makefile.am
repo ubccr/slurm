@@ -5,13 +5,25 @@ AUTOMAKE_OPTIONS = foreign
 
 sbin_PROGRAMS = slurmstepd
 
-AM_CPPFLAGS = -I$(top_srcdir)
-
-slurmstepd_LDADD = 				   \
+depend_libs = 				   \
 	$(top_builddir)/src/common/libdaemonize.la \
-	../common/libslurmd_common.o $(HWLOC_LDFLAGS) $(HWLOC_LIBS) \
-	$(top_builddir)/src/api/libslurm.o $(DL_LIBS) \
-	$(PAM_LIBS) $(UTIL_LIBS)
+	../common/libslurmd_common.o
+
+# If slurmstepd_LDADD or slurmstepd_LDFLAGS change
+# make sure you alter the below depend_[ldadd|ldflags] to look identical in the
+# slurmd.  If these libs aren't available
+# on slurmstepd startup the slurmstepd will fail sliently and make debugging
+# rather difficult.  Making the slurmd link to them as well shouldn't increase
+# memory footprint and will fail way earlier and give the user a way to known
+# what is happening.
+depend_ldadd = $(HWLOC_LIBS) $(PAM_LIBS) $(UTIL_LIBS)
+depend_ldflags = $(HWLOC_LDFLAGS)
+
+AM_CPPFLAGS = -I$(top_srcdir) $(HWLOC_CPPFLAGS)
+
+slurmstepd_LDADD = $(depend_libs) $(LIB_SLURM) $(DL_LIBS) $(depend_ldadd)
+
+slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(depend_ldflags)
 
 slurmstepd_SOURCES = 	        	\
 	slurmstepd.c slurmstepd.h	\
@@ -19,22 +31,16 @@ slurmstepd_SOURCES = 	        	\
 	task.c task.h			\
 	slurmstepd_job.c slurmstepd_job.h \
 	io.c io.h			\
-	fname.c fname.h			\
 	ulimits.c ulimits.h     	\
 	pdebug.c pdebug.h		\
 	pam_ses.c pam_ses.h		\
 	req.c req.h			\
 	multi_prog.c multi_prog.h	\
-	step_terminate_monitor.c step_terminate_monitor.h
+	step_terminate_monitor.c step_terminate_monitor.h \
+	x11_forwarding.c x11_forwarding.h
 
-if HAVE_AIX
-# We need to set maxdata back to 0 because this effects the "max memory size"
-# ulimit, and the ulimit is inherited by child processes.
-slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) -Wl,-bmaxdata:0x0
-else
-slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
-endif
+slurmstepd_DEPENDENCIES = $(depend_libs) $(LIB_SLURM_BUILD)
 
 force:
-$(slurmstepd_LDADD) : force
+$(slurmstepd_DEPENDENCIES) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`

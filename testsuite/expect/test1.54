@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Test of MPMD (--multi-prog option).
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -12,22 +12,22 @@
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -41,12 +41,6 @@ print_header $test_id
 if {[test_front_end] != 0} {
 	send_user "\nWARNING: This test is incompatible with front-end systems\n"
 	exit 0
-} elseif {[test_serial]} {
-	send_user "\nWARNING: This test is incompatible with serial systems\n"
-	exit 0
-} elseif {[test_launch_poe]} {
-	send_user "\nWARNING: This test is incompatible with POE systems\n"
-	exit 0
 }
 
 #
@@ -56,8 +50,8 @@ if {[test_front_end] != 0} {
 exec $bin_rm -f $file_in
 set file [open $file_in "w"]
 puts $file "# multi-program configuration file
-1-2   /bin/echo task:%t:offset:%o
-0,3   echo task:%t:offset:%o
+1-2   $bin_echo task:%t:offset:%o
+0,3   $bin_echo task:%t:offset:%o
 "
 close $file
 exec $bin_chmod 700 $file_in
@@ -119,13 +113,13 @@ set timeout [expr $max_job_delay + 60 + 60 + 60]
 exec $bin_rm -f $file_in
 set file [open $file_in "w"]
 puts $file "# multi-program configuration file
-1-2   /bin/hostname
-0,3   /bin/date
+1-2   $bin_hostname
+0,3   $bin_date
 "
 close $file
 exec $bin_chmod 700 $file_in
 
-set job_id    -
+set job_id    0
 set matches   0
 set srun_pid [spawn $srun -N1 -n4 --overcommit -l -t1 --multi-prog --debugger-test -v ./$file_in]
 expect {
@@ -133,11 +127,11 @@ expect {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
-	-re "executable:(/bin/)($alpha)" {
-		if {[string compare $expect_out(2,string) "date"] != 0} {
+	-re "executable:(/usr)?(/bin/)($alpha)" {
+		if {[string compare $expect_out(3,string) "date"] != 0} {
 			incr matches
 		}
-		if {[string compare $expect_out(2,string) "hostname"] != 0} {
+		if {[string compare $expect_out(3,string) "hostname"] != 0} {
 			incr matches
 		}
 		if {$matches == 4} {
@@ -193,6 +187,47 @@ expect {
 }
 if {$matches != 1} {
 	send_user "\nFAILURE: did not note lack of a executable for task 5.\n"
+	set exit_code 1
+}
+
+
+exec $bin_rm -f $file_in
+set file [open $file_in "w"]
+puts $file "# multi-program configuration file
+1-2   $bin_hostname
+0,3   $bin_echo aaaa \
+task:%t:\\
+offset:%o \\
+bbbb
+"
+close $file
+exec $bin_chmod 700 $file_in
+
+set matches   0
+set srun_pid [spawn $srun -N1 -n4 --overcommit -l -t1 --multi-prog ./$file_in]
+expect {
+	-re "($number): aaaa task:($number):offset:($number) bbbb" {
+		if {$expect_out(1,string) == 0 && $expect_out(2,string) == 0 && $expect_out(3,string) == 0} {
+			incr matches
+		} elseif {$expect_out(1,string) == 3 && $expect_out(2,string) == 3 && $expect_out(3,string) == 1} {
+			incr matches	
+		} else {
+			send_user "\nFAILURE: processing MPMD line continuation\n"
+			set exit_code 1
+		}
+		exp_continue
+	}
+	timeout {
+		send_user "\nFAILURE: srun not responding\n"
+		slow_kill $srun_pid
+		set exit_code 1
+	}
+	eof {
+		wait
+	}
+}
+if {$matches != 2} {
+	send_user "\nFAILURE: processing MPMD line continuation ($matches != 2)\n"
 	set exit_code 1
 }
 

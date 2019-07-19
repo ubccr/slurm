@@ -7,11 +7,11 @@
  *  Written by Christopher Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -49,9 +49,9 @@
 
 typedef enum {
 	REQUEST_CONNECT = 0,
-	REQUEST_SIGNAL_PROCESS_GROUP, /* Defunct, See REQUEST_SIGNAL_CONTAINER */
-	REQUEST_SIGNAL_TASK_LOCAL,
-	REQUEST_SIGNAL_TASK_GLOBAL,
+	REQUEST_SIGNAL_PROCESS_GROUP, /* Defunct since July 2013 */
+	REQUEST_SIGNAL_TASK_LOCAL, /* Defunct see REQUEST_SIGNAL_CONTAINER */
+	REQUEST_SIGNAL_TASK_GLOBAL, /* Defunct see REQUEST_SIGNAL_CONTAINER */
 	REQUEST_SIGNAL_CONTAINER,
 	REQUEST_STATE,
 	REQUEST_INFO,  /* Defunct, See REQUEST_STEP_MEM_LIMITS|UID|NODEID */
@@ -70,7 +70,10 @@ typedef enum {
 	REQUEST_STEP_MEM_LIMITS,
 	REQUEST_STEP_UID,
 	REQUEST_STEP_NODEID,
-	REQUEST_ADD_EXTERN_PID
+	REQUEST_ADD_EXTERN_PID,
+	REQUEST_X11_DISPLAY,
+	REQUEST_GETPW,
+	REQUEST_GETGR,
 } step_msg_t;
 
 typedef enum {
@@ -80,20 +83,32 @@ typedef enum {
 	SLURMSTEPD_STEP_ENDING
 } slurmstepd_state_t;
 
+typedef enum {
+	GETPW_MATCH_USER_AND_PID = 0,	/* user must match, pid must belong */
+	GETPW_MATCH_ALWAYS,		/* always return */
+	GETPW_MATCH_PID,		/* only pid must belong */
+} stepd_getpw_mode_t;
+
+typedef enum {
+	GETGR_MATCH_GROUP_AND_PID = 0,	/* user must match, pid must belong */
+	GETGR_MATCH_ALWAYS,		/* always return */
+	GETGR_MATCH_PID,		/* only pid must belong */
+} stepd_getgr_mode_t;
+
 typedef struct {
 	uid_t uid;
 	uint32_t jobid;
 	uint32_t stepid;
 	uint32_t nodeid;
 	uint16_t protocol_version;
-	uint32_t job_mem_limit;		/* job's memory limit, MB */
-	uint32_t step_mem_limit;	/* step's memory limit, MB */
+	uint64_t job_mem_limit;		/* job's memory limit, MB */
+	uint64_t step_mem_limit;	/* step's memory limit, MB */
 } slurmstepd_info_t;
 
 typedef struct {
-	uint32_t job_mem_limit;		/* job's memory limit, MB */
+	uint64_t job_mem_limit;		/* job's memory limit, MB */
 	uint32_t nodeid;
-	uint32_t step_mem_limit;	/* step's memory limit, MB */
+	uint64_t step_mem_limit;	/* step's memory limit, MB */
 } slurmstepd_mem_info_t;
 
 typedef struct {
@@ -159,21 +174,10 @@ int stepd_checkpoint(int fd, uint16_t protocol_version,
 		     time_t timestamp, char *image_dir);
 
 /*
- * Send a signal to a single task in a job step.
- */
-int stepd_signal_task_local(int fd, uint16_t protocol_version,
-			    int signal, int ltaskid);
-
-/*
- * Send a signal to a single task in a job step.
- */
-int stepd_signal_task_global(int fd, uint16_t protocol_version,
-			     int signal, int gtaskid);
-
-/*
  * Send a signal to the proctrack container of a job step.
  */
-int stepd_signal_container(int fd, uint16_t protocol_version, int signal);
+int stepd_signal_container(int fd, uint16_t protocol_version, int signal,
+			   int flags, uid_t uid);
 
 /*
  * Attach a client to a running job step.
@@ -213,6 +217,36 @@ bool stepd_pid_in_container(int fd, uint16_t protocol_version, pid_t pid);
  * jobacct_gather and proctrack plugins.
  */
 extern int stepd_add_extern_pid(int fd, uint16_t protocol_version, pid_t pid);
+
+/*
+ * Fetch the display number if this extern step is providing x11 tunneling.
+ * If temporary XAUTHORITY files are in use, xauthority is set to that path,
+ * otherwise NULL.
+ * Returns 0 to indicate no display forwarded.
+ */
+extern int stepd_get_x11_display(int fd, uint16_t protocol_version,
+				 char **xauthority);
+
+/*
+ * Get the 'struct passwd' info for the user running this job step iff
+ * the cluster is running with enable_nss_slurm.
+ */
+extern struct passwd *stepd_getpw(int fd, uint16_t protocol_version,
+				  int mode, uid_t uid, const char *name);
+
+extern void xfree_struct_passwd(struct passwd *pwd);
+
+/*
+ * Get the 'struct group' info for the user running this job step iff
+ * the cluster is running with enable_nss_slurm.
+ *
+ * Returns a NULL-terminated array of 'struct group' elements, with all
+ * fields allocated with xmalloc().
+ */
+extern struct group **stepd_getgr(int fd, uint16_t protocol_version,
+				  int mode, gid_t gid, const char *name);
+
+extern void xfree_struct_group_array(struct group **grp);
 
 /*
  * Return the process ID of the slurmstepd.

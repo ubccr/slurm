@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Test sreport cluster utilization. Also test for
 #          sreport -M option
 #
@@ -13,31 +13,34 @@
 # Written by Danny Auble <da@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
 source ./globals_accounting
+source ./globals_federation
 
 source ./inc22.1.1
 source ./inc22.1.2
 source ./inc22.1.3
 source ./inc22.1.4
+source ./inc22.1.5
+source ./inc22.1.fed
 
 set test_id     "22.1"
 set test_name   "test22.1"
@@ -52,27 +55,28 @@ set sql_rem_clus2    "$test_name-clus2-rem.sql"
 set sql_out    "$test_name-out.sql"
 set cluster1    [format "%s%s" $test_nu "clus1"]
 set cluster2    [format "%s%s" $test_nu "clus2"]
-set account1   [format "%s%s" $test_nu "acct1"]
-set account2   [format "%s%s" $test_nu "acct2"]
-set account3   [format "%s%s" $test_nu "acct3"]
-set accounts   [format "%s,%s,%s" $account1 $account2 $account3]
-set wckey1     [format "%s%s" $test_nu "wckey"]
-set user1      [format "%s%s" $test_nu "user1"]
-set user2      [format "%s%s" $test_nu "user2"]
-set users      [format "%s,%s" $user1 $user2]
-set node0      [format "%s%d" $cluster1 0]
-set node1      [format "%s%d" $cluster1 1]
-set node_list  [format "%s%s" $cluster1 "\[0-1\]"]
-set node0_cpus 2
-set node1_cpus 2
-set test_job1  "$test_name\_job1"
-set test_job2  "$test_name\_job2"
-set test_job3  "$test_name\_job3"
+set account1    [format "%s%s" $test_nu "acct1"]
+set account2    [format "%s%s" $test_nu "acct2"]
+set account3    [format "%s%s" $test_nu "acct3"]
+set accounts    [format "%s,%s,%s" $account1 $account2 $account3]
+set wckey1      [format "%s%s" $test_nu "wckey"]
+set user1       [format "%s%s" $test_nu "user1"]
+set user2       [format "%s%s" $test_nu "user2"]
+set users       [format "%s,%s" $user1 $user2]
+set node0       [format "%s%d" $cluster1 0]
+set node1       [format "%s%d" $cluster1 1]
+set node_list   [format "%s%s" $cluster1 "\[0-1\]"]
+set node0_cpus  2
+set node1_cpus  2
+set test_job1   "$test_name\_job1"
+set test_job2   "$test_name\_job2"
+set test_job3   "$test_name\_job3"
 set cluster_cpus [expr $node0_cpus + $node1_cpus]
 set access_err  0
 set uid [get_my_uid]
 set gid [get_my_gid]
 set timeout 120
+set fedname     "test22_1"
 
 # Cluster
 array set clus_req {}
@@ -329,6 +333,70 @@ if {!$user1wckey1 || !$user1wckey1} {
 	exit $exit_code
 }
 
+proc end_it {} {
+	global exit_code sql_rem_clus1 sql_rem_clus2 users accounts
+	global cluster1 cluster2
+
+	incr exit_code [archive_load $sql_rem_clus1]
+	incr exit_code [archive_load $sql_rem_clus2]
+	remove_user "" "" $users
+	remove_acct "" $accounts
+	remove_cluster "$cluster1"
+	remove_cluster "$cluster2"
+	exit $exit_code
+}
+
+proc test_fed {} {
+	global scontrol alpha sacctmgr env bin_rm cluster1 cluster2 fedname
+
+	set config_dir ""
+	set new_conf /tmp/slurm.conf.test22.1
+
+	spawn $scontrol show config
+	expect {
+		-re "SLURM_CONF *= (/.*)/($alpha).*SLURM_VERSION" {
+			set config_dir $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol is not responding\n"
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	delete_federations $fedname
+
+	set cmd1 "$sacctmgr -i add federation $fedname"
+	send_user "$cmd1\n"
+	send_user "[eval exec $cmd1]\n"
+
+	set cmd2 "$sacctmgr -i mod fed $fedname set clusters=$cluster1,$cluster2"
+	send_user "$cmd2\n"
+	send_user "[eval exec $cmd2]\n"
+
+	send_user "This is the config dir: $config_dir; new config: $new_conf \n"
+
+	set old_conf "$config_dir/slurm.conf"
+
+	send_user [exec sed "s/ClusterName\\s*=.*/ClusterName=$cluster1/Ig" $old_conf > $new_conf]
+
+	set env(SLURM_CONF) $new_conf
+
+	send_user "ENV VARIABLE: [exec printenv SLURM_CONF]  \n"
+
+	set exit_code [inc22_1_fed]
+	delete_federations $fedname
+	exec $bin_rm -rf $new_conf
+
+	set env(SLURM_CONF) $config_dir/slurm.conf
+	if {$exit_code ne 0} {
+		end_it
+	}
+}
+
 proc create_sql {cluster sql_in sql_rem} {
 
 	global bin_rm cluster_cpus period_start period_end node_list exit_code
@@ -343,7 +411,6 @@ proc create_sql {cluster sql_in sql_rem} {
 	global job3_end_str job3_diff_str sacctmgr node0_start_str
 	global node0_end_str matches users accounts
 	global test_job1 test_job2 test_job3
-
 
 	exec $bin_rm -f $sql_in
 	set file [open $sql_in "w"]
@@ -407,7 +474,7 @@ proc create_sql {cluster sql_in sql_rem} {
 	# Use sacct to see if the job loaded
 	#
 	set matches 0
-	set my_pid [eval spawn $sacct -p -C $cluster --format=cluster,account,associd,wckey,wckeyid,start,end,elapsed --noheader --start=$start_str --end=$end_str]
+	set my_pid [eval spawn $sacct -p -M $cluster --format=cluster,account,associd,wckey,wckeyid,start,end,elapsed --noheader --start=$start_str --end=$end_str]
 	expect {
 		-re "There was a problem" {
 			send_user "FAILURE: there was a problem with the sacct command\n"
@@ -445,11 +512,7 @@ proc create_sql {cluster sql_in sql_rem} {
 	}
 
 	if { $exit_code } {
-		#incr exit_code [archive_load $sql_rem]
-		remove_user "" "" $users
-		remove_acct "" $accounts
-		remove_cluster "$cluster"
-		exit $exit_code
+		end_it
 	}
 
 	#
@@ -491,11 +554,7 @@ proc create_sql {cluster sql_in sql_rem} {
 	}
 
 	if { $exit_code } {
-		#incr exit_code [archive_load $sql_rem]
-		remove_user "" "" $users
-		remove_acct "" $accounts
-		remove_cluster "$cluster"
-		exit $exit_code
+		end_it
 	}
 
 	#
@@ -532,11 +591,7 @@ proc create_sql {cluster sql_in sql_rem} {
 	}
 
 	if { $exit_code } {
-		incr exit_code [archive_load $sql_rem]
-		remove_user "" "" $users
-		remove_acct "" $accounts
-		remove_cluster "$cluster"
-		exit $exit_code
+		end_it
 	}
 }
 
@@ -547,13 +602,30 @@ create_sql $cluster2 $sql_in_clus2 $sql_rem_clus2
 #
 # Execute sub-test
 #
-inc22_1_1
 
-inc22_1_2
+# Fed Testing
+test_fed
 
-inc22_1_3
-
-inc22_1_4
+set exit_code [inc22_1_1]
+if {$exit_code ne 0} {
+	end_it
+}
+set exit_code [inc22_1_2]
+if {$exit_code ne 0} {
+	end_it
+}
+set exit_code [inc22_1_3]
+if {$exit_code ne 0} {
+	end_it
+}
+set exit_code [inc22_1_4]
+if {$exit_code ne 0} {
+	end_it
+}
+set exit_code [inc22_1_5]
+if {$exit_code ne 0} {
+	end_it
+}
 
 if {$exit_code == 0} {
 	incr exit_code [archive_load $sql_rem_clus1]

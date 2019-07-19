@@ -3,11 +3,11 @@
  *****************************************************************************
  *  Copyright (C) 2005-2006 Hewlett-Packard Development Company, L.P.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -23,13 +23,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -56,70 +56,6 @@
 #endif
 
 static int is_power = -1;
-
-void slurm_chkaffinity(cpu_set_t *mask, stepd_step_rec_t *job, int statval)
-{
-	char *bind_type, *action, *status, *units;
-	char mstr[1 + CPU_SETSIZE / 4];
-	int task_gid = job->envtp->procid;
-	int task_lid = job->envtp->localid;
-	pid_t mypid = job->envtp->task_pid;
-
-	if (!(job->cpu_bind_type & CPU_BIND_VERBOSE))
-		return;
-
-	if (statval)
-		status = " FAILED";
-	else
-		status = "";
-
-	if (job->cpu_bind_type & CPU_BIND_NONE) {
-		action = "";
-		units  = "";
-		bind_type = "NONE";
-	} else {
-		action = " set";
-		if (job->cpu_bind_type & CPU_BIND_TO_THREADS)
-			units = "_threads";
-		else if (job->cpu_bind_type & CPU_BIND_TO_CORES)
-			units = "_cores";
-		else if (job->cpu_bind_type & CPU_BIND_TO_SOCKETS)
-			units = "_sockets";
-		else if (job->cpu_bind_type & CPU_BIND_TO_LDOMS)
-			units = "_ldoms";
-		else
-			units = "";
-		if (job->cpu_bind_type & CPU_BIND_RANK) {
-			bind_type = "RANK";
-		} else if (job->cpu_bind_type & CPU_BIND_MAP) {
-			bind_type = "MAP ";
-		} else if (job->cpu_bind_type & CPU_BIND_MASK) {
-			bind_type = "MASK";
-		} else if (job->cpu_bind_type & CPU_BIND_LDRANK) {
-			bind_type = "LDRANK";
-		} else if (job->cpu_bind_type & CPU_BIND_LDMAP) {
-			bind_type = "LDMAP ";
-		} else if (job->cpu_bind_type & CPU_BIND_LDMASK) {
-			bind_type = "LDMASK";
-		} else if (job->cpu_bind_type & (~CPU_BIND_VERBOSE)) {
-			bind_type = "UNK ";
-		} else {
-			action = "";
-			bind_type = "NULL";
-		}
-	}
-
-	fprintf(stderr, "cpu_bind%s=%s - "
-			"%s, task %2u %2u [%u]: mask 0x%s%s%s\n",
-			units, bind_type,
-			conf->hostname,
-			task_gid,
-			task_lid,
-			mypid,
-			cpuset_to_str(mask, mstr),
-			action,
-			status);
-}
 
 /* If HAVE_NUMA, create mask for given ldom.
  * Otherwise create mask for given socket
@@ -225,8 +161,8 @@ int get_cpuset(cpu_set_t *mask, stepd_step_rec_t *job)
 
 	if (job->cpu_bind_type & CPU_BIND_MASK) {
 		/* convert mask string into cpu_set_t mask */
-		if (str_to_cpuset(mask, mstr) < 0) {
-			error("str_to_cpuset %s", mstr);
+		if (task_str_to_cpuset(mask, mstr) < 0) {
+			error("task_str_to_cpuset %s", mstr);
 			return false;
 		}
 		return true;
@@ -256,7 +192,7 @@ int get_cpuset(cpu_set_t *mask, stepd_step_rec_t *job)
 		if (len > 1 && !memcmp(mstr, "0x", 2L))
 			curstr += 2;
 		while (ptr >= curstr) {
-			char val = char_to_val(*ptr);
+			char val = slurm_char_to_hex(*ptr);
 			if (val == (char) -1)
 				return false;
 			if (val & 1)
@@ -397,14 +333,12 @@ int slurm_setaffinity(pid_t pid, size_t size, const cpu_set_t *mask)
 #ifdef __FreeBSD__
         rval = cpuset_setaffinity(CPU_LEVEL_WHICH, CPU_WHICH_PID,
 				pid, size, mask);
-#elif defined(SCHED_GETAFFINITY_THREE_ARGS)
-	rval = sched_setaffinity(pid, size, mask);
 #else
-	rval = sched_setaffinity(pid, mask);
+	rval = sched_setaffinity(pid, size, mask);
 #endif
 	if (rval) {
-		verbose("sched_setaffinity(%d,%zd,0x%s) failed: %m",
-			pid, size, cpuset_to_str(mask, mstr));
+		verbose("sched_setaffinity(%d,%zu,0x%s) failed: %m",
+			pid, size, task_cpuset_to_str(mask, mstr));
 	}
 	return (rval);
 }
@@ -427,17 +361,15 @@ int slurm_getaffinity(pid_t pid, size_t size, cpu_set_t *mask)
 #ifdef __FreeBSD__
         rval = cpuset_getaffinity(CPU_LEVEL_WHICH, CPU_WHICH_PID,
 				pid, size, mask);
-#elif defined(SCHED_GETAFFINITY_THREE_ARGS)
-	rval = sched_getaffinity(pid, size, mask);
 #else
-	rval = sched_getaffinity(pid, mask);
+	rval = sched_getaffinity(pid, size, mask);
 #endif
 	if (rval) {
-		verbose("sched_getaffinity(%d,%zd,0x%s) failed with status %d",
-				pid, size, cpuset_to_str(mask, mstr), rval);
+		verbose("sched_getaffinity(%d,%zu,0x%s) failed with status %d",
+			pid, size, task_cpuset_to_str(mask, mstr), rval);
 	} else {
 		debug3("sched_getaffinity(%d) = 0x%s",
-		       pid, cpuset_to_str(mask, mstr));
+		       pid, task_cpuset_to_str(mask, mstr));
 	}
 	return (rval);
 }

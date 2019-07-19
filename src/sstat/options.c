@@ -6,11 +6,11 @@
  *  Written by Danny Auble <da@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -58,7 +58,7 @@ void _help_fields_msg(void)
 			printf(" ");
 		else if (i)
 			printf("\n");
-		printf("%-17s", fields[i].name);
+		printf("%-19s", fields[i].name);
 	}
 	printf("\n");
 	return;
@@ -138,13 +138,14 @@ void _init_params()
 {
 	memset(&params, 0, sizeof(sstat_parameters_t));
 	params.convert_flags = CONVERT_NUM_UNIT_EXACT;
+	params.units = NO_VAL;
 }
 
 /* returns number of objects added to list */
 static int _addto_job_list(List job_list, char *names)
 {
-	int i=0, start=0;
-	char *name = NULL, *dot = NULL;
+	int i = 0, start = 0;
+	char *name = NULL, *dot, *plus, *under;
 	slurmdb_selected_step_t *selected_step = NULL;
 	slurmdb_selected_step_t *curr_step = NULL;
 
@@ -174,7 +175,6 @@ static int _addto_job_list(List job_list, char *names)
 				names[i] = '`';
 			else if (names[i] == ',') {
 				if ((i-start) > 0) {
-					char *dot = NULL;
 					name = xmalloc((i-start+1));
 					memcpy(name, names+start, (i-start));
 
@@ -200,24 +200,18 @@ static int _addto_job_list(List job_list, char *names)
 								atoi(dot);
 					}
 
-					dot = strstr(name, "_");
-					if (dot == NULL) {
-						debug2("No jobarray requested");
+					selected_step->array_task_id = NO_VAL;
+					selected_step->pack_job_offset = NO_VAL;
+					if ((under = strstr(name, "_"))) {
+						*under++ = 0;
 						selected_step->array_task_id =
-							NO_VAL;
+							atoi(under);
+					} else if ((plus = strstr(name, "+"))) {
+						*plus++ = 0;
+						selected_step->pack_job_offset =
+							atoi(plus);
 					} else {
-						*dot++ = 0;
-						/* INFINITE means give
-						 * me all the tasks of
-						 * the array */
-						if (!dot)
-							selected_step->
-								array_task_id =
-								INFINITE;
-						else
-							selected_step->
-								array_task_id =
-								atoi(dot);
+						debug2("No array/pack job requested");
 					}
 
 					selected_step->jobid =
@@ -270,24 +264,16 @@ static int _addto_job_list(List job_list, char *names)
 					selected_step->stepid = atoi(dot);
 			}
 
-			dot = strstr(name, "_");
-			if (dot == NULL) {
-				debug2("No jobarray requested");
-				selected_step->array_task_id =
-					NO_VAL;
+			selected_step->array_task_id = NO_VAL;
+			selected_step->pack_job_offset = NO_VAL;
+			if ((under = strstr(name, "_"))) {
+				*under++ = 0;
+				selected_step->array_task_id = atoi(under);
+			} else if ((plus = strstr(name, "+"))) {
+				*plus++ = 0;
+				selected_step->pack_job_offset = atoi(plus);
 			} else {
-				*dot++ = 0;
-				/* INFINITE means give
-				 * me all the tasks of
-				 * the array */
-				if (!dot)
-					selected_step->
-						array_task_id =
-						INFINITE;
-				else
-					selected_step->
-						array_task_id =
-						atoi(dot);
+				debug2("No array/pack job requested");
 			}
 
 			selected_step->jobid = slurm_xlate_job_id(name);
@@ -334,6 +320,8 @@ int decode_state_char(char *state)
 		return JOB_PREEMPTED;
 	else if (!xstrcasecmp(state, "dl"))
 		return JOB_DEADLINE;
+	else if (!xstrcasecmp(state, "oom"))
+		return JOB_OOM;
 	else
 		return -1; // unknown
 }
@@ -492,7 +480,7 @@ void parse_command_line(int argc, char **argv)
 		command_len = strlen(start);
 
 		for (i = 0; fields[i].name; i++) {
-			if (!strncasecmp(fields[i].name, start, command_len))
+			if (!xstrncasecmp(fields[i].name, start, command_len))
 				goto foundfield;
 		}
 		error("Invalid field requested: \"%s\"", start);
@@ -508,5 +496,3 @@ void parse_command_line(int argc, char **argv)
 
 	return;
 }
-
-

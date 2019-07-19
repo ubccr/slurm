@@ -4,11 +4,11 @@
  *  Copyright (C) 2013 SchedMD LLC
  *  Written by Morris Jette <jette@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,28 +24,18 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif
-#endif
-
 #include <fcntl.h>
+#include <inttypes.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -55,10 +45,11 @@
 #include <time.h>
 #include <unistd.h>
 
-//#include "slurm/slurmdb.h"
 #include "slurm/smd_ns.h"
+
 #include "src/common/slurm_xlator.h"	/* Must be first */
 #include "src/common/bitstring.h"
+#include "src/common/fd.h"
 #include "src/common/job_resources.h"
 #include "src/common/list.h"
 #include "src/common/node_conf.h"
@@ -118,8 +109,7 @@ static void _job_fail_del(void *x)
 	if (job_fail_ptr->pending_job_id) {
 		job_ptr = find_job_record(job_fail_ptr->pending_job_id);
 		if (job_ptr && (job_ptr->user_id == job_fail_ptr->user_id)) {
-			(void) job_signal(job_fail_ptr->pending_job_id,
-					  SIGKILL, 0, 0, false);
+			(void) job_signal(job_ptr, SIGKILL, 0, 0, false);
 		}
 	}
 	xfree(job_fail_ptr->fail_node_cpus);
@@ -246,10 +236,10 @@ static int _unpack_job_state(job_failures_t **job_pptr, Buf buffer)
 	safe_unpack16(&job_fail_ptr->callback_port, buffer);
 	safe_unpack32(&job_fail_ptr->job_id, buffer);
 	safe_unpack32(&job_fail_ptr->fail_node_cnt, buffer);
-	job_fail_ptr->fail_node_cpus  = xmalloc(sizeof(uint32_t) *
-						job_fail_ptr->fail_node_cnt);
-	job_fail_ptr->fail_node_names = xmalloc(sizeof(char *) *
-						job_fail_ptr->fail_node_cnt);
+	safe_xcalloc(job_fail_ptr->fail_node_cpus,job_fail_ptr->fail_node_cnt,
+		     sizeof(uint32_t));
+	safe_xcalloc(job_fail_ptr->fail_node_names, job_fail_ptr->fail_node_cnt,
+		     sizeof(char *));
 	for (i = 0; i < job_fail_ptr->fail_node_cnt; i++) {
 		safe_unpack32(&job_fail_ptr->fail_node_cpus[i], buffer);
 		safe_unpackstr_xmalloc(&job_fail_ptr->fail_node_names[i],
@@ -274,6 +264,7 @@ unpack_error:
 		xfree(job_fail_ptr->fail_node_names[i]);
 	xfree(job_fail_ptr->fail_node_names);
 	xfree(job_fail_ptr->pending_node_name);
+	xfree(job_fail_ptr);
 	return SLURM_ERROR;
 }
 
@@ -283,7 +274,7 @@ static int _update_job(job_desc_msg_t * job_specs, uid_t uid)
 
 	msg.data= job_specs;
 	msg.conn_fd = -1;
-	return update_job(&msg, uid);
+	return update_job(&msg, uid, true);
 }
 
 /*
@@ -379,12 +370,10 @@ extern int save_nonstop_state(void)
 extern int restore_nonstop_state(void)
 {
 	char *dir_path, *state_file;
-	uint32_t data_allocated, data_size = 0;
 	uint32_t job_cnt = 0;
-	char *data;
-	uint16_t protocol_version = (uint16_t) NO_VAL;
+	uint16_t protocol_version = NO_VAL16;
 	Buf buffer;
-	int error_code = SLURM_SUCCESS, i, state_fd, data_read;
+	int error_code = SLURM_SUCCESS, i;
 	time_t buf_time;
 	job_failures_t *job_fail_ptr = NULL;
 
@@ -393,41 +382,20 @@ extern int restore_nonstop_state(void)
 	xstrcat(state_file, "/nonstop_state");
 	xfree(dir_path);
 
-	state_fd = open(state_file, O_RDONLY);
-	if (state_fd < 0) {
+	if (!(buffer = create_mmap_buf(state_file))) {
 		error("No nonstop state file (%s) to recover", state_file);
 		xfree(state_file);
 		return error_code;
-	} else {
-		data_allocated = BUF_SIZE;
-		data = xmalloc(data_allocated);
-		while (1) {
-			data_read = read(state_fd, &data[data_size],
-					 BUF_SIZE);
-			if (data_read < 0) {
-				if (errno == EINTR)
-					continue;
-				else {
-					error("Read error on %s: %m",
-					      state_file);
-					break;
-				}
-			} else if (data_read == 0)	/* eof */
-				break;
-			data_size      += data_read;
-			data_allocated += data_read;
-			xrealloc(data, data_allocated);
-		}
-		close(state_fd);
 	}
 	xfree(state_file);
 
 	/* Validate state version */
-	buffer = create_buf(data, data_size);
 	safe_unpack16(&protocol_version, buffer);
 	debug3("Version in slurmctld/nonstop header is %u", protocol_version);
 
-	if (protocol_version == (uint16_t) NO_VAL) {
+	if (protocol_version == NO_VAL16) {
+		if (!ignore_state_errors)
+			fatal("Can not recover slurmctld/nonstop state, incompatible version, start with '-i' to ignore this");
 		error("*************************************************************");
 		error("Can not recover slurmctld/nonstop state, incompatible version");
 		error("*************************************************************");
@@ -454,9 +422,11 @@ extern int restore_nonstop_state(void)
 	return error_code;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete nonstop state file, start with '-i' to ignore this");
 	error("Incomplete nonstop state file");
 	free_buf(buffer);
-	return SLURM_FAILURE;
+	return SLURM_ERROR;
 }
 
 extern void init_job_db(void)
@@ -512,7 +482,7 @@ static void _failing_node(struct node_record *node_ptr)
 	info("node_fail_callback for node:%s", node_ptr->name);
 	if (!job_fail_list)
 		return;
-	if (IS_NODE_DOWN(node_ptr) || IS_NODE_ERROR(node_ptr))
+	if (IS_NODE_DOWN(node_ptr))
 		event_flag |= SMD_EVENT_NODE_FAILED;
 	if (IS_NODE_FAIL(node_ptr))
 		event_flag |= SMD_EVENT_NODE_FAILING;
@@ -547,7 +517,7 @@ extern void node_fail_callback(struct job_record *job_ptr,
 
 	info("node_fail_callback for job:%u node:%s",
 	     job_ptr->job_id, node_ptr->name);
-	if (IS_NODE_DOWN(node_ptr) || IS_NODE_ERROR(node_ptr))
+	if (IS_NODE_DOWN(node_ptr))
 		event_flag |= SMD_EVENT_NODE_FAILED;
 	if (IS_NODE_FAIL(node_ptr))
 		event_flag |= SMD_EVENT_NODE_FAILING;
@@ -794,7 +764,7 @@ static void _kill_job(uint32_t job_id, uid_t cmd_uid)
 {
 	int rc;
 
-	rc = job_signal(job_id, SIGKILL, 0, cmd_uid, false);
+	rc = job_signal_id(job_id, SIGKILL, 0, cmd_uid, false);
 	if (rc) {
 		info("slurmctld/nonstop: can not kill job %u: %s",
 		     job_id, slurm_strerror(rc));
@@ -1240,14 +1210,15 @@ extern char *replace_node(char *cmd_ptr, uid_t cmd_uid,
 		goto fini;
 	}
 
-	/* Create a job with replacement resources,
-	 * which will later be merged into the original job */
+	/*
+	 * Create a job with replacement resources,
+	 * which will later be merged into the original job
+	 */
 	slurm_init_job_desc_msg(&job_alloc_req);
 	job_alloc_req.account = xstrdup(job_ptr->account);
 	xstrfmtcat(job_alloc_req.dependency, "expand:%u", job_ptr->job_id);
 	job_alloc_req.exc_nodes = xstrdup(job_ptr->nodes);
 	job_alloc_req.features  = _job_node_features(job_ptr, node_ptr);
-	job_alloc_req.gres	= xstrdup(job_ptr->gres);
 	job_alloc_req.group_id	= job_ptr->group_id;
 	job_alloc_req.immediate	= 1;
 	job_alloc_req.max_cpus	= cpu_cnt;
@@ -1258,14 +1229,17 @@ extern char *replace_node(char *cmd_ptr, uid_t cmd_uid,
 	job_alloc_req.network	= xstrdup(job_ptr->network);
 	job_alloc_req.partition	= xstrdup(job_ptr->partition);
 	job_alloc_req.priority	= NO_VAL - 1;
-	if (job_ptr->qos_ptr) {
-		slurmdb_qos_rec_t *qos_ptr;
-		qos_ptr = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
-		job_alloc_req.qos = xstrdup(qos_ptr->name);
-	}
+	if (job_ptr->qos_ptr)
+		job_alloc_req.qos = xstrdup(job_ptr->qos_ptr->name);
+	job_alloc_req.tres_per_job    = xstrdup(job_ptr->tres_per_job);
+	job_alloc_req.tres_per_node   = xstrdup(job_ptr->tres_per_node);
+	job_alloc_req.tres_per_socket = xstrdup(job_ptr->tres_per_socket);
+	job_alloc_req.tres_per_task   = xstrdup(job_ptr->tres_per_task);
 
-	/* Without unlock, the job_begin_callback() function will deadlock.
-	 * Not a great solution, but perhaps the least bad solution. */
+	/*
+	 * Without unlock, the job_begin_callback() function will deadlock.
+	 * Not a great solution, but perhaps the least bad solution.
+	 */
 	slurm_mutex_unlock(&job_fail_mutex);
 
 	job_alloc_req.user_id	= job_ptr->user_id;
@@ -1349,11 +1323,13 @@ extern char *replace_node(char *cmd_ptr, uid_t cmd_uid,
 	xfree(job_alloc_req.dependency);
 	xfree(job_alloc_req.exc_nodes);
 	xfree(job_alloc_req.features);
-	xfree(job_alloc_req.gres);
 	xfree(job_alloc_req.name);
 	xfree(job_alloc_req.network);
 	xfree(job_alloc_req.partition);
 	xfree(job_alloc_req.qos);
+	xfree(job_alloc_req.tres_per_node);
+	xfree(job_alloc_req.tres_per_socket);
+	xfree(job_alloc_req.tres_per_task);
 	xfree(job_alloc_req.wckey);
 
 	slurm_mutex_lock(&job_fail_mutex);	/* Resume lock */
@@ -1714,7 +1690,7 @@ static void _send_event_callbacks(void)
 	ListIterator job_iterator;
 	slurm_addr_t callback_addr;
 	uint32_t callback_flags, callback_jobid;
-	int fd, retry = 0;
+	int fd;
 	ssize_t sent;
 
 	if (!job_fail_list)
@@ -1751,14 +1727,8 @@ static void _send_event_callbacks(void)
 			}
 			sent = slurm_msg_sendto_timeout(fd,
 					(char *) &callback_flags,
-					sizeof(uint32_t), 0, 100000);
-			while ((slurm_shutdown_msg_conn(fd) < 0) &&
-			       (errno == EINTR)) {
-				if (retry++ > 10) {
-					error("nonstop: socket close fail: %m");
-					break;
-				}
-			}
+					sizeof(uint32_t), 100000);
+			(void) close(fd);
 			/* Reset locks and clean-up as needed */
 io_fini:		slurm_mutex_lock(&job_fail_mutex);
 			if ((sent != sizeof(uint32_t)) &&
@@ -1803,19 +1773,13 @@ static void *_state_thread(void *no_data)
 /* Spawn thread to periodically save nonstop plugin state to disk */
 extern int spawn_state_thread(void)
 {
-	pthread_attr_t thread_attr_msg;
-
 	slurm_mutex_lock(&thread_flag_mutex);
 	if (thread_running) {
 		slurm_mutex_unlock(&thread_flag_mutex);
 		return SLURM_ERROR;
 	}
 
-	slurm_attr_init(&thread_attr_msg);
-	if (pthread_create(&msg_thread_id, &thread_attr_msg,
-			   _state_thread, NULL))
-		fatal("pthread_create %m");
-	slurm_attr_destroy(&thread_attr_msg);
+	slurm_thread_create(&msg_thread_id, _state_thread, NULL);
 	thread_running = true;
 	slurm_mutex_unlock(&thread_flag_mutex);
 

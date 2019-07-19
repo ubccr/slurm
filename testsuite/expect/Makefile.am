@@ -2,16 +2,8 @@
 AUTOMAKE_OPTIONS = foreign
 
 EXTRA_DIST = \
-	mpi-testscripts/allred.c	\
-	mpi-testscripts/allred_timed.c	\
-	mpi-testscripts/alltoall.c	\
-	mpi-testscripts/alltoall_timed.c	\
-	mpi-testscripts/barrier_timed.c	\
-	mpi-testscripts/Makefile	\
-	mpi-testscripts/script.slurm.sh	\
 	globals				\
 	globals_accounting		\
-	pkill				\
 	README				\
 	regression			\
 	regression.py			\
@@ -139,6 +131,8 @@ EXTRA_DIST = \
 	test1.111			\
 	test1.112			\
 	test1.113			\
+	test1.114			\
+	test1.115			\
 	test2.1				\
 	test2.2				\
 	test2.3				\
@@ -164,6 +158,7 @@ EXTRA_DIST = \
 	test2.23			\
 	test2.24			\
 	test2.25			\
+	test2.26			\
 	test3.1				\
 	test3.2				\
 	test3.3				\
@@ -189,6 +184,8 @@ EXTRA_DIST = \
 	test3.14			\
 	test3.15			\
 	test3.16			\
+	test3.17			\
+	test3.18			\
 	test4.1				\
 	test4.2				\
 	test4.3				\
@@ -231,6 +228,8 @@ EXTRA_DIST = \
 	test6.13.prog.c			\
 	test6.14			\
 	test6.15			\
+	test6.16			\
+	test6.17			\
 	test7.1				\
 	test7.2				\
 	test7.2.prog.c			\
@@ -244,10 +243,6 @@ EXTRA_DIST = \
 	test7.6				\
 	test7.6.prog.c			\
 	test7.7				\
-	test7.7.crypto.c		\
-	test7.7.prog.c			\
-	test7.8				\
-	test7.8.prog.c			\
 	test7.9				\
 	test7.9.prog.c			\
 	test7.10			\
@@ -279,27 +274,12 @@ EXTRA_DIST = \
 	test7.17_configs/test7.17.6/slurm.conf	\
 	test7.17_configs/test7.17.7/gres.conf	\
 	test7.17_configs/test7.17.7/slurm.conf	\
-	test8.1				\
-	test8.2				\
-	test8.3				\
-	test8.4				\
-	test8.4.prog.c			\
-	test8.5				\
-	test8.6				\
-	test8.7				\
-	test8.7.crypto.c		\
-	test8.7.prog.c			\
-	test8.8				\
-	test8.9				\
-	test8.10			\
-	test8.11			\
-	test8.20			\
-	test8.21			\
-	test8.21.bash			\
-	test8.22			\
-	test8.23			\
-	test8.24			\
-	test8.25			\
+	test7.18			\
+	test7.18.prog.c			\
+	test7.19			\
+	test7.20			\
+	test7.21			\
+	test7.21.prog.c			\
 	test9.1				\
 	test9.2				\
 	test9.3				\
@@ -316,15 +296,11 @@ EXTRA_DIST = \
 	test10.2			\
 	test10.3			\
 	test10.4			\
-	test10.5			\
-	test10.6			\
 	test10.7			\
 	test10.8			\
 	test10.9			\
 	test10.10			\
 	test10.11			\
-	test10.12			\
-	test10.13			\
 	test11.1			\
 	test11.2			\
 	test11.3			\
@@ -345,6 +321,8 @@ EXTRA_DIST = \
 	test12.6.prog.c			\
 	test12.7			\
 	test12.8			\
+	test12.9			\
+	test12.10			\
 	test13.1			\
 	test13.2			\
 	test14.1			\
@@ -373,7 +351,6 @@ EXTRA_DIST = \
 	test15.14			\
 	test15.15			\
 	test15.16			\
-	test15.17			\
 	test15.18			\
 	test15.19			\
 	test15.20			\
@@ -405,7 +382,6 @@ EXTRA_DIST = \
 	test17.4			\
 	test17.5			\
 	test17.6			\
-	test17.7			\
 	test17.8			\
 	test17.9			\
 	test17.10			\
@@ -443,6 +419,7 @@ EXTRA_DIST = \
 	test17.42			\
 	test17.43			\
 	test17.44			\
+	test17.45			\
 	test17.51			\
 	test17.52			\
 	test17.53			\
@@ -515,6 +492,9 @@ EXTRA_DIST = \
 	test21.34			\
 	test21.35			\
 	test21.36			\
+	test21.37			\
+	test21.38			\
+	test21.39			\
 	inc21.30.1                      \
 	inc21.30.2                      \
 	inc21.30.3                      \
@@ -534,12 +514,13 @@ EXTRA_DIST = \
 	inc21.30.17			\
 	inc21.34.1			\
 	inc21.34.2			\
-	inc21.34_test			\
+	inc21.34_tests			\
 	test22.1			\
 	inc22.1.1                       \
 	inc22.1.2                       \
 	inc22.1.3                       \
 	inc22.1.4                       \
+	inc22.1.5                       \
 	test22.2			\
 	test23.1			\
 	test23.2			\
@@ -550,9 +531,10 @@ EXTRA_DIST = \
 	test24.3.prog.c			\
 	test24.4			\
 	test24.4.prog.c			\
+	test24.5			\
+	test24.6			\
+	test24.7			\
 	test25.1			\
-	test26.1			\
-	test26.2			\
 	test27.1			\
 	test27.2			\
 	test27.3			\
@@ -568,6 +550,9 @@ EXTRA_DIST = \
 	test28.8			\
 	test28.9			\
 	test28.10			\
+	test28.11			\
+	test28.12			\
+	test28.13			\
 	test29.1                        \
 	test29.2                        \
 	test29.3                        \
@@ -576,8 +561,8 @@ EXTRA_DIST = \
 	test29.6                        \
 	test29.7			\
 	test29.8			\
-	test30.1			\
 	test31.1			\
+	test31.2			\
 	test32.1			\
 	test32.2			\
 	test32.3			\
@@ -604,10 +589,83 @@ EXTRA_DIST = \
 	test34.2			\
 	test35.1			\
 	test35.2			\
+	test35.3			\
+	test35.4			\
+	test35.5			\
+	test35.6			\
 	test36.1			\
 	test36.2			\
 	test36.3			\
-	test36.4
+	test36.4			\
+	test37.1			\
+	test37.2			\
+	test37.3			\
+	test37.4			\
+	test37.5			\
+	test37.6			\
+	test37.7			\
+	test37.8			\
+	test37.9			\
+	test37.10			\
+	test37.11			\
+	test37.12			\
+	test37.13			\
+	test37.14			\
+	test37.15			\
+	test37.16			\
+	test38.1                        \
+	test38.2                        \
+	test38.3                        \
+	test38.4                        \
+	test38.5                        \
+	test38.6                        \
+	test38.6.prog.c			\
+	test38.7			\
+	test38.7.prog.c			\
+	test38.8			\
+	test38.9			\
+	test38.10			\
+	test38.11			\
+	test38.12			\
+	test38.13			\
+	test38.14			\
+	test38.15			\
+	test38.16			\
+	test38.17			\
+	test39.1			\
+	test39.2			\
+	test39.3			\
+	test39.4			\
+	test39.5			\
+	test39.6			\
+	test39.7			\
+	test39.8			\
+	test39.9			\
+	test39.10			\
+	test39.11			\
+	test39.12			\
+	test39.13			\
+	test39.14			\
+	test39.15			\
+	test39.16			\
+	test39.17			\
+	test39.18			\
+	test39.18.prog.c		\
+	test39.18.ulong.c		\
+	test39.19			\
+	test39.20			\
+	test39.21			\
+	test39.21.prog.cu		\
+	test39.22			\
+	test39.23			\
+	test40.1			\
+	test40.2			\
+	test40.3			\
+	test40.4			\
+	test40.5			\
+	test40.6			\
+	test40.8			\
+	test40.8.prog.cu
 
 distclean-local:
 	rm -rf *error *output

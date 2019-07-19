@@ -1,5 +1,5 @@
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          to be called from test3.11
 #          Make a list of lists with a series of parameters to test.
 #          All the tests in goodtests should pass, all those in badtests
@@ -12,22 +12,22 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 
@@ -36,6 +36,7 @@ proc inc3_11_1 {} {
 	global def_partition exit_code
 	global part_cores part_node part_node_cnt part_node_cores
 	global res_name user_name
+	global heterogeneous
 
 	# TEST 1
 	# Make a list of lists with a series of parameters to test.  All the tests
@@ -93,7 +94,7 @@ proc inc3_11_1 {} {
 	{StartTime=now   Duration=5   Nodes=$def_node   User=$user_name  Flags=Maint Flags=ignore_jobs}
 "
 	#{StartTime=now   Duration=5   NodeCnt=10 CoreCnt=11  User=$user_name}
-	if {$cons_res_actived == 1} {
+	if {$cons_res_actived == 1 && $heterogeneous == 0} {
 		set more_goodtests "StartTime=now Duration=5 NodeCnt=$part_node_cnt CoreCnt=$corecnt User=$user_name"
 		lappend goodtests $more_goodtests
 	}

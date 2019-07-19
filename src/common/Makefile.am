@@ -10,15 +10,7 @@
 
 AUTOMAKE_OPTIONS = foreign
 
-if HAVE_UNSETENV
-build_unsetenv_src =
-extra_unsetenv_src = unsetenv.c unsetenv.h
-else
-build_unsetenv_src = unsetenv.c unsetenv.h
-extra_unsetenv_src =
-endif
-
-AM_CPPFLAGS     = -I$(top_srcdir) $(BG_INCLUDES)
+AM_CPPFLAGS     = -I$(top_srcdir) $(lua_CFLAGS) -DSBINDIR=\"$(sbindir)\"
 
 noinst_PROGRAMS = libcommon.o libeio.o libspank.o
 # This is needed if compiling on windows
@@ -48,13 +40,11 @@ libcommon_la_SOURCES = 			\
 	net.c net.h                     \
 	log.c log.h			\
 	cbuf.c cbuf.h			\
-	safeopen.c safeopen.h		\
 	bitstring.c bitstring.h 	\
 	mpi.c slurm_mpi.h               \
 	pack.c pack.h			\
 	parse_config.c parse_config.h	\
 	parse_value.c parse_value.h	\
-	parse_spec.c parse_spec.h	\
 	plugin.c plugin.h		\
 	plugrack.c plugrack.h		\
 	power.c power.h			\
@@ -77,8 +67,7 @@ libcommon_la_SOURCES = 			\
 	slurm_protocol_pack.h		\
 	slurm_protocol_util.c		\
 	slurm_protocol_util.h		\
-	slurm_protocol_socket_implementation.c	\
-	slurm_protocol_socket_common.h	\
+	slurm_protocol_socket.c		\
 	slurm_protocol_common.h		\
 	slurm_protocol_interface.h	\
 	slurm_protocol_defs.c		\
@@ -88,6 +77,7 @@ libcommon_la_SOURCES = 			\
 	slurmdb_defs.c slurmdb_defs.h   \
 	slurmdb_pack.c slurmdb_pack.h   \
 	slurmdbd_defs.c slurmdbd_defs.h	\
+	slurmdbd_pack.c slurmdbd_pack.h	\
 	working_cluster.c working_cluster.h   \
 	uid.c uid.h			\
 	util-net.c util-net.h		\
@@ -97,18 +87,15 @@ libcommon_la_SOURCES = 			\
 	slurm_jobacct_gather.c slurm_jobacct_gather.h \
 	slurm_acct_gather_energy.c slurm_acct_gather_energy.h \
 	slurm_acct_gather_profile.c slurm_acct_gather_profile.h \
-	slurm_acct_gather_infiniband.c slurm_acct_gather_infiniband.h \
+	slurm_acct_gather_interconnect.c slurm_acct_gather_interconnect.h \
 	slurm_acct_gather_filesystem.c slurm_acct_gather_filesystem.h \
 	slurm_jobcomp.c slurm_jobcomp.h	\
+	slurm_opt.c slurm_opt.h		\
 	slurm_route.c slurm_route.h	\
 	slurm_time.c slurm_time.h	\
 	slurm_topology.c slurm_topology.h \
 	switch.c switch.h		\
-	arg_desc.c arg_desc.h		\
 	macros.h			\
-	malloc.c malloc.h		\
-	getopt.h getopt.c getopt1.c     \
-	$(build_unsetenv_src)		\
 	slurm_selecttype_info.c 	\
 	slurm_selecttype_info.h		\
 	slurm_resource_info.c 		\
@@ -121,28 +108,38 @@ libcommon_la_SOURCES = 			\
 	job_options.c job_options.h	\
 	global_defaults.c		\
 	timers.c timers.h		\
+	track_script.c track_script.h	\
 	slurm_xlator.h			\
 	stepd_api.c stepd_api.h		\
 	write_labelled_message.c	\
 	write_labelled_message.h	\
 	proc_args.c proc_args.h		\
-	slurm_strcasestr.c slurm_strcasestr.h \
 	node_conf.h node_conf.c		\
+	gpu.h gpu.c			\
 	gres.h gres.c			\
 	entity.h entity.c		\
 	layout.h layout.c		\
 	layouts_mgr.h layouts_mgr.c	\
 	mapping.c mapping.h		\
 	xcgroup_read_config.c xcgroup_read_config.h \
-	xlua.c xlua.h			\
+	xlua.c xlua.h                   \
 	callerid.c callerid.h		\
-	siphash24.c siphash_slurm.c siphash.h
+	group_cache.c group_cache.h	\
+	slurm_persist_conn.c slurm_persist_conn.h \
+	run_command.c run_command.h	\
+	x11_util.c x11_util.h		\
+	half_duplex.c half_duplex.h	\
+	state_control.c state_control.h	\
+	site_factor.c site_factor.h	\
+	cli_filter.c cli_filter.h	\
+	tres_bind.c tres_bind.h		\
+	tres_frequency.c tres_frequency.h
 
 EXTRA_libcommon_la_SOURCES = 		\
-	$(extra_unsetenv_src)		\
 	uthash/LICENSE			\
 	uthash/README			\
 	uthash/uthash.h
+
 
 libdaemonize_la_SOURCES =  		\
 	daemonize.c       	 	\

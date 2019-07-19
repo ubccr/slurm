@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Cray job-specific burst buffer use
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -8,26 +8,25 @@
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2015 SchedMD LLC.
-# Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
+# Copyright (C) 2015-2018 SchedMD LLC.
 # Written by Morris Jette <jette(at)schedmd.com>
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -80,9 +79,11 @@ proc find_bb_data { file_name string_seek } {
 
 print_header $test_id
 
+stop_root_user
+
 set bb_types [get_bb_types]
-if {[string first "cray" $bb_types] == -1} {
-	send_user "\nWARNING: This test can only be run with the burst_buffer/cray plugin\n"
+if {[string first "datawarp" $bb_types] == -1} {
+	send_user "\nWARNING: This test can only be run with the burst_buffer/datawarp plugin\n"
 	exit 0
 }
 
@@ -91,24 +92,26 @@ exec $bin_rm -f $input_data $output_data $output_use
 exec $bin_echo $data_in >$cwd/$input_data
 
 if {[get_bb_emulate] != 0} {
-	set work_file_in  $cwd/$input_data
-	set work_file_out $cwd/$output_data
-} else {
-	set work_file_in  /ss/$tmp_file
-	set work_file_out /ss/$tmp_file
-}
-
-make_bash_script $script_use "#DW jobdw type=scratch capacity=1GiB access_mode=striped,private pfs=/scratch
-#DW stage_in type=file source=$cwd/$input_data destination=/ss/$tmp_file
-#DW stage_out type=file destination=$cwd/$output_data source=/ss/$tmp_file
-$bin_cat  $work_file_in
-$bin_echo $data_out >$work_file_out
+make_bash_script $script_use "#DW jobdw type=scratch capacity=1GiB access_mode=striped,private type=scratch
+#DW stage_in type=file source=$cwd/$input_data destination=\$DW_JOB_STRIPED/$tmp_file
+#DW stage_out type=file destination=$cwd/$output_data source=\$DW_JOB_STRIPED/$tmp_file
+$bin_cat  $cwd/$input_data
+$bin_echo $data_out >$cwd/$output_data
 $scontrol show burst
 exit 0"
+} else {
+make_bash_script $script_use "#DW jobdw type=scratch capacity=1GiB access_mode=striped,private type=scratch
+#DW stage_in type=file source=$cwd/$input_data destination=\$DW_JOB_STRIPED/$tmp_file
+#DW stage_out type=file destination=$cwd/$output_data source=\$DW_JOB_STRIPED/$tmp_file
+$bin_cat  \$DW_JOB_STRIPED/$tmp_file
+$bin_echo $data_out >\$DW_JOB_STRIPED/$tmp_file
+$scontrol show burst
+exit 0"
+}
 
 incr max_job_state_delay 300
 set job_id_use 0
-spawn $sbatch -N1 --output=$output_use $script_use
+spawn $sbatch -t1 -N1 --output=$output_use $script_use
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id_use $expect_out(1,string)
@@ -129,6 +132,7 @@ if {$job_id_use == 0} {
 } elseif {[wait_for_job $job_id_use "DONE"] != 0} {
 	send_user "\nFAILURE: job did not complete\n"
 	set exit_code 1
+	cancel_job $job_id_use
 } elseif {[wait_for_file $output_use] != 0} {
 	set exit_code 1
 } elseif {[find_bb_jobid $output_use $job_id_use] == 0} {
@@ -141,6 +145,9 @@ if {$job_id_use == 0} {
 	send_user "\nFAILURE: job burst buffer output data not found\n"
 	set exit_code 1
 }
+
+# Wait for purge of buffer to complete
+sleep 10
 
 set found 0
 spawn $scontrol show burst

@@ -3,18 +3,18 @@
  *
  *  NOTE: These functions are designed so they can be used by multiple burst
  *  buffer plugins at the same time (e.g. you might provide users access to
- *  both burst_buffer/cray and burst_buffer/generic on the same system), so
- *  the state information is largely in the individual plugin and passed as
- *  a pointer argument to these functions.
+ *  both burst_buffer/datawarp and burst_buffer/generic on the same system),
+ *  so the state information is largely in the individual plugin and passed
+ *  as a pointer argument to these functions.
  *****************************************************************************
  *  Copyright (C) 2014-2015 SchedMD LLC.
  *  Written by Morris Jette <jette@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -30,13 +30,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -73,6 +73,7 @@ typedef struct bb_config {
 	char    *destroy_buffer;
 	uint32_t flags;			/* See BB_FLAG_* in slurm.h */
 	char    *get_sys_state;
+	char    *get_sys_status;
 	uint64_t granularity;		/* space allocation granularity,
 					 * units are GB */
 	uint32_t pool_cnt;		/* Count of records in pool_ptr */
@@ -126,9 +127,13 @@ typedef struct bb_user {
 	uint32_t user_id;
 } bb_user_t;
 
+#define BB_FLAG_BB_OP		1	/* Requested using #BB prefix */
+#define BB_FLAG_DW_OP		2	/* Requested using #DW prefix */
+
 /* Burst buffer creation records with state */
 typedef struct {
 	char    *access;	/* Buffer access */
+	uint32_t flags;		/* See BB_FLAG_* above */
 	bool     create;	/* Set if buffer create requested */
 	bool     destroy;	/* Set if buffer destroy requested */
 	bool     hurry;		/* Fast buffer destroy */
@@ -155,12 +160,17 @@ typedef struct bb_job {
 	uint64_t   persist_add;	/* Persistent buffer space job adds, bytes */
 	char      *qos;	 	/* Associated QOS (for limits) */
 	int        retry_cnt;	/* Count of attempted retries */
+	uint64_t   req_size;	/* Bytes requested by job (excludes
+				 * persistent buffers) */
 	int        state;	/* job state with respect to burst buffers,
 				 * See BB_STATE_* in slurm.h.in */
 	uint32_t   swap_size;	/* swap space required per node in GB */
 	uint32_t   swap_nodes;	/* Number of nodes needed */
 	uint64_t   total_size;	/* Total bytes required for job (excludes
-				 * persistent buffers) */
+				 * persistent buffers, rounded up from
+				 * req_size) */
+	bool       use_job_buf;	/* True if uses job buffer,
+				 * false if uses persistent buffer only */
 	uint32_t   user_id;	/* user the job runs as */
 } bb_job_t;
 
@@ -307,9 +317,6 @@ extern int bb_pack_usage(uid_t uid, bb_state_t *state_ptr, Buf buffer,
 /* Sort preempt_bb_recs in order of DECREASING use_time */
 extern int bb_preempt_queue_sort(void *x, void *y);
 
-/* Return count of child processes */
-extern int bb_proc_count(void);
-
 /* Set the bb_state's tres_pos for limit enforcement.
  * Value is set to -1 if not found. */
 extern void bb_set_tres_pos(bb_state_t *state_ptr);
@@ -318,22 +325,8 @@ extern void bb_set_tres_pos(bb_state_t *state_ptr);
  * use is expected to begin (i.e. each job's expected start time) */
 extern void bb_set_use_time(bb_state_t *state_ptr);
 
-/* Terminate any child processes */
-extern void bb_shutdown(void);
-
 /* Sleep function, also handles termination signal */
 extern void bb_sleep(bb_state_t *state_ptr, int add_secs);
-
-/* Execute a script, wait for termination and return its stdout.
- * script_type IN - Type of program being run (e.g. "StartStageIn")
- * script_path IN - Fully qualified pathname of the program to execute
- * script_args IN - Arguments to the script
- * max_wait IN - Maximum time to wait in milliseconds,
- *		 -1 for no limit (asynchronous)
- * status OUT - Job exit code
- * Return stdout+stderr of spawned program, value must be xfreed. */
-extern char *bb_run_script(char *script_type, char *script_path,
-			   char **script_argv, int max_wait, int *status);
 
 /* Make claim against resource limit for a user
  * user_id IN - Owner of burst buffer

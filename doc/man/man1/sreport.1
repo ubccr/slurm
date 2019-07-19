@@ -1,4 +1,4 @@
-.TH sreport "1" "Slurm Commands" "June 2015" "Slurm Commands"
+.TH sreport "1" "Slurm Commands" "May 2019" "Slurm Commands"
 
 .SH "NAME"
 sreport \- Generate reports from the slurm accounting data.
@@ -15,13 +15,25 @@ utilization for Slurm jobs saved to the Slurm Database,
 
 .TP
 \fB\-a\fR, \fB\-\-all_clusters\fR
-Use all clusters instead of only the cluster from where the command was run.
+Use all clusters instead of only the cluster from which the command was
+executed.
+.TP
+\fB\-\-federation\fR
+Generate a report for the federation if a member of one.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print a help message describing the usage of \fBsreport\fR.
 .TP
+\fB\-\-local\fR
+Generate a report for the local cluster, even if part of a federation.
+Overrides \-\-federation
+.TP
 \fB\-M\fR, \fB\-\-cluster\fR
-The cluster(s) to generate reports for. Default is local cluster.
+The cluster(s) to generate reports for. Default is local cluster, unless the
+local cluster is currently part of a federation and in that case generate a
+report for all clusters in the current federation. If the clusters included
+in a federation vary through time, use this option to identify the clusters
+to be included in report. Implies --local.
 .TP
 \fB\-n\fR, \fB\-\-noheader\fR
 Don't display header when listing results.
@@ -43,9 +55,27 @@ section below.
 .TP
 \fB\-T,  \-\-tres <tres_names>\fR
 Trackable resource (TRES) to report values for.
-By default CPU resource use is reported.
+By default CPU resource use is reported (except for reservation reports. All
+TRES types reserved by a reservation will be shown by default unless overridden
+with this option).
 Multiple TRES names may be separated using a comma separated list for all
-reports except the job reports, which can only support a single TRES name.
+reports except the job reports, which can only support a single TRES name, or
+"ALL" for all TRES.
+
+The "Reported" Billing TRES is calculated from the largest Billing TRES of each
+node multiplied by the time frame. For example, if a node is part of multiple
+partitions and each has a different TRESBillingWeights defined the Billing TRES
+for the node will be the highest of the partitions.  If TRESBillingWeights is
+not defined on any partition for a node then the Billing TRES will be equal to
+the number of CPUs on the node.
+
+TRES node usage is no longer reported in percent format or in Cluster
+Utilization.  Please use TRES CPU instead.
+The main issue with using node is in most configurations multiple jobs are able
+to run on the same node.  This makes TRES node accounting count the same node
+multiple times in the same period.  In exclusive node configurations, CPU
+accounting returns the same usage node accounting would.
+
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Print detailed event logging.
@@ -169,7 +199,7 @@ root account by default this report will list the underlying
 usage with a sum on each level.  Use the 'tree' option to span
 the tree for better visibility.
 NOTE: If there were reservations allowing a whole account any
-any idle time in the reservation given to the association for the
+idle time in the reservation given to the association for the
 account, not the user associations in the account, so it can be
 possible a parent account can be larger than the sum of it's children.
 .TP
@@ -184,11 +214,49 @@ grouping multiple wckey by user into one, but displaying them
 on separate lines.
 .TP
 .B cluster Utilization
-This report will display total usage divided by Allocated, Down,
-Idle, and Reserved time for selected clusters.  Reserved time
-refers to time that a job was waiting for resources after the job
-had become eligible.  If the value is not of importance for you
-the number should be grouped with idle time.
+This report will display total usage divided amongst Allocated, Down,
+Planned Down, Idle, and Reserved time for selected clusters.
+.RS
+.IP Allocated 13
+Time that nodes were in use with active jobs or an active reservation.
+This does not include reservations created with the MAINT or IGNORE_JOBS
+flags.
+.IP Down
+Time that nodes were marked as Down or time that slurmctld was not
+responding (assuming TrackSlurmctldDown is set in slurmdbd.conf).
+.IP Idle
+Time where nodes had no active jobs or reservations.
+.IP Overcommited
+Time that the nodes were over allocated, either with the \fB-O,
+--overcommit\fP flag at submission time or \fBOverSubscribe\fP set to
+FORCE in the slurm.conf. This time is not counted against the total
+reported time.
+.IP PlannedDown
+Time that nodes were in use by a reservation created with the MAINT flag
+but not the IGNORE_JOBS flag.
+.IP Reserved
+Time that a node spent idle with eligible jobs in the queue that were
+unable to start due to time or size constraints. If this value is
+not of importance for you then the number can be grouped with idle time.
+.IP TresCount
+Configured number of TRES' on the reported nodes. See also the
+\fBTresName\fP field.
+.RE
+.RS 7
+
+Note: Reservations created with the IGNORE_JOBS flag are not tracked
+in the Cluster Utilization report due to the fact that allowing any
+current/active jobs to continue to run in the reservation introduces the
+possibility for them to be accounted for incorrectly.
+.RE
+.RS
+
+Note: The default view for the "Cluster Utilization" report includes the
+following fields: Cluster, Allocated, Down, PlannedDown, Idle, Reserved,
+Reported. You can include additional fields like OverCommitted and TresCount
+fields with the \fBFormat\fP option. The TresName will also be included if
+using the \fB\-T,  \-\-tres <tres_names>\fR option.
+.RE
 .TP
 .B cluster WCKeyUtilizationByUser
 This report will display wckey utilization sorted by WCKey name for
@@ -196,12 +264,12 @@ each user on each cluster.
 
 .TP
 .B job SizesByAccount
-This report will dispay the amount of time used for job ranges
+This report will display the amount of time used for job ranges
 specified by the 'grouping=' option.  Only a single level in the tree
 is displayed defaulting to the root dir.  If you specify other
 accounts with the 'account=' option sreport will use those accounts as
-the root account and you will receive the sub accounts for the
-accounts listed.
+the root account and you will receive the aggregated totals of each listed
+account plus their sub accounts.
 .TP
 .B job SizesByAccountAndWckey
 This report is very similar to SizesByAccount with the difference being
@@ -210,7 +278,7 @@ instead of just account so there will most likely be multiple accounts
 listed depending on the number of wckeys used.
 .TP
 .B job SizesByWckey
-This report will dispay the amount of time for each wckey for job ranges
+This report will display the amount of time for each wckey for job ranges
 specified by the 'grouping=' option.
 
 .TP
@@ -298,12 +366,16 @@ List of wckeys to include in report. Default is all.
 
 .TP
 .B Accounts=<OPT>
-List of accounts to use for the report Default is all.  The SizesByAccount(*)
-report only displays 1 hierarchical level. If accounts are specified
-the next layer of accounts under those specified will be displayed,
-not the accounts specified.  In the SizesByAccount(*) reports the default
-for accounts is root.  This explanation does not apply when ran with
-the FlatView option.
+List of accounts to use for the report. Default is all which will show only
+one line corresponding to the totals of all accounts in the hierarchy.
+This explanation does not apply when ran with the FlatView or AcctAsParent
+options.
+.TP
+.B AcctAsParent
+When used with the SizesbyAccount(*) will take specified accounts
+as parents and the next layer of accounts under those specified
+will be displayed. Default is root if no specific Accounts are requested.
+When FlatView is used, this option is ignored.
 .TP
 .B FlatView
 When used with the SizesbyAccount(*) will not group accounts in a
@@ -387,7 +459,8 @@ Cluster, Login, Proper, TresCount, Used, Wckey
 .in 10
 Utilization:
 .in 14
-Allocated, Cluster, Down, Idle, Overcommited, PlannedDown, Reported, Reserved, TresCount, TresName
+Allocated, Cluster, Down, Idle, Overcommited, PlannedDown, Reported, Reserved,
+TresCount, TresName
 
 .TP
 \fBFORMAT OPTIONS FOR JOB REPORTS\fP
@@ -423,7 +496,16 @@ All commands and options are case-insensitive.
 Some \fBsreport\fR options may be set via environment variables. These
 environment variables, along with their corresponding options, are listed below.
 (Note: commandline options will always override these settings)
-.TP 14
+.TP 20
+\fBSREPORT_CLUSTER\fR
+Same as \fB\-M\fR, \fB\-\-cluster\fR
+.TP
+\fBSREPORT_FEDERATION\fR
+Same as \-\-federation\fR
+.TP
+\fBSREPORT_LOCAL\fR
+Same as \-\-local\fR
+.TP
 \fBSREPORT_TRES\fR
 Same as \fB\-t, \-\-tres\fR
 .TP

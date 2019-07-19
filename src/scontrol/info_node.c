@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -84,10 +84,20 @@ scontrol_load_nodes (node_info_msg_t ** node_buffer_pptr, uint16_t show_flags)
  *	last name match
  */
 extern void
-scontrol_print_node (char *node_name, node_info_msg_t  * node_buffer_ptr)
+scontrol_print_node(char *node_name, node_info_msg_t *node_buffer_ptr)
 {
-	int i, j, print_cnt = 0;
+	int error_code, i, j, print_cnt = 0;
 	static int last_inx = 0;
+	partition_info_msg_t *part_info_ptr = NULL;
+
+	error_code = scontrol_load_partitions(&part_info_ptr);
+	if (error_code) {
+		part_info_ptr = NULL;
+		exit_code = 1;
+		if (quiet_flag != 1)
+			slurm_perror("slurm_load_partitions error");
+	}
+	slurm_populate_node_partitions(node_buffer_ptr, part_info_ptr);
 
 	for (j = 0; j < node_buffer_ptr->record_count; j++) {
 		if (node_name) {
@@ -103,7 +113,6 @@ scontrol_print_node (char *node_name, node_info_msg_t  * node_buffer_ptr)
 		print_cnt++;
 		slurm_print_node_table (stdout,
 					& node_buffer_ptr->node_array[i],
-					node_buffer_ptr->node_scaling,
 					one_liner);
 
 		if (node_name) {
@@ -142,6 +151,8 @@ scontrol_print_node_list (char *node_list)
 		show_flags |= SHOW_ALL;
 	if (detail_flag)
 		show_flags |= SHOW_DETAIL;
+	if (future_flag)
+		show_flags |= SHOW_FUTURE;
 
 	error_code = scontrol_load_nodes(&node_info_ptr, show_flags);
 	if (error_code) {

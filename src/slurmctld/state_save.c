@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,27 +27,23 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
 #if HAVE_SYS_PRCTL_H
-#include <sys/prctl.h>
+#  include <sys/prctl.h>
 #endif
 
-#ifdef WITH_PTHREADS
-#  include <pthread.h>
-#endif                          /* WITH_PTHREADS */
+#include <pthread.h>
 
 #include "src/common/macros.h"
 #include "src/slurmctld/front_end.h"
@@ -66,44 +62,13 @@ static int save_jobs = 0, save_nodes = 0, save_parts = 0;
 static int save_front_end = 0, save_triggers = 0, save_resv = 0;
 static bool run_save_thread = true;
 
-/* fsync() and close() a file,
- * Execute fsync() and close() multiple times if necessary and log failures
- * RET 0 on success or -1 on error */
-extern int fsync_and_close(int fd, char *file_type)
-{
-	int rc = 0, retval, pos;
-
-	/* SLURM state save files are typically stored on shared filesystems,
-	 * so lets give fysync() three tries to sync the data to disk. */
-	for (retval = 1, pos = 1; retval && pos < 4; pos++) {
-		retval = fsync(fd);
-		if (retval && (errno != EINTR)) {
-			error("fsync() error writing %s state save file: %m",
-			      file_type);
-		}
-	}
-	if (retval)
-		rc = retval;
-
-	for (retval = 1, pos = 1; retval && pos < 4; pos++) {
-		retval = close(fd);
-		if (retval && (errno != EINTR)) {
-			error("close () error on %s state save file: %m",
-			      file_type);
-		}
-	}
-	if (retval)
-		rc = retval;
-
-	return rc;
-}
 
 /* Queue saving of front_end state information */
 extern void schedule_front_end_save(void)
 {
 	slurm_mutex_lock(&state_save_lock);
 	save_front_end++;
-	pthread_cond_broadcast(&state_save_cond);
+	slurm_cond_broadcast(&state_save_cond);
 	slurm_mutex_unlock(&state_save_lock);
 }
 
@@ -112,7 +77,7 @@ extern void schedule_job_save(void)
 {
 	slurm_mutex_lock(&state_save_lock);
 	save_jobs++;
-	pthread_cond_broadcast(&state_save_cond);
+	slurm_cond_broadcast(&state_save_cond);
 	slurm_mutex_unlock(&state_save_lock);
 }
 
@@ -121,7 +86,7 @@ extern void schedule_node_save(void)
 {
 	slurm_mutex_lock(&state_save_lock);
 	save_nodes++;
-	pthread_cond_broadcast(&state_save_cond);
+	slurm_cond_broadcast(&state_save_cond);
 	slurm_mutex_unlock(&state_save_lock);
 }
 
@@ -130,7 +95,7 @@ extern void schedule_part_save(void)
 {
 	slurm_mutex_lock(&state_save_lock);
 	save_parts++;
-	pthread_cond_broadcast(&state_save_cond);
+	slurm_cond_broadcast(&state_save_cond);
 	slurm_mutex_unlock(&state_save_lock);
 }
 
@@ -139,7 +104,7 @@ extern void schedule_resv_save(void)
 {
 	slurm_mutex_lock(&state_save_lock);
 	save_resv++;
-	pthread_cond_broadcast(&state_save_cond);
+	slurm_cond_broadcast(&state_save_cond);
 	slurm_mutex_unlock(&state_save_lock);
 }
 
@@ -148,7 +113,7 @@ extern void schedule_trigger_save(void)
 {
 	slurm_mutex_lock(&state_save_lock);
 	save_triggers++;
-	pthread_cond_broadcast(&state_save_cond);
+	slurm_cond_broadcast(&state_save_cond);
 	slurm_mutex_unlock(&state_save_lock);
 }
 
@@ -157,7 +122,7 @@ extern void shutdown_state_save(void)
 {
 	slurm_mutex_lock(&state_save_lock);
 	run_save_thread = false;
-	pthread_cond_broadcast(&state_save_cond);
+	slurm_cond_broadcast(&state_save_cond);
 	slurm_mutex_unlock(&state_save_lock);
 }
 
@@ -181,6 +146,9 @@ extern void *slurmctld_state_save(void *no_data)
 	}
 #endif
 
+	if (test_config)	/* Should be redundant, but just to be safe */
+		return NULL;
+
 	while (1) {
 		/* wait for work to perform */
 		slurm_mutex_lock(&state_save_lock);
@@ -202,11 +170,11 @@ extern void *slurmctld_state_save(void *no_data)
 			} else if (save_count) { /* wait for a timeout */
 				struct timespec ts = {0, 0};
 				ts.tv_sec = now + 1;
-				pthread_cond_timedwait(&state_save_cond,
-				           	       &state_save_lock, &ts);
+				slurm_cond_timedwait(&state_save_cond,
+					  	     &state_save_lock, &ts);
 			} else {		/* wait for more work */
-				pthread_cond_wait(&state_save_cond,
-				           	  &state_save_lock);
+				slurm_cond_wait(&state_save_cond,
+					  	&state_save_lock);
 			}
 		}
 
@@ -277,4 +245,3 @@ extern void *slurmctld_state_save(void *no_data)
 			(void)trigger_state_save();
 	}
 }
-

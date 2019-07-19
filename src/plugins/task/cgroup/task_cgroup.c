@@ -5,11 +5,11 @@
  *  Copyright (C) 2009 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,19 +25,17 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if     HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
 #include <signal.h>
 #include <sys/types.h>
@@ -69,14 +67,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *      <application>/<method>
  *
  * where <application> is a description of the intended application of
  * the plugin (e.g., "task" for task control) and <method> is a description
- * of how this plugin satisfies that application.  SLURM will only load
+ * of how this plugin satisfies that application.  Slurm will only load
  * a task plugin if the plugin_type string has a prefix of "task/".
  *
  * plugin_version - an unsigned 32-bit integer containing the Slurm version
@@ -90,46 +88,50 @@ static bool use_cpuset  = false;
 static bool use_memory  = false;
 static bool use_devices = false;
 
-static slurm_cgroup_conf_t slurm_cgroup_conf;
-
 /*
  * init() is called when the plugin is loaded, before any other functions
  *	are called.  Put global initialization here.
  */
 extern int init (void)
 {
+	slurm_cgroup_conf_t *cg_conf;
 
 	/* read cgroup configuration */
-	if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
-		return SLURM_ERROR;
+	slurm_mutex_lock(&xcgroup_config_read_mutex);
+	cg_conf = xcgroup_get_slurm_cgroup_conf();
+	/* enable subsystems based on conf */
+	if (cg_conf->constrain_cores)
+		use_cpuset = true;
+	if (cg_conf->constrain_ram_space ||
+	    cg_conf->constrain_swap_space)
+		use_memory = true;
+	if (cg_conf->constrain_devices)
+		use_devices = true;
+	slurm_mutex_unlock(&xcgroup_config_read_mutex);
 
 	/* enable subsystems based on conf */
-	if (slurm_cgroup_conf.constrain_cores) {
+	if (use_cpuset) {
 		use_cpuset = true;
-		if (task_cgroup_cpuset_init(&slurm_cgroup_conf) !=
-		    SLURM_SUCCESS) {
-			free_slurm_cgroup_conf(&slurm_cgroup_conf);
+		if (task_cgroup_cpuset_init() != SLURM_SUCCESS) {
 			return SLURM_ERROR;
 		}
 		debug("%s: now constraining jobs allocated cores",
 		      plugin_type);
 	}
 
-	if (slurm_cgroup_conf.constrain_ram_space ||
-	    slurm_cgroup_conf.constrain_swap_space) {
+	if (use_memory) {
 		use_memory = true;
-		if (task_cgroup_memory_init(&slurm_cgroup_conf) !=
-		    SLURM_SUCCESS) {
-			free_slurm_cgroup_conf(&slurm_cgroup_conf);
+		if (task_cgroup_memory_init() != SLURM_SUCCESS) {
 			return SLURM_ERROR;
 		}
 		debug("%s: now constraining jobs allocated memory",
 		      plugin_type);
 	}
 
-	if (slurm_cgroup_conf.constrain_devices) {
-		use_devices = true;
-		task_cgroup_devices_init(&slurm_cgroup_conf);
+	if (use_devices) {
+		if (task_cgroup_devices_init() != SLURM_SUCCESS) {
+			return SLURM_ERROR;
+		}
 		debug("%s: now constraining jobs allocated devices",
 		      plugin_type);
 	}
@@ -146,17 +148,14 @@ extern int fini (void)
 {
 
 	if (use_cpuset) {
-		task_cgroup_cpuset_fini(&slurm_cgroup_conf);
+		task_cgroup_cpuset_fini();
 	}
 	if (use_memory) {
-		task_cgroup_memory_fini(&slurm_cgroup_conf);
+		task_cgroup_memory_fini();
 	}
 	if (use_devices) {
-		task_cgroup_devices_fini(&slurm_cgroup_conf);
+		task_cgroup_devices_fini();
 	}
-
-	/* unload configuration */
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
 
 	return SLURM_SUCCESS;
 }
@@ -164,8 +163,7 @@ extern int fini (void)
 /*
  * task_p_slurmd_batch_request()
  */
-extern int task_p_slurmd_batch_request (uint32_t job_id,
-					batch_job_launch_msg_t *req)
+extern int task_p_slurmd_batch_request (batch_job_launch_msg_t *req)
 {
 	return SLURM_SUCCESS;
 }
@@ -173,8 +171,7 @@ extern int task_p_slurmd_batch_request (uint32_t job_id,
 /*
  * task_p_slurmd_launch_request()
  */
-extern int task_p_slurmd_launch_request (uint32_t job_id,
-					 launch_tasks_request_msg_t *req,
+extern int task_p_slurmd_launch_request (launch_tasks_request_msg_t *req,
 					 uint32_t node_id)
 {
 	return SLURM_SUCCESS;
@@ -183,8 +180,7 @@ extern int task_p_slurmd_launch_request (uint32_t job_id,
 /*
  * task_p_slurmd_reserve_resources()
  */
-extern int task_p_slurmd_reserve_resources (uint32_t job_id,
-					    launch_tasks_request_msg_t *req,
+extern int task_p_slurmd_reserve_resources (launch_tasks_request_msg_t *req,
 					    uint32_t node_id)
 {
 	return SLURM_SUCCESS;
@@ -244,7 +240,7 @@ extern int task_p_pre_setuid (stepd_step_rec_t *job)
  * task_p_pre_launch_priv() is called prior to exec of application task.
  * in privileged mode, just after slurm_spank_task_init_privileged
  */
-extern int task_p_pre_launch_priv (stepd_step_rec_t *job)
+extern int task_p_pre_launch_priv(stepd_step_rec_t *job, pid_t pid)
 {
 
 	if (use_cpuset) {
@@ -254,7 +250,7 @@ extern int task_p_pre_launch_priv (stepd_step_rec_t *job)
 
 	if (use_memory) {
 		/* attach the task to the memory cgroup */
-		task_cgroup_memory_attach_task(job);
+		task_cgroup_memory_attach_task(job, pid);
 	}
 
 	if (use_devices) {
@@ -274,9 +270,17 @@ extern int task_p_pre_launch (stepd_step_rec_t *job)
 {
 
 	if (use_cpuset) {
+		slurm_cgroup_conf_t *cg_conf;
+
+		/* read cgroup configuration */
+		slurm_mutex_lock(&xcgroup_config_read_mutex);
+		cg_conf = xcgroup_get_slurm_cgroup_conf();
+
 		/* set affinity if requested */
-		if (slurm_cgroup_conf.task_affinity)
+		if (cg_conf->task_affinity)
 			task_cgroup_cpuset_set_task_affinity(job);
+
+		slurm_mutex_unlock(&xcgroup_config_read_mutex);
 	}
 
 	return SLURM_SUCCESS;
@@ -290,15 +294,16 @@ extern int task_p_pre_launch (stepd_step_rec_t *job)
 extern int task_p_post_term (stepd_step_rec_t *job, stepd_step_task_info_t *task)
 {
 	static bool ran = false;
+	int rc = SLURM_SUCCESS;
 
 	/* Only run this on the first call since this will run for
 	 * every task on the node.
 	 */
 	if (use_memory && !ran) {
-		task_cgroup_memory_check_oom(job);
+		rc = task_cgroup_memory_check_oom(job);
 		ran = true;
 	}
-	return SLURM_SUCCESS;
+	return rc;
 }
 
 /*
@@ -316,7 +321,17 @@ extern char* task_cgroup_create_slurm_cg (xcgroup_ns_t* ns) {
 	/* we do it here as we do not have access to the conf structure */
 	/* in libslurm (src/common/xcgroup.c) */
 	xcgroup_t slurm_cg;
-	char* pre = (char*) xstrdup(slurm_cgroup_conf.cgroup_prepend);
+	char *pre;
+	slurm_cgroup_conf_t *cg_conf;
+
+	/* read cgroup configuration */
+	slurm_mutex_lock(&xcgroup_config_read_mutex);
+	cg_conf = xcgroup_get_slurm_cgroup_conf();
+
+	pre = xstrdup(cg_conf->cgroup_prepend);
+
+	slurm_mutex_unlock(&xcgroup_config_read_mutex);
+
 #ifdef MULTIPLE_SLURMD
 	if ( conf->node_name != NULL )
 		xstrsubstitute(pre,"%n", conf->node_name);
@@ -326,15 +341,12 @@ extern char* task_cgroup_create_slurm_cg (xcgroup_ns_t* ns) {
 	}
 #endif
 
-	/* create slurm cgroup in the ns (it could already exist)
-	 * disable notify_on_release to avoid the removal/creation
-	 * of this cgroup for each last/first running job on the node */
+	/* create slurm cgroup in the ns (it could already exist) */
 	if (xcgroup_create(ns,&slurm_cg,pre,
 			   getuid(), getgid()) != XCGROUP_SUCCESS) {
 		xfree(pre);
 		return pre;
 	}
-	slurm_cg.notify = 0;
 	if (xcgroup_instantiate(&slurm_cg) != XCGROUP_SUCCESS) {
 		error("unable to build slurm cgroup for ns %s: %m",
 		      ns->subsystems);

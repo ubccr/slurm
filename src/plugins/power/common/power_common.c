@@ -8,11 +8,11 @@
  *  Copyright (C) 2014-2015 SchedMD LLC.
  *  Written by Morris Jette <jette@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,19 +28,17 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
 #define _GNU_SOURCE	/* For POLLRDHUP */
 #include <fcntl.h>
@@ -50,7 +48,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#if defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #define POLLRDHUP POLLHUP
 #include <signal.h>
 #endif
@@ -128,7 +126,6 @@ extern List get_job_power(List job_list,
 	struct job_record *job_ptr;
 	ListIterator job_iterator;
 	power_by_job_t *power_ptr;
-	char jobid_buf[64] = "";
 	int i, i_first, i_last;
 	uint64_t debug_flag = slurm_get_debug_flags();
 	List job_power_list = list_create(_job_power_del);
@@ -143,8 +140,8 @@ extern List get_job_power(List job_list,
 		power_ptr->start_time = job_ptr->start_time;
 		list_append(job_power_list, power_ptr);
 		if (!job_ptr->node_bitmap) {
-			error("%s: %s node_bitmap is NULL", __func__,
-			      jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)));
+			error("%s: %pJ node_bitmap is NULL",
+			      __func__, job_ptr);
 			continue;
 		}
 		i_first = bit_ffs(job_ptr->node_bitmap);
@@ -165,9 +162,8 @@ extern List get_job_power(List job_list,
 			}
 		}
 		if (debug_flag & DEBUG_FLAG_POWER) {
-			info("%s: %s Age=%ld(sec) AllocWatts=%u UsedWatts=%u",
-			     __func__,
-			     jobid2fmt(job_ptr, jobid_buf, sizeof(jobid_buf)),
+			info("%s: %pJ Age=%ld(sec) AllocWatts=%u UsedWatts=%u",
+			     __func__, job_ptr,
 			     (long int) difftime(now, power_ptr->start_time),
 			     power_ptr->alloc_watts, power_ptr->used_watts);
 		}
@@ -298,11 +294,7 @@ extern char *power_run_script(char *script_name, char *script_path,
 			else if (cpid > 0)
 				exit(0);
 		}
-#ifdef SETPGRP_TWO_ARGS
-		setpgrp(0, 0);
-#else
-		setpgrp();
-#endif
+		setpgid(0, 0);
 		execv(script_path, script_argv);
 		error("%s: execv(%s): %m", __func__, script_path);
 		exit(127);

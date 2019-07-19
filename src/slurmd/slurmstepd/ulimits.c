@@ -7,11 +7,11 @@
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,33 +27,32 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
+#include <stdlib.h>
+#include <string.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
 
-#include "src/common/log.h"
 #include "src/common/env.h" /* For unsetenvp() */
-#include "src/common/strlcpy.h"
-#include "src/common/xmalloc.h"
+#include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/slurm_rlimits_info.h"
+#include "src/common/strlcpy.h"
+#include "src/common/xmalloc.h"
+#include "src/common/xstring.h"
 
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
@@ -106,7 +105,7 @@ int set_user_limits(stepd_step_rec_t *job)
 
 	if (getrlimit(RLIMIT_CPU, &r) == 0) {
 		if (r.rlim_max != RLIM_INFINITY) {
-			error("SLURM process CPU time limit is %d seconds",
+			error("Slurm process CPU time limit is %d seconds",
 			      (int) r.rlim_max);
 		}
 	}
@@ -131,10 +130,10 @@ int set_user_limits(stepd_step_rec_t *job)
 		r.rlim_max =  r.rlim_cur = task_mem_bytes;
 		if (setrlimit(RLIMIT_RSS, &r)) {
 			/* Indicates that limit has already been exceeded */
-			fatal("setrlimit(RLIMIT_RSS, %u MB): %m",
+			fatal("setrlimit(RLIMIT_RSS, %"PRIu64" MB): %m",
 			      job->step_mem);
 		} else
-			debug2("Set task rss(%u MB)", job->step_mem);
+			debug2("Set task rss(%"PRIu64" MB)", job->step_mem);
 #if 0
 		getrlimit(RLIMIT_RSS, &r);
 		info("task RSS limits: %u %u", r.rlim_cur, r.rlim_max);
@@ -151,10 +150,10 @@ int set_user_limits(stepd_step_rec_t *job)
 		r.rlim_cur = r.rlim_max;
 		if (setrlimit(SLURM_RLIMIT_VSIZE, &r)) {
 			/* Indicates that limit has already been exceeded */
-			fatal("setrlimit(%s, %u MB): %m", 
+			fatal("setrlimit(%s, %"PRIu64" MB): %m",
 			      SLURM_RLIMIT_VNAME, job->step_mem);
 		} else
-			debug2("Set task vsize(%u MB)", job->step_mem);
+			debug2("Set task vsize(%"PRIu64" MB)", job->step_mem);
 #if 0
 		getrlimit(SLURM_RLIMIT_VSIZE, &r);
 		info("task VSIZE limits:   %u %u", r.rlim_cur, r.rlim_max);
@@ -200,8 +199,8 @@ set_umask(stepd_step_rec_t *job)
 
 /*
  * Set rlimit using value of env vars such as SLURM_RLIMIT_FSIZE if
- * the slurm config file has PropagateResourceLimits=YES or the user
- * requested it with srun --propagate.
+ * the slurm config file has PropagateResourceLimits set or the user
+ * requested it with srun/sbatch --propagate.
  *
  * NOTE: THIS FUNCTION SHOULD ONLY BE CALLED RIGHT BEFORE THE EXEC OF
  * A SCRIPT AFTER THE FORK SO AS TO LIMIT THE ABOUT OF EFFECT THE
@@ -217,33 +216,35 @@ _set_limit(char **env, slurm_rlimits_info_t *rli)
 	unsigned long env_value;
 	char max[24], cur[24], req[24];
 	struct rlimit r;
-	bool u_req_propagate;  /* e.g. TRUE if 'srun --propagate' */
+	bool u_req_propagate;  /* e.g. true if 'srun --propagate' */
+	char *env_name = NULL, *rlimit_name;
+	int rc = SLURM_SUCCESS;
 
-	char env_name[25] = "SLURM_RLIMIT_";
-	char *rlimit_name = &env_name[6];
-
-	strcpy( &env_name[sizeof("SLURM_RLIMIT_")-1], rli->name );
-
-	if (_get_env_val( env, env_name, &env_value, &u_req_propagate )){
-		debug( "Couldn't find %s in environment", env_name );
+	xstrfmtcat(env_name, "SLURM_RLIMIT_%s", rli->name);
+	rlimit_name = xstrdup(env_name + 6);
+	if (_get_env_val(env, env_name, &env_value, &u_req_propagate)) {
+		debug("Couldn't find %s in environment", env_name);
+		xfree(env_name);
 		return SLURM_ERROR;
 	}
 
 	/*
 	 * Users shouldn't get the SLURM_RLIMIT_* env vars in their environ
 	 */
-	unsetenvp( env, env_name );
+	unsetenvp(env, env_name);
+	xfree(env_name);
 
 	/*
 	 * We'll only attempt to set the propagated soft rlimit when indicated
 	 * by the slurm conf file settings, or the user requested it.
 	 */
 	if ( ! (rli->propagate_flag == PROPAGATE_RLIMITS || u_req_propagate))
-		return SLURM_SUCCESS;
+		goto cleanup;
 
 	if (getrlimit( rli->resource, &r ) < 0) {
 		error("getrlimit(%s): %m", rlimit_name);
-		return SLURM_ERROR;
+		rc = SLURM_ERROR;
+		goto cleanup;
 	}
 
 	/*
@@ -253,7 +254,7 @@ _set_limit(char **env, slurm_rlimits_info_t *rli)
 		debug2( "_set_limit: %s setrlimit %s no change in value: %lu",
 			u_req_propagate?"user":"conf", rlimit_name,
 			(unsigned long) r.rlim_cur);
-		return SLURM_SUCCESS;
+		goto cleanup;
 	}
 
 	debug2("_set_limit: %-14s: max:%s cur:%s req:%s", rlimit_name,
@@ -280,12 +281,15 @@ _set_limit(char **env, slurm_rlimits_info_t *rli)
 				r.rlim_cur == RLIM_INFINITY ? "'unlimited'" :
 				rlim_to_string( r.rlim_cur, cur, sizeof(cur)));
 		}
-		return SLURM_ERROR;
+		rc = SLURM_ERROR;
+		goto cleanup;
 	}
 	debug2( "_set_limit: %s setrlimit %s succeeded",
 			u_req_propagate?"user":"conf", rlimit_name );
 
-	return SLURM_SUCCESS;
+cleanup:
+	xfree(rlimit_name);
+	return rc;
 }
 
 /*
@@ -309,12 +313,12 @@ static int _get_env_val(char **env, const char *name, unsigned long *valp,
 	 * user requested to have this rlimit propagated via 'srun --propagate'
 	 */
 	if (*val == 'U') {
-		*u_req_propagate = TRUE;
+		*u_req_propagate = true;
 		debug2( "_get_env_val: %s propagated by user option", &name[6]);
 		val++;
 	}
 	else
-		*u_req_propagate = FALSE;
+		*u_req_propagate = false;
 
 	*valp = strtoul(val, &p, 10);
 

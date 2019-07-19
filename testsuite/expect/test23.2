@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM sstat functionality
+# Purpose: Test of Slurm sstat functionality
 #          sstat a, n, o, p, P and v options.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -12,22 +12,22 @@
 # Written by Joseph Donaghy <donaghy1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -83,29 +83,7 @@ if { [string compare [check_accounting_admin_level] "Administrator"] } {
 # Identify the user and his current default account
 #
 set acct_name ""
-set user_gid  ""
-set user_name ""
-spawn $bin_id -u -n
-expect {
-	 -re "($alpha_numeric_under)" {
-		set user_name $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
-
-spawn $bin_id -u
-expect {
-	 -re "($alpha_numeric_under)" {
-		set user_gid $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
+set user_name [get_my_user_name]
 
 set s_pid [spawn $sacctmgr show user $user_name]
 expect {
@@ -262,7 +240,7 @@ sleep 5
 #
 ################################################################
 
-proc sstat_job { soption job_id } {
+proc sstat_job { soption job_id step_id } {
 	global sstat number
 	set debug       0
 	set exit_code   0
@@ -273,12 +251,17 @@ proc sstat_job { soption job_id } {
 	if { $soption == "-allsteps" || $soption == "a" } {
 		spawn $sstat -$soption -p -j $job_id
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
 			-re "$job_id.($number)" {
 				if {$debug} {send_user "\nmatch $expect_out(1,string)\n"}
+				incr matches
+				exp_continue
+			}
+			-re "$job_id.batch" {
+				if {$debug} {send_user "\nmatch batch\n"}
 				incr matches
 				exp_continue
 			}
@@ -300,7 +283,7 @@ proc sstat_job { soption job_id } {
 	if { $soption == "-noheader" || $soption == "n" } {
 		spawn $sstat -$soption -p -j $job_id
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -333,9 +316,9 @@ proc sstat_job { soption job_id } {
 	}
 
 	if { $soption == "-parsable" || $soption == "p" } {
-		spawn $sstat -$soption -p -j $job_id
+		spawn $sstat -$soption -p -j $job_id.$step_id
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -354,7 +337,7 @@ proc sstat_job { soption job_id } {
 				incr matches
 				exp_continue
 			}
-			-re "$job_id..\\|" {
+			-re "$job_id.$step_id\\|" {
 				if {$debug} {send_user "\nmatch9\n"}
 				incr matches
 				exp_continue
@@ -375,9 +358,9 @@ proc sstat_job { soption job_id } {
 	}
 
 	if { $soption == "-parsable2" || $soption == "P" } {
-		spawn $sstat -$soption -j $job_id
+		spawn $sstat -$soption -j $job_id.$step_id
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -396,7 +379,7 @@ proc sstat_job { soption job_id } {
 				incr matches
 				exp_continue
 			}
-			-re "$job_id..\\|" {
+			-re "$job_id.$step_id\\|" {
 				if {$debug} {send_user "\nmatch13\n"}
 				incr matches
 				exp_continue
@@ -419,7 +402,7 @@ proc sstat_job { soption job_id } {
 	if { $soption == "-verbose" || $soption == "v" } {
 		spawn $sstat -$soption -p -j $job_id
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -482,7 +465,7 @@ proc sstat_vargs { soption vargs job_id} {
 	if { $soption == "o" || $soption == "-format" } {
 		spawn $sstat -$soption $vargs -p -j $job_id
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -532,61 +515,61 @@ proc sstat_vargs { soption vargs job_id} {
 	}
 }
 ################################################################
-set matches [sstat_job a $job_id3]
-if {$matches != 3} {
+set matches [sstat_job a $job_id3 ""]
+if {$matches != 4} {
 	send_user "\nFAILURE: sstat -a failed ($matches != 3)\n"
 	set exit_code 1
 }
 
-set matches [sstat_job -allsteps $job_id3]
-if {$matches != 3} {
+set matches [sstat_job -allsteps $job_id3 ""]
+if {$matches != 4} {
 	send_user "\nFAILURE: sstat --allsteps failed ($matches != 3)\n"
 	set exit_code 1
 }
 
-set matches [sstat_job n $job_id3]
+set matches [sstat_job n $job_id3 ""]
 if {$matches != 1} {
 	send_user "\nFAILURE: sstat -n failed ($matches != 1)\n"
 	set exit_code 1
 }
 
-set matches [sstat_job -noheader $job_id3]
+set matches [sstat_job -noheader $job_id3 ""]
 if {$matches != 1} {
 	send_user "\nFAILURE: sstat --noheader failed ($matches != 1)\n"
 	set exit_code 1
 }
 
-set matches [sstat_job p $job_id3]
+set matches [sstat_job p $job_id3 0]
 if {$matches != 4} {
 	send_user "\nFAILURE: sstat -p failed ($matches != 4)\n"
 	set exit_code 1
 }
 
-set matches [sstat_job -parsable $job_id3]
+set matches [sstat_job -parsable $job_id3 0]
 if {$matches != 4} {
 	send_user "\nFAILURE: sstat --parsable failed ($matches != 4)\n"
 	set exit_code 1
 }
 
-set matches [sstat_job P $job_id3]
+set matches [sstat_job P $job_id3 0]
 if {$matches != 4} {
 	send_user "\nFAILURE: sstat -P failed ($matches != 4)\n"
 	set exit_code 1
 }
 
-set matches [sstat_job -parsable2 $job_id3]
+set matches [sstat_job -parsable2 $job_id3 0]
 if {$matches != 4} {
 	send_user "\nFAILURE: sstat --parsable2 failed ($matches != 4)\n"
 	set exit_code 1
 }
 
-set matches [sstat_job v $job_id3]
+set matches [sstat_job v $job_id3 0]
 if {$matches != 4} {
 	send_user "\nFAILURE: sstat -v failed ($matches != 4)\n"
 	set exit_code 1
 }
 
-set matches [sstat_job -verbose $job_id3]
+set matches [sstat_job -verbose $job_id3 0]
 if {$matches != 4} {
 	send_user "\nFAILURE: sstat --verbose failed ($matches != 4)\n"
 	set exit_code 1

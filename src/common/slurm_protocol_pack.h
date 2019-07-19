@@ -7,11 +7,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,31 +27,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _SLURM_PROTOCOL_PACK_H
 #define _SLURM_PROTOCOL_PACK_H
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif  /* HAVE_INTTYPES_H */
-#else   /* !HAVE_CONFIG_H */
-#  include <inttypes.h>
-#endif  /*  HAVE_CONFIG_H */
+#include <inttypes.h>
 
 #include "src/common/pack.h"
 #include "src/common/slurm_protocol_defs.h"
@@ -141,6 +130,18 @@ extern int unpack_msg ( slurm_msg_t * msg , Buf buffer );
 /* 		Buf buffer ); */
 
 
+extern int slurm_pack_list(List send_list,
+			   void (*pack_function) (void *object,
+						  uint16_t rpc_version,
+						  Buf buffer),
+			   Buf buffer, uint16_t protocol_version);
+extern int slurm_unpack_list(List *recv_list,
+			     int (*unpack_function) (void **object,
+						     uint16_t protocol_version,
+						     Buf buffer),
+			     void (*destroy_function) (void *object),
+			     Buf buffer, uint16_t protocol_version);
+
 extern void  pack_job_step_create_response_msg(
 	job_step_create_response_msg_t * msg, Buf buffer,
 	uint16_t protocol_version);
@@ -159,23 +160,4 @@ extern void pack_multi_core_data (multi_core_data_t *multi_core, Buf buffer,
 				  uint16_t protocol_version);
 extern int unpack_multi_core_data (multi_core_data_t **multi_core, Buf buffer,
 				   uint16_t protocol_version);
-extern void slurm_pack_block_job_info(block_job_info_t *block_job_info,
-				      Buf buffer, uint16_t protocol_version);
-extern int slurm_unpack_block_info_members(block_info_t *block_info, Buf buffer,
-					   uint16_t protocol_version);
-extern int slurm_unpack_block_info_msg(
-	block_info_msg_t **block_info_msg_pptr, Buf buffer,
-	uint16_t protocol_version);
-
-/* Translate task_dist value from v15.08+ format to v14.11- format */
-extern uint16_t task_dist_new2old(uint32_t new_task_dist);
-/* Translate task_dist value from v14.11- format to v15.08+ format */
-extern uint32_t task_dist_old2new(uint16_t old_task_dist);
-
-/* Translate 32-bit nice value to equivalent 16-bit value.
- * Remove when version 15.08 support is no longer required. */
-extern uint16_t xlate_nice_new2old(uint32_t new_nice);
-/* Translate 16-bit nice value to equivalent 32-bit value.
- * Remove when version 15.08 support is no longer required. */
-extern uint32_t xlate_nice_old2new(uint16_t old_nice);
 #endif

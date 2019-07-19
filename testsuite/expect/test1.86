@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Confirm node selection from within a job step on existing allocation
 #          (--nodelist, --exclude, --nodes and --nprocs options).
 #
@@ -15,22 +15,22 @@
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -48,15 +48,14 @@ if {[test_front_end]} {
 } elseif {[test_multiple_slurmd] != 0} {
 	send_user "\nWARNING: This test is incompatible with multiple slurmd systems\n"
 	exit 0
-} elseif {[test_serial]} {
-	send_user "\nWARNING: This test is incompatible with a serial system\n"
-	exit 0
 }
 
-if {[test_launch_poe]} {
-	set node_name_env MP_I_UPMD_HOSTNAME
-} else {
-	set node_name_env SLURMD_NODENAME
+# find out if we have enough nodes to test functionality
+set partition [default_partition]
+set node_count [get_node_cnt_in_part $partition]
+if { $node_count < 2 } {
+	send_user "WARNING: Insufficient nodes in default partition ($node_count < 2)\n"
+	exit $exit_code
 }
 
 #
@@ -77,9 +76,14 @@ set env(PATH) "${slurm_dir}/bin:$env(PATH)"
 #
 # Submit a 2 node job
 #
+set job_id 0
 set timeout $max_job_delay
 set salloc_pid [spawn $salloc -N2 -t1 ./$file_in]
 expect {
+	-re "Granted job allocation ($number)" {
+		set job_id $expect_out(1,string)
+		exp_continue
+	}
 	-re "salloc: error" {
 		send_user "\nWARNING: can't test srun task distribution\n"
 		exec $bin_rm -f $file_in
@@ -110,7 +114,7 @@ exec $bin_rm -f $file_in
 #
 set host_0      ""
 set host_1      ""
-send "$srun -l $bin_printenv $node_name_env\r"
+send "$srun -l $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "($number): *($alpha_numeric_under)" {
 		set host_inx $expect_out(1,string)
@@ -159,7 +163,7 @@ if {$exit_code != 0} {
 # Exclude specific node
 #
 set matches 0
-send "$srun -l -N1 -n1 --exclude=$host_0 $bin_printenv $node_name_env\r"
+send "$srun -l -N1 -n1 --exclude=$host_0 $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "0: *($alpha_numeric_under)" {
 		if {[string compare $expect_out(1,string) $host_1] == 0} {
@@ -196,7 +200,7 @@ if {$matches == 0} {
 # Exclude specific node
 #
 set matches 0
-send "$srun -l -N1 -n1 --exclude=$host_1 $bin_printenv $node_name_env\r"
+send "$srun -l -N1 -n1 --exclude=$host_1 $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "0: *($alpha_numeric_under)" {
 		if {[string compare $expect_out(1,string) $host_0] == 0} {
@@ -233,7 +237,7 @@ if {$matches == 0} {
 # Include specific node
 #
 set matches 0
-send "$srun -l -N1 -n1 --nodelist=$host_0 $bin_printenv $node_name_env\r"
+send "$srun -l -N1 -n1 --nodelist=$host_0 $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "Requested node configuration is not available" {
 		send_user "\nWARNING: Appears you are using "
@@ -277,7 +281,7 @@ if {$matches == 0} {
 # Include specific node
 #
 set matches 0
-send "$srun -l -N1 -n1 --nodelist=$host_1 $bin_printenv $node_name_env\r"
+send "$srun -l -N1 -n1 --nodelist=$host_1 $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "0: *($alpha_numeric_under)" {
 		if {[string compare $expect_out(1,string) $host_1] == 0} {
@@ -317,7 +321,7 @@ if {$matches == 0} {
 #
 set matches 0
 send "$srun -l -N1 -n1 --nodelist=$host_0 "
-send " --exclude=$host_0 $bin_printenv $node_name_env\r"
+send " --exclude=$host_0 $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "0: *($alpha_numeric_under)" {
 		send_user "\nFAILURE: wrong node responded\n"
@@ -351,7 +355,7 @@ if {$matches == 0} {
 # Error test: Exceed node count
 #
 set matches 0
-send "$srun -l -N3 -n3 -O $bin_printenv $node_name_env\r"
+send "$srun -l -N3 -n3 -O $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "0: *($alpha_numeric_under)" {
 		send_user "\nFAILURE: wrong node responded\n"
@@ -386,7 +390,7 @@ if {$matches == 0} {
 #
 set test_0      ""
 set test_1      ""
-send "$srun -l -N1-1 -n2 -O $bin_printenv $node_name_env\r"
+send "$srun -l -N1-1 -n2 -O $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "($number).($number):($alpha_numeric_under)" {
 		set test_0 $expect_out(3,string)
@@ -429,7 +433,7 @@ if {[string compare $test_0 $test_1] != 0} {
 # Error test: Exceed task count, first get the processor count then exceed it
 #
 set processors 1
-send "$srun -l -c1 $bin_printenv $node_name_env\r"
+send "$srun -l -c1 $bin_printenv SLURMD_NODENAME\r"
 expect {
 	-re "($number)-($number):($alpha_numeric_under)" {
 		set processors [expr $processors + $expect_out(2,string) - $expect_out(1,string) + 1]
@@ -457,15 +461,19 @@ expect {
 	}
 }
 set matches 0
-send "$srun -l -n $processors $bin_printenv $node_name_env\r"
+send "$srun -l -n $processors $bin_printenv SLURMD_NODENAME\r"
 expect {
-	-re "0: *($alpha_numeric_under)" {
-		send_user "\nFAILURE: wrong node responded\n"
-		set exit_code   1
+	-re "error:" {
+		incr matches
 		exp_continue
 	}
-	"error:" {
-		incr matches
+	-re "$job_id:" {
+#		Avoid confusiuon with task ID below
+		exp_continue
+	}
+	-re "($number): *($alpha_numeric_under)" {
+		send_user "\nFAILURE: wrong node responded\n"
+		set exit_code   1
 		exp_continue
 	}
 	"$prompt" {

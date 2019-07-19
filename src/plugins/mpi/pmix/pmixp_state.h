@@ -2,14 +2,15 @@
  **  pmix_state.h - PMIx agent state related code
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
- *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
+ *  Copyright (C) 2015-2018 Mellanox Technologies. All rights reserved.
+ *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>,
+ *             Boris Karasev <karasev.b@gmail.com, boriska@mellanox.com>.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
@@ -50,7 +51,7 @@
 
 typedef struct {
 #ifndef NDEBUG
-#define PMIX_STATE_MAGIC 0xFEEDCAFE
+#define PMIXP_STATE_MAGIC 0xFEEDCAFE
 	int magic;
 #endif
 	List coll;
@@ -69,7 +70,7 @@ void pmixp_state_finalize(void);
 
 static inline void pmixp_state_sanity_check(void)
 {
-	xassert(_pmixp_state.magic == PMIX_STATE_MAGIC);
+	xassert(_pmixp_state.magic == PMIXP_STATE_MAGIC);
 }
 
 /*
@@ -77,10 +78,10 @@ static inline void pmixp_state_sanity_check(void)
  */
 
 pmixp_coll_t *pmixp_state_coll_get(pmixp_coll_type_t type,
-				   const pmix_proc_t *ranges,
+				   const pmixp_proc_t *ranges,
 				   size_t nranges);
 pmixp_coll_t *pmixp_state_coll_new(pmixp_coll_type_t type,
-				   const pmix_proc_t *ranges,
+				   const pmixp_proc_t *ranges,
 				   size_t nranges);
 
 void pmixp_state_coll_cleanup(void);

@@ -6,11 +6,11 @@
  *  Written by Danny Auble da@llnl.gov, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #ifndef _WORKINGCLUSTER_H
@@ -49,11 +49,8 @@ extern int * slurmdb_setup_cluster_dim_size(void);
  * in the current working cluster */
 extern uint16_t slurmdb_setup_cluster_name_dims(void);
 
-/* Return true if the working cluster is a Cray system (ALPS or Native) */
+/* Return true if the working cluster is a Cray system */
 extern bool is_cray_system(void);
-
-/* Return true if the working cluster is a ALPS Cray system */
-extern bool is_alps_cray_system(void);
 
 /* Return the architecture flags in the current working cluster */
 extern uint32_t slurmdb_setup_cluster_flags(void);
@@ -73,5 +70,12 @@ extern char *slurmdb_cluster_flags_2_str(uint32_t flags_in);
  * Return the plugin select id of the cluster working or current
  */
 extern uint32_t slurmdb_setup_plugin_id_select(void);
+
+/*
+ * Setup the working_cluster_rec with the working_cluster_rec and node_addrs
+ * returned in an allocation response msg.
+ */
+extern void
+slurm_setup_remote_working_cluster(resource_allocation_response_msg_t *msg);
 
 #endif

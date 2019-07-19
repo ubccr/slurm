@@ -11,11 +11,11 @@
  *  and Danny Auble <da@schedmd.com> @ SchedMD.
  *  Adapted by Yoann Blein <yoann.blein@bull.net> @ Bull.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -31,13 +31,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  *
  *  This file is patterned after jobcomp_linux.c, written by Morris Jette and
@@ -82,14 +82,14 @@
  * plugin_type - a string suggesting the type of the plugin or its
  * applicability to a particular form of data or method of data handling.
  * If the low-level plugin API is used, the contents of this string are
- * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * unimportant and may be anything.  Slurm uses the higher-level plugin
  * interface which requires this string to be of the form
  *
  *	<application>/<method>
  *
  * where <application> is a description of the intended application of
- * the plugin (e.g., "jobacct" for SLURM job completion logging) and <method>
- * is a description of how this plugin satisfies that application.  SLURM will
+ * the plugin (e.g., "jobacct" for Slurm job completion logging) and <method>
+ * is a description of how this plugin satisfies that application.  Slurm will
  * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
@@ -181,14 +181,16 @@ static int _create_directories(void)
 	else if (access(hdf5_conf.dir, R_OK|W_OK|X_OK) < 0)
 		fatal("Incorrect permissions on acct_gather_profile_dir: %s",
 		      hdf5_conf.dir);
-	chmod(hdf5_conf.dir, 0755);
+	if (chmod(hdf5_conf.dir, 0755) == -1)
+		error("%s: chmod(%s): %m", __func__, hdf5_conf.dir);
 
 	user_dir = xstrdup_printf("%s/%s", hdf5_conf.dir, g_job->user_name);
 	if (((rc = stat(user_dir, &st)) < 0) && (errno == ENOENT)) {
 		if (mkdir(user_dir, 0700) < 0)
 			fatal("mkdir(%s): %m", user_dir);
 	}
-	chmod(user_dir, 0700);
+	if (chmod(user_dir, 0700) == -1)
+		error("%s: chmod(%s): %m", __func__, user_dir);
 	if (chown(user_dir, (uid_t)g_job->uid,
 		  (gid_t)g_job->gid) < 0)
 		error("chown(%s): %m", user_dir);
@@ -322,7 +324,8 @@ extern int acct_gather_profile_p_node_step_start(stepd_step_rec_t* job)
 
 	_create_directories();
 
-	/* Use a more user friendly string "batch" rather
+	/*
+	 * Use a more user friendly string "batch" rather
 	 * then 4294967294.
 	 */
 	if (g_job->stepid == NO_VAL) {
@@ -345,27 +348,32 @@ extern int acct_gather_profile_p_node_step_start(stepd_step_rec_t* job)
 		     profile_str, profile_file_name);
 	}
 
-	// Create a new file using the default properties.
+	/*
+	 * Create a new file using the default properties
+	 */
 	file_id = H5Fcreate(profile_file_name, H5F_ACC_TRUNC, H5P_DEFAULT,
 			    H5P_DEFAULT);
 	if (chown(profile_file_name, (uid_t)g_job->uid,
 		  (gid_t)g_job->gid) < 0)
 		error("chown(%s): %m", profile_file_name);
-	chmod(profile_file_name,  0600);
+	if (chmod(profile_file_name, 0600) < 0)
+		error("chmod(%s): %m", profile_file_name);
 	xfree(profile_file_name);
 
 	if (file_id < 1) {
 		info("PROFILE: Failed to create Node group");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
-	/* fd_set_close_on_exec(file_id); Not supported for HDF5 */
+	/*
+	 * fd_set_close_on_exec(file_id); Not supported for HDF5
+	 */
 	sprintf(group_node, "/%s", g_job->node_name);
 	gid_node = make_group(file_id, group_node);
 	if (gid_node < 0) {
 		H5Fclose(file_id);
 		file_id = -1;
 		info("PROFILE: Failed to create Node group");
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	}
 	put_int_attribute(gid_node, ATTR_NODEINX, g_job->nodeid);
 	put_string_attribute(gid_node, ATTR_NODENAME, g_job->node_name);
@@ -464,7 +472,7 @@ extern int acct_gather_profile_p_task_end(pid_t taskpid)
 	return SLURM_SUCCESS;
 }
 
-extern int acct_gather_profile_p_create_group(const char* name)
+extern int64_t acct_gather_profile_p_create_group(const char* name)
 {
 	hid_t gid_group = make_group(gid_node, name);
 	if (gid_group < 0) {
@@ -480,7 +488,8 @@ extern int acct_gather_profile_p_create_group(const char* name)
 }
 
 extern int acct_gather_profile_p_create_dataset(
-	const char* name, int parent, acct_gather_profile_dataset_t *dataset)
+	const char* name, int64_t parent,
+	acct_gather_profile_dataset_t *dataset)
 {
 	size_t type_size;
 	size_t offset, field_size;
@@ -538,8 +547,10 @@ extern int acct_gather_profile_p_create_dataset(
 			field_id = H5T_NATIVE_DOUBLE;
 			field_size = sizeof(double);
 			break;
-		case PROFILE_FIELD_NOT_SET:
-			break;
+		default:
+			error("%s: unknown field type:%d",
+			      __func__, dataset_loc->type);
+			continue;
 		}
 		if (H5Tinsert(dtype_id, dataset_loc->name,
 			      offset, field_id) < 0)
@@ -648,4 +659,3 @@ extern bool acct_gather_profile_p_is_active(uint32_t type)
 	return (type == ACCT_GATHER_PROFILE_NOT_SET)
 		|| (g_profile_running & type);
 }
-

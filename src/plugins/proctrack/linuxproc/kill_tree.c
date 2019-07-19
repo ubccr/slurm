@@ -7,11 +7,11 @@
  *  Written by Takao Hatazaki <takao.hatazaki@hp.com>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,31 +27,26 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#include <sys/types.h>
 #include <dirent.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <signal.h>
-#include <strings.h>
-#include <unistd.h>
-#include <string.h>
 #include <limits.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -128,7 +123,7 @@ static int _get_myname(char *s)
 	ssize_t buf_used;
 	int fd;
 
-	sprintf(path, "/proc/%ld/stat", (long)getpid());
+	snprintf(path, PATH_MAX, "/proc/%ld/stat", (long)getpid());
 	if ((fd = open(path, O_RDONLY)) < 0) {
 		error("Cannot open /proc/getpid()/stat");
 		return -1;
@@ -187,7 +182,7 @@ static xppid_t **_build_hashtbl(void)
 		}
 		if (endptr == NULL || *endptr != 0)
 			continue;
-		sprintf(path, "/proc/%s/stat", num);
+		snprintf(path, PATH_MAX, "/proc/%s/stat", num);
 		if ((fd = open(path, O_RDONLY)) < 0) {
 			continue;
 		}
@@ -329,24 +324,28 @@ extern pid_t find_ancestor(pid_t process, char *process_name)
 {
 	char path[PATH_MAX], *rbuf;
 	ssize_t buf_used;
-	int fd;
+	int fd, len;
 	long pid, ppid;
 
-	rbuf = xmalloc_nz(4096);
+	len = strlen(process_name);
+	rbuf = xmalloc_nz(4097);
 	pid = ppid = (long)process;
-	do {
+	while (1) {
 		if (ppid <= 1) {
 			pid = 0;
 			break;
 		}
 
-		sprintf(path, "/proc/%ld/stat", ppid);
+		snprintf(path, PATH_MAX, "/proc/%ld/stat", ppid);
 		if ((fd = open(path, O_RDONLY)) < 0) {
 			pid = 0;
 			break;
 		}
-		memset(rbuf, 0, 4096);
 		buf_used = read(fd, rbuf, 4096);
+		if (buf_used >= 0)
+			rbuf[buf_used] = '\0';
+		else
+			rbuf[0] = '\0';	
 		if ((buf_used <= 0) || (buf_used >= 4096)) {
 			close(fd);
 			pid = 0;
@@ -358,17 +357,23 @@ extern pid_t find_ancestor(pid_t process, char *process_name)
 			break;
 		}
 
-		sprintf(path, "/proc/%ld/cmdline", pid);
+		snprintf(path, PATH_MAX, "/proc/%ld/cmdline", pid);
 		if ((fd = open(path, O_RDONLY)) < 0) {
 			continue;
 		}
 		buf_used = read(fd, rbuf, 4096);
+		if (buf_used >= 0)
+			rbuf[buf_used] = '\0';
+		else
+			rbuf[0] = '\0';	
 		if ((buf_used <= 0) || (buf_used >= 4096)) {
 			close(fd);
 			continue;
 		}
 		close(fd);
-	} while (!strstr(rbuf, process_name));
+		if (strncmp(rbuf, process_name, len) == 0)
+			break;
+	}
 	xfree(rbuf);
 
 	return pid;
@@ -380,8 +385,7 @@ extern int proctrack_linuxproc_get_pids(pid_t top, pid_t **pids, int *npids)
 	xppid_t **hashtbl;
 	xpid_t *list, *ptr;
 	pid_t *p;
-	int i;
-	int len = 32;
+	int i, len = 32, rc;
 
 	if ((hashtbl = _build_hashtbl()) == NULL)
 		return SLURM_ERROR;
@@ -399,7 +403,7 @@ extern int proctrack_linuxproc_get_pids(pid_t top, pid_t **pids, int *npids)
 	i = 0;
 	while (ptr != NULL) {
 		if (ptr->is_usercmd) { /* don't include the slurmstepd */
-			if (i >= len-1) {
+			if (i >= len - 1) {
 				len *= 2;
 				xrealloc(p, (sizeof(pid_t) * len));
 			}
@@ -413,14 +417,13 @@ extern int proctrack_linuxproc_get_pids(pid_t top, pid_t **pids, int *npids)
 		xfree(p);
 		*pids = NULL;
 		*npids = 0;
-		_destroy_hashtbl(hashtbl);
-		_destroy_list(list);
-		return SLURM_ERROR;
+		rc = SLURM_ERROR;
 	} else {
 		*pids = p;
 		*npids = i;
-		_destroy_hashtbl(hashtbl);
-		_destroy_list(list);
-		return SLURM_SUCCESS;
+		rc = SLURM_SUCCESS;
 	}
+	_destroy_hashtbl(hashtbl);
+	_destroy_list(list);
+	return rc;
 }

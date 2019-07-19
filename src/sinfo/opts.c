@@ -3,16 +3,16 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2016 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2017 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,33 +28,24 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#define _GNU_SOURCE
 
-#ifndef _GNU_SOURCE
-#  define _GNU_SOURCE
-#endif
-
-#if HAVE_GETOPT_H
-#  include <getopt.h>
-#else
-#  include "src/common/getopt.h"
-#endif
-
+#include <getopt.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "slurm/slurmdb.h"
+#include "src/common/read_config.h"
 #include "src/common/xstring.h"
 #include "src/common/proc_args.h"
 
@@ -62,10 +53,12 @@
 #include "src/sinfo/sinfo.h"
 
 /* getopt_long options, integers but not characters */
-#define OPT_LONG_HELP   0x100
-#define OPT_LONG_USAGE  0x101
-#define OPT_LONG_HIDE	0x102
+#define OPT_LONG_HELP      0x100
+#define OPT_LONG_USAGE     0x101
+#define OPT_LONG_HIDE      0x102
+#define OPT_LONG_LOCAL     0x103
 #define OPT_LONG_NOCONVERT 0x104
+#define OPT_LONG_FEDR      0x105
 
 /* FUNCTIONS */
 static List  _build_state_list( char* str );
@@ -88,7 +81,7 @@ static void  _usage(void);
 /*
  * parse_command_line, fill in params data structure with data
  */
-extern void parse_command_line(int argc, char *argv[])
+extern void parse_command_line(int argc, char **argv)
 {
 	char *env_val = NULL;
 	int opt_char;
@@ -99,16 +92,19 @@ extern void parse_command_line(int argc, char *argv[])
 	bool env_a_set = false, env_p_set = false;
 	static struct option long_options[] = {
 		{"all",       no_argument,       0, 'a'},
-		{"bg",        no_argument,       0, 'b'},
 		{"dead",      no_argument,       0, 'd'},
 		{"exact",     no_argument,       0, 'e'},
-		{"noheader",  no_argument,       0, 'h'},
+		{"federation",no_argument,       0, OPT_LONG_FEDR},
+		{"help",      no_argument,       0, OPT_LONG_HELP},
+		{"hide",      no_argument,       0, OPT_LONG_HIDE},
 		{"iterate",   required_argument, 0, 'i'},
+		{"local",     no_argument,       0, OPT_LONG_LOCAL},
 		{"long",      no_argument,       0, 'l'},
 		{"cluster",   required_argument, 0, 'M'},
 		{"clusters",  required_argument, 0, 'M'},
 		{"nodes",     required_argument, 0, 'n'},
-                {"noconvert", no_argument,       0, OPT_LONG_NOCONVERT},
+		{"noconvert", no_argument,       0, OPT_LONG_NOCONVERT},
+		{"noheader",  no_argument,       0, 'h'},
 		{"Node",      no_argument,       0, 'N'},
 		{"format",    required_argument, 0, 'o'},
 		{"Format",    required_argument, 0, 'O'},
@@ -119,20 +115,26 @@ extern void parse_command_line(int argc, char *argv[])
 		{"sort",      required_argument, 0, 'S'},
 		{"states",    required_argument, 0, 't'},
 		{"reservation",no_argument,      0, 'T'},
+		{"usage",     no_argument,       0, OPT_LONG_USAGE},
 		{"verbose",   no_argument,       0, 'v'},
 		{"version",   no_argument,       0, 'V'},
-		{"help",      no_argument,       0, OPT_LONG_HELP},
-		{"usage",     no_argument,       0, OPT_LONG_USAGE},
-		{"hide",      no_argument,       0, OPT_LONG_HIDE},
 		{NULL,        0,                 0, 0}
 	};
 
 	params.convert_flags = CONVERT_NUM_UNIT_EXACT;
 
+	if (slurmctld_conf.fed_params &&
+	    strstr(slurmctld_conf.fed_params, "fed_display"))
+		params.federation_flag = true;
+
 	if (getenv("SINFO_ALL")) {
 		env_a_set = true;
 		params.all_flag = true;
 	}
+	if (getenv("SINFO_FEDERATION"))
+		params.federation_flag = true;
+	if (getenv("SINFO_LOCAL"))
+		params.local = true;
 	if ( ( env_val = getenv("SINFO_PARTITION") ) ) {
 		env_p_set = true;
 		params.partition = xstrdup(env_val);
@@ -152,10 +154,11 @@ extern void parse_command_line(int argc, char *argv[])
 			exit(1);
 		}
 		working_cluster_rec = list_peek(params.clusters);
+		params.local = true;
 	}
 
 	while ((opt_char = getopt_long(argc, argv,
-				       "abdehi:lM:n:No:O:p:rRsS:t:TvV",
+				       "adehi:lM:n:No:O:p:rRsS:t:TvV",
 				       long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -168,18 +171,6 @@ extern void parse_command_line(int argc, char *argv[])
 			xfree(params.partition);
 			FREE_NULL_LIST(params.part_list);
 			params.all_flag = true;
-			break;
-		case (int)'b':
-			params.cluster_flags = slurmdb_setup_cluster_flags();
-			if (params.cluster_flags & CLUSTER_FLAG_BG)
-				params.bg_flag = true;
-			else {
-				error("Must be on a BG system to use --bg "
-				      "option, if using --cluster option "
-				      "put the --bg option "
-				      "after the --cluster option.");
-				exit(1);
-			}
 			break;
 		case (int)'d':
 			params.dead_nodes = true;
@@ -209,6 +200,7 @@ extern void parse_command_line(int argc, char *argv[])
 				exit(1);
 			}
 			working_cluster_rec = list_peek(params.clusters);
+			params.local = true;
 			break;
 		case OPT_LONG_NOCONVERT:
 			params.convert_flags |= CONVERT_NUM_UNIT_NO;
@@ -228,7 +220,8 @@ extern void parse_command_line(int argc, char *argv[])
 			if (hostlist_count(host_list) == 1) {
 				params.node_name_single = true;
 				xfree(params.nodes);
-				params.nodes = hostlist_deranged_string_xmalloc(host_list);
+				params.nodes =
+				    hostlist_deranged_string_xmalloc(host_list);
 			} else
 				params.node_name_single = false;
 			hostlist_destroy(host_list);
@@ -283,6 +276,9 @@ extern void parse_command_line(int argc, char *argv[])
 		case (int) 'V':
 			print_slurm_version ();
 			exit(0);
+		case (int) OPT_LONG_FEDR:
+			params.federation_flag = true;
+			break;
 		case (int) OPT_LONG_HELP:
 			_help();
 			exit(0);
@@ -292,8 +288,14 @@ extern void parse_command_line(int argc, char *argv[])
 		case OPT_LONG_HIDE:
 			params.all_flag = false;
 			break;
+		case OPT_LONG_LOCAL:
+			params.local = true;
+			break;
 		}
 	}
+
+	if (params.long_output && params.format)
+		fatal("Options -o(--format) and -l(--long) are mutually exclusive. Please remove one and retry.");
 
 	if (opt_a_set && opt_p_set) {
 		error("Conflicting options, -a and -p, specified. "
@@ -303,13 +305,24 @@ extern void parse_command_line(int argc, char *argv[])
 
 	params.cluster_flags = slurmdb_setup_cluster_flags();
 
+	if (params.federation_flag && !params.clusters && !params.local) {
+		void *ptr = NULL;
+		char *cluster_name = slurm_get_cluster_name();
+		if (slurm_load_federation(&ptr) ||
+		    !cluster_in_federation(ptr, cluster_name)) {
+			/* Not in federation */
+			params.local = true;
+			slurm_destroy_federation_rec(ptr);
+		} else {
+			params.fed = (slurmdb_federation_rec_t *) ptr;
+		}
+		xfree(cluster_name);
+	}
+
 	if ( params.format == NULL ) {
 		if ( params.summarize ) {
 			params.part_field_flag = true;	/* compute size later */
-			if (params.cluster_flags & CLUSTER_FLAG_BG)
-				params.format = "%9P %.5a %.10l %.32F  %N";
-			else
-				params.format = "%9P %.5a %.10l %.16F  %N";
+			params.format = "%9P %.5a %.10l %.16F  %N";
 		} else if ( params.node_flag ) {
 			params.node_field_flag = true;	/* compute size later */
 			params.part_field_flag = true;	/* compute size later */
@@ -325,6 +338,12 @@ extern void parse_command_line(int argc, char *argv[])
 		} else if ((env_val = getenv ("SINFO_FORMAT"))) {
 			params.format = xstrdup(env_val);
 
+
+		} else if (params.fed) {
+			params.part_field_flag = true;	/* compute size later */
+			params.format = params.long_output ?
+			  "%9P %8V %.5a %.10l %.10s %.4r %.8h %.10g %.6D %.11T %N" :
+			  "%9P %8V %.5a %.10l %.6D %.6t %N";
 		} else {
 			params.part_field_flag = true;	/* compute size later */
 			params.format = params.long_output ?
@@ -339,7 +358,7 @@ extern void parse_command_line(int argc, char *argv[])
 		_parse_format(params.format);
 
 	if (params.list_reasons && (params.state_list == NULL)) {
-		params.states = xstrdup ("down,drain,error");
+		params.states = xstrdup("down,fail,drain");
 		if (!(params.state_list = _build_state_list (params.states)))
 			fatal ("Unable to build state list for -R!");
 	}
@@ -358,7 +377,7 @@ _next_tok (char *sep, char **str)
 	char *tok;
 
 	/* push str past any leading separators */
-	while ((**str != '\0') && (strchr(sep, **str) != '\0'))
+	while ((**str != '\0') && (strchr(sep, **str) != NULL))
 		(*str)++;
 
 	if (**str == '\0')
@@ -368,11 +387,11 @@ _next_tok (char *sep, char **str)
 	tok = *str;
 
 	/* push str past token and leave pointing to first separator */
-	while ((**str != '\0') && (strchr(sep, **str) == '\0'))
+	while ((**str != '\0') && (strchr(sep, **str) == NULL))
 		(*str)++;
 
 	/* nullify consecutive separators and push str beyond them */
-	while ((**str != '\0') && (strchr(sep, **str) != '\0'))
+	while ((**str != '\0') && (strchr(sep, **str) != NULL))
 		*(*str)++ = '\0';
 
 	return (tok);
@@ -482,6 +501,8 @@ _node_state_list (void)
 	xstrcat(all_states, ",");
 	xstrcat(all_states, node_state_string(NODE_STATE_COMPLETING));
 	xstrcat(all_states, ",");
+	xstrcat(all_states, node_state_string(NODE_STATE_POWERING_DOWN));
+	xstrcat(all_states, ",");
 	xstrcat(all_states, node_state_string(NODE_STATE_POWER_SAVE));
 	xstrcat(all_states, ",");
 	xstrcat(all_states, node_state_string(NODE_STATE_POWER_UP));
@@ -489,6 +510,8 @@ _node_state_list (void)
 	xstrcat(all_states, node_state_string(NODE_STATE_FAIL));
 	xstrcat(all_states, ",");
 	xstrcat(all_states, node_state_string(NODE_STATE_MAINT));
+	xstrcat(all_states, ",");
+	xstrcat(all_states, node_state_string(NODE_STATE_REBOOT));
 
 	for (i = 0; i < strlen (all_states); i++)
 		all_states[i] = tolower (all_states[i]);
@@ -502,8 +525,8 @@ _node_state_equal (int i, const char *str)
 {
 	int len = strlen (str);
 
-	if ((strncasecmp(node_state_string_compact(i), str, len) == 0) ||
-	    (strncasecmp(node_state_string(i),         str, len) == 0))
+	if ((xstrncasecmp(node_state_string_compact(i), str, len) == 0) ||
+	    (xstrncasecmp(node_state_string(i),         str, len) == 0))
 		return (true);
 	return (false);
 }
@@ -525,25 +548,25 @@ _node_state_id (char *str)
 			return (i);
 	}
 
-	if (strncasecmp("DRAIN", str, len) == 0)
+	if (xstrncasecmp("DRAIN", str, len) == 0)
 		return NODE_STATE_DRAIN;
-	if (strncasecmp("DRAINED", str, len) == 0)
+	if (xstrncasecmp("DRAINED", str, len) == 0)
 		return NODE_STATE_DRAIN | NODE_STATE_IDLE;
-	if (strncasecmp("ERROR", str, len) == 0)
-		return NODE_STATE_ERROR;
-	if ((strncasecmp("RESV", str, len) == 0) ||
-	    (strncasecmp("RESERVED", str, len) == 0))
+	if ((xstrncasecmp("RESV", str, len) == 0) ||
+	    (xstrncasecmp("RESERVED", str, len) == 0))
 		return NODE_STATE_RES;
-	if ((strncasecmp("PERFCTRS", str, len) == 0) ||
-	    (strncasecmp("NPC", str, len) == 0))
+	if ((xstrncasecmp("PERFCTRS", str, len) == 0) ||
+	    (xstrncasecmp("NPC", str, len) == 0))
 		return NODE_STATE_NET;
-	if ((strncasecmp("DRAINING", str, len) == 0) ||
-	    (strncasecmp("DRNG", str, len) == 0))
+	if ((xstrncasecmp("DRAINING", str, len) == 0) ||
+	    (xstrncasecmp("DRNG", str, len) == 0))
 		return NODE_STATE_DRAIN | NODE_STATE_ALLOCATED;
 	if (_node_state_equal (NODE_STATE_COMPLETING, str))
 		return NODE_STATE_COMPLETING;
-	if (strncasecmp("NO_RESPOND", str, len) == 0)
+	if (xstrncasecmp("NO_RESPOND", str, len) == 0)
 		return NODE_STATE_NO_RESPOND;
+	if (_node_state_equal (NODE_STATE_POWERING_DOWN, str))
+		return NODE_STATE_POWERING_DOWN;
 	if (_node_state_equal (NODE_STATE_POWER_SAVE, str))
 		return NODE_STATE_POWER_SAVE;
 	if (_node_state_equal (NODE_STATE_POWER_UP, str))
@@ -552,6 +575,8 @@ _node_state_id (char *str)
 		return NODE_STATE_FAIL;
 	if (_node_state_equal (NODE_STATE_MAINT, str))
 		return NODE_STATE_MAINT;
+	if (_node_state_equal (NODE_STATE_REBOOT, str))
+		return NODE_STATE_REBOOT;
 
 	return (-1);
 }
@@ -805,6 +830,11 @@ _parse_format( char* format )
 					    field_size,
 					    right_justify,
 					    suffix);
+		} else if (field[0] == 'V') {
+			format_add_cluster_name(params.format_list,
+						field_size,
+						right_justify,
+						suffix);
 		} else if (field[0] == 'w') {
 			params.match_flags.weight_flag = true;
 			format_add_weight( params.format_list,
@@ -836,7 +866,7 @@ _parse_format( char* format )
 					right_justify,
 					suffix );
 		} else if (format_all) {
-			;	/* ignore */
+			xfree(suffix);	/* ignore */
 		} else {
 			prefix = xstrdup("%");
 			xstrcat(prefix, token);
@@ -896,6 +926,11 @@ static int _parse_long_format (char* format_long)
 					  field_size,
 					  right_justify,
 					  suffix );
+		} else if (!xstrcasecmp(token, "cluster")) {
+			format_add_cluster_name(params.format_list,
+						field_size,
+						right_justify,
+						suffix);
 		} else if (!xstrcasecmp(token, "cpus")) {
 			params.match_flags.cpus_flag = true;
 			format_add_cpus( params.format_list,
@@ -962,6 +997,12 @@ static int _parse_long_format (char* format_long)
 					 field_size,
 					 right_justify,
 					 suffix );
+		} else if (!xstrcasecmp(token, "gresused")) {
+			params.match_flags.gres_used_flag = true;
+			format_add_gres_used( params.format_list,
+					 field_size,
+					 right_justify,
+					 suffix );
 		} else if (!xstrcasecmp(token, "maxcpuspernode")) {
 			params.match_flags.max_cpus_per_node_flag = true;
 			format_add_max_cpus_per_node( params.format_list,
@@ -1018,6 +1059,12 @@ static int _parse_long_format (char* format_long)
 						   field_size,
 						   right_justify,
 						   suffix );
+		} else if (!xstrcasecmp(token, "port")) {
+			params.match_flags.port_flag = true;
+			format_add_port( params.format_list,
+					 field_size,
+					 right_justify,
+					 suffix );
 		} else if (!xstrcasecmp(token, "preemptmode")) {
 			params.match_flags.preempt_mode_flag = true;
 			format_add_preempt_mode( params.format_list,
@@ -1252,7 +1299,6 @@ void _print_options( void )
 			"true" : "false");
 	printf("avail_flag      = %s\n", params.match_flags.avail_flag ?
 			"true" : "false");
-	printf("bg_flag         = %s\n", params.bg_flag ? "true" : "false");
 	printf("cpus_flag       = %s\n", params.match_flags.cpus_flag ?
 			"true" : "false");
 	printf("default_time_flag =%s\n", params.match_flags.default_time_flag ?
@@ -1267,6 +1313,8 @@ void _print_options( void )
 					"true" : "false");
 	printf("gres_flag       = %s\n", params.match_flags.gres_flag ?
 			"true" : "false");
+	printf("gres_used_flag  = %s\n", params.match_flags.gres_used_flag ?
+			"true" : "false");
 	printf("job_size_flag   = %s\n", params.match_flags.job_size_flag ?
 					"true" : "false");
 	printf("max_time_flag   = %s\n", params.match_flags.max_time_flag ?
@@ -1274,6 +1322,8 @@ void _print_options( void )
 	printf("memory_flag     = %s\n", params.match_flags.memory_flag ?
 			"true" : "false");
 	printf("partition_flag  = %s\n", params.match_flags.partition_flag ?
+			"true" : "false");
+	printf("port_flag       = %s\n", params.match_flags.port_flag ?
 			"true" : "false");
 	printf("priority_job_factor_flag   = %s\n",
 			params.match_flags.priority_job_factor_flag ?
@@ -1306,7 +1356,7 @@ static void _usage( void )
 {
 	printf("\
 Usage: sinfo [-abdelNRrsTv] [-i seconds] [-t states] [-p partition] [-n nodes]\n\
-             [-S fields] [-o format] [-O Format]\n");
+             [-S fields] [-o format] [-O Format] [--federation] [--local]\n");
 }
 
 static void _help( void )
@@ -1315,13 +1365,17 @@ static void _help( void )
 Usage: sinfo [OPTIONS]\n\
   -a, --all                  show all partitions (including hidden and those\n\
 			     not accessible)\n\
-  -b, --bg                   show bgblocks (on Blue Gene systems)\n\
   -d, --dead                 show only non-responding nodes\n\
   -e, --exact                group nodes only on exact match of configuration\n\
+      --federation           Report federated information if a member of one\n\
   -h, --noheader             no headers on output\n\
   --hide                     do not show hidden or non-accessible partitions\n\
   -i, --iterate=seconds      specify an iteration period\n\
+      --local                show only local cluster in a federation.\n\
+                             Overrides --federation.\n\
   -l, --long                 long output - displays more information\n\
+  -M, --clusters=names       clusters to issue commands to. Implies --local.\n\
+                             NOTE: SlurmDBD must be up.\n\
   -n, --nodes=NODES          report on specific node(s)\n\
   --noconvert                don't convert units from their original type\n\
 			     (e.g. 2048M won't be converted to 2G).\n\

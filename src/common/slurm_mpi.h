@@ -6,11 +6,11 @@
  *  Written by Mark Grondona <grondo1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,24 +26,21 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _SRUN_MPI_H
 #define _SRUN_MPI_H
 
-#if HAVE_CONFIG_H
-# include "config.h"
-#endif
-
 #include <stdbool.h>
+
 #include "slurm/slurm.h"
 
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
@@ -53,12 +50,14 @@ typedef void mpi_plugin_client_state_t;
 
 typedef struct {
 	uint32_t jobid;
+	uint32_t pack_jobid;	/* pack job leader or NO_VAL */
+	uint32_t pack_task_offset;   /* Task offset within pack job or NO_VAL */
 	uint32_t stepid;
 	slurm_step_layout_t *step_layout;
 } mpi_plugin_client_info_t;
 
 typedef struct {
-	uint32_t jobid;  /* Current SLURM job id                      */
+	uint32_t jobid;  /* Current Slurm job id                      */
 	uint32_t stepid; /* Current step id (or NO_VAL)               */
 	uint32_t nnodes; /* number of nodes in current job step       */
 	uint32_t nodeid; /* relative position of this node in job     */
@@ -139,9 +138,6 @@ int mpi_hook_client_init (char *mpi_type);
  */
 mpi_plugin_client_state_t *
 mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env);
-
-/* Call the plugin p_mpi_hook_client_single_task_per_node() function. */
-bool mpi_hook_client_single_task_per_node (void);
 
 /* Call the plugin p_mpi_hook_client_fini() function. */
 int mpi_hook_client_fini (mpi_plugin_client_state_t *state);

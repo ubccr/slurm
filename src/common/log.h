@@ -46,14 +46,6 @@
 #ifndef _LOG_H
 #define _LOG_H
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#ifdef HAVE_SYS_SYSLOG_H
-#  include <sys/syslog.h>
-#endif
-
 #include <syslog.h>
 #include <stdio.h>
 
@@ -93,7 +85,6 @@ typedef enum {
 	LOG_LEVEL_DEBUG3,
 	LOG_LEVEL_DEBUG4,
 	LOG_LEVEL_DEBUG5,
-	LOG_LEVEL_SCHED,
 	LOG_LEVEL_END
 }	log_level_t;
 
@@ -102,11 +93,11 @@ typedef enum {
  * log options: Each of stderr, syslog, and logfile can have a different level
  */
 typedef struct {
-	log_level_t stderr_level;   /* max level to log to stderr         */
-	log_level_t syslog_level;   /* max level to log to syslog         */
-	log_level_t logfile_level;  /* max level to log to logfile        */
-	unsigned    prefix_level:1; /* prefix level (e.g. "debug: ") if 1 */
-	unsigned    buffered:1;     /* Use internal buffer to never block */
+	log_level_t stderr_level;   /* max level to log to stderr            */
+	log_level_t syslog_level;   /* max level to log to syslog            */
+	log_level_t logfile_level;  /* max level to log to logfile           */
+	bool prefix_level;          /* prefix level (e.g. "debug: ") if true */
+	bool buffered;              /* use internal buffer to never block    */
 } 	log_options_t;
 
 extern char *slurm_prog_name;
@@ -156,9 +147,6 @@ int log_init(char *argv0, log_options_t opts,
 int sched_log_init(char *argv0, log_options_t opts, log_facility_t fac,
 		   char *logfile);
 
-/* Write to scheduler log */
-void schedlog(const char *fmt, ...);
-
 /* reinitialize log module.
  * Keep same log options as previously initialized log, but reinit mutex
  * that protects the log. This call is needed after a fork() in a threaded
@@ -198,9 +186,10 @@ int log_alter_with_fp(log_options_t opt, log_facility_t fac, FILE *fp_in);
 int sched_log_alter(log_options_t opts, log_facility_t fac, char *logfile);
 
 /* Set prefix for log file entries
- * (really only useful for slurmd at this point)
+ * (really only useful for slurmd at this point).
+ * Note: will store pfx internally, do not use after this call.
  */
-void log_set_fpfx(char *pfx);
+void log_set_fpfx(char **pfx);
 
 /*
  * (re)set argv0 string prepended to all log messages
@@ -244,6 +233,7 @@ extern void log_set_debug_flags(void);
  * For example, if LOG_LEVEL_INFO is returned, we know that all verbose and
  * debug type messages will be ignored. */
 extern int get_log_level(void);
+extern int get_sched_log_level(void);
 
 /*
  * the following log a message to the log facility at the appropriate level:
@@ -251,17 +241,22 @@ extern int get_log_level(void);
  * Messages do not need a newline!
  *
  * args are printf style with the following exceptions:
- *
- * fmt     expands to
- * ~~~~    ~~~~~~~~~~~
- * "%m" => strerror(errno)
- * "%t" => strftime "%x %X"  (locally preferred short date/time)
- * "%T" => strftime "%a, %d %b %Y %H:%M:%S %z" (rfc2822 date/time)
+ * %m expands to strerror(errno)
+ * %M expand to time stamp, format is configuration dependent
+ * %pJ expands to "JobId=XXXX" for the given job_ptr, with the appropriate
+ *     format for job arrays and hetjob components.
+ * %pS expands to "JobId=XXXX StepId=YYYY" for a given step_ptr.
+ * %t expands to strftime("%x %X") [ locally preferred short date/time ]
+ * %T expands to rfc2822 date time  [ "dd, Mon yyyy hh:mm:ss GMT offset" ]
  */
 
-/* fatal() aborts program unless NDEBUG defined
+/*
+ * fatal() exits program
  * error() returns SLURM_ERROR
  */
+void	log_var(const log_level_t, const char *, ...)
+			__attribute__ ((format (printf, 2, 3)));
+void	fatal_abort(const char *, ...) __attribute__ ((format (printf, 1, 2)));
 void	fatal(const char *, ...) __attribute__ ((format (printf, 1, 2)));
 int	error(const char *, ...) __attribute__ ((format (printf, 1, 2)));
 void	info(const char *, ...) __attribute__ ((format (printf, 1, 2)));
@@ -276,11 +271,15 @@ void	debug3(const char *, ...) __attribute__ ((format (printf, 1, 2)));
 void	debug4(const char *, ...) __attribute__ ((format (printf, 1, 2)));
 void	debug5(const char *, ...) __attribute__ ((format (printf, 1, 2)));
 
-void	dump_cleanup_list(void);
-void	fatal_add_cleanup(void (*proc) (void *), void *context);
-void	fatal_add_cleanup_job(void (*proc) (void *), void *context);
-void	fatal_remove_cleanup(void (*proc) (void *context), void *context);
-void	fatal_remove_cleanup_job(void (*proc) (void *context), void *context);
-void	fatal_cleanup(void);
+/*
+ * Like above logging messages, but prepend "sched: " to the log entry
+ * and route the message into the sched_log if enabled.
+ */
+int	sched_error(const char *, ...) __attribute__ ((format (printf, 1, 2)));
+void	sched_info(const char *, ...) __attribute__ ((format (printf, 1, 2)));
+void	sched_verbose(const char *, ...) __attribute__ ((format (printf, 1, 2)));
+void	sched_debug(const char *, ...) __attribute__ ((format (printf, 1, 2)));
+void	sched_debug2(const char *, ...) __attribute__ ((format (printf, 1, 2)));
+void	sched_debug3(const char *, ...) __attribute__ ((format (printf, 1, 2)));
 
 #endif /* !_LOG_H */

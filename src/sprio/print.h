@@ -1,16 +1,17 @@
 /*****************************************************************************\
  *  print.h - sprio print job definitions
  *****************************************************************************
+ *  Portions Copyright (C) 2010-2017 SchedMD LLC <https://www.schedmd.com>.
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -57,6 +58,7 @@ typedef struct job_format {
 
 int print_jobs_array(List factors, List format);
 int print_job_from_format(priority_factors_object_t * job, List list);
+double get_priority_from_factors(priority_factors_object_t *prio_factors);
 
 /*****************************************************************************
  * Job Line Format Options
@@ -74,6 +76,12 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_age_priority_normalized)
 #define job_format_add_age_priority_weighted(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_age_priority_weighted)
+#define job_format_add_assoc_priority_normalized(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_assoc_priority_normalized)
+#define job_format_add_assoc_priority_weighted(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_assoc_priority_weighted)
+#define job_format_add_cluster_name(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_cluster_name)
 #define job_format_add_fs_priority_normalized(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_fs_priority_normalized)
 #define job_format_add_fs_priority_weighted(list,wid,right,suffix) \
@@ -90,10 +98,14 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_part_priority_normalized)
 #define job_format_add_part_priority_weighted(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_part_priority_weighted)
+#define job_format_add_partition(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_partition)
 #define job_format_add_qos_priority_normalized(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_qos_priority_normalized)
 #define job_format_add_qos_priority_weighted(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_qos_priority_weighted)
+#define job_format_add_site_priority(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_site_priority)
 #define job_format_add_job_nice(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_nice)
 #define job_format_add_user_name(list,wid,right,suffix) \
@@ -114,6 +126,12 @@ int _print_age_priority_normalized(priority_factors_object_t * job, int width,
 				   bool right_justify, char* suffix);
 int _print_age_priority_weighted(priority_factors_object_t * job, int width,
 				 bool right_justify, char* suffix);
+int _print_assoc_priority_normalized(priority_factors_object_t * job, int width,
+				     bool right_justify, char* suffix);
+int _print_assoc_priority_weighted(priority_factors_object_t * job, int width,
+				   bool right_justify, char* suffix);
+int _print_cluster_name(priority_factors_object_t *job, int width,
+			bool right, char *suffix);
 int _print_fs_priority_normalized(priority_factors_object_t * job, int width,
 				  bool right_justify, char* suffix);
 int _print_fs_priority_weighted(priority_factors_object_t * job, int width,
@@ -130,10 +148,14 @@ int _print_part_priority_normalized(priority_factors_object_t * job, int width,
 				    bool right_justify,	char* suffix);
 int _print_part_priority_weighted(priority_factors_object_t * job, int width,
 				  bool right_justify, char* suffix);
+int _print_partition(priority_factors_object_t * job, int width,
+		     bool right_justify, char* suffix);
 int _print_qos_priority_normalized(priority_factors_object_t * job, int width,
 				   bool right_justify, char* suffix);
 int _print_qos_priority_weighted(priority_factors_object_t * job, int width,
 				 bool right_justify, char* suffix);
+int _print_site_priority(priority_factors_object_t * job, int width,
+			 bool right, char* suffix);
 int _print_job_nice(priority_factors_object_t * job, int width,
 		    bool right_justify, char* suffix);
 int _print_job_user_name(priority_factors_object_t * job, int width,

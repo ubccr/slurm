@@ -9,11 +9,11 @@
  *  Portions Copyright (C) 2012 SchedMD LLC.
  *  Written by Danny Auble <da@schedmd.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,46 +29,34 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "config.h"
 
+#include <dlfcn.h>
 #include <errno.h>
-#include <sys/types.h>
 #include <stdio.h>
-#include <dlfcn.h>	/* don't know if there's an autoconf for this. */
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "src/common/xmalloc.h"
 #include "src/common/log.h"
 #include "src/common/plugrack.h"
+#include "src/common/strlcpy.h"
 #include "src/common/xstring.h"
 #include "src/common/slurm_protocol_api.h"
 #include "slurm/slurm_errno.h"
-
-#  if HAVE_UNISTD_H
-#    include <unistd.h>
-#  endif /* HAVE_UNISTD_H */
-#  if HAVE_SYS_TYPES_H
-#    include <sys/types.h>
-#  endif
-#  if HAVE_SYS_STAT_H
-#    include <sys/stat.h>
-#  endif
-
-#  if HAVE_STDLIB_H
-#    include <stdlib.h>
-#  endif
 
 strong_alias(plugin_get_syms,         slurm_plugin_get_syms);
 strong_alias(plugin_load_and_link,    slurm_plugin_load_and_link);
@@ -128,12 +116,12 @@ plugin_peek( const char *fq_path,
 	}
 	if ( ( type = dlsym( plug, PLUGIN_TYPE ) ) != NULL ) {
 		if ( plugin_type != NULL ) {
-			strncpy( plugin_type, type, type_len );
+			strlcpy(plugin_type, type, type_len);
 		}
 	} else {
 		dlclose( plug );
 		/* could be vestigial library, don't treat as an error */
-		verbose( "%s: not a SLURM plugin", fq_path );
+		verbose( "%s: not a Slurm plugin", fq_path );
 		return SLURM_ERROR;
 	}
 
@@ -233,23 +221,19 @@ plugin_load_from_file(plugin_handle_t *p, const char *fq_path)
 
 plugin_handle_t
 plugin_load_and_link(const char *type_name, int n_syms,
-		    const char *names[], void *ptrs[])
+		     const char *names[], void *ptrs[])
 {
 	plugin_handle_t plug = PLUGIN_INVALID_HANDLE;
 	struct stat st;
-	char *head=NULL, *dir_array=NULL, *so_name = NULL,
-		*file_name=NULL;
-	int i=0;
+	char *head = NULL, *dir_array = NULL, *so_name = NULL;
+	char *file_name = NULL;
+	int i = 0;
 	plugin_err_t err = EPLUGIN_NOTFOUND;
 
 	if (!type_name)
 		return plug;
-#if defined(__CYGWIN__)
-	so_name = xstrdup_printf("%s.dll", type_name);
-#else
 	so_name = xstrdup_printf("%s.so", type_name);
-#endif
-	while(so_name[i]) {
+	while (so_name[i]) {
 		if (so_name[i] == '/')
 			so_name[i] = '_';
 		i++;
@@ -261,7 +245,7 @@ plugin_load_and_link(const char *type_name, int n_syms,
 	}
 
 	head = dir_array;
-	for (i=0; ; i++) {
+	for (i = 0; ; i++) {
 		bool got_colon = 0;
 		if (dir_array[i] == ':') {
 			dir_array[i] = '\0';
@@ -280,12 +264,12 @@ plugin_load_and_link(const char *type_name, int n_syms,
 			if ((err = plugin_load_from_file(&plug, file_name))
 			   == EPLUGIN_SUCCESS) {
 				if (plugin_get_syms(plug, n_syms,
-						    names, ptrs) >=
-				       n_syms) {
+						    names, ptrs) >= n_syms) {
 					debug3("Success.");
 					xfree(file_name);
 					break;
 				} else {
+					(void) dlclose(plug);
 					err = EPLUGIN_MISSING_SYMBOL;
 					plug = PLUGIN_INVALID_HANDLE;
 				}
@@ -445,14 +429,7 @@ extern plugin_context_t *plugin_context_create(
 	/* Get plugin list. */
 	if (!c->plugin_list) {
 		char *plugin_dir;
-		c->plugin_list = plugrack_create();
-		if (!c->plugin_list) {
-			error("cannot create plugin manager");
-			goto fail;
-		}
-		plugrack_set_major_type(c->plugin_list, plugin_type);
-		plugrack_set_paranoia(
-			c->plugin_list, PLUGRACK_PARANOIA_NONE, 0);
+		c->plugin_list = plugrack_create(plugin_type);
 		plugin_dir = slurm_get_plugin_dir();
 		plugrack_read_dir(c->plugin_list, plugin_dir);
 		xfree(plugin_dir);
@@ -496,4 +473,75 @@ extern int plugin_context_destroy(plugin_context_t *c)
 	xfree(c);
 
 	return rc;
+}
+
+/*
+ * Return a list of plugin names that match the given type.
+ *
+ * IN plugin_type - Type of plugin to search for in the plugin_dir.
+ * RET list of plugin names, NULL if none found.
+ */
+extern List plugin_get_plugins_of_type(char *plugin_type)
+{
+	List plugin_names = NULL;
+	char *plugin_dir = NULL, *dir = NULL, *save_ptr = NULL;
+	char *type_under = NULL, *type_slash = NULL;
+	DIR *dirp;
+	struct dirent *e;
+	int len;
+
+	if (!(plugin_dir = slurm_get_plugin_dir())) {
+		error("%s: No plugin dir given", __func__);
+		goto done;
+	}
+
+	type_under = xstrdup_printf("%s_", plugin_type);
+	type_slash = xstrdup_printf("%s/", plugin_type);
+
+	dir = strtok_r(plugin_dir, ":", &save_ptr);
+	while (dir) {
+		/* Open the directory. */
+		if (!(dirp = opendir(dir))) {
+			error("cannot open plugin directory %s", dir);
+			goto done;
+		}
+
+		while (1) {
+			char full_name[128];
+
+			if (!(e = readdir( dirp )))
+				break;
+			/* Check only files with "plugintype_" in them. */
+			if (xstrncmp(e->d_name, type_under, strlen(type_under)))
+				continue;
+
+			len = strlen(e->d_name);
+			len -= 3;
+			/* Check only shared object files */
+			if (xstrcmp(e->d_name+len, ".so"))
+				continue;
+			/* add one for the / */
+			len++;
+			xassert(len < sizeof(full_name));
+			snprintf(full_name, len, "%s%s",
+				 type_slash, e->d_name + strlen(type_slash));
+
+			if (!plugin_names)
+				plugin_names = list_create(slurm_destroy_char);
+			if (!list_find_first(plugin_names,
+					     slurm_find_char_in_list,
+					     full_name))
+				list_append(plugin_names, xstrdup(full_name));
+		}
+		closedir(dirp);
+
+		dir = strtok_r(NULL, ":", &save_ptr);
+	}
+
+done:
+	xfree(plugin_dir);
+	xfree(type_under);
+	xfree(type_slash);
+
+	return plugin_names;
 }

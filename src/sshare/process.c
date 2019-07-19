@@ -6,11 +6,11 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -53,16 +53,17 @@ print_field_t fields[] = {
 	{10, "Cluster", print_fields_str, PRINT_CLUSTER},
 	{13, "EffectvUsage", print_fields_double, PRINT_EUSED},
 	{10, "FairShare", print_fields_double, PRINT_FSFACTOR},
+	{30, "GrpTRESMins", _print_tres, PRINT_TRESMINS},
+	{30, "GrpTRESRaw", _print_tres, PRINT_GRPTRESRAW},
+	{6,  "ID", print_fields_uint, PRINT_ID},
 	{10, "LevelFS", print_fields_double, PRINT_LEVELFS},
-	{6, "ID", print_fields_uint, PRINT_ID},
 	{11, "NormShares", print_fields_double, PRINT_NORMS},
 	{11, "NormUsage", print_fields_double, PRINT_NORMU},
 	{12, "Partition", print_fields_str, PRINT_PART},
 	{10, "RawShares", print_fields_uint32, PRINT_RAWS},
 	{11, "RawUsage", print_fields_uint64, PRINT_RAWU},
-	{10, "User", print_fields_str, PRINT_USER},
-	{30, "GrpTRESMins", _print_tres, PRINT_TRESMINS},
 	{30, "TRESRunMins", _print_tres, PRINT_RUNMINS},
+	{10, "User", print_fields_str, PRINT_USER},
 	{0,  NULL, NULL, 0}
 };
 
@@ -188,8 +189,8 @@ extern int process(shares_response_msg_t *resp, uint16_t options)
 			newlen = atoi(tmp_char+1);
 		}
 		for (i = 0; fields[i].name; i++) {
-			if (!strncasecmp(fields[i].name,
-					 object, strlen(object))) {
+			if (!xstrncasecmp(fields[i].name, object,
+					  strlen(object))) {
 				if (newlen)
 					fields[i].len = newlen;
 
@@ -226,6 +227,7 @@ extern int process(shares_response_msg_t *resp, uint16_t options)
 		char *tmp_char = NULL;
 		char *local_acct = NULL;
 		print_field_t *field = NULL;
+		uint64_t tres_raw[tres_cnt];
 
 		if ((options & PRINT_USERS_ONLY) && share->user == 0)
 			continue;
@@ -340,6 +342,15 @@ extern int process(shares_response_msg_t *resp, uint16_t options)
 			case PRINT_TRESMINS:
 				field->print_routine(field,
 						     share->tres_grp_mins,
+						     (curr_inx == field_count));
+				break;
+			case PRINT_GRPTRESRAW:
+				/* convert to ints and minutes */
+				for (i=0; i<tres_cnt; i++)
+					tres_raw[i] = (uint64_t)
+						(share->usage_tres_raw[i] / 60);
+				field->print_routine(field,
+						     tres_raw,
 						     (curr_inx == field_count));
 				break;
 			case PRINT_RUNMINS:

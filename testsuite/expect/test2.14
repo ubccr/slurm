@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          Validate scontrol update size of running job.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -13,22 +13,22 @@
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -43,18 +43,9 @@ set node_cnt         2
 
 print_header $test_id
 
-if { [test_xcpu] } {
-	send_user "\nWARNING: This test is incompatible with XCPU systems\n"
-	exit 0
-} elseif {[test_front_end]} {
+if {[test_front_end]} {
         send_user "\nWARNING: This test is incompatible with front-end systems\n"
         exit $exit_code
-} elseif {[test_serial]} {
-	send_user "\nWARNING: This test is incompatible with serial systems\n"
-	exit $exit_code
-} elseif {[test_launch_poe]} {
-	send_user "\nWARNING: This test is incompatible with POE systems\n"
-	exit 0
 }
 
 set available [available_nodes $partition ""]
@@ -74,13 +65,14 @@ make_bash_script $file_in "
 	. slurm_job_\${SLURM_JOBID}_resize.sh
 	$scontrol show job \${SLURM_JOBID} >>${file_out2}
 	$srun -l $bin_id
+	echo SLURM_NNODES=\${SLURM_NNODES}
 	$bin_rm -f slurm_job_\${SLURM_JOBID}_resize.csh
 	$bin_rm -f slurm_job_\${SLURM_JOBID}_resize.sh"
 
 #
 # Run job to determine what nodes are available
 #
-spawn $sbatch -N$node_cnt -t1 --output=$file_out $file_in
+spawn $sbatch -N$node_cnt -J "test$test_id" -t1 --output=$file_out $file_in
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
@@ -108,9 +100,10 @@ if {[wait_for_file $file_out] != 0} {
 	exit 1
 }
 set task_count 0
+set node_count 0
 spawn $bin_cat $file_out
 expect {
-	-re "slurm_allocation_lookup_lite" {
+	-re "slurm_allocation_lookup" {
 		send_user "\nFAILURE: Couldn't look up the job correctly\n\n\n"
 		set exit_code 1
 	}
@@ -122,14 +115,24 @@ expect {
 		incr task_count
 		exp_continue
 	}
+	-re "SLURM_NNODES=($number)" {
+		set node_count $expect_out(1,string)
+		exp_continue
+	}
 	eof {
 		wait
 	}
 }
-if {$task_count != 3} {
-	send_user "\nFAILURE: Invalid task count ($task_count != 3)\n\n\n"
+set task_target [expr $node_cnt + 1]
+if {$task_count != $task_target} {
+	send_user "\nFAILURE: Invalid task count ($task_count != $task_target)\n\n\n"
 	set exit_code 1
-} elseif (!$exit_code) {
+}
+if {$node_count != 1} {
+	send_user "\nFAILURE: Invalid node count ($node_count != 1)\n\n\n"
+	set exit_code 1
+}
+if {$exit_code == 0} {
 	send_user "\nSo far, so good...\n\n\n"
 }
 

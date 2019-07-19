@@ -4,11 +4,11 @@
  *  Copyright (C) 2013 SchedMD LLC
  *  Written by Morris Jette
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,13 +24,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -49,7 +49,7 @@
 typedef struct job_container_ops {
 	int	(*container_p_create)	(uint32_t job_id);
 	int	(*container_p_add_cont)	(uint32_t job_id, uint64_t cont_id);
-	int	(*container_p_add_pid)	(uint32_t job_id, pid_t pid, uid_t uid);
+	int	(*container_p_join)	(uint32_t job_id, uid_t uid);
 	int	(*container_p_delete)	(uint32_t job_id);
 	int	(*container_p_restore)	(char *dir_name, bool recover);
 	void	(*container_p_reconfig)	(void);
@@ -62,7 +62,7 @@ typedef struct job_container_ops {
 static const char *syms[] = {
 	"container_p_create",
 	"container_p_add_cont",
-	"container_p_add_pid",
+	"container_p_join",
 	"container_p_delete",
 	"container_p_restore",
 	"container_p_reconfig",
@@ -190,10 +190,12 @@ extern int container_g_create(uint32_t job_id)
 	return rc;
 }
 
-/* Add a process to the specified job's container.
- * A proctrack containter will be generated containing the process
- * before container_g_add_cont() is called (see below). */
-extern int container_g_add_pid(uint32_t job_id, pid_t pid, uid_t uid)
+/*
+ * Add the calling process to the specified job's container.
+ * A proctrack container will be generated containing the process
+ * before container_g_add_cont() is called (see below).
+ */
+extern int container_g_join(uint32_t job_id, uid_t uid)
 {
 	int i, rc = SLURM_SUCCESS;
 
@@ -202,7 +204,7 @@ extern int container_g_add_pid(uint32_t job_id, pid_t pid, uid_t uid)
 
 	for (i = 0; ((i < g_container_context_num) && (rc == SLURM_SUCCESS));
 	     i++) {
-		rc = (*(ops[i].container_p_add_pid))(job_id, pid, uid);
+		rc = (*(ops[i].container_p_join))(job_id, uid);
 	}
 
 	return rc;
@@ -270,4 +272,3 @@ extern void container_g_reconfig(void)
 
 	return;
 }
-

@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -47,13 +47,13 @@
 
 /*
  * srun_allocate - notify srun of a resource allocation
- * IN job_id - id of the job allocated resource
+ * IN job_ptr - job allocated resources
  */
-extern void srun_allocate (uint32_t job_id);
+extern void srun_allocate(struct job_record *job_ptr);
 
 /*
  * srun_allocate_abort - notify srun of a resource allocation failure
- * IN job_id - id of the job allocated resource
+ * IN job_ptr - job allocated resources
  */
 extern void srun_allocate_abort(struct job_record *job_ptr);
 
@@ -96,7 +96,7 @@ extern void srun_step_missing (struct step_record *step_ptr,
 			       char *node_list);
 
 /*
- * srun_step_signal - notify srun that a job step should be signalled
+ * srun_step_signal - notify srun that a job step should be signaled
  * NOTE: Needed on BlueGene/Q to signal runjob process
  * IN step_ptr  - pointer to the slurmctld job step record
  * IN signal - signal number
@@ -105,10 +105,10 @@ extern void srun_step_signal (struct step_record *step_ptr, uint16_t signal);
 
 /*
  * srun_node_fail - notify srun of a node's failure
- * IN job_id    - id of job to notify
+ * IN job_ptr - job to notify
  * IN node_name - name of failed node
  */
-extern void srun_node_fail (uint32_t job_id, char *node_name);
+extern void srun_node_fail(struct job_record *job_ptr, char *node_name);
 
 /* srun_ping - ping all srun commands that have not been heard from recently */
 extern void srun_ping (void);

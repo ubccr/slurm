@@ -9,22 +9,22 @@
 # Copyright (C) 2014 SchedMD LLC
 # Written by Morris Jette
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -35,6 +35,12 @@ set test_prog   "test$test_id.prog"
 set cfgdir      [pwd]
 
 print_header $test_id
+
+if {[test_cray]} {
+#	Many Cray-specific changes required in slurm.conf test files
+	send_user "\nWARNING: This test can not run on a Cray system\n"
+	exit $exit_code
+}
 
 #
 # Delete left-over programs and rebuild them
@@ -136,7 +142,7 @@ if {$cpu_match != 1} {
 }
 
 #######################################
-# Bad tests
+# Tests for expected failures
 #######################################
 
 # Run a job with invalid job allocation
@@ -153,7 +159,6 @@ expect {
 		wait
 	}
 }
-
 if {$fail_match != 1} {
 	send_user "\nFAILURE: This test should have failed but did not\n"
 	set exit_code 1

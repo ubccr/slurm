@@ -35,11 +35,6 @@
  *  Refer to "fd.h" for documentation on public functions.
 \*****************************************************************************/
 
-
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif /* HAVE_CONFIG_H */
-
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -54,8 +49,6 @@
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h 
  * for details. 
  */
-strong_alias(fd_read_n,		slurm_fd_read_n);
-strong_alias(fd_write_n,	slurm_fd_write_n);
 strong_alias(fd_set_blocking,	slurm_fd_set_blocking);
 strong_alias(fd_set_nonblocking,slurm_fd_set_nonblocking);
 
@@ -80,44 +73,6 @@ void fd_set_noclose_on_exec(int fd)
 	if (fcntl(fd, F_SETFD, 0) < 0)
 		error("fcntl(F_SETFD) failed: %m");
 	return;
-}
-
-
-int open_cloexec(const char *pathname, int flags)
-{
-#ifdef O_CLOEXEC
-	return open(pathname, flags | O_CLOEXEC);
-#else
-	int fd = open(pathname, flags);
-	if (fd >= 0)
-		fd_set_close_on_exec(fd);
-	return fd;
-#endif
-}
-
-
-int creat_cloexec(const char *pathname, mode_t mode)
-{
-#ifdef O_CLOEXEC
-	return open(pathname, O_CREAT|O_WRONLY|O_TRUNC|O_CLOEXEC, mode);
-#else
-	int fd = creat(pathname, mode);
-	if (fd >= 0)
-		fd_set_close_on_exec(fd);
-	return fd;
-#endif
-}
-
-
-int fd_is_blocking(int fd)
-{
-	int val = 0;
-
-	assert(fd >= 0);
-
-	if ((val = fcntl(fd, F_GETFL, 0)) < 0)
-		error("fnctl(F_GET_FL) failed: %m");
-	return (val & O_NONBLOCK) ? 0 : 1;
 }
 
 void fd_set_nonblocking(int fd)
@@ -146,13 +101,6 @@ void fd_set_blocking(int fd)
 	return;
 }
 
-
-int fd_get_read_lock(int fd)
-{
-	return(fd_get_lock(fd, F_SETLK, F_RDLCK));
-}
-
-
 int fd_get_readw_lock(int fd)
 {
 	return(fd_get_lock(fd, F_SETLKW, F_RDLCK));
@@ -164,13 +112,6 @@ int fd_get_write_lock(int fd)
 	return(fd_get_lock(fd, F_SETLK, F_WRLCK));
 }
 
-
-int fd_get_writew_lock(int fd)
-{
-	return(fd_get_lock(fd, F_SETLKW, F_WRLCK));
-}
-
-
 int fd_release_lock(int fd)
 {
 	return(fd_get_lock(fd, F_SETLK, F_UNLCK));
@@ -181,13 +122,6 @@ pid_t fd_is_read_lock_blocked(int fd)
 {
 	return(fd_test_lock(fd, F_RDLCK));
 }
-
-
-pid_t fd_is_write_lock_blocked(int fd)
-{
-	return(fd_test_lock(fd, F_WRLCK));
-}
-
 
 static int fd_get_lock(int fd, int cmd, int type)
 {
@@ -224,86 +158,6 @@ static pid_t fd_test_lock(int fd, int type)
 }
 
 
-ssize_t fd_read_n(int fd, void *buf, size_t n)
-{
-	size_t nleft;
-	ssize_t nread;
-	unsigned char *p;
-
-	p = buf;
-	nleft = n;
-	while (nleft > 0) {
-		if ((nread = read(fd, p, nleft)) < 0) {
-			if (errno == EINTR)
-				continue;
-			else
-				return(-1);
-		}
-		else if (nread == 0) {          /* EOF */
-			break;
-		}
-		nleft -= nread;
-		p += nread;
-	}
-	return(n - nleft);
-}
-
-
-ssize_t fd_write_n(int fd, void *buf, size_t n)
-{
-	size_t nleft;
-	ssize_t nwritten;
-	unsigned char *p;
-
-	p = buf;
-	nleft = n;
-	while (nleft > 0) {
-		if ((nwritten = write(fd, p, nleft)) < 0) {
-			if (errno == EINTR)
-				continue;
-			else
-				return(-1);
-		}
-		nleft -= nwritten;
-		p += nwritten;
-	}
-	return(n);
-}
-
-
-ssize_t fd_read_line(int fd, void *buf, size_t maxlen)
-{
-	ssize_t n, rc;
-	unsigned char c, *p;
-
-	n = 0;
-	p = buf;
-	while (n < maxlen - 1) {            /* reserve space for NUL-termination */
-
-		if ((rc = read(fd, &c, 1)) == 1) {
-			n++;
-			*p++ = c;
-			if (c == '\n')
-				break;                  /* store newline, like fgets() */
-		}
-		else if (rc == 0) {
-			if (n == 0)                 /* EOF, no data read */
-				return(0);
-			else                        /* EOF, some data read */
-				break;
-		}
-		else {
-			if (errno == EINTR)
-				continue;
-			return(-1);
-		}
-	}
-
-	*p = '\0';                          /* NUL-terminate, like fgets() */
-	return(n);
-}
-
-
 /* Wait for a file descriptor to be readable (up to time_limit seconds).
  * Return 0 when readable or -1 on error */
 extern int wait_fd_readable(int fd, int time_limit)
@@ -334,4 +188,40 @@ extern int wait_fd_readable(int fd, int time_limit)
 			time_left = time_limit - (time(NULL) - start);
 		}
 	}
+}
+
+/*
+ * fsync() then close() a file.
+ * Execute fsync() and close() multiple times if necessary and log failures
+ * RET 0 on success or -1 on error
+ */
+extern int fsync_and_close(int fd, const char *file_type)
+{
+	int rc = 0, retval, pos;
+
+	/*
+	 * Slurm state save files are commonly stored on shared filesystems,
+	 * so lets give fsync() three tries to sync the data to disk.
+	 */
+	for (retval = 1, pos = 1; retval && pos < 4; pos++) {
+		retval = fsync(fd);
+		if (retval && (errno != EINTR)) {
+			error("fsync() error writing %s state save file: %m",
+			      file_type);
+		}
+	}
+	if (retval)
+		rc = retval;
+
+	for (retval = 1, pos = 1; retval && pos < 4; pos++) {
+		retval = close(fd);
+		if (retval && (errno != EINTR)) {
+			error("close () error on %s state save file: %m",
+			      file_type);
+		}
+	}
+	if (retval)
+		rc = retval;
+
+	return rc;
 }

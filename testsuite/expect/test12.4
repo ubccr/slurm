@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM sacct functionality
+# Purpose: Test of Slurm sacct functionality
 #          sacct options b, g, j, l, n, p, u, v.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -12,22 +12,22 @@
 # Written by Joseph Donaghy <donaghy1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -61,27 +61,9 @@ set cluster [get_cluster_name]
 set acct_name ""
 set user_name ""
 set user_gid ""
-spawn $bin_id -u -n
-expect {
-	 -re "($alpha_numeric_under)" {
-		set user_name $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
+set user_name [get_my_user_name]
 
-spawn $bin_id -g
-expect {
-	 -re "($alpha_numeric_under)" {
-		set user_gid $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
+set user_gid [get_my_gid]
 
 set s_pid [spawn $sacctmgr show user $user_name]
 expect {
@@ -142,6 +124,7 @@ expect {
 		wait
 	}
 }
+
 
 #
 # Spawn a job via srun using this account
@@ -208,7 +191,7 @@ proc sacct_job { soption job_id} {
 	set exit_code   0
 	set matches     0
 	set not_support 0
-	set total_opts "$sacct -$soption -X -p -j $job_id"
+	set total_opts "$sacct -$soption -X -p --starttime=00:00 -j $job_id"
 
 	send_user "\n"
 
@@ -216,7 +199,7 @@ proc sacct_job { soption job_id} {
 
 	if { $soption == "-brief" || $soption == "b" } {
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -248,11 +231,11 @@ proc sacct_job { soption job_id} {
 
 	if { $soption == "-long" || $soption == "l" } {
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "JobID.JobName.Partition.MaxVMSize" {
+			-re "JobID.JobIDRaw.JobName.Partition.MaxVMSize" {
 				if {$debug} {send_user "\nmatch3\n"}
 				incr matches
 				exp_continue
@@ -304,7 +287,7 @@ proc sacct_job { soption job_id} {
 
 	if { $soption == "-noheader" || $soption == "n" } {
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -348,7 +331,7 @@ proc sacct_job { soption job_id} {
 
 	if { $soption == "-parsable" || $soption == "p" } {
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -380,7 +363,7 @@ proc sacct_job { soption job_id} {
 
 	if { $soption == "-parsable2" || $soption == "P" } {
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -412,11 +395,11 @@ proc sacct_job { soption job_id} {
 
 	if { $soption == "-verbose" || $soption == "v" } {
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
-			-re "sacct: Accounting storage SLURMDBD plugin loaded " {
+			-re "sacct: Accounting storage SLURMDBD plugin loaded" {
 				if {$debug} {send_user "\nmatch16\n"}
 				incr matches
 				exp_continue
@@ -451,8 +434,6 @@ proc sacct_job { soption job_id} {
 		}
 		return $matches
 	}
-
-
 }
 
 ################################################################
@@ -481,7 +462,7 @@ proc sacct_vargs { soption vargs job_id} {
 
 	if { $soption == "g" || $soption == "-gid" || $soption == "-group" || $soption == "u" || $soption == "-uid" || $soption == "-user"} {
 		expect {
-			-re "SLURM accounting storage is disabled" {
+			-re "Slurm accounting storage is disabled" {
 				set not_support 1
 				exp_continue
 			}
@@ -612,6 +593,11 @@ if {$job_id == 0} {
 		sleep 12
 	}
 
+#
+#	Wait for accounting data to be propagated to slurmdbd
+#
+	sleep 10
+
 	set matches [sacct_job b $job_id]
 	if {$matches != 2} {
 		send_user "\nFAILURE: sacct -b failed ($matches != 2)\n"
@@ -643,14 +629,14 @@ if {$job_id == 0} {
 	}
 
 	set matches [sacct_job l $job_id]
-	if {$matches != 7} {
-		send_user "\nFAILURE: sacct --allusers failed ($matches != 7)\n"
+	if {$matches != 8} {
+		send_user "\nFAILURE: sacct -l failed ($matches != 8)\n"
 		set exit_code 1
 	}
 
 	set matches [sacct_job -long $job_id]
-	if {$matches != 7} {
-		send_user "\nFAILURE: sacct -l failed ($matches != 7)\n"
+	if {$matches != 8} {
+		send_user "\nFAILURE: sacct --long failed ($matches != 8)\n"
 		set exit_code 1
 	}
 

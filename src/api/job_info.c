@@ -1,18 +1,18 @@
 /*****************************************************************************\
  *  job_info.c - get/print the job state information of slurm
  *****************************************************************************
+ *  Portions Copyright (C) 2010-2017 SchedMD LLC <https://www.schedmd.com>.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2016 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,19 +28,15 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
 
 #include <ctype.h>
 #include <errno.h>
@@ -55,6 +51,7 @@
 #include <time.h>
 
 #include "slurm/slurm.h"
+#include "slurm/slurmdb.h"
 #include "slurm/slurm_errno.h"
 
 #include "src/common/cpu_frequency.h"
@@ -64,8 +61,33 @@
 #include "src/common/parse_time.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/strlcpy.h"
 #include "src/common/uid.h"
+#include "src/common/uthash/uthash.h"
+#include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+
+/* Use a hash table to identify duplicate job records across the clusters in
+ * a federation */
+#define JOB_HASH_SIZE 1000
+
+/* Data structures for pthreads used to gather job information from multiple
+ * clusters in parallel */
+typedef struct load_job_req_struct {
+	slurmdb_cluster_rec_t *cluster;
+	bool local_cluster;
+	slurm_msg_t *req_msg;
+	List resp_msg_list;
+} load_job_req_struct_t;
+
+typedef struct load_job_resp_struct {
+	job_info_msg_t *new_msg;
+} load_job_resp_struct_t;
+
+typedef struct load_job_prio_resp_struct {
+	bool local_cluster;
+	priority_factors_response_msg_t *new_msg;
+} load_job_prio_resp_struct_t;
 
 static pthread_mutex_t job_node_info_lock = PTHREAD_MUTEX_INITIALIZER;
 static node_info_msg_t *job_node_ptr = NULL;
@@ -79,6 +101,7 @@ static void _load_node_info(void)
 		(void) slurm_load_node((time_t) NULL, &job_node_ptr, 0);
 	slurm_mutex_unlock(&job_node_info_lock);
 }
+
 static uint32_t _threads_per_core(char *host)
 {
 	uint32_t i, threads = 1;
@@ -114,6 +137,7 @@ static void _free_node_info(void)
  * %a - Job array ID (index) number.
  * %j - Job ID
  * %u - User name
+ * %x - Job name
  */
 static void _fname_format(char *buf, int buf_size, job_info_t * job_ptr,
 			  char *fname)
@@ -157,6 +181,8 @@ static void _fname_format(char *buf, int buf_size, job_info_t * job_ptr,
 		tmp = tmp2;
 		tmp2 = NULL;
 	}
+	xstrsubstituteall(tmp, "%x", job_ptr->name);	/* Job name */
+
 	if (tmp[0] == '/')
 		snprintf(buf, buf_size, "%s", tmp);
 	else
@@ -195,7 +221,7 @@ extern void slurm_get_job_stdin(char *buf, int buf_size, job_info_t * job_ptr)
 	else if (job_ptr->batch_flag == 0)
 		snprintf(buf, buf_size, "%s", "");
 	else
-		snprintf(buf, buf_size, "%s", "StdIn=/dev/null");
+		snprintf(buf, buf_size, "%s", "/dev/null");
 }
 
 /* Given a job record pointer, return its stdout path in buf */
@@ -281,28 +307,10 @@ slurm_print_job_info_msg ( FILE* out, job_info_msg_t *jinfo, int one_liner )
 static void _sprint_range(char *str, uint32_t str_size,
 			  uint32_t lower, uint32_t upper)
 {
-	char tmp[128];
-	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
-
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		convert_num_unit((float)lower, tmp, sizeof(tmp), UNIT_NONE,
-				 NO_VAL, CONVERT_NUM_UNIT_EXACT);
-	} else {
-		snprintf(tmp, sizeof(tmp), "%u", lower);
-	}
-	if (upper > 0) {
-    		char tmp2[128];
-		if (cluster_flags & CLUSTER_FLAG_BG) {
-			convert_num_unit((float)upper, tmp2, sizeof(tmp2),
-					 UNIT_NONE, NO_VAL,
-					 CONVERT_NUM_UNIT_EXACT);
-		} else {
-			snprintf(tmp2, sizeof(tmp2), "%u", upper);
-		}
-		snprintf(str, str_size, "%s-%s", tmp, tmp2);
-	} else
-		snprintf(str, str_size, "%s", tmp);
-
+	if (upper > 0)
+		snprintf(str, str_size, "%u-%u", lower, upper);
+	else
+		snprintf(str, str_size, "%u", lower);
 }
 
 /*
@@ -318,9 +326,10 @@ slurm_print_job_info ( FILE* out, job_info_t * job_ptr, int one_liner )
 	char *print_this;
 
 	_load_node_info();
-	print_this = slurm_sprint_job_info(job_ptr, one_liner);
-	fprintf(out, "%s", print_this);
-	xfree(print_this);
+	if ((print_this = slurm_sprint_job_info(job_ptr, one_liner))) {
+		fprintf(out, "%s", print_this);
+		xfree(print_this);
+	}
 	_free_node_info();
 }
 
@@ -337,11 +346,10 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 {
 	int i, j, k;
 	char time_str[32], *group_name, *user_name;
-	char tmp1[128], tmp2[128];
+	char *gres_last = "", tmp1[128], tmp2[128];
 	char *tmp6_ptr;
 	char tmp_line[1024 * 128];
 	char tmp_path[MAXPATHLEN];
-	char *ionodes = NULL;
 	uint16_t exit_status = 0, term_sig = 0;
 	job_resources_t *job_resrcs = job_ptr->job_resrcs;
 	char *out = NULL;
@@ -354,21 +362,15 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	int abs_node_inx, rel_node_inx;
 	int64_t nice;
 	int bit_inx, bit_reps;
-	uint32_t *last_mem_alloc_ptr = NULL;
-	uint32_t last_mem_alloc = NO_VAL;
+	uint64_t *last_mem_alloc_ptr = NULL;
+	uint64_t last_mem_alloc = NO_VAL64;
 	char *last_hosts;
 	hostlist_t hl, hl_last;
-	char select_buf[122];
-	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 	uint32_t threads;
 	char *line_end = (one_liner) ? " " : "\n   ";
 
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		nodelist = "MidplaneList";
-		select_g_select_jobinfo_get(job_ptr->select_jobinfo,
-					    SELECT_JOBDATA_IONODES,
-					    &ionodes);
-	}
+	if (job_ptr->job_id == 0)	/* Duplicated sibling job record */
+		return NULL;
 
 	/****** Line 1 ******/
 	xstrfmtcat(out, "JobId=%u ", job_ptr->job_id);
@@ -383,11 +385,24 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 				   job_ptr->array_job_id,
 				   job_ptr->array_task_id);
 		}
+		if (job_ptr->array_max_tasks) {
+			xstrfmtcat(out, "ArrayTaskThrottle=%u ",
+				   job_ptr->array_max_tasks);
+		}
+	} else if (job_ptr->pack_job_id) {
+		xstrfmtcat(out, "PackJobId=%u PackJobOffset=%u ",
+			   job_ptr->pack_job_id, job_ptr->pack_job_offset);
 	}
 	xstrfmtcat(out, "JobName=%s", job_ptr->name);
 	xstrcat(out, line_end);
 
-	/****** Line 2 ******/
+	/****** Line ******/
+	if (job_ptr->pack_job_id_set) {
+		xstrfmtcat(out, "PackJobIdSet=%s", job_ptr->pack_job_id_set);
+		xstrcat(out, line_end);
+	}
+
+	/****** Line ******/
 	user_name = uid_to_string((uid_t) job_ptr->user_id);
 	group_name = gid_to_string((gid_t) job_ptr->group_id);
 	xstrfmtcat(out, "UserId=%s(%u) GroupId=%s(%u) MCS_label=%s",
@@ -425,19 +440,21 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	xstrfmtcat(out, "Requeue=%u Restarts=%u BatchFlag=%u Reboot=%u ",
 		 job_ptr->requeue, job_ptr->restart_cnt, job_ptr->batch_flag,
 		 job_ptr->reboot);
+	exit_status = term_sig = 0;
 	if (WIFSIGNALED(job_ptr->exit_code))
 		term_sig = WTERMSIG(job_ptr->exit_code);
-	exit_status = WEXITSTATUS(job_ptr->exit_code);
+	else if (WIFEXITED(job_ptr->exit_code))
+		exit_status = WEXITSTATUS(job_ptr->exit_code);
 	xstrfmtcat(out, "ExitCode=%u:%u", exit_status, term_sig);
 	xstrcat(out, line_end);
 
 	/****** Line 5a (optional) ******/
 	if (job_ptr->show_flags & SHOW_DETAIL) {
+		exit_status = term_sig = 0;
 		if (WIFSIGNALED(job_ptr->derived_ec))
 			term_sig = WTERMSIG(job_ptr->derived_ec);
-		else
-			term_sig = 0;
-		exit_status = WEXITSTATUS(job_ptr->derived_ec);
+		else if (WIFEXITED(job_ptr->derived_ec))
+			exit_status = WEXITSTATUS(job_ptr->derived_ec);
 		xstrfmtcat(out, "DerivedExitCode=%u:%u", exit_status, term_sig);
 		xstrcat(out, line_end);
 	}
@@ -488,6 +505,12 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	xstrcat(out, line_end);
 
+	/****** Line 7.5 ******/
+	slurm_make_time_str(&job_ptr->accrue_time, time_str, sizeof(time_str));
+	xstrfmtcat(out, "AccrueTime=%s", time_str);
+
+	xstrcat(out, line_end);
+
 	/****** Line 8 (optional) ******/
 	if (job_ptr->resize_time) {
 		slurm_make_time_str(&job_ptr->resize_time, time_str, sizeof(time_str));
@@ -516,21 +539,39 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	xstrcat(out, line_end);
 
-	/****** Line 10 ******/
-	if (job_ptr->preempt_time == 0)
-		xstrcat(out, "PreemptTime=None ");
-	else {
-		slurm_make_time_str(&job_ptr->preempt_time, time_str, sizeof(time_str));
-		xstrfmtcat(out, "PreemptTime=%s ", time_str);
+	/****** Line ******/
+	/*
+	 * only print this line if preemption is enabled and job started
+	 * 	see src/slurmctld/job_mgr.c:pack_job, 'preemptable'
+	 */
+	if (job_ptr->preemptable_time) {
+		slurm_make_time_str(&job_ptr->preemptable_time,
+				    time_str, sizeof(time_str));
+		xstrfmtcat(out, "PreemptEligibleTime=%s ", time_str);
+
+		if (job_ptr->preempt_time == 0)
+			xstrcat(out, "PreemptTime=None");
+		else {
+			slurm_make_time_str(&job_ptr->preempt_time, time_str,
+					    sizeof(time_str));
+			xstrfmtcat(out, "PreemptTime=%s", time_str);
+		}
+
+		xstrcat(out, line_end);
 	}
 
+	/****** Line 10 ******/
 	if (job_ptr->suspend_time) {
 		slurm_make_time_str(&job_ptr->suspend_time, time_str, sizeof(time_str));
 		xstrfmtcat(out, "SuspendTime=%s ", time_str);
 	} else
 		xstrcat(out, "SuspendTime=None ");
 
-	xstrfmtcat(out, "SecsPreSuspend=%ld", (long int)job_ptr->pre_sus_time);
+	xstrfmtcat(out, "SecsPreSuspend=%ld ", (long int)job_ptr->pre_sus_time);
+
+	slurm_make_time_str(&job_ptr->last_sched_eval, time_str,
+			    sizeof(time_str));
+	xstrfmtcat(out, "LastSchedEval=%s", time_str);
 	xstrcat(out, line_end);
 
 	/****** Line 11 ******/
@@ -545,32 +586,35 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	/****** Line 13 ******/
 	xstrfmtcat(out, "%s=%s", nodelist, job_ptr->nodes);
-	if (job_ptr->nodes && ionodes) {
-		xstrfmtcat(out, "[%s]", ionodes);
-		xfree(ionodes);
-	}
+
 	if (job_ptr->sched_nodes)
 		xstrfmtcat(out, " Sched%s=%s", nodelist, job_ptr->sched_nodes);
 
 	xstrcat(out, line_end);
 
 	/****** Line 14 (optional) ******/
+	if (job_ptr->batch_features)
+		xstrfmtcat(out, "BatchFeatures=%s", job_ptr->batch_features);
 	if (job_ptr->batch_host) {
-		xstrfmtcat(out, "BatchHost=%s", job_ptr->batch_host);
+		char *sep = "";
+		if (job_ptr->batch_features)
+			sep = " ";
+		xstrfmtcat(out, "%sBatchHost=%s", sep, job_ptr->batch_host);
+	}
+	if (job_ptr->batch_features || job_ptr->batch_host)
+		xstrcat(out, line_end);
+
+	/****** Line 14a (optional) ******/
+	if (job_ptr->fed_siblings_active || job_ptr->fed_siblings_viable) {
+		xstrfmtcat(out, "FedOrigin=%s FedViableSiblings=%s FedActiveSiblings=%s",
+			   job_ptr->fed_origin_str,
+			   job_ptr->fed_siblings_viable_str,
+			   job_ptr->fed_siblings_active_str);
 		xstrcat(out, line_end);
 	}
 
 	/****** Line 15 ******/
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		select_g_select_jobinfo_get(job_ptr->select_jobinfo,
-					    SELECT_JOBDATA_NODE_CNT,
-					    &min_nodes);
-		if ((min_nodes == 0) || (min_nodes == NO_VAL)) {
-			min_nodes = job_ptr->num_nodes;
-			max_nodes = job_ptr->max_nodes;
-		} else if (job_ptr->max_nodes)
-			max_nodes = min_nodes;
-	} else if (IS_JOB_PENDING(job_ptr)) {
+	if (IS_JOB_PENDING(job_ptr)) {
 		min_nodes = job_ptr->num_nodes;
 		max_nodes = job_ptr->max_nodes;
 		if (max_nodes && (max_nodes < min_nodes))
@@ -586,24 +630,27 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	xstrfmtcat(out, "NumCPUs=%s ", tmp_line);
 
 	xstrfmtcat(out, "NumTasks=%u ", job_ptr->num_tasks);
-	xstrfmtcat(out, "CPUs/Task=%u ", job_ptr->cpus_per_task);
+	if (job_ptr->cpus_per_task == NO_VAL16)
+		xstrfmtcat(out, "CPUs/Task=N/A ");
+	else
+		xstrfmtcat(out, "CPUs/Task=%u ", job_ptr->cpus_per_task);
 
-	if (job_ptr->boards_per_node == (uint16_t) NO_VAL)
+	if (job_ptr->boards_per_node == NO_VAL16)
 		xstrcat(out, "ReqB:S:C:T=*:");
 	else
 		xstrfmtcat(out, "ReqB:S:C:T=%u:", job_ptr->boards_per_node);
 
-	if (job_ptr->sockets_per_board == (uint16_t) NO_VAL)
+	if (job_ptr->sockets_per_board == NO_VAL16)
 		xstrcat(out, "*:");
 	else
 		xstrfmtcat(out, "%u:", job_ptr->sockets_per_board);
 
-	if (job_ptr->cores_per_socket == (uint16_t) NO_VAL)
+	if (job_ptr->cores_per_socket == NO_VAL16)
 		xstrcat(out, "*:");
 	else
 		xstrfmtcat(out, "%u:", job_ptr->cores_per_socket);
 
-	if (job_ptr->threads_per_core == (uint16_t) NO_VAL)
+	if (job_ptr->threads_per_core == NO_VAL16)
 		xstrcat(out, "*");
 	else
 		xstrfmtcat(out, "%u", job_ptr->threads_per_core);
@@ -618,34 +665,34 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	xstrcat(out, line_end);
 
 	/****** Line 17 ******/
-	if (job_ptr->sockets_per_node == (uint16_t) NO_VAL)
+	if (job_ptr->sockets_per_node == NO_VAL16)
 		xstrcat(out, "Socks/Node=* ");
 	else
 		xstrfmtcat(out, "Socks/Node=%u ", job_ptr->sockets_per_node);
 
-	if (job_ptr->ntasks_per_node == (uint16_t) NO_VAL)
+	if (job_ptr->ntasks_per_node == NO_VAL16)
 		xstrcat(out, "NtasksPerN:B:S:C=*:");
 	else
 		xstrfmtcat(out, "NtasksPerN:B:S:C=%u:", job_ptr->ntasks_per_node);
 
-	if (job_ptr->ntasks_per_board == (uint16_t) NO_VAL)
+	if (job_ptr->ntasks_per_board == NO_VAL16)
 		xstrcat(out, "*:");
 	else
 		xstrfmtcat(out, "%u:", job_ptr->ntasks_per_board);
 
-	if ((job_ptr->ntasks_per_socket == (uint16_t) NO_VAL) ||
-	    (job_ptr->ntasks_per_socket == (uint16_t) INFINITE))
+	if ((job_ptr->ntasks_per_socket == NO_VAL16) ||
+	    (job_ptr->ntasks_per_socket == INFINITE16))
 		xstrcat(out, "*:");
 	else
 		xstrfmtcat(out, "%u:", job_ptr->ntasks_per_socket);
 
-	if ((job_ptr->ntasks_per_core == (uint16_t) NO_VAL) ||
-	    (job_ptr->ntasks_per_core == (uint16_t) INFINITE))
+	if ((job_ptr->ntasks_per_core == NO_VAL16) ||
+	    (job_ptr->ntasks_per_core == INFINITE16))
 		xstrcat(out, "* ");
 	else
 		xstrfmtcat(out, "%u ", job_ptr->ntasks_per_core);
 
-	if (job_ptr->core_spec == (uint16_t) NO_VAL)
+	if (job_ptr->core_spec == NO_VAL16)
 		xstrcat(out, "CoreSpec=*");
 	else if (job_ptr->core_spec & CORE_SPEC_THREAD)
 		xstrfmtcat(out, "ThreadSpec=%d",
@@ -655,36 +702,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	xstrcat(out, line_end);
 
-	if (job_resrcs && cluster_flags & CLUSTER_FLAG_BG) {
-		if ((job_resrcs->cpu_array_cnt > 0) &&
-		    (job_resrcs->cpu_array_value) &&
-		    (job_resrcs->cpu_array_reps)) {
-			int length = 0;
-			xstrcat(out, "CPUs=");
-			for (i = 0; i < job_resrcs->cpu_array_cnt; i++) {
-				/* only print 60 characters worth of this record */
-				if (length > 60) {
-					/* skip to last CPU group entry */
-					if (i < job_resrcs->cpu_array_cnt - 1) {
-						continue;
-					}
-					/* add ellipsis before last entry */
-					xstrcat(out, "...,");
-				}
-
-				length += xstrfmtcat(out, "%d", job_resrcs->cpus[i]);
-				if (job_resrcs->cpu_array_reps[i] > 1) {
-					length += xstrfmtcat(out, "*%d",
-							     job_resrcs->cpu_array_reps[i]);
-				}
-				if (i < job_resrcs->cpu_array_cnt - 1) {
-					xstrcat(out, ",");
-					length++;
-				}
-			}
-			xstrcat(out, line_end);
-		}
-	} else if (job_resrcs && job_resrcs->core_bitmap &&
+	if (job_resrcs && job_resrcs->core_bitmap &&
 		   ((last = bit_fls(job_resrcs->core_bitmap)) != -1)) {
 		hl = hostlist_create(job_resrcs->nodes);
 		if (!hl) {
@@ -703,6 +721,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		i = sock_inx = sock_reps = 0;
 		abs_node_inx = job_ptr->node_inx[i];
 
+		gres_last = "";
 		/* tmp1[] stores the current cpu(s) allocated */
 		tmp2[0] = '\0';	/* stores last cpu(s) allocated */
 		for (rel_node_inx=0; rel_node_inx < job_resrcs->nhosts;
@@ -736,6 +755,9 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 			 * group of hosts that had identical allocation values.
 			 */
 			if (xstrcmp(tmp1, tmp2) ||
+			    ((rel_node_inx < job_ptr->gres_detail_cnt) &&
+			     xstrcmp(job_ptr->gres_detail_str[rel_node_inx],
+				     gres_last)) ||
 			    (last_mem_alloc_ptr != job_resrcs->memory_allocated) ||
 			    (job_resrcs->memory_allocated &&
 			     (last_mem_alloc !=
@@ -745,10 +767,12 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 						hostlist_ranged_string_xmalloc(
 						hl_last);
 					xstrfmtcat(out,
-						   "  Nodes=%s CPU_IDs=%s Mem=%u",
+						   "  Nodes=%s CPU_IDs=%s "
+						   "Mem=%"PRIu64" GRES=%s",
 						   last_hosts, tmp2,
 						   last_mem_alloc_ptr ?
-						   last_mem_alloc : 0);
+						   last_mem_alloc : 0,
+						   gres_last);
 					xfree(last_hosts);
 					xstrcat(out, line_end);
 
@@ -756,12 +780,18 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 					hl_last = hostlist_create(NULL);
 				}
 				strcpy(tmp2, tmp1);
+				if (rel_node_inx < job_ptr->gres_detail_cnt) {
+					gres_last = job_ptr->
+						    gres_detail_str[rel_node_inx];
+				} else {
+					gres_last = "";
+				}
 				last_mem_alloc_ptr = job_resrcs->memory_allocated;
 				if (last_mem_alloc_ptr)
 					last_mem_alloc = job_resrcs->
 						memory_allocated[rel_node_inx];
 				else
-					last_mem_alloc = NO_VAL;
+					last_mem_alloc = NO_VAL64;
 			}
 			hostlist_push_host(hl_last, host);
 			free(host);
@@ -779,9 +809,10 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 		if (hostlist_count(hl_last)) {
 			last_hosts = hostlist_ranged_string_xmalloc(hl_last);
-			xstrfmtcat(out, "  Nodes=%s CPU_IDs=%s Mem=%u",
+			xstrfmtcat(out, "  Nodes=%s CPU_IDs=%s Mem=%"PRIu64" GRES=%s",
 				 last_hosts, tmp2,
-				 last_mem_alloc_ptr ? last_mem_alloc : 0);
+				 last_mem_alloc_ptr ? last_mem_alloc : 0,
+				 gres_last);
 			xfree(last_hosts);
 			xstrcat(out, line_end);
 		}
@@ -795,14 +826,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	} else
 		tmp6_ptr = "Node";
 
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		convert_num_unit((float)job_ptr->pn_min_cpus, tmp1,
-				 sizeof(tmp1), UNIT_NONE, NO_VAL,
-				 CONVERT_NUM_UNIT_EXACT);
-		xstrfmtcat(out, "MinCPUsNode=%s ", tmp1);
-	} else {
-		xstrfmtcat(out, "MinCPUsNode=%u ", job_ptr->pn_min_cpus);
-	}
+	xstrfmtcat(out, "MinCPUsNode=%u ", job_ptr->pn_min_cpus);
 
 	convert_num_unit((float)job_ptr->pn_min_memory, tmp1, sizeof(tmp1),
 			 UNIT_MEGA, NO_VAL, CONVERT_NUM_UNIT_EXACT);
@@ -811,10 +835,23 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	xstrfmtcat(out, "MinMemory%s=%s MinTmpDiskNode=%s", tmp6_ptr, tmp1, tmp2);
 	xstrcat(out, line_end);
 
-	/****** Line 19 ******/
-	xstrfmtcat(out, "Features=%s Gres=%s Reservation=%s",
-		   job_ptr->features, job_ptr->gres, job_ptr->resv_name);
+	/****** Line ******/
+	secs2time_str((time_t)job_ptr->delay_boot, tmp1, sizeof(tmp1));
+	xstrfmtcat(out, "Features=%s DelayBoot=%s", job_ptr->features, tmp1);
 	xstrcat(out, line_end);
+
+	/****** Line (optional) ******/
+	if (job_ptr->cluster_features) {
+		xstrfmtcat(out, "ClusterFeatures=%s",
+			   job_ptr->cluster_features);
+		xstrcat(out, line_end);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->resv_name) {
+		xstrfmtcat(out, "Reservation=%s", job_ptr->resv_name);
+		xstrcat(out, line_end);
+	}
 
 	/****** Line 20 ******/
 	xstrfmtcat(out, "OverSubscribe=%s Contiguous=%d Licenses=%s Network=%s",
@@ -829,69 +866,19 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	/****** Line 22 ******/
 	xstrfmtcat(out, "WorkDir=%s", job_ptr->work_dir);
 
-	if (cluster_flags & CLUSTER_FLAG_BG) {
-		/****** Line 23 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_BG_ID);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			xstrfmtcat(out, "Block_ID=%s", select_buf);
-		}
-
-		/****** Line 24 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_MIXED_SHORT);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			xstrcat(out, select_buf);
-		}
-
-		if (cluster_flags & CLUSTER_FLAG_BGL) {
-			/****** Line 25 (optional) ******/
-			select_g_select_jobinfo_sprint(
-				job_ptr->select_jobinfo,
-				select_buf, sizeof(select_buf),
-				SELECT_PRINT_BLRTS_IMAGE);
-			if (select_buf[0] != '\0') {
-				xstrcat(out, line_end);
-				xstrfmtcat(out, "BlrtsImage=%s", select_buf);
-			}
-		}
-		/****** Line 26 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_LINUX_IMAGE);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			if (cluster_flags & CLUSTER_FLAG_BGL)
-				xstrfmtcat(out, "LinuxImage=%s", select_buf);
-			else
-				xstrfmtcat(out, "CnloadImage=%s", select_buf);
-		}
-		/****** Line 27 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_MLOADER_IMAGE);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			xstrfmtcat(out, "MloaderImage=%s", select_buf);
-		}
-		/****** Line 28 (optional) ******/
-		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-					       select_buf, sizeof(select_buf),
-					       SELECT_PRINT_RAMDISK_IMAGE);
-		if (select_buf[0] != '\0') {
-			xstrcat(out, line_end);
-			if (cluster_flags & CLUSTER_FLAG_BGL)
-				xstrfmtcat(out, "RamDiskImage=%s", select_buf);
-			else
-				xstrfmtcat(out, "IoloadImage=%s", select_buf);
-		}
+	/****** Line (optional) ******/
+	if (job_ptr->admin_comment) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "AdminComment=%s ", job_ptr->admin_comment);
 	}
 
-	/****** Line 29 (optional) ******/
+	/****** Line (optional) ******/
+	if (job_ptr->system_comment) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "SystemComment=%s ", job_ptr->system_comment);
+	}
+
+	/****** Line (optional) ******/
 	if (job_ptr->comment) {
 		xstrcat(out, line_end);
 		xstrfmtcat(out, "Comment=%s ", job_ptr->comment);
@@ -918,26 +905,26 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		xstrfmtcat(out, "StdOut=%s", tmp_path);
 	}
 
-	/****** Line 33 (optional) ******/
-	if (job_ptr->batch_script) {
-		xstrcat(out, line_end);
-		xstrcat(out, "BatchScript=\n");
-		xstrcat(out, job_ptr->batch_script);
-	}
-
 	/****** Line 34 (optional) ******/
 	if (job_ptr->req_switch) {
 		char time_buf[32];
 		xstrcat(out, line_end);
 		secs2time_str((time_t) job_ptr->wait4switch, time_buf,
 			      sizeof(time_buf));
-		xstrfmtcat(out, "Switches=%u@%s\n", job_ptr->req_switch, time_buf);
+		xstrfmtcat(out, "Switches=%u@%s", job_ptr->req_switch, time_buf);
 	}
 
 	/****** Line 35 (optional) ******/
 	if (job_ptr->burst_buffer) {
 		xstrcat(out, line_end);
 		xstrfmtcat(out, "BurstBuffer=%s", job_ptr->burst_buffer);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->burst_buffer_state) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "BurstBufferState=%s",
+			   job_ptr->burst_buffer_state);
 	}
 
 	/****** Line 36 (optional) ******/
@@ -953,12 +940,68 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	xstrfmtcat(out, "Power=%s", power_flags_str(job_ptr->power_flags));
 
 	/****** Line 38 (optional) ******/
-	if (job_ptr->bitflags) {
+	if (job_ptr->bitflags &
+	    (GRES_DISABLE_BIND | GRES_ENFORCE_BIND | KILL_INV_DEP |
+	     NO_KILL_INV_DEP | SPREAD_JOB)) {
 		xstrcat(out, line_end);
+		if (job_ptr->bitflags & GRES_DISABLE_BIND)
+			xstrcat(out, "GresEnforceBind=No");
+		if (job_ptr->bitflags & GRES_ENFORCE_BIND)
+			xstrcat(out, "GresEnforceBind=Yes");
 		if (job_ptr->bitflags & KILL_INV_DEP)
 			xstrcat(out, "KillOInInvalidDependent=Yes");
 		if (job_ptr->bitflags & NO_KILL_INV_DEP)
 			xstrcat(out, "KillOInInvalidDependent=No");
+		if (job_ptr->bitflags & SPREAD_JOB)
+			xstrcat(out, "SpreadJob=Yes");
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->cpus_per_tres) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "CpusPerTres=%s", job_ptr->cpus_per_tres);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->mem_per_tres) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "MemPerTres=%s", job_ptr->mem_per_tres);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_bind) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresBind=%s", job_ptr->tres_bind);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_freq) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresFreq=%s", job_ptr->tres_freq);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_per_job) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresPerJob=%s", job_ptr->tres_per_job);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_per_node) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresPerNode=%s", job_ptr->tres_per_node);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_per_socket) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresPerSocket=%s", job_ptr->tres_per_socket);
+	}
+
+	/****** Line (optional) ******/
+	if (job_ptr->tres_per_task) {
+		xstrcat(out, line_end);
+		xstrfmtcat(out, "TresPerTask=%s", job_ptr->tres_per_task);
 	}
 
 	/****** END OF JOB RECORD ******/
@@ -970,12 +1013,272 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	return out;
 }
 
+/* Return true if the specified job id is local to a cluster
+ * (not a federated job) */
+static inline bool _test_local_job(uint32_t job_id)
+{
+	if ((job_id & (~MAX_JOB_ID)) == 0)
+		return true;
+	return false;
+}
+
+static int
+_load_cluster_jobs(slurm_msg_t *req_msg, job_info_msg_t **job_info_msg_pptr,
+		   slurmdb_cluster_rec_t *cluster)
+{
+	slurm_msg_t resp_msg;
+	int rc = SLURM_SUCCESS;
+
+	slurm_msg_t_init(&resp_msg);
+
+	*job_info_msg_pptr = NULL;
+
+	if (slurm_send_recv_controller_msg(req_msg, &resp_msg, cluster) < 0)
+		return SLURM_ERROR;
+
+	switch (resp_msg.msg_type) {
+	case RESPONSE_JOB_INFO:
+		*job_info_msg_pptr = (job_info_msg_t *)resp_msg.data;
+		resp_msg.data = NULL;
+		break;
+	case RESPONSE_SLURM_RC:
+		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
+		slurm_free_return_code_msg(resp_msg.data);
+		break;
+	default:
+		rc = SLURM_UNEXPECTED_MSG_ERROR;
+		break;
+	}
+	if (rc)
+		slurm_seterrno(rc);
+
+	return rc;
+}
+
+/* Thread to read job information from some cluster */
+static void *_load_job_thread(void *args)
+{
+	load_job_req_struct_t *load_args = (load_job_req_struct_t *) args;
+	slurmdb_cluster_rec_t *cluster = load_args->cluster;
+	job_info_msg_t *new_msg = NULL;
+	int rc;
+
+	if ((rc = _load_cluster_jobs(load_args->req_msg, &new_msg, cluster)) ||
+	    !new_msg) {
+		verbose("Error reading job information from cluster %s: %s",
+			cluster->name, slurm_strerror(rc));
+	} else {
+		load_job_resp_struct_t *job_resp;
+		job_resp = xmalloc(sizeof(load_job_resp_struct_t));
+		job_resp->new_msg = new_msg;
+		list_append(load_args->resp_msg_list, job_resp);
+	}
+	xfree(args);
+
+	return (void *) NULL;
+}
+
+
+static int _sort_orig_clusters(const void *a, const void *b)
+{
+	slurm_job_info_t *job1 = (slurm_job_info_t *)a;
+	slurm_job_info_t *job2 = (slurm_job_info_t *)b;
+
+	if (!xstrcmp(job1->cluster, job1->fed_origin_str))
+		return -1;
+	if (!xstrcmp(job2->cluster, job2->fed_origin_str))
+		return 1;
+	return 0;
+}
+
+static int _load_fed_jobs(slurm_msg_t *req_msg,
+			  job_info_msg_t **job_info_msg_pptr,
+			  uint16_t show_flags, char *cluster_name,
+			  slurmdb_federation_rec_t *fed)
+{
+	int i, j;
+	load_job_resp_struct_t *job_resp;
+	job_info_msg_t *orig_msg = NULL, *new_msg = NULL;
+	uint32_t new_rec_cnt;
+	uint32_t hash_inx, *hash_tbl_size = NULL, **hash_job_id = NULL;
+	slurmdb_cluster_rec_t *cluster;
+	ListIterator iter;
+	int pthread_count = 0;
+	pthread_t *load_thread = 0;
+	load_job_req_struct_t *load_args;
+	List resp_msg_list;
+
+	*job_info_msg_pptr = NULL;
+
+	/* Spawn one pthread per cluster to collect job information */
+	resp_msg_list = list_create(NULL);
+	load_thread = xmalloc(sizeof(pthread_t) *
+			      list_count(fed->cluster_list));
+	iter = list_iterator_create(fed->cluster_list);
+	while ((cluster = (slurmdb_cluster_rec_t *) list_next(iter))) {
+		if ((cluster->control_host == NULL) ||
+		    (cluster->control_host[0] == '\0'))
+			continue;	/* Cluster down */
+
+		/* Only show jobs from the local cluster */
+		if ((show_flags & SHOW_LOCAL) &&
+		    xstrcmp(cluster->name, cluster_name))
+			continue;
+
+		load_args = xmalloc(sizeof(load_job_req_struct_t));
+		load_args->cluster = cluster;
+		load_args->req_msg = req_msg;
+		load_args->resp_msg_list = resp_msg_list;
+		slurm_thread_create(&load_thread[pthread_count],
+				    _load_job_thread, load_args);
+		pthread_count++;
+
+	}
+	list_iterator_destroy(iter);
+
+	/* Wait for all pthreads to complete */
+	for (i = 0; i < pthread_count; i++)
+		pthread_join(load_thread[i], NULL);
+	xfree(load_thread);
+
+	/* Merge the responses into a single response message */
+	iter = list_iterator_create(resp_msg_list);
+	while ((job_resp = (load_job_resp_struct_t *) list_next(iter))) {
+		new_msg = job_resp->new_msg;
+		if (!orig_msg) {
+			orig_msg = new_msg;
+			*job_info_msg_pptr = orig_msg;
+		} else {
+			/* Merge job records into a single response message */
+			orig_msg->last_update = MIN(orig_msg->last_update,
+						    new_msg->last_update);
+			new_rec_cnt = orig_msg->record_count +
+				      new_msg->record_count;
+			if (new_msg->record_count) {
+				orig_msg->job_array =
+					xrealloc(orig_msg->job_array,
+						 sizeof(slurm_job_info_t) *
+						 new_rec_cnt);
+				(void) memcpy(orig_msg->job_array +
+					      orig_msg->record_count,
+					      new_msg->job_array,
+					      sizeof(slurm_job_info_t) *
+					      new_msg->record_count);
+				orig_msg->record_count = new_rec_cnt;
+			}
+			xfree(new_msg->job_array);
+			xfree(new_msg);
+		}
+		xfree(job_resp);
+	}
+	list_iterator_destroy(iter);
+	FREE_NULL_LIST(resp_msg_list);
+
+	if (!orig_msg)
+		slurm_seterrno_ret(ESLURM_INVALID_JOB_ID);
+
+	/* Find duplicate job records and jobs local to other clusters and set
+	 * their job_id == 0 so they get skipped in reporting */
+	if ((show_flags & SHOW_SIBLING) == 0) {
+		hash_tbl_size = xmalloc(sizeof(uint32_t) * JOB_HASH_SIZE);
+		hash_job_id = xmalloc(sizeof(uint32_t *) * JOB_HASH_SIZE);
+		for (i = 0; i < JOB_HASH_SIZE; i++) {
+			hash_tbl_size[i] = 100;
+			hash_job_id[i] = xmalloc(sizeof(uint32_t ) *
+						 hash_tbl_size[i]);
+		}
+	}
+
+	/* Put the origin jobs at top and remove duplicates. */
+	qsort(orig_msg->job_array, orig_msg->record_count,
+	      sizeof(slurm_job_info_t), _sort_orig_clusters);
+	for (i = 0; orig_msg && i < orig_msg->record_count; i++) {
+		slurm_job_info_t *job_ptr = &orig_msg->job_array[i];
+
+		/*
+		 * Only show non-federated jobs that are local. Non-federated
+		 * jobs will not have a fed_origin_str.
+		 */
+		if (_test_local_job(job_ptr->job_id) &&
+		    !job_ptr->fed_origin_str &&
+		    xstrcmp(job_ptr->cluster, cluster_name)) {
+			job_ptr->job_id = 0;
+			continue;
+		}
+
+		if (show_flags & SHOW_SIBLING)
+			continue;
+		hash_inx = job_ptr->job_id % JOB_HASH_SIZE;
+		for (j = 0;
+		     (j < hash_tbl_size[hash_inx] && hash_job_id[hash_inx][j]);
+		     j++) {
+			if (job_ptr->job_id == hash_job_id[hash_inx][j]) {
+				job_ptr->job_id = 0;
+				break;
+			}
+		}
+		if (job_ptr->job_id == 0) {
+			continue;	/* Duplicate */
+		} else if (j >= hash_tbl_size[hash_inx]) {
+			hash_tbl_size[hash_inx] *= 2;
+			xrealloc(hash_job_id[hash_inx],
+				 sizeof(uint32_t) * hash_tbl_size[hash_inx]);
+		}
+		hash_job_id[hash_inx][j] = job_ptr->job_id;
+	}
+	if ((show_flags & SHOW_SIBLING) == 0) {
+		for (i = 0; i < JOB_HASH_SIZE; i++)
+			xfree(hash_job_id[i]);
+		xfree(hash_tbl_size);
+		xfree(hash_job_id);
+	}
+
+	return SLURM_SUCCESS;
+}
+
+/*
+ * slurm_job_batch_script - retrieve the batch script for a given jobid
+ * returns SLURM_SUCCESS, or appropriate error code
+ */
+extern int slurm_job_batch_script(FILE *out, uint32_t jobid)
+{
+	job_id_msg_t msg;
+	slurm_msg_t req, resp;
+	int rc = SLURM_SUCCESS;
+
+	slurm_msg_t_init(&req);
+	slurm_msg_t_init(&resp);
+
+	memset(&msg, 0, sizeof(msg));
+	msg.job_id = jobid;
+	req.msg_type = REQUEST_BATCH_SCRIPT;
+	req.data = &msg;
+
+	if (slurm_send_recv_controller_msg(&req, &resp, working_cluster_rec) < 0)
+		return SLURM_ERROR;
+
+	if (resp.msg_type == RESPONSE_BATCH_SCRIPT) {
+		if (fprintf(out, "%s", (char *) resp.data) < 0)
+			rc = SLURM_ERROR;
+		xfree(resp.data);
+	} else if (resp.msg_type == RESPONSE_SLURM_RC) {
+		rc = ((return_code_msg_t *) resp.data)->return_code;
+		slurm_free_return_code_msg(resp.data);
+		if (rc)
+			slurm_seterrno_ret(rc);
+	} else {
+		rc = SLURM_ERROR;
+	}
+
+	return rc;
+}
+
 /*
  * slurm_load_jobs - issue RPC to get all job configuration
  *	information if changed since update_time
  * IN update_time - time of current configuration data
  * IN/OUT job_info_msg_pptr - place to store a job configuration pointer
- * IN show_flags -  job filtering option: 0, SHOW_ALL or SHOW_DETAIL
+ * IN show_flags -  job filtering option: 0, SHOW_ALL, SHOW_DETAIL or SHOW_LOCAL
  * RET 0 or -1 on error
  * NOTE: free the response using slurm_free_job_info_msg
  */
@@ -983,38 +1286,50 @@ extern int
 slurm_load_jobs (time_t update_time, job_info_msg_t **job_info_msg_pptr,
 		 uint16_t show_flags)
 {
-	int rc;
-	slurm_msg_t resp_msg;
 	slurm_msg_t req_msg;
 	job_info_request_msg_t req;
+	char *cluster_name = NULL;
+	void *ptr = NULL;
+	slurmdb_federation_rec_t *fed;
+	int rc;
+
+	if (working_cluster_rec)
+		cluster_name = xstrdup(working_cluster_rec->name);
+	else
+		cluster_name = slurm_get_cluster_name();
+	if ((show_flags & SHOW_FEDERATION) && !(show_flags & SHOW_LOCAL) &&
+	    (slurm_load_federation(&ptr) == SLURM_SUCCESS) &&
+	    cluster_in_federation(ptr, cluster_name)) {
+		/* In federation. Need full info from all clusters */
+		update_time = (time_t) 0;
+		show_flags &= (~SHOW_LOCAL);
+	} else {
+		/* Report local cluster info only */
+		show_flags |= SHOW_LOCAL;
+		show_flags &= (~SHOW_FEDERATION);
+	}
 
 	slurm_msg_t_init(&req_msg);
-	slurm_msg_t_init(&resp_msg);
-
+	memset(&req, 0, sizeof(req));
 	req.last_update  = update_time;
 	req.show_flags   = show_flags;
 	req_msg.msg_type = REQUEST_JOB_INFO;
 	req_msg.data     = &req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
-		return SLURM_ERROR;
-
-	switch (resp_msg.msg_type) {
-	case RESPONSE_JOB_INFO:
-		*job_info_msg_pptr = (job_info_msg_t *)resp_msg.data;
-		break;
-	case RESPONSE_SLURM_RC:
-		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
-		slurm_free_return_code_msg(resp_msg.data);
-		if (rc)
-			slurm_seterrno_ret(rc);
-		break;
-	default:
-		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
-		break;
+	if (show_flags & SHOW_FEDERATION) {
+		fed = (slurmdb_federation_rec_t *) ptr;
+		rc = _load_fed_jobs(&req_msg, job_info_msg_pptr, show_flags,
+				    cluster_name, fed);
+	} else {
+		rc = _load_cluster_jobs(&req_msg, job_info_msg_pptr,
+					working_cluster_rec);
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	if (ptr)
+		slurm_destroy_federation_rec(ptr);
+	xfree(cluster_name);
+
+	return rc;
 }
 
 /*
@@ -1030,38 +1345,45 @@ extern int slurm_load_job_user (job_info_msg_t **job_info_msg_pptr,
 				uint32_t user_id,
 				uint16_t show_flags)
 {
-	int rc;
-	slurm_msg_t resp_msg;
 	slurm_msg_t req_msg;
 	job_user_id_msg_t req;
+	char *cluster_name = NULL;
+	void *ptr = NULL;
+	slurmdb_federation_rec_t *fed;
+	int rc;
+
+	cluster_name = slurm_get_cluster_name();
+	if ((show_flags & SHOW_LOCAL) == 0) {
+		if (slurm_load_federation(&ptr) ||
+		    !cluster_in_federation(ptr, cluster_name)) {
+			/* Not in federation */
+			show_flags |= SHOW_LOCAL;
+		}
+	}
 
 	slurm_msg_t_init(&req_msg);
-	slurm_msg_t_init(&resp_msg);
-
+	memset(&req, 0, sizeof(req));
 	req.show_flags   = show_flags;
 	req.user_id      = user_id;
 	req_msg.msg_type = REQUEST_JOB_USER_INFO;
 	req_msg.data     = &req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
-		return SLURM_ERROR;
-
-	switch (resp_msg.msg_type) {
-	case RESPONSE_JOB_INFO:
-		*job_info_msg_pptr = (job_info_msg_t *)resp_msg.data;
-		break;
-	case RESPONSE_SLURM_RC:
-		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
-		slurm_free_return_code_msg(resp_msg.data);
-		if (rc)
-			slurm_seterrno_ret(rc);
-		break;
-	default:
-		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
-		break;
+	/* With -M option, working_cluster_rec is set and  we only get
+	 * information for that cluster */
+	if (working_cluster_rec || !ptr || (show_flags & SHOW_LOCAL)) {
+		rc = _load_cluster_jobs(&req_msg, job_info_msg_pptr,
+					working_cluster_rec);
+	} else {
+		fed = (slurmdb_federation_rec_t *) ptr;
+		rc = _load_fed_jobs(&req_msg, job_info_msg_pptr, show_flags,
+				    cluster_name, fed);
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	if (ptr)
+		slurm_destroy_federation_rec(ptr);
+	xfree(cluster_name);
+
+	return rc;
 }
 
 /*
@@ -1073,41 +1395,48 @@ extern int slurm_load_job_user (job_info_msg_t **job_info_msg_pptr,
  * NOTE: free the response using slurm_free_job_info_msg
  */
 extern int
-slurm_load_job (job_info_msg_t **resp, uint32_t job_id, uint16_t show_flags)
+slurm_load_job (job_info_msg_t **job_info_msg_pptr, uint32_t job_id,
+		uint16_t show_flags)
 {
-	int rc;
-	slurm_msg_t resp_msg;
 	slurm_msg_t req_msg;
 	job_id_msg_t req;
+	char *cluster_name = NULL;
+	void *ptr = NULL;
+	slurmdb_federation_rec_t *fed;
+	int rc;
 
+	cluster_name = slurm_get_cluster_name();
+	if ((show_flags & SHOW_LOCAL) == 0) {
+		if (slurm_load_federation(&ptr) ||
+		    !cluster_in_federation(ptr, cluster_name)) {
+			/* Not in federation */
+			show_flags |= SHOW_LOCAL;
+		}
+	}
+
+	memset(&req, 0, sizeof(req));
 	slurm_msg_t_init(&req_msg);
-	slurm_msg_t_init(&resp_msg);
-
-	bzero(&req, sizeof(job_id_msg_t));
-	req.job_id = job_id;
-	req.show_flags = show_flags;
+	req.job_id       = job_id;
+	req.show_flags   = show_flags;
 	req_msg.msg_type = REQUEST_JOB_INFO_SINGLE;
 	req_msg.data     = &req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
-		return SLURM_ERROR;
-
-	switch (resp_msg.msg_type) {
-	case RESPONSE_JOB_INFO:
-		*resp = (job_info_msg_t *)resp_msg.data;
-		break;
-	case RESPONSE_SLURM_RC:
-		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
-		slurm_free_return_code_msg(resp_msg.data);
-		if (rc)
-			slurm_seterrno_ret(rc);
-		break;
-	default:
-		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
-		break;
+	/* With -M option, working_cluster_rec is set and  we only get
+	 * information for that cluster */
+	if (working_cluster_rec || !ptr || (show_flags & SHOW_LOCAL)) {
+		rc = _load_cluster_jobs(&req_msg, job_info_msg_pptr,
+					working_cluster_rec);
+	} else {
+		fed = (slurmdb_federation_rec_t *) ptr;
+		rc = _load_fed_jobs(&req_msg, job_info_msg_pptr, show_flags,
+				    cluster_name, fed);
 	}
 
-	return SLURM_PROTOCOL_SUCCESS ;
+	if (ptr)
+		slurm_destroy_federation_rec(ptr);
+	xfree(cluster_name);
+
+	return rc;
 }
 
 /*
@@ -1154,13 +1483,14 @@ slurm_pid2jobid (pid_t job_pid, uint32_t *jobid)
 		xfree(this_addr);
 	}
 
+	memset(&req, 0, sizeof(req));
 	req.job_pid      = job_pid;
 	req_msg.msg_type = REQUEST_JOB_ID;
 	req_msg.data     = &req;
 
 	rc = slurm_send_recv_node_msg(&req_msg, &resp_msg, 0);
 
-	if (rc != 0 || !resp_msg.auth_cred) {
+	if ((rc != 0) || !resp_msg.auth_cred) {
 		error("slurm_pid2jobid: %m");
 		if (resp_msg.auth_cred)
 			g_slurm_auth_destroy(resp_msg.auth_cred);
@@ -1184,7 +1514,7 @@ slurm_pid2jobid (pid_t job_pid, uint32_t *jobid)
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -1285,12 +1615,13 @@ slurm_get_end_time(uint32_t jobid, time_t *end_time_ptr)
 		return SLURM_SUCCESS;
 	}
 
+	memset(&job_msg, 0, sizeof(job_msg));
 	job_msg.job_id     = jobid;
 	req_msg.msg_type   = REQUEST_JOB_END_TIME;
 	req_msg.data       = &job_msg;
 
-	if (slurm_send_recv_controller_msg(
-		    &req_msg, &resp_msg) < 0)
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					   working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	switch (resp_msg.msg_type) {
@@ -1335,12 +1666,12 @@ extern int slurm_job_node_ready(uint32_t job_id)
 	slurm_msg_t_init(&req);
 	slurm_msg_t_init(&resp);
 
-	bzero(&msg, sizeof(job_id_msg_t));
+	memset(&msg, 0, sizeof(msg));
 	msg.job_id   = job_id;
 	req.msg_type = REQUEST_JOB_READY;
 	req.data     = &msg;
 
-	if (slurm_send_recv_controller_msg(&req, &resp) < 0)
+	if (slurm_send_recv_controller_msg(&req, &resp, working_cluster_rec) <0)
 		return READY_JOB_ERROR;
 
 	if (resp.msg_type == RESPONSE_JOB_READY) {
@@ -1488,7 +1819,7 @@ int slurm_job_cpus_allocated_str_on_node(char *cpus,
  * OUT job_id -  ID of the job or NO_VAL
  * OUT node_name - name of the remote slurmd
  * IN node_name_size - size of the node_name buffer
- * RET SLURM_PROTOCOL_SUCCESS or SLURM_FAILURE on error
+ * RET SLURM_SUCCESS or SLURM_ERROR on error
  */
 extern int
 slurm_network_callerid (network_callerid_msg_t req, uint32_t *job_id,
@@ -1521,7 +1852,7 @@ slurm_network_callerid (network_callerid_msg_t req, uint32_t *job_id,
 		addr.sin_family = AF_INET;
 		target_slurmd = inet_addr("127.0.0.1"); //choose a test target
 		*/
-		return SLURM_FAILURE;
+		return SLURM_ERROR;
 	} else
 		memcpy(&target_slurmd, req.ip_src, 4);
 
@@ -1539,7 +1870,7 @@ slurm_network_callerid (network_callerid_msg_t req, uint32_t *job_id,
 		case RESPONSE_NETWORK_CALLERID:
 			resp = (network_callerid_resp_t*)resp_msg.data;
 			*job_id = resp->job_id;
-			strncpy(node_name, resp->node_name, node_name_size);
+			strlcpy(node_name, resp->node_name, node_name_size);
 			break;
 		case RESPONSE_SLURM_RC:
 			rc = ((return_code_msg_t *) resp_msg.data)->return_code;
@@ -1552,5 +1883,322 @@ slurm_network_callerid (network_callerid_msg_t req, uint32_t *job_id,
 	}
 
 	slurm_free_network_callerid_msg(resp_msg.data);
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
+}
+
+static int
+_load_cluster_job_prio(slurm_msg_t *req_msg,
+		       priority_factors_response_msg_t **factors_resp,
+		       slurmdb_cluster_rec_t *cluster)
+{
+	slurm_msg_t resp_msg;
+	int rc = SLURM_SUCCESS;
+
+	slurm_msg_t_init(&resp_msg);
+
+	if (slurm_send_recv_controller_msg(req_msg, &resp_msg, cluster) < 0)
+		return SLURM_ERROR;
+
+	switch (resp_msg.msg_type) {
+	case RESPONSE_PRIORITY_FACTORS:
+		*factors_resp =
+			(priority_factors_response_msg_t *) resp_msg.data;
+		resp_msg.data = NULL;
+		break;
+	case RESPONSE_SLURM_RC:
+		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
+		slurm_free_return_code_msg(resp_msg.data);
+		break;
+	default:
+		rc = SLURM_UNEXPECTED_MSG_ERROR;
+		break;
+	}
+	if (rc)
+		slurm_seterrno(rc);
+
+	return rc;
+}
+
+/* Sort responses so local cluster response is first */
+static int _local_resp_first_prio(void *x, void *y)
+{
+	load_job_prio_resp_struct_t *resp_x = *(load_job_prio_resp_struct_t **)x;
+	load_job_prio_resp_struct_t *resp_y = *(load_job_prio_resp_struct_t **)y;
+
+	if (resp_x->local_cluster)
+		return -1;
+	if (resp_y->local_cluster)
+		return 1;
+	return 0;
+}
+
+/* Add cluster_name to job priority info records */
+static void _add_cluster_name(priority_factors_response_msg_t *new_msg,
+			      char *cluster_name)
+{
+	priority_factors_object_t *prio_obj;
+	ListIterator iter;
+
+	if (!new_msg || !new_msg->priority_factors_list)
+		return;
+
+	iter = list_iterator_create(new_msg->priority_factors_list);
+	while ((prio_obj = (priority_factors_object_t *) list_next(iter)))
+		prio_obj->cluster_name = xstrdup(cluster_name);
+	list_iterator_destroy(iter);
+}
+
+/* Thread to read job priority factor information from some cluster */
+static void *_load_job_prio_thread(void *args)
+{
+	load_job_req_struct_t *load_args = (load_job_req_struct_t *) args;
+	slurmdb_cluster_rec_t *cluster = load_args->cluster;
+	priority_factors_response_msg_t *new_msg = NULL;
+	int rc;
+
+	if ((rc = _load_cluster_job_prio(load_args->req_msg, &new_msg,
+					 cluster)) || !new_msg) {
+		verbose("Error reading job information from cluster %s: %s",
+			cluster->name, slurm_strerror(rc));
+	} else {
+		load_job_prio_resp_struct_t *job_resp;
+		_add_cluster_name(new_msg, cluster->name);
+
+
+		job_resp = xmalloc(sizeof(load_job_prio_resp_struct_t));
+		job_resp->local_cluster = load_args->local_cluster;
+		job_resp->new_msg = new_msg;
+		list_append(load_args->resp_msg_list, job_resp);
+	}
+	xfree(args);
+
+	return (void *) NULL;
+}
+
+static int _load_fed_job_prio(slurm_msg_t *req_msg,
+			      priority_factors_response_msg_t **factors_resp,
+			      uint16_t show_flags, char *cluster_name,
+			      slurmdb_federation_rec_t *fed)
+{
+	int i, j;
+	int local_job_cnt = 0;
+	load_job_prio_resp_struct_t *job_resp;
+	priority_factors_response_msg_t *orig_msg = NULL, *new_msg = NULL;
+	priority_factors_object_t *prio_obj;
+	uint32_t hash_job_inx, *hash_tbl_size = NULL, **hash_job_id = NULL;
+	uint32_t hash_part_inx, **hash_part_id = NULL;
+	slurmdb_cluster_rec_t *cluster;
+	ListIterator iter;
+	int pthread_count = 0;
+	pthread_t *load_thread = 0;
+	load_job_req_struct_t *load_args;
+	List resp_msg_list;
+
+	*factors_resp = NULL;
+
+	/* Spawn one pthread per cluster to collect job information */
+	resp_msg_list = list_create(NULL);
+	load_thread = xmalloc(sizeof(pthread_t) *
+			      list_count(fed->cluster_list));
+	iter = list_iterator_create(fed->cluster_list);
+	while ((cluster = (slurmdb_cluster_rec_t *) list_next(iter))) {
+		bool local_cluster = false;
+		if ((cluster->control_host == NULL) ||
+		    (cluster->control_host[0] == '\0'))
+			continue;	/* Cluster down */
+
+		if (!xstrcmp(cluster->name, cluster_name))
+			local_cluster = true;
+		if ((show_flags & SHOW_LOCAL) && !local_cluster)
+			continue;
+
+		load_args = xmalloc(sizeof(load_job_req_struct_t));
+		load_args->cluster = cluster;
+		load_args->local_cluster = local_cluster;
+		load_args->req_msg = req_msg;
+		load_args->resp_msg_list = resp_msg_list;
+		slurm_thread_create(&load_thread[pthread_count],
+				    _load_job_prio_thread, load_args);
+		pthread_count++;
+
+	}
+	list_iterator_destroy(iter);
+
+	/* Wait for all pthreads to complete */
+	for (i = 0; i < pthread_count; i++)
+		pthread_join(load_thread[i], NULL);
+	xfree(load_thread);
+
+	/* Move the response from the local cluster (if any) to top of list */
+	list_sort(resp_msg_list, _local_resp_first_prio);
+
+	/* Merge the responses into a single response message */
+	iter = list_iterator_create(resp_msg_list);
+	while ((job_resp = (load_job_prio_resp_struct_t *) list_next(iter))) {
+		new_msg = job_resp->new_msg;
+		if (!new_msg->priority_factors_list) {
+			/* Just skip this one. */
+		} else if (!orig_msg) {
+			orig_msg = new_msg;
+			if (job_resp->local_cluster) {
+				local_job_cnt = list_count(
+						new_msg->priority_factors_list);
+			}
+			*factors_resp = orig_msg;
+		} else {
+			/* Merge prio records into a single response message */
+			list_transfer(orig_msg->priority_factors_list,
+				      new_msg->priority_factors_list);
+			FREE_NULL_LIST(new_msg->priority_factors_list);
+			xfree(new_msg);
+		}
+		xfree(job_resp);
+	}
+	list_iterator_destroy(iter);
+	FREE_NULL_LIST(resp_msg_list);
+
+	/* In a single cluster scenario with no jobs, the priority_factors_list
+	 * will be NULL. sprio will handle this above. If the user requests
+	 * specific jobids it will give the corresponding error otherwise the
+	 * header will be printed and no jobs will be printed out. */
+	if (!*factors_resp) {
+		*factors_resp =
+			xmalloc(sizeof(priority_factors_response_msg_t));
+		return SLURM_SUCCESS;
+	}
+
+	/* Find duplicate job records and jobs local to other clusters and set
+	 * their job_id == 0 so they get skipped in reporting */
+	if ((show_flags & SHOW_SIBLING) == 0) {
+		hash_tbl_size = xmalloc(sizeof(uint32_t)   * JOB_HASH_SIZE);
+		hash_job_id   = xmalloc(sizeof(uint32_t *) * JOB_HASH_SIZE);
+		hash_part_id  = xmalloc(sizeof(uint32_t *) * JOB_HASH_SIZE);
+		for (i = 0; i < JOB_HASH_SIZE; i++) {
+			hash_tbl_size[i] = 100;
+			hash_job_id[i]  = xmalloc(sizeof(uint32_t) *
+						  hash_tbl_size[i]);
+			hash_part_id[i] = xmalloc(sizeof(uint32_t) *
+						  hash_tbl_size[i]);
+		}
+	}
+	iter = list_iterator_create(orig_msg->priority_factors_list);
+	i = 0;
+	while ((prio_obj = (priority_factors_object_t *) list_next(iter))) {
+		bool found_job = false, local_cluster = false;
+		if (i++ < local_job_cnt) {
+			local_cluster = true;
+		} else if (_test_local_job(prio_obj->job_id)) {
+			list_delete_item(iter);
+			continue;
+		}
+
+		if (show_flags & SHOW_SIBLING)
+			continue;
+		hash_job_inx = prio_obj->job_id % JOB_HASH_SIZE;
+		if (prio_obj->partition) {
+			HASH_FCN(prio_obj->partition,
+				 strlen(prio_obj->partition), hash_part_inx);
+		} else {
+			hash_part_inx = 0;
+		}
+		for (j = 0;
+		     ((j < hash_tbl_size[hash_job_inx]) &&
+		      hash_job_id[hash_job_inx][j]); j++) {
+			if ((prio_obj->job_id ==
+			     hash_job_id[hash_job_inx][j]) &&
+			    (hash_part_inx == hash_part_id[hash_job_inx][j])) {
+				found_job = true;
+				break;
+			}
+		}
+		if (found_job && local_cluster) {
+			/* Local job in multiple partitions */
+			continue;
+		} if (found_job) {
+			/* Duplicate remote job,
+			 * possible in multiple partitions */
+			list_delete_item(iter);
+			continue;
+		} else if (j >= hash_tbl_size[hash_job_inx]) {
+			hash_tbl_size[hash_job_inx] *= 2;
+			xrealloc(hash_job_id[hash_job_inx],
+				 sizeof(uint32_t) * hash_tbl_size[hash_job_inx]);
+		}
+		hash_job_id[hash_job_inx][j]  = prio_obj->job_id;
+		hash_part_id[hash_job_inx][j] = hash_part_inx;
+	}
+	list_iterator_destroy(iter);
+	if ((show_flags & SHOW_SIBLING) == 0) {
+		for (i = 0; i < JOB_HASH_SIZE; i++) {
+			xfree(hash_job_id[i]);
+			xfree(hash_part_id[i]);
+		}
+		xfree(hash_tbl_size);
+		xfree(hash_job_id);
+		xfree(hash_part_id);
+	}
+
+	return SLURM_SUCCESS;
+}
+
+/*
+ * slurm_load_job_prio - issue RPC to get job priority information for
+ *	jobs which pass filter test
+ * OUT factors_resp - job priority factors
+ * IN job_id_list - list of job IDs to be reported
+ * IN partitions - comma delimited list of partition names to be reported
+ * IN uid_list - list of user IDs to be reported
+ * IN show_flags -  job filtering option: 0, SHOW_LOCAL and/or SHOW_SIBLING
+ * RET 0 or -1 on error
+ * NOTE: free the response using slurm_free_priority_factors_response_msg()
+ */
+extern int
+slurm_load_job_prio(priority_factors_response_msg_t **factors_resp,
+		    List job_id_list, char *partitions, List uid_list,
+		    uint16_t show_flags)
+{
+	slurm_msg_t req_msg;
+	priority_factors_request_msg_t factors_req;
+	char *cluster_name = NULL;
+	void *ptr = NULL;
+	slurmdb_federation_rec_t *fed;
+	int rc;
+
+	cluster_name = slurm_get_cluster_name();
+	if ((show_flags & SHOW_FEDERATION) && !(show_flags & SHOW_LOCAL) &&
+	    (slurm_load_federation(&ptr) == SLURM_SUCCESS) &&
+	    cluster_in_federation(ptr, cluster_name)) {
+		/* In federation. Need full info from all clusters */
+		show_flags &= (~SHOW_LOCAL);
+	} else {
+		/* Report local cluster info only */
+		show_flags |= SHOW_LOCAL;
+		show_flags &= (~SHOW_FEDERATION);
+	}
+
+	memset(&factors_req, 0, sizeof(factors_req));
+	factors_req.job_id_list = job_id_list;
+	factors_req.partitions  = partitions;
+	factors_req.uid_list    = uid_list;
+
+	slurm_msg_t_init(&req_msg);
+	req_msg.msg_type = REQUEST_PRIORITY_FACTORS;
+	req_msg.data     = &factors_req;
+
+	/* With -M option, working_cluster_rec is set and  we only get
+	 * information for that cluster */
+	if (show_flags & SHOW_FEDERATION) {
+		fed = (slurmdb_federation_rec_t *) ptr;
+		rc = _load_fed_job_prio(&req_msg, factors_resp, show_flags,
+					cluster_name, fed);
+	} else {
+		rc = _load_cluster_job_prio(&req_msg, factors_resp,
+					    working_cluster_rec);
+	}
+
+	if (ptr)
+		slurm_destroy_federation_rec(ptr);
+	xfree(cluster_name);
+
+	return rc;
 }

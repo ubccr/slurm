@@ -6,11 +6,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,32 +26,31 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#if HAVE_CONFIG_H
-#  include <config.h>
-#endif
+#define _GNU_SOURCE
 
-#include <string.h>
+#include "config.h"
+
 #include <ctype.h>
-#include <stdlib.h>
-#include <libgen.h>
-#include <glob.h>
 #include <dlfcn.h>
+#include <glob.h>
+#include <libgen.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "src/common/plugin.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/xassert.h"
-#include "src/common/safeopen.h"
 #include "src/common/strlcpy.h"
 #include "src/common/read_config.h"
 #include "src/common/plugstack.h"
@@ -60,7 +59,6 @@
 #include "src/common/env.h"
 
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
-/*#include "src/srun/srun_job.h"*/
 
 #include "slurm/spank.h"
 
@@ -117,8 +115,6 @@ struct spank_plugin {
  *  SPANK Plugin options
  */
 
-#define SPANK_OPTION_ENV_PREFIX "_SLURM_SPANK_OPTION_"
-
 struct spank_plugin_opt {
 	struct spank_option *opt;   /* Copy of plugin option info           */
 	struct spank_plugin *plugin;/* Link back to plugin structure        */
@@ -126,6 +122,8 @@ struct spank_plugin_opt {
 	int found:1;                /* 1 if option was found, 0 otherwise   */
 	int disabled:1;             /* 1 if option is cached but disabled   */
 	char *optarg;               /* Option argument.                     */
+	bool set;                   /* true if argument is set              */
+	bool set_by_env;            /* true if argument is set by environ   */
 };
 
 /*
@@ -205,6 +203,7 @@ static int spank_stack_get_remote_options(struct spank_stack *, job_options_t);
 static int spank_stack_get_remote_options_env (struct spank_stack *, char **);
 static int spank_stack_set_remote_options_env (struct spank_stack * stack);
 static int dyn_spank_set_job_env (const char *var, const char *val, int ovwt);
+static char *_opt_env_name(struct spank_plugin_opt *p, char *buf, size_t siz);
 
 static void spank_stack_destroy (struct spank_stack *stack)
 {
@@ -537,12 +536,12 @@ _spank_stack_process_line(struct spank_stack *stack,
 	return (0);
 }
 
-
 static int _spank_stack_load(struct spank_stack *stack, const char *path)
 {
 	int rc = 0;
 	int line;
 	char buf[4096];
+	int fd;
 	FILE *fp;
 
 	debug ("spank: opening plugin stack %s", path);
@@ -551,7 +550,8 @@ static int _spank_stack_load(struct spank_stack *stack, const char *path)
 	 *  Try to open plugstack.conf. A missing config file is not an
 	 *   error, but is equivalent to an empty file.
 	 */
-	if (!(fp = safeopen(path, "r", SAFEOPEN_NOCREATE|SAFEOPEN_LINK_OK))) {
+	if ((fd = open(path, O_RDONLY | O_CLOEXEC)) < 0 ||
+	    (fp = fdopen(fd, "r")) == NULL) {
 		if (errno == ENOENT)
 			return (0);
 		error("spank: Failed to open %s: %m", path);
@@ -709,7 +709,7 @@ static spank_f *spank_plugin_get_fn (struct spank_plugin *sp, step_fn_t type)
 	case SPANK_EXIT:
 		return (sp->ops.exit);
 	default:
-		error ("Unhandled spank function type=%d\n", type);
+		error("Unhandled spank function type=%d", type);
 		return (NULL);
 	}
 	return (NULL);
@@ -809,7 +809,7 @@ static int spank_stack_post_opt (struct spank_stack * stack,
 	 *  Now that all options have been processed, we can
 	 *   call the post_opt handlers here in remote context.
 	 */
-	return (_do_call_stack(stack, SPANK_INIT_POST_OPT, job, -1) < 0);
+	return (_do_call_stack(stack, SPANK_INIT_POST_OPT, job, -1));
 
 }
 
@@ -984,6 +984,8 @@ static struct spank_plugin_opt *_spank_plugin_opt_create(struct
 	spopt->optval = _spank_next_option_val(p->stack);
 	spopt->found = 0;
 	spopt->optarg = NULL;
+	spopt->set = false;
+	spopt->set_by_env = false;
 
 	spopt->disabled = disabled;
 
@@ -1143,19 +1145,12 @@ void spank_option_table_destroy(struct option *optz)
 	optz_destroy(optz);
 }
 
-int spank_process_option(int optval, const char *arg)
+static int _do_option_cb(struct spank_plugin_opt *opt, const char *arg)
 {
-	struct spank_plugin_opt *opt;
 	int rc = 0;
-	List option_cache = get_global_option_cache();
 
-	if (option_cache == NULL || (list_count(option_cache) == 0))
-		return (-1);
-
-	opt = list_find_first(option_cache, (ListFindF) _opt_by_val, &optval);
-
-	if (!opt)
-		return (-1);
+	xassert(opt);
+	xassert(arg);
 
 	/*
 	 *  Call plugin callback if such a one exists
@@ -1171,8 +1166,71 @@ int spank_process_option(int optval, const char *arg)
 	if (opt->opt->has_arg)
 		opt->optarg = xstrdup(arg);
 	opt->found = 1;
+	opt->set = true;
+
+	return rc;
+}
+
+extern int spank_process_option(int optval, const char *arg)
+{
+	struct spank_plugin_opt *opt;
+	int rc = 0;
+	List option_cache = get_global_option_cache();
+
+	if (option_cache == NULL || (list_count(option_cache) == 0)) {
+		error("No spank option cache");
+		return (-1);
+	}
+
+	opt = list_find_first(option_cache, (ListFindF)_opt_by_val, &optval);
+	if (!opt) {
+		error("Failed to find spank option for optval: %d", optval);
+		return (-1);
+	}
+
+	if ((rc = _do_option_cb(opt, arg))) {
+		error("Invalid --%s argument: %s", opt->opt->name, arg);
+		return (rc);
+	}
 
 	return (0);
+}
+
+extern int spank_process_env_options()
+{
+	char var[1024];
+	const char *arg;
+	struct spank_plugin_opt *option;
+	ListIterator i;
+	List option_cache = get_global_option_cache();
+	int rc = 0;
+
+	if (option_cache == NULL || (list_count(option_cache) == 0))
+		return 0;
+
+	i = list_iterator_create(option_cache);
+	while ((option = list_next(i))) {
+		char *env_name;
+		env_name = xstrdup_printf("SLURM_SPANK_%s",
+					  _opt_env_name(option, var,
+							sizeof(var)));
+		if (!(arg = getenv(env_name))) {
+			xfree(env_name);
+			continue;
+		}
+
+		if ((rc = _do_option_cb(option, arg))) {
+			error("Invalid argument (%s) for environment variable: %s",
+			      arg, env_name);
+			xfree(env_name);
+			break;
+		}
+		option->set_by_env = true;
+		xfree(env_name);
+	}
+	list_iterator_destroy(i);
+
+	return rc;
 }
 
 static char *
@@ -1374,15 +1432,31 @@ static char * _opt_env_name (struct spank_plugin_opt *p, char *buf, size_t siz)
 
 static int _option_setenv (struct spank_plugin_opt *option)
 {
-	char var [1024];
+	char var[1024];
+	char *arg = option->optarg;
 
-	_opt_env_name (option, var, sizeof (var));
+	_opt_env_name(option, var, sizeof(var));
 
-	if (setenv (var, option->optarg, 1) < 0)
-	    error ("failed to set %s=%s in env", var, option->optarg);
+	/*
+	 * Old glibc behavior was to set the variable with an empty value if
+	 * the option was NULL. Newer glibc versions will segfault instead,
+	 * so feed it an empty string when necessary to maintain backwards
+	 * compatibility.
+	 */
+	if (!option->optarg)
+		arg = "";
 
-	if (dyn_spank_set_job_env (var, option->optarg, 1) < 0)
-	    error ("failed to set %s=%s in env", var, option->optarg);
+	if (setenv(var, arg, 1) < 0)
+		error("failed to set %s=%s in env", var, arg);
+
+	/*
+	 * Use the possibly-NULL value and let the command itself figure
+	 * out how to handle it. This will usually result in "(null)"
+	 * instead of "" used above.
+	 */
+
+	if (dyn_spank_set_job_env(var, option->optarg, 1) < 0)
+		error("failed to set %s=%s in env", var, option->optarg);
 
 	return (0);
 }
@@ -1547,7 +1621,7 @@ spank_option_getopt (spank_t sp, struct spank_option *opt, char **argp)
 	 *  We need to check for variables that start with either
 	 *   the default spank option env prefix, or the default
 	 *   prefix + an *extra* prefix of SPANK_, in case we're
-	 *   running in prolog/epilog, where SLURM prepends SPANK_
+	 *   running in prolog/epilog, where Slurm prepends SPANK_
 	 *   to all spank job environment variables.
 	 */
 	spopt = _spank_plugin_opt_create (sp->plugin, opt, 0);
@@ -1666,7 +1740,7 @@ int spank_clear_remote_options_env (char **env)
 				char name[1024];
 				memcpy (name, *ep, end - *ep);
 				name [end - *ep] = '\0';
-				debug ("unsetenv (%s)\n", name);
+				debug("unsetenv (%s)", name);
 				unsetenvp (env, name);
 			}
 		}
@@ -1868,6 +1942,7 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 {
 	int *p2int;
 	uint32_t *p2uint32;
+	uint64_t *p2uint64;
 	uint32_t  uint32;
 	uint16_t *p2uint16;
 	uid_t *p2uid;
@@ -1950,6 +2025,20 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 			*p2uint32 = launcher_job->stepid;
 		else if (slurmd_job)
 			*p2uint32 = slurmd_job->stepid;
+		else
+			*p2uint32 = 0;
+		break;
+	case S_JOB_ARRAY_ID:
+		p2uint32 = va_arg(vargs, uint32_t *);
+		if (spank->stack->type == S_TYPE_REMOTE)
+			*p2uint32 = slurmd_job->array_job_id;
+		else
+			*p2uint32 = 0;
+		break;
+	case S_JOB_ARRAY_TASK_ID:
+		p2uint32 = va_arg(vargs, uint32_t *);
+		if (spank->stack->type == S_TYPE_REMOTE)
+			*p2uint32 = slurmd_job->array_task_id;
 		else
 			*p2uint32 = 0;
 		break;
@@ -2114,11 +2203,11 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 			*p2str = NULL;
 		break;
 	case S_JOB_ALLOC_MEM:
-		p2uint32 = va_arg(vargs, uint32_t *);
+		p2uint64 = va_arg(vargs, uint64_t *);
 		if (slurmd_job)
-			*p2uint32 = slurmd_job->job_mem;
+			*p2uint64 = slurmd_job->job_mem;
 		else
-			*p2uint32 = 0;
+			*p2uint64 = 0;
 		break;
 	case S_STEP_ALLOC_CORES:
 		p2str = va_arg(vargs, char **);
@@ -2128,11 +2217,11 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 			*p2str = NULL;
 		break;
 	case S_STEP_ALLOC_MEM:
-		p2uint32 = va_arg(vargs, uint32_t *);
+		p2uint64 = va_arg(vargs, uint64_t *);
 		if (slurmd_job)
-			*p2uint32 = slurmd_job->step_mem;
+			*p2uint64 = slurmd_job->step_mem;
 		else
-			*p2uint32 = 0;
+			*p2uint64 = 0;
 		break;
 	case S_SLURM_RESTART_COUNT:
 		p2uint32 = va_arg(vargs, uint32_t *);
@@ -2240,40 +2329,55 @@ spank_err_t spank_unsetenv (spank_t spank, const char *var)
 /*
  *  Dynamically loaded versions of spank_*_job_env
  */
-const char *dyn_spank_get_job_env (const char *name)
+const char *dyn_spank_get_job_env(const char *name)
 {
-	void *h = dlopen (NULL, 0);
+	void *h = dlopen(NULL, 0);
 	char * (*fn)(const char *n);
+	char *rc;
 
-	fn = dlsym (h, "spank_get_job_env");
-	if (fn == NULL)
+	fn = dlsym(h, "spank_get_job_env");
+	if (fn == NULL) {
+		(void) dlclose(h);
 		return NULL;
+	}
 
-	return ((*fn) (name));
+	rc = ((*fn) (name));
+/*	(void) dlclose(h);	NOTE: DO NOT CLOSE OR SPANK WILL BREAK */
+	return rc;
 }
 
-int dyn_spank_set_job_env (const char *n, const char *v, int overwrite)
+int dyn_spank_set_job_env(const char *n, const char *v, int overwrite)
 {
-	void *h = dlopen (NULL, 0);
+	void *h = dlopen(NULL, 0);
 	int (*fn)(const char *n, const char *v, int overwrite);
+	int rc;
 
-	fn = dlsym (h, "spank_set_job_env");
-	if (fn == NULL)
+	fn = dlsym(h, "spank_set_job_env");
+	if (fn == NULL) {
+		(void) dlclose(h);
 		return (-1);
+	}
 
-	return ((*fn) (n, v, overwrite));
+	rc = ((*fn) (n, v, overwrite));
+/*	(void) dlclose(h);	NOTE: DO NOT CLOSE OR SPANK WILL BREAK */
+	return rc;
 }
 
-extern int dyn_spank_unset_job_env (const char *n)
+extern int dyn_spank_unset_job_env(const char *n)
 {
-	void *h = dlopen (NULL, 0);
+	void *h = dlopen(NULL, 0);
 	int (*fn)(const char *n);
+	int rc;
 
-	fn = dlsym (h, "spank_unset_job_env");
-	if (fn == NULL)
+	fn = dlsym(h, "spank_unset_job_env");
+	if (fn == NULL) {
+		(void) dlclose(h);
 		return (-1);
+	}
 
-	return ((*fn) (n));
+	rc = ((*fn) (n));
+/*	(void) dlclose(h);	NOTE: DO NOT CLOSE OR SPANK WILL BREAK */
+	return rc;
 }
 
 static spank_err_t spank_job_control_access_check (spank_t spank)
@@ -2344,4 +2448,184 @@ spank_err_t spank_job_control_unsetenv (spank_t spank, const char *var)
 		return (ESPANK_BAD_ARG);
 
 	return (ESPANK_SUCCESS);
+}
+
+/*
+ * spank_get_plugin_names
+ * Get names of all spank plugins
+ *
+ * Parameters:
+ * IN/OUT names	- Pointer to char ** (should be NULL when called) output of
+ *		  function is allocated memory for the array of string
+ *		  pointers, and allocated memory for the strings. Array will
+ *		  be NULL terminated. Caller should manage the memory.
+ * Returns:
+ * 		- Number of allocated strings (excluding NULL terminator)
+ */
+size_t spank_get_plugin_names(char ***names)
+{
+	struct spank_plugin *p;
+	ListIterator i;
+	size_t n_names = 0;
+
+	if (!global_spank_stack)
+		return 0;
+
+	i = list_iterator_create(global_spank_stack->plugin_list);
+	while ((p = list_next(i))) {
+		*names = xrecalloc(*names, ++n_names + 1, sizeof(char *));
+		(*names)[n_names] = NULL;
+		(*names)[n_names - 1] = xstrdup(p->name);
+	}
+	list_iterator_destroy(i);
+	return n_names;
+}
+
+/*
+ * spank_get_plugin_option_names
+ * Get names of all spank plugins
+ *
+ * Parameters:
+ * IN plugin_name	- Name of spank plugin being considered
+ *			  (e.g., from spank_get_plugin_names)
+ * IN/OUT opts		- Pointer to char ** (should be NULL when called)
+ *			  output of function is allocated memory for the array
+ *			  of string pointers, and allocated memory for the
+ *			  strings. Array will be NULL terminated. Caller
+ *			  should manage the memory.
+ * Returns:
+ *			- Number of allocated strings (excluding NULL
+ *			  terminator)
+ */
+size_t spank_get_plugin_option_names(const char *plugin_name, char ***opts)
+{
+	struct spank_plugin_opt *spopt;
+	size_t nopts = 0;
+
+	List options = get_global_option_cache();
+	ListIterator i;
+
+	i = list_iterator_create(options);
+	while ((spopt = list_next(i))) {
+		if (spopt->disabled)
+			continue;
+		if (!xstrcmp(spopt->plugin->name, plugin_name)) {
+			*opts = xrecalloc(*opts, ++nopts + 1, sizeof(char *));
+			(*opts)[nopts] = NULL;
+			(*opts)[nopts - 1] = xstrdup(spopt->opt->name);
+			continue;
+		}
+	}
+	list_iterator_destroy(i);
+	return nopts;
+}
+
+/*
+ * Get option value by common option name
+ */
+extern char *spank_option_get(char *name)
+{
+	List option_cache = get_global_option_cache();
+	struct spank_plugin_opt *spopt;
+
+	if (!option_cache)
+		return NULL;
+
+	spopt = list_find_first(option_cache,
+			(ListFindF) _opt_by_name, name);
+
+	if (spopt) {
+		if (spopt->set && !spopt->optarg)
+			return xstrdup("set");
+		if (!spopt->set && !spopt->opt->has_arg)
+			return xstrdup("unset");
+		if (spopt->optarg)
+			return xstrdup(spopt->optarg);
+	}
+	return NULL;
+}
+
+/*
+ * Get plugin name by common option name
+ */
+extern char *spank_option_plugin(char *optname)
+{
+	List option_cache = get_global_option_cache();
+	struct spank_plugin_opt *spopt;
+
+	if (!option_cache)
+		return NULL;
+
+	spopt = list_find_first(option_cache,
+			(ListFindF) _opt_by_name, optname);
+
+	if (spopt)
+		return xstrdup(spopt->plugin->name);
+	return NULL;
+}
+
+/*
+ * Is option set? Discover by common option name
+ */
+extern bool spank_option_isset(char *name)
+{
+	List option_cache = get_global_option_cache();
+	struct spank_plugin_opt *spopt;
+
+	if (!option_cache)
+		return NULL;
+
+	spopt = list_find_first(option_cache,
+			(ListFindF) _opt_by_name, name);
+	if (spopt)
+		return spopt->set;
+	return false;
+}
+
+/*
+ * Function for iterating through all the common option data structure
+ * and returning (via parameter arguments) the name and value of each
+ * set slurm option.
+ *
+ * OUT plugin	- pointer to string to store the plugin name
+ * OUT name	- pointer to string to store the option name
+ * OUT value	- pointer to string to store the value
+ * IN/OUT state	- internal state, should point to NULL for the first call
+ * RETURNS	- true if plugin/name/value set; false if no more options
+ */
+extern bool spank_option_get_next_set(char **plugin, char **name,
+				      char **value, void **state)
+{
+	List option_cache = get_global_option_cache();
+	ListIterator *iter = (ListIterator *) *state;
+	struct spank_plugin_opt *spopt;
+
+	if (option_cache == NULL)
+		return NULL;
+
+	if (!iter) {
+		iter = xmalloc(sizeof(ListIterator));
+		*iter = list_iterator_create(option_cache);
+		*state = iter;
+	}
+
+	while ((spopt = list_next(*iter))) {
+		if (!spopt->set)
+			continue;
+		*plugin = xstrdup(spopt->plugin->name);
+		*name = xstrdup(spopt->opt->name);
+		if (spopt->optarg)
+			*value = xstrdup(spopt->optarg);
+		else if (spopt->set)
+			*value = xstrdup("set");
+		else if (!spopt->set && !spopt->opt->has_arg)
+			*value = xstrdup("unset");
+		return true;
+	}
+
+	list_iterator_destroy(*iter);
+	xfree(iter);
+	*state = NULL;
+
+	return false;
 }

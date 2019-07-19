@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -105,8 +105,10 @@ static int _parse_comp_file(
 
 	if (!fgets(line, BUFFER_SIZE, fd)) {
 		fprintf(stderr, "Empty step update completion file\n");
+		(void) fclose(fd);
 		return SLURM_ERROR;
 	}
+	(void) fclose(fd);
 
 	fptr = line;	/* break the record into NULL-terminated strings */
 	for (i = 0; i < MAX_RECORD_FIELDS; i++) {
@@ -141,10 +143,11 @@ static int _parse_comp_file(
 			atoi(update[UPDATE_STEP_USER_SEC]);
 		step_msg->jobacct->sys_cpu_sec =
 			atoi(update[UPDATE_STEP_SYS_SEC]);
-		step_msg->jobacct->min_cpu =
+		step_msg->jobacct->tres_usage_in_min[TRES_ARRAY_CPU] =
 			step_msg->jobacct->user_cpu_sec
 			+ step_msg->jobacct->sys_cpu_sec;
-		step_msg->jobacct->max_rss = atoi(update[UPDATE_STEP_MAX_RSS]);
+		step_msg->jobacct->tres_usage_in_max[TRES_ARRAY_MEM] =
+			atoi(update[UPDATE_STEP_MAX_RSS]);
 		step_msg->name =
 			xstrdup(xbasename(update[UPDATE_STEP_STEPNAME]));
 		break;
@@ -168,7 +171,7 @@ static int _parse_comp_file(
  * RET 0 if no slurm error, errno otherwise. parsing error prints
  *			error message and returns 0
  */
-extern int scontrol_update_step (int argc, char *argv[])
+extern int scontrol_update_step (int argc, char **argv)
 {
 	int i, update_cnt = 0;
 	char *tag, *val;
@@ -190,7 +193,7 @@ extern int scontrol_update_step (int argc, char *argv[])
 			return -1;
 		}
 
-		if (strncasecmp(tag, "StepId", MAX(taglen, 4)) == 0) {
+		if (xstrncasecmp(tag, "StepId", MAX(taglen, 4)) == 0) {
 			char *end_ptr;
 			step_msg.job_id = (uint32_t) strtol(val, &end_ptr, 10);
 			if (end_ptr[0] == '.') {
@@ -203,7 +206,7 @@ extern int scontrol_update_step (int argc, char *argv[])
 				fprintf (stderr, "Request aborted\n");
 				return 0;
 			} /* else apply to all steps of this job_id */
-		} else if (strncasecmp(tag, "TimeLimit", MAX(taglen, 2)) == 0) {
+		} else if (xstrncasecmp(tag, "TimeLimit", MAX(taglen, 2)) == 0) {
 			bool incr, decr;
 			uint32_t step_current_time, time_limit;
 
@@ -240,7 +243,7 @@ extern int scontrol_update_step (int argc, char *argv[])
 			}
 			step_msg.time_limit = time_limit;
 			update_cnt++;
-		} else if (strncasecmp(tag, "CompFile", MAX(taglen, 2)) == 0) {
+		} else if (xstrncasecmp(tag, "CompFile", MAX(taglen, 2)) == 0) {
 			if (_parse_comp_file(val, &step_msg)) {
 				exit_code = 1;
 				fprintf(stderr,

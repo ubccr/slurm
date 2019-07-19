@@ -9,11 +9,11 @@
  *  Derived from dsh written by Jim Garlick <garlick1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -29,13 +29,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -63,6 +63,9 @@ typedef struct agent_arg {
 	void		*msg_args;	/* RPC data to be transmitted */
 } agent_arg_t;
 
+/* Start a thread to manage queued agent requests */
+extern void agent_init(void);
+
 /*
  * agent - party responsible for transmitting an common RPC in parallel
  *	across a set of nodes. agent_queue_request() if immediate
@@ -81,21 +84,22 @@ extern void *agent (void *args);
 extern void agent_queue_request(agent_arg_t *agent_arg_ptr);
 
 /*
- * agent_retry - Agent for retrying pending RPCs. One pending request is
- *	issued if it has been pending for at least min_wait seconds
+ * agent_trigger - Request processing of pending RPCs
  * IN min_wait - Minimum wait time between re-issue of a pending RPC
  * IN mail_too - Send pending email too, note this performed using a
- *		fork/waitpid, so it can take longer than just creating
- *		a pthread to send RPCs
- * RET count of queued requests remaining
+ *	fork/waitpid, so it can take longer than just creating a pthread
+ *	to send RPCs
  */
-extern int agent_retry (int min_wait, bool mail_too);
+extern void agent_trigger(int min_wait, bool mail_too);
 
 /* agent_purge - purge all pending RPC requests */
 extern void agent_purge (void);
 
 /* get_agent_count - find out how many active agents we have */
 extern int get_agent_count(void);
+
+/* agent_pack_pending_rpc_stats - pack counts of pending RPCs into a buffer */
+extern void agent_pack_pending_rpc_stats(Buf buffer);
 
 /*
  * mail_job_info - Send e-mail notice of job state change
@@ -106,12 +110,5 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type);
 
 /* Return length of agent's retry_list */
 extern int retry_list_size(void);
-
-/* slurmctld_free_batch_job_launch_msg is a variant of
- *	slurm_free_job_launch_msg because all environment variables currently
- *	loaded in one xmalloc buffer (see get_job_env()), which is different
- *	from how slurmd assembles the data from a message
- */
-extern void slurmctld_free_batch_job_launch_msg(batch_job_launch_msg_t * msg);
 
 #endif /* !_AGENT_H */

@@ -3,11 +3,11 @@
 *  Copyright (C) 2012 SchedMD LLC
 *  Written by Danny Auble <da@schedmd.com>
 *
-*  This file is part of SLURM, a resource management program.
-*  For details, see <http://slurm.schedmd.com/>.
+*  This file is part of Slurm, a resource management program.
+*  For details, see <https://slurm.schedmd.com/>.
 *  Please also read the included file: DISCLAIMER.
 *
-*  SLURM is free software; you can redistribute it and/or modify it under
+*  Slurm is free software; you can redistribute it and/or modify it under
 *  the terms of the GNU General Public License as published by the Free
 *  Software Foundation; either version 2 of the License, or (at your option)
 *  any later version.
@@ -23,40 +23,47 @@
 *  version.  If you delete this exception statement from all source files in
 *  the program, then also delete it here.
 *
-*  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+*  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 *  details.
 *
 *  You should have received a copy of the GNU General Public License along
-*  with SLURM; if not, write to the Free Software Foundation, Inc.,
+*  with Slurm; if not, write to the Free Software Foundation, Inc.,
 *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
+
+#include "config.h"
 
 #include <stdlib.h>
 #include <fcntl.h>
 #include <signal.h>
 
-#include "launch.h"
+#include "src/srun/libsrun/launch.h"
 
 #include "src/common/env.h"
 #include "src/common/xstring.h"
 #include "src/common/plugin.h"
 #include "src/common/plugrack.h"
+#include "src/common/proc_args.h"
+#include "src/common/tres_bind.h"
+#include "src/common/tres_frequency.h"
 #include "src/common/xsignal.h"
 
 typedef struct {
-	int (*setup_srun_opt)      (char **rest);
-	int (*handle_multi_prog)   (int command_pos);
+	int (*setup_srun_opt)      (char **rest, slurm_opt_t *opt_local);
+	int (*handle_multi_prog)   (int command_pos, slurm_opt_t *opt_local);
 	int (*create_job_step)     (srun_job_t *job, bool use_all_cpus,
 				    void (*signal_function)(int),
-				    sig_atomic_t *destroy_job);
+				    sig_atomic_t *destroy_job,
+				    slurm_opt_t *opt_local);
 	int (*step_launch)         (srun_job_t *job,
 				    slurm_step_io_fds_t *cio_fds,
 				    uint32_t *global_rc,
 				    slurm_step_launch_callbacks_t *
-				    step_callbacks);
-	int (*step_wait)           (srun_job_t *job, bool got_alloc);
+				    step_callbacks, slurm_opt_t *opt_local);
+	int (*step_wait)           (srun_job_t *job, bool got_alloc,
+				    slurm_opt_t *opt_local);
 	int (*step_terminate)      (void);
 	void (*print_status)       (void);
 	void (*fwd_signal)         (int signal);
@@ -157,11 +164,15 @@ extern slurm_step_layout_t *launch_common_get_slurm_step_layout(srun_job_t *job)
 
 extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 					 void (*signal_function)(int),
-					 sig_atomic_t *destroy_job)
+					 sig_atomic_t *destroy_job,
+					 slurm_opt_t *opt_local)
 {
-	int i, rc;
-	unsigned long step_wait = 0, my_sleep = 0;
-	uint16_t base_dist;
+	srun_opt_t *srun_opt = opt_local->srun_opt;
+	int i, j, rc;
+	unsigned long step_wait = 0;
+	uint16_t base_dist, slurmctld_timeout;
+	char *add_tres;
+	xassert(srun_opt);
 
 	if (!job) {
 		error("launch_common_create_job_step: no job given");
@@ -170,84 +181,84 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 
 	slurm_step_ctx_params_t_init(&job->ctx_params);
 	job->ctx_params.job_id = job->jobid;
-	job->ctx_params.uid = opt.uid;
+	job->ctx_params.step_id = job->stepid;
+	job->ctx_params.uid = opt_local->uid;
 
 	/* Validate minimum and maximum node counts */
-	if (opt.min_nodes && opt.max_nodes &&
-	    (opt.min_nodes > opt.max_nodes)) {
+	if (opt_local->min_nodes && opt_local->max_nodes &&
+	    (opt_local->min_nodes > opt_local->max_nodes)) {
 		error ("Minimum node count > maximum node count (%d > %d)",
-		       opt.min_nodes, opt.max_nodes);
+		       opt_local->min_nodes, opt_local->max_nodes);
 		return SLURM_ERROR;
 	}
-#if !defined HAVE_FRONT_END || (defined HAVE_BGQ)
-//#if !defined HAVE_FRONT_END || (defined HAVE_BGQ && defined HAVE_BG_FILES)
-	if (opt.min_nodes && (opt.min_nodes > job->nhosts)) {
+#if !defined HAVE_FRONT_END
+	if (opt_local->min_nodes && (opt_local->min_nodes > job->nhosts)) {
 		error ("Minimum node count > allocated node count (%d > %d)",
-		       opt.min_nodes, job->nhosts);
+		       opt_local->min_nodes, job->nhosts);
 		return SLURM_ERROR;
 	}
 #endif
 	job->ctx_params.min_nodes = job->nhosts;
-	if (opt.min_nodes && (opt.min_nodes < job->ctx_params.min_nodes))
-		job->ctx_params.min_nodes = opt.min_nodes;
+	if (opt_local->min_nodes &&
+	    (opt_local->min_nodes < job->ctx_params.min_nodes))
+		job->ctx_params.min_nodes = opt_local->min_nodes;
 	job->ctx_params.max_nodes = job->nhosts;
-	if (opt.max_nodes && (opt.max_nodes < job->ctx_params.max_nodes))
-		job->ctx_params.max_nodes = opt.max_nodes;
+	if (opt_local->max_nodes &&
+	    (opt_local->max_nodes < job->ctx_params.max_nodes))
+		job->ctx_params.max_nodes = opt_local->max_nodes;
 
-	if (!opt.ntasks_set && (opt.ntasks_per_node != NO_VAL))
-		job->ntasks = opt.ntasks = job->nhosts * opt.ntasks_per_node;
-	job->ctx_params.task_count = opt.ntasks;
+	if (!opt_local->ntasks_set && (opt_local->ntasks_per_node != NO_VAL))
+		job->ntasks = opt_local->ntasks = job->nhosts *
+						  opt_local->ntasks_per_node;
+	job->ctx_params.task_count = opt_local->ntasks;
 
-	if (opt.mem_per_cpu != NO_VAL)
-		job->ctx_params.pn_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
-	else if (opt.pn_min_memory != NO_VAL)
-		job->ctx_params.pn_min_memory = opt.pn_min_memory;
-	if (opt.gres)
-		job->ctx_params.gres = opt.gres;
-	else
-		job->ctx_params.gres = getenv("SLURM_STEP_GRES");
+	if (opt_local->mem_per_cpu > -1)
+		job->ctx_params.pn_min_memory = opt_local->mem_per_cpu |
+						MEM_PER_CPU;
+	else if (opt_local->pn_min_memory != NO_VAL64)
+		job->ctx_params.pn_min_memory = opt_local->pn_min_memory;
 
-	if (opt.overcommit) {
+	if (opt_local->overcommit) {
 		if (use_all_cpus)	/* job allocation created by srun */
 			job->ctx_params.cpu_count = job->cpu_count;
 		else
 			job->ctx_params.cpu_count = job->ctx_params.min_nodes;
-	} else if (opt.cpus_set) {
-		job->ctx_params.cpu_count = opt.ntasks * opt.cpus_per_task;
-	} else if (opt.ntasks_set) {
-		job->ctx_params.cpu_count = opt.ntasks;
+	} else if (opt_local->cpus_set) {
+		job->ctx_params.cpu_count = opt_local->ntasks *
+					    opt_local->cpus_per_task;
+	} else if (opt_local->ntasks_set) {
+		job->ctx_params.cpu_count = opt_local->ntasks;
 	} else if (use_all_cpus) {	/* job allocation created by srun */
 		job->ctx_params.cpu_count = job->cpu_count;
 	} else {
-		job->ctx_params.cpu_count = opt.ntasks;
+		job->ctx_params.cpu_count = opt_local->ntasks;
 	}
 
-	job->ctx_params.cpu_freq_min = opt.cpu_freq_min;
-	job->ctx_params.cpu_freq_max = opt.cpu_freq_max;
-	job->ctx_params.cpu_freq_gov = opt.cpu_freq_gov;
-	job->ctx_params.relative = (uint16_t)opt.relative;
-	job->ctx_params.ckpt_interval = (uint16_t)opt.ckpt_interval;
-	job->ctx_params.ckpt_dir = opt.ckpt_dir;
-	job->ctx_params.exclusive = (uint16_t)opt.exclusive;
-	if (opt.immediate == 1)
-		job->ctx_params.immediate = (uint16_t)opt.immediate;
-	if (opt.time_limit != NO_VAL)
-		job->ctx_params.time_limit = (uint32_t)opt.time_limit;
-	job->ctx_params.verbose_level = (uint16_t)_verbose;
-	if (opt.resv_port_cnt != NO_VAL)
-		job->ctx_params.resv_port_cnt = (uint16_t) opt.resv_port_cnt;
-	else {
+	job->ctx_params.cpu_freq_min = opt_local->cpu_freq_min;
+	job->ctx_params.cpu_freq_max = opt_local->cpu_freq_max;
+	job->ctx_params.cpu_freq_gov = opt_local->cpu_freq_gov;
+	job->ctx_params.relative = (uint16_t)srun_opt->relative;
+	job->ctx_params.ckpt_interval = (uint16_t)srun_opt->ckpt_interval;
+	job->ctx_params.exclusive = (uint16_t)srun_opt->exclusive;
+	if (opt_local->immediate == 1)
+		job->ctx_params.immediate = (uint16_t)opt_local->immediate;
+	if (opt_local->time_limit != NO_VAL)
+		job->ctx_params.time_limit = (uint32_t)opt_local->time_limit;
+	job->ctx_params.verbose_level = (uint16_t) opt.verbose;
+	if (srun_opt->resv_port_cnt != NO_VAL) {
+		job->ctx_params.resv_port_cnt = (uint16_t)srun_opt->resv_port_cnt;
+	} else {
 #if defined(HAVE_NATIVE_CRAY)
 		/*
 		 * On Cray systems default to reserving one port, or one
 		 * more than the number of multi prog commands, for Cray PMI
 		 */
-		job->ctx_params.resv_port_cnt = (opt.multi_prog ?
-						 opt.multi_prog_cmds + 1 : 1);
+		job->ctx_params.resv_port_cnt = (srun_opt->multi_prog ?
+					srun_opt->multi_prog_cmds + 1 : 1);
 #endif
 	}
 
-	switch (opt.distribution & SLURM_DIST_NODESOCKMASK) {
+	switch (opt_local->distribution & SLURM_DIST_NODESOCKMASK) {
 	case SLURM_DIST_BLOCK:
 	case SLURM_DIST_ARBITRARY:
 	case SLURM_DIST_CYCLIC:
@@ -257,43 +268,91 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	case SLURM_DIST_BLOCK_BLOCK:
 	case SLURM_DIST_CYCLIC_CFULL:
 	case SLURM_DIST_BLOCK_CFULL:
-		job->ctx_params.task_dist = opt.distribution;
-		if (opt.ntasks_per_node != NO_VAL)
-			job->ctx_params.plane_size = opt.ntasks_per_node;
+		job->ctx_params.task_dist = opt_local->distribution;
+		if (opt_local->ntasks_per_node != NO_VAL)
+			job->ctx_params.plane_size = opt_local->ntasks_per_node;
 		break;
 	case SLURM_DIST_PLANE:
 		job->ctx_params.task_dist = SLURM_DIST_PLANE;
-		job->ctx_params.plane_size = opt.plane_size;
+		job->ctx_params.plane_size = opt_local->plane_size;
 		break;
 	default:
 		/* Leave distribution set to unknown if taskcount <= nodes and
 		 * memory is set to 0. step_mgr will handle the 0mem case.
 		 * ex. SallocDefaultCommand=srun -n1 -N1 --mem=0 ... */
-		if (!opt.mem_per_cpu || !opt.pn_min_memory)
+		if (!opt_local->mem_per_cpu || !opt_local->pn_min_memory)
 			base_dist = SLURM_DIST_UNKNOWN;
 		else
 			base_dist = (job->ctx_params.task_count <=
 				     job->ctx_params.min_nodes)
 				     ? SLURM_DIST_CYCLIC : SLURM_DIST_BLOCK;
-		opt.distribution &= SLURM_DIST_STATE_FLAGS;
-		opt.distribution |= base_dist;
-		job->ctx_params.task_dist = opt.distribution;
-		if (opt.ntasks_per_node != NO_VAL)
-			job->ctx_params.plane_size = opt.ntasks_per_node;
+		opt_local->distribution &= SLURM_DIST_STATE_FLAGS;
+		opt_local->distribution |= base_dist;
+		job->ctx_params.task_dist = opt_local->distribution;
+		if (opt_local->ntasks_per_node != NO_VAL)
+			job->ctx_params.plane_size = opt_local->ntasks_per_node;
 		break;
 
 	}
-	job->ctx_params.overcommit = opt.overcommit ? 1 : 0;
-
-	job->ctx_params.node_list = opt.nodelist;
-
-	job->ctx_params.network = opt.network;
-	job->ctx_params.no_kill = opt.no_kill;
-	if (opt.job_name_set_cmd && opt.job_name)
-		job->ctx_params.name = opt.job_name;
+	job->ctx_params.overcommit = opt_local->overcommit ? 1 : 0;
+	job->ctx_params.node_list = opt_local->nodelist;
+	job->ctx_params.network = opt_local->network;
+	job->ctx_params.no_kill = opt_local->no_kill;
+	if (slurm_option_set_by_cli('J'))
+		job->ctx_params.name = opt_local->job_name;
 	else
-		job->ctx_params.name = opt.cmd_name;
-	job->ctx_params.features = opt.constraints;
+		job->ctx_params.name = srun_opt->cmd_name;
+	job->ctx_params.features = opt_local->constraint;
+
+	if (opt_local->cpus_per_gpu) {
+		xstrfmtcat(job->ctx_params.cpus_per_tres, "gpu:%d",
+			   opt_local->cpus_per_gpu);
+	}
+	xfree(opt_local->tres_bind);	/* Vestigial value from job allocate */
+	if (opt_local->gpu_bind)
+		xstrfmtcat(opt_local->tres_bind, "gpu:%s", opt_local->gpu_bind);
+	if (tres_bind_verify_cmdline(opt_local->tres_bind)) {
+		if (tres_bind_err_log) {	/* Log once */
+			error("Invalid --tres-bind argument: %s. Ignored",
+			      opt_local->tres_bind);
+			tres_bind_err_log = false;
+		}
+		xfree(opt_local->tres_bind);
+	}
+	job->ctx_params.tres_bind = xstrdup(opt_local->tres_bind);
+	xfree(opt_local->tres_freq);	/* Vestigial value from job allocate */
+	xfmt_tres_freq(&opt_local->tres_freq, "gpu", opt_local->gpu_freq);
+	if (tres_freq_verify_cmdline(opt_local->tres_freq)) {
+		if (tres_freq_err_log) {	/* Log once */
+			error("Invalid --tres-freq argument: %s. Ignored",
+			      opt_local->tres_freq);
+			tres_freq_err_log = false;
+		}
+		xfree(opt_local->tres_freq);
+	}
+	job->ctx_params.tres_freq = xstrdup(opt_local->tres_freq);
+	xfmt_tres(&job->ctx_params.tres_per_step, "gpu", opt_local->gpus);
+	xfmt_tres(&job->ctx_params.tres_per_node, "gpu",
+		  opt_local->gpus_per_node);
+	if (opt_local->gres)
+		add_tres = opt_local->gres;
+	else
+		add_tres = getenv("SLURM_STEP_GRES");
+	if (add_tres) {
+		if (job->ctx_params.tres_per_node) {
+			xstrfmtcat(job->ctx_params.tres_per_node, ",%s",
+				   add_tres);
+		} else
+			job->ctx_params.tres_per_node = xstrdup(add_tres);
+	}
+	xfmt_tres(&job->ctx_params.tres_per_socket, "gpu",
+		  opt_local->gpus_per_socket);
+	xfmt_tres(&job->ctx_params.tres_per_task, "gpu",
+		  opt_local->gpus_per_task);
+	if (opt_local->mem_per_gpu != NO_VAL64) {
+		xstrfmtcat(job->ctx_params.mem_per_tres, "gpu:%"PRIu64,
+			   opt.mem_per_gpu);
+	}
 
 	debug("requesting job %u, user %u, nodes %u including (%s)",
 	      job->ctx_params.job_id, job->ctx_params.uid,
@@ -302,41 +361,42 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	      job->ctx_params.cpu_count, job->ctx_params.task_count,
 	      job->ctx_params.name, job->ctx_params.relative);
 
-	for (i=0; (!(*destroy_job)); i++) {
-		if (opt.no_alloc) {
+	for (i = 0; (!(*destroy_job)); i++) {
+		if (srun_opt->no_alloc) {
 			job->step_ctx = slurm_step_ctx_create_no_alloc(
 				&job->ctx_params, job->stepid);
 		} else {
-			if (opt.immediate) {
-				step_wait = MAX(1, opt.immediate -
+			if (opt_local->immediate) {
+				step_wait = MAX(1, opt_local->immediate -
 						   difftime(time(NULL),
 							    srun_begin_time)) *
 					    1000;
 			} else {
-				/* Wait 60 to 70 seconds for response */
-				step_wait = (getpid() % 10) * 1000 + 60000;
+				slurmctld_timeout = MIN(300, MAX(60,
+					slurm_get_slurmctld_timeout()));
+				step_wait = ((getpid() % 10) +
+					     slurmctld_timeout) * 1000;
 			}
 			job->step_ctx = slurm_step_ctx_create_timeout(
 						&job->ctx_params, step_wait);
 		}
 		if (job->step_ctx != NULL) {
-			if (i > 0)
-				info("Job step created");
-
+			if (i > 0) {
+				info("Step created for job %u",
+				     job->ctx_params.job_id);
+			}
 			break;
 		}
 		rc = slurm_get_errno();
 
-		if (((opt.immediate != 0) &&
-		     ((opt.immediate == 1) ||
+		if (((opt_local->immediate != 0) &&
+		     ((opt_local->immediate == 1) ||
 		      (difftime(time(NULL), srun_begin_time) >=
-		       opt.immediate))) ||
-		    ((rc != ESLURM_NODES_BUSY) && (rc != ESLURM_PORTS_BUSY) &&
-		     (rc != ESLURM_PROLOG_RUNNING) &&
-		     (rc != SLURM_PROTOCOL_SOCKET_IMPL_TIMEOUT) &&
-		     (rc != ESLURM_INTERCONNECT_BUSY) &&
-		     (rc != ESLURM_DISABLED))) {
-			error ("Unable to create job step: %m");
+		       opt_local->immediate))) ||
+		    ((rc != ESLURM_PROLOG_RUNNING) &&
+		     !slurm_step_retry_errno(rc))) {
+			error("Unable to create step for job %u: %m",
+			      job->ctx_params.job_id);
 			return SLURM_ERROR;
 		}
 
@@ -346,21 +406,16 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 					"being configured, please wait",
 					job->ctx_params.job_id);
 			} else {
-				info("Job step creation temporarily disabled, "
-				     "retrying");
+				info("Job %u step creation temporarily disabled, retrying",
+				     job->ctx_params.job_id);
 			}
 			xsignal_unblock(sig_array);
-			for (i = 0; sig_array[i]; i++)
-				xsignal(sig_array[i], signal_function);
-			my_sleep = (getpid() % 1000) * 100 + 100000;
+			for (j = 0; sig_array[j]; j++)
+				xsignal(sig_array[j], signal_function);
 		} else {
-			verbose("Job step creation still disabled, retrying");
-			my_sleep *= 2;
+			verbose("Job %u step creation still disabled, retrying",
+				job->ctx_params.job_id);
 		}
-
-		/* sleep 0.1 to 5 secs with exponential back-off */
-		my_sleep = MIN(my_sleep, 5000000);
-		usleep(my_sleep);
 
 		if (*destroy_job) {
 			/* cancelled by signal */
@@ -370,13 +425,15 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	if (i > 0) {
 		xsignal_block(sig_array);
 		if (*destroy_job) {
-			info("Cancelled pending job step");
+			info("Cancelled pending step for job %u",
+			     job->ctx_params.job_id);
 			return SLURM_ERROR;
 		}
 	}
 
 	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_STEPID, &job->stepid);
-	/*  Number of hosts in job may not have been initialized yet if
+	/*
+	 *  Number of hosts in job may not have been initialized yet if
 	 *    --jobid was used or only SLURM_JOB_ID was set in user env.
 	 *    Reset the value here just in case.
 	 */
@@ -386,20 +443,23 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	/*
 	 * Recreate filenames which may depend upon step id
 	 */
-	job_update_io_fnames(job);
+	job_update_io_fnames(job, opt_local);
 
 	return SLURM_SUCCESS;
 }
 
 extern void launch_common_set_stdio_fds(srun_job_t *job,
-					slurm_step_io_fds_t *cio_fds)
+					slurm_step_io_fds_t *cio_fds,
+					slurm_opt_t *opt_local)
 {
+	srun_opt_t *srun_opt = opt_local->srun_opt;
 	bool err_shares_out = false;
 	int file_flags;
+	xassert(srun_opt);
 
-	if (opt.open_mode == OPEN_MODE_APPEND)
+	if (srun_opt->open_mode == OPEN_MODE_APPEND)
 		file_flags = O_CREAT|O_WRONLY|O_APPEND;
-	else if (opt.open_mode == OPEN_MODE_TRUNCATE)
+	else if (srun_opt->open_mode == OPEN_MODE_TRUNCATE)
 		file_flags = O_CREAT|O_WRONLY|O_APPEND|O_TRUNC;
 	else {
 		slurm_ctl_conf_t *conf;
@@ -417,17 +477,17 @@ extern void launch_common_set_stdio_fds(srun_job_t *job,
 	if (_is_local_file(job->ifname)) {
 		if ((job->ifname->name == NULL) ||
 		    (job->ifname->taskid != -1)) {
-			cio_fds->in.fd = STDIN_FILENO;
+			cio_fds->input.fd = STDIN_FILENO;
 		} else {
-			cio_fds->in.fd = open(job->ifname->name, O_RDONLY);
-			if (cio_fds->in.fd == -1) {
+			cio_fds->input.fd = open(job->ifname->name, O_RDONLY);
+			if (cio_fds->input.fd == -1) {
 				error("Could not open stdin file: %m");
 				exit(error_exit);
 			}
 		}
 		if (job->ifname->type == IO_ONE) {
-			cio_fds->in.taskid = job->ifname->taskid;
-			cio_fds->in.nodeid = slurm_step_layout_host_id(
+			cio_fds->input.taskid = job->ifname->taskid;
+			cio_fds->input.nodeid = slurm_step_layout_host_id(
 				launch_common_get_slurm_step_layout(job),
 				job->ifname->taskid);
 		}
@@ -478,49 +538,54 @@ extern void launch_common_set_stdio_fds(srun_job_t *job,
 	}
 }
 
-extern int launch_g_setup_srun_opt(char **rest)
+extern int launch_g_setup_srun_opt(char **rest, slurm_opt_t *opt_local)
 {
 	if (launch_init() < 0)
 		return SLURM_ERROR;
 
-	return (*(ops.setup_srun_opt))(rest);
+	return (*(ops.setup_srun_opt))(rest, opt_local);
 }
 
-extern int launch_g_handle_multi_prog_verify(int command_pos)
+extern int launch_g_handle_multi_prog_verify(int command_pos,
+					     slurm_opt_t *opt_local)
 {
 	if (launch_init() < 0)
 		return 0;
 
-	return (*(ops.handle_multi_prog))(command_pos);
+	return (*(ops.handle_multi_prog))(command_pos, opt_local);
 }
 
 extern int launch_g_create_job_step(srun_job_t *job, bool use_all_cpus,
 				    void (*signal_function)(int),
-				    sig_atomic_t *destroy_job)
+				    sig_atomic_t *destroy_job,
+				    slurm_opt_t *opt_local)
 {
 	if (launch_init() < 0)
 		return SLURM_ERROR;
 
-	return (*(ops.create_job_step))(
-		job, use_all_cpus, signal_function, destroy_job);
+	return (*(ops.create_job_step))(job, use_all_cpus, signal_function,
+					destroy_job, opt_local);
 }
 
-extern int launch_g_step_launch(
-	srun_job_t *job, slurm_step_io_fds_t *cio_fds,
-	uint32_t *global_rc, slurm_step_launch_callbacks_t *step_callbacks)
+extern int launch_g_step_launch(srun_job_t *job, slurm_step_io_fds_t *cio_fds,
+				uint32_t *global_rc,
+				slurm_step_launch_callbacks_t *step_callbacks,
+				slurm_opt_t *opt_local)
 {
 	if (launch_init() < 0)
 		return SLURM_ERROR;
 
-	return (*(ops.step_launch))(job, cio_fds, global_rc, step_callbacks);
+	return (*(ops.step_launch))(job, cio_fds, global_rc, step_callbacks,
+				    opt_local);
 }
 
-extern int launch_g_step_wait(srun_job_t *job, bool got_alloc)
+extern int launch_g_step_wait(srun_job_t *job, bool got_alloc,
+			      slurm_opt_t *opt_local)
 {
 	if (launch_init() < 0)
 		return SLURM_ERROR;
 
-	return (*(ops.step_wait))(job, got_alloc);
+	return (*(ops.step_wait))(job, got_alloc, opt_local);
 }
 
 extern int launch_g_step_terminate(void)

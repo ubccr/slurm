@@ -1,4 +1,4 @@
-.TH slurmctld "8" "Slurm Daemon" "April 2015" "Slurm Daemon"
+.TH slurmctld "8" "Slurm Daemon" "June 2018" "Slurm Daemon"
 
 .SH "NAME"
 slurmctld \- The central management daemon of Slurm.
@@ -14,11 +14,6 @@ the primary server fails.
 OPTIONS
 
 .TP
-\fB\-B\fR
-Do not recover state of BlueGene blocks when running on a bluegene
-system.
-
-.TP
 \fB\-c\fR
 Clear all previous \fBslurmctld\fR state from its last checkpoint.
 With this option, all jobs, including both running and queued, and all
@@ -29,6 +24,9 @@ NOTE: It is rare you would ever want to use this in production as all
 jobs will be killed.
 
 .TP
+\fB\-d\fR
+Run \fBslurmctld\fR in the background.
+.TP
 \fB\-D\fR
 Run \fBslurmctld\fR in the foreground with logging copied to stdout.
 .TP
@@ -37,6 +35,9 @@ Read configuration from the specified file. See \fBNOTES\fR below.
 .TP
 \fB\-h\fR
 Help; print a brief summary of command options.
+.TP
+\fB\-i\fR
+Ignore errors found while reading in state files on startup.
 .TP
 \fB\-L <file>\fR
 Write log messages to the specified file.

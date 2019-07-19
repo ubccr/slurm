@@ -7,28 +7,24 @@
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
 
 #include <netinet/in.h>
 #include <pthread.h>
@@ -53,6 +49,7 @@
 #include "src/common/fd.h"
 #include "src/common/forward.h"
 #include "src/common/hostlist.h"
+#include "src/common/macros.h"
 #include "src/common/net.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_cred.h"
@@ -117,7 +114,7 @@ static struct termios termdefaults;
 /**********************************************************************
  * sattach
  **********************************************************************/
-int sattach(int argc, char *argv[])
+int sattach(int argc, char **argv)
 {
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
 	slurm_step_layout_t *layout;
@@ -163,8 +160,8 @@ int sattach(int argc, char *argv[])
 
 	_mpir_init(layout->task_cnt);
 	if (opt.input_filter_set) {
-		opt.fds.in.nodeid =
-			_nodeid_from_layout(layout, opt.fds.in.taskid);
+		opt.fds.input.nodeid =
+			_nodeid_from_layout(layout, opt.fds.input.taskid);
 	}
 
 	if (layout->front_end)
@@ -177,7 +174,7 @@ int sattach(int argc, char *argv[])
 
 	io = client_io_handler_create(opt.fds, layout->task_cnt,
 				      layout->node_cnt, fake_cred,
-				      opt.labelio);
+				      opt.labelio, NO_VAL, NO_VAL);
 	client_io_handler_start(io);
 
 	if (opt.pty) {
@@ -273,6 +270,7 @@ static void print_layout_info(slurm_step_layout_t *layout)
 		printf("\n");
 		free(name);
 	}
+	hostlist_destroy(nl);
 }
 
 
@@ -454,12 +452,11 @@ static message_thread_state_t *_msg_thr_create(int num_nodes, int num_tasks)
 	eio_obj_t *obj;
 	int i;
 	message_thread_state_t *mts;
-	pthread_attr_t attr;
 
 	debug("Entering _msg_thr_create()");
 	mts = (message_thread_state_t *)xmalloc(sizeof(message_thread_state_t));
 	slurm_mutex_init(&mts->lock);
-	pthread_cond_init(&mts->cond, NULL);
+	slurm_cond_init(&mts->cond, NULL);
 	mts->tasks_started = bit_alloc(num_tasks);
 	mts->tasks_exited = bit_alloc(num_tasks);
 	mts->msg_handle = eio_handle_create(0);
@@ -476,14 +473,7 @@ static message_thread_state_t *_msg_thr_create(int num_nodes, int num_tasks)
 		eio_new_initial_obj(mts->msg_handle, obj);
 	}
 
-	slurm_attr_init(&attr);
-	if (pthread_create(&mts->msg_thread, &attr,
-			   _msg_thr_internal, (void *)mts) != 0) {
-		error("pthread_create of message thread: %m");
-		slurm_attr_destroy(&attr);
-		goto fail;
-	}
-	slurm_attr_destroy(&attr);
+	slurm_thread_create(&mts->msg_thread, _msg_thr_internal, mts);
 
 	return mts;
 fail:
@@ -499,7 +489,7 @@ static void _msg_thr_wait(message_thread_state_t *mts)
 	slurm_mutex_lock(&mts->lock);
 	while (bit_set_count(mts->tasks_exited)
 	       < bit_set_count(mts->tasks_started)) {
-		pthread_cond_wait(&mts->cond, &mts->lock);
+		slurm_cond_wait(&mts->cond, &mts->lock);
 	}
 	slurm_mutex_unlock(&mts->lock);
 }
@@ -509,8 +499,8 @@ static void _msg_thr_destroy(message_thread_state_t *mts)
 	eio_signal_shutdown(mts->msg_handle);
 	pthread_join(mts->msg_thread, NULL);
 	eio_handle_destroy(mts->msg_handle);
-	pthread_mutex_destroy(&mts->lock);
-	pthread_cond_destroy(&mts->cond);
+	slurm_mutex_destroy(&mts->lock);
+	slurm_cond_destroy(&mts->cond);
 	FREE_NULL_BITMAP(mts->tasks_started);
 	FREE_NULL_BITMAP(mts->tasks_exited);
 }
@@ -527,7 +517,7 @@ _launch_handler(message_thread_state_t *mts, slurm_msg_t *resp)
 		bit_set(mts->tasks_started, msg->task_ids[i]);
 	}
 
-	pthread_cond_signal(&mts->cond);
+	slurm_cond_signal(&mts->cond);
 	slurm_mutex_unlock(&mts->lock);
 
 }
@@ -571,7 +561,7 @@ _exit_handler(message_thread_state_t *mts, slurm_msg_t *exit_msg)
 		}
 	}
 
-	pthread_cond_signal(&mts->cond);
+	slurm_cond_signal(&mts->cond);
 	slurm_mutex_unlock(&mts->lock);
 }
 
@@ -581,12 +571,10 @@ _handle_msg(void *arg, slurm_msg_t *msg)
 	static uid_t slurm_uid;
 	static bool slurm_uid_set = false;
 	message_thread_state_t *mts = (message_thread_state_t *)arg;
-	char *auth_info = slurm_get_auth_info();
 	uid_t req_uid;
 	uid_t uid = getuid();
 
-	req_uid = g_slurm_auth_get_uid(msg->auth_cred, auth_info);
-	xfree(auth_info);
+	req_uid = g_slurm_auth_get_uid(msg->auth_cred);
 
 	if (!slurm_uid_set) {
 		slurm_uid = slurm_get_slurm_user_id();
@@ -655,10 +643,7 @@ _mpir_dump_proctable()
 
 	for (i = 0; i < MPIR_proctable_size; i++) {
 		tv = &MPIR_proctable[i];
-		if (!tv)
-			break;
 		info("task:%d, host:%s, pid:%d, executable:%s",
 		     i, tv->host_name, tv->pid, tv->executable_name);
 	}
 }
-

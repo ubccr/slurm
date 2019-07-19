@@ -1,4 +1,4 @@
-.TH slurmd "8" "Slurm Daemon" "January 2016" "Slurm Daemon"
+.TH slurmd "8" "Slurm Daemon" "January 2019" "Slurm Daemon"
 
 .SH "NAME"
 slurmd \- The compute node daemon for Slurm.
@@ -13,7 +13,7 @@ running tasks upon request.
 .TP
 OPTIONS
 .TP
-\fB\-B\fR
+\fB\-b\fR
 Report node rebooted when daemon restarted. Used for testing purposes.
 
 .TP
@@ -37,6 +37,10 @@ Run slurmd in the foreground. Error and debug messages will be copied to stderr.
 \fB\-f <file>\fR
 Read configuration from the specified file. See \fBNOTES\fR below.
 .TP
+\fB\-G\fR
+Print Generic RESource (GRES) configuration (based upon gres.conf contents
+for this node) and exit.
+.TP
 \fB\-h\fR
 Help; print a brief summary of command options.
 .TP
@@ -56,8 +60,8 @@ Set the daemon's nice value to the specified value, typically a negative number.
 Also note the \fBPropagatePrioProcess\fR configuration parameter.
 
 .TP
-\fB\-N <hostname>\fR
-Run the daemon with the given hostname. Used to emulate a larger system
+\fB\-N <nodename>\fR
+Run the daemon with the given nodename. Used to emulate a larger system
 with more than one slurmd daemon per node. Requires that Slurm be built using
 the \-\-enable\-multiple\-slurmd configure option.
 
@@ -65,7 +69,7 @@ the \-\-enable\-multiple\-slurmd configure option.
 \fB\-v\fR
 Verbose operation. Multiple \-v's increase verbosity.
 .TP
-\fB\-V\fR
+\fB\-V\fR, \fB\-\-version\fR
 Print version information and exit.
 
 .SH "ENVIRONMENT VARIABLES"

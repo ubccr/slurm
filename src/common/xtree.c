@@ -3,11 +3,11 @@
  *****************************************************************************
  *  Copyright (C) 2012 CEA/DAM/DIF
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -23,13 +23,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -127,7 +127,7 @@ xtree_node_t* xtree_add_child(xtree_t* tree,
 
 	xassert(flags & (XTREE_APPEND | XTREE_PREPEND));
 
-	newnode = (xtree_node_t*)xmalloc(sizeof(xtree_node_t));
+	newnode = xmalloc(sizeof(xtree_node_t));
 	newnode->data     = data;
 	newnode->parent   = parent;
 	newnode->start    = NULL;
@@ -195,7 +195,7 @@ xtree_node_t* xtree_add_sibling(xtree_t* tree,
 	if (!node->parent)
 		return NULL;
 
-	newnode = (xtree_node_t*)xmalloc(sizeof(xtree_node_t));
+	newnode = xmalloc(sizeof(xtree_node_t));
 	newnode->data     = data;
 	newnode->parent   = node->parent;
 	newnode->start    = NULL;
@@ -455,8 +455,7 @@ xtree_node_t** xtree_get_parents(xtree_t* tree,
 		return NULL;
 
 	parents_size = XTREE_GET_PARENTS_FIRST_SIZE;
-	parents_list = (xtree_node_t**)xmalloc(
-			sizeof(xtree_node_t*)*parents_size);
+	parents_list = xmalloc(sizeof(xtree_node_t *) * parents_size);
 
 	current_node = node->parent;
 	while (current_node) {
@@ -562,7 +561,7 @@ xtree_node_t** xtree_get_leaves(xtree_t* tree,
 	}
 	st.list_count = 0;
 	st.size = XTREE_GET_LEAVES_FIRST_SIZE;
-	st.list = (xtree_node_t**)xmalloc(sizeof(xtree_node_t*)*st.size);
+	st.list = xmalloc(sizeof(xtree_node_t *) * st.size);
 	xtree_walk(tree, node, 0, UINT32_MAX, xtree_get_leaves_helper, &st);
 	if (st.list_count != 0) {
 		st.list = (xtree_node_t**)xrealloc(st.list,
@@ -577,4 +576,3 @@ xtree_node_t** xtree_get_leaves(xtree_t* tree,
 	*size = st.list_count;
 	return st.list;
 }
-

@@ -6,11 +6,11 @@
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,65 +26,33 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _SLURM_PROTOCOL_INTERFACE_H
 #define _SLURM_PROTOCOL_INTERFACE_H
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif  /* HAVE_INTTYPES_H */
-#else   /* !HAVE_CONFIG_H */
-#  include <inttypes.h>
-#endif  /*  HAVE_CONFIG_H */
-
-/* WHAT ABOUT THESE INCLUDES */
+#include <fcntl.h>
+#include <inttypes.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <sys/time.h>
-
-
-#if HAVE_SYS_SOCKET_H
-#  include <sys/socket.h>
-#else
-#  if HAVE_SOCKET_H
-#    include <socket.h>
-#  endif
-#endif
-
-
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <stdarg.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/slurm_protocol_common.h"
-
-/****************\
- **  Data Types  **
- \****************/
-
-typedef enum slurm_socket_type {
-	SLURM_MESSAGE ,
-	SLURM_STREAM
-} slurm_socket_type_t;
 
 /*******************************\
  **  MIDDLE LAYER FUNCTIONS  **
@@ -107,7 +75,7 @@ typedef enum slurm_socket_type {
  * timing out after `timeout' milliseconds.
  *
  */
-extern ssize_t slurm_msg_recvfrom_timeout(slurm_fd_t fd, char **buf,
+extern ssize_t slurm_msg_recvfrom_timeout(int fd, char **buf,
 		size_t *len, uint32_t flags, int timeout);
 
 /* slurm_msg_sendto
@@ -115,15 +83,17 @@ extern ssize_t slurm_msg_recvfrom_timeout(slurm_fd_t fd, char **buf,
  * IN open_fd - an open file descriptor
  * IN buffer - data to transmit
  * IN size - size of buffer in bytes
- * IN flags - communication specific flags
  * RET number of bytes written
  */
-extern ssize_t slurm_msg_sendto ( slurm_fd_t open_fd, char *buffer ,
-			   size_t size , uint32_t flags ) ;
+extern ssize_t slurm_msg_sendto(int open_fd,
+				char *buffer,
+				size_t size);
 /* slurm_msg_sendto_timeout is identical to _slurm_msg_sendto except
  * IN timeout - maximum time to wait for a message in milliseconds */
-extern ssize_t slurm_msg_sendto_timeout ( slurm_fd_t open_fd, char *buffer,
-				   size_t size, uint32_t flags, int timeout );
+extern ssize_t slurm_msg_sendto_timeout(int open_fd,
+					char *buffer,
+					size_t size,
+					int timeout);
 
 /********************/
 /* stream functions */
@@ -132,41 +102,38 @@ extern ssize_t slurm_msg_sendto_timeout ( slurm_fd_t open_fd, char *buffer,
 /* slurm_init_msg_engine
  * opens a stream server and listens on it
  * IN slurm_address 	- slurm_addr_t to bind the server stream to
- * RET slurm_fd		- file descriptor of the stream created
+ * RET fd		- file descriptor of the stream created
  */
-extern slurm_fd_t slurm_init_msg_engine ( slurm_addr_t * slurm_address ) ;
+extern int slurm_init_msg_engine(slurm_addr_t *slurm_address);
 
 /* slurm_accept_msg_conn
  * accepts a incoming stream connection on a stream server slurm_fd
  * IN open_fd		- file descriptor to accept connection on
  * OUT slurm_address 	- slurm_addr_t of the accepted connection
- * RET slurm_fd		- file descriptor of the accepted connection
+ * RET int		- file descriptor of the accepted connection
  */
-extern slurm_fd_t slurm_accept_msg_conn ( slurm_fd_t open_fd ,
-				slurm_addr_t * slurm_address ) ;
+extern int slurm_accept_msg_conn(int open_fd, slurm_addr_t *slurm_address);
 
 /* slurm_open_stream
  * opens a client connection to stream server
  * IN slurm_address 	- slurm_addr_t of the connection destination
  * IN retry             - if true, retry as needed with various ports
  *                        to avoid socket address collision
- * RET slurm_fd_t         - file descriptor of the connection created
+ * RET int              - file descriptor of the connection created
  */
-extern slurm_fd_t slurm_open_stream ( slurm_addr_t * slurm_address,
-				      bool retry ) ;
+extern int slurm_open_stream(slurm_addr_t *slurm_address, bool retry);
 
 /* slurm_get_stream_addr
  * esentially a encapsilated get_sockname
  * IN open_fd 		- file descriptor to retreive slurm_addr_t for
  * OUT address		- address that open_fd to bound to
  */
-extern int slurm_get_stream_addr ( slurm_fd_t open_fd ,
-				   slurm_addr_t * address ) ;
+extern int slurm_get_stream_addr(int open_fd, slurm_addr_t *address);
 
-extern int slurm_send_timeout ( slurm_fd_t open_fd, char *buffer ,
-				size_t size , uint32_t flags, int timeout ) ;
-extern int slurm_recv_timeout ( slurm_fd_t open_fd, char *buffer ,
-				size_t size , uint32_t flags, int timeout ) ;
+extern int slurm_send_timeout(int open_fd, char *buffer, size_t size,
+			      uint32_t flags, int timeout);
+extern int slurm_recv_timeout(int open_fd, char *buffer, size_t size,
+			      uint32_t flags, int timeout);
 
 /***************************/
 /* slurm address functions */
@@ -213,27 +180,9 @@ extern void slurm_pack_slurm_addr ( slurm_addr_t * slurm_address ,
  * unpacks a buffer into a slurm_addr_t after serialization transport
  * OUT slurm_address	- slurm_addr_t to unpack to
  * IN/OUT buffer	- buffer to upack the slurm_addr_t from
- * returns 		- SLURM error code
+ * returns 		- Slurm error code
  */
 extern int slurm_unpack_slurm_addr_no_alloc (
 	slurm_addr_t * slurm_address , Buf buffer ) ;
-
-
-/*******************************\
- ** BSD LINUX SOCKET FUNCTIONS  **
- \*******************************/
-
-/* Put the address of the peer connected to socket FD into *ADDR
- * (which is *LEN bytes long), and its actual length into *LEN.  */
-extern int slurm_getpeername (int __fd, struct sockaddr * __addr,
-			      socklen_t *__restrict __len) ;
-
-/* Set socket FD's option OPTNAME at protocol level LEVEL
- * to *OPTVAL (which is OPTLEN bytes long).
- * Returns 0 on success, -1 for errors.  */
-extern int slurm_setsockopt (int __fd, int __level, int __optname,
-			     __const void *__optval, socklen_t __optlen) ;
-
-extern int slurm_close (int __fd ) ;
 
 #endif /* !_SLURM_PROTOCOL_INTERFACE_H */

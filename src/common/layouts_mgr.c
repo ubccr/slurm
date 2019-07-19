@@ -6,11 +6,11 @@
  *  Adapted by Matthieu Hautreux <matthieu.hautreux@cea.fr> for slurm-14.11.
  *  Enhanced by Matthieu Hautreux <matthieu.hautreux@cea.fr> for slurm-15.x.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,29 +26,28 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#include <pthread.h>
-#include <string.h>
-#include <strings.h>
 #include <ctype.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 
 #include "layouts_mgr.h"
 
-#include "src/common/entity.h"
-#include "src/common/layout.h"
-
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
+#include "src/common/entity.h"
+#include "src/common/layout.h"
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/node_conf.h"
@@ -74,8 +73,6 @@
 /*****************************************************************************\
  *                            STRUCTURES AND TYPES                           *
 \*****************************************************************************/
-
-void free(void*);
 
 /*
  * layouts_conf_spec_t - structure used to keep track of layouts conf details
@@ -184,10 +181,12 @@ typedef struct layouts_keydef_st {
  * layouts_keydef_idfunc - identity function to build an hash table of
  *        layouts_keydef_t
  */
-static const char* layouts_keydef_idfunc(void* item)
+static void layouts_keydef_idfunc(void* item, const char** key,
+				  uint32_t* key_len)
 {
 	layouts_keydef_t* keydef = (layouts_keydef_t*)item;
-	return keydef->key;
+	*key = keydef->key;
+	*key_len = strlen(keydef->key);
 }
 
 /*
@@ -196,6 +195,7 @@ static const char* layouts_keydef_idfunc(void* item)
  */
 typedef struct layouts_mgr_st {
 	pthread_mutex_t lock;
+	bool	init_done;	/* Set if memory allocated for arrays/List */
 	layout_plugin_t *plugins;
 	uint32_t plugins_count;
 	List    layouts_desc;  /* list of the layouts requested in conf */
@@ -209,7 +209,7 @@ typedef struct layouts_mgr_st {
 \*****************************************************************************/
 
 /** global structure holding layouts and entities */
-static layouts_mgr_t layouts_mgr = {PTHREAD_MUTEX_INITIALIZER};
+static layouts_mgr_t layouts_mgr = {PTHREAD_MUTEX_INITIALIZER, false};
 static layouts_mgr_t* mgr = &layouts_mgr;
 
 /*****************************************************************************\
@@ -217,7 +217,7 @@ static layouts_mgr_t* mgr = &layouts_mgr;
 \*****************************************************************************/
 
 /* entities added to the layouts mgr hash table come from the heap,
- * this funciton will help to free them while freeing the hash table */
+ * this function will help to free them while freeing the hash table */
 static void _entity_free(void* item)
 {
 	entity_t* entity = (entity_t*) item;
@@ -226,7 +226,7 @@ static void _entity_free(void* item)
 }
 
 /* layouts added to the layouts mgr hash table come from the heap,
- * this funciton will help to free them while freeing the hash table */
+ * this function will help to free them while freeing the hash table */
 static void _layout_free(void* item)
 {
 	layout_t* layout = (layout_t*) item;
@@ -235,7 +235,7 @@ static void _layout_free(void* item)
 }
 
 /* keydef added to the layouts mgr hash table come from the heap,
- * this funciton will help to free them while freeing the hash table */
+ * this function will help to free them while freeing the hash table */
 static void _layouts_keydef_free(void* x)
 {
 	layouts_keydef_t* keydef = (layouts_keydef_t*)x;
@@ -269,7 +269,7 @@ static char* _cat(char* dest, const char* src, size_t n)
 	return r;
 }
 
-static char* trim(char* str)
+static char* _trim(char* str)
 {
 	char* str_modifier;
 	if (!str)
@@ -335,7 +335,7 @@ static void _normalize_keydef_mgrkey(char* buffer, uint32_t size,
 
 static void _entity_add_data(entity_t* e, const char* key, void* data)
 {
-	layouts_keydef_t* hkey = xhash_get(mgr->keydefs, key);
+	layouts_keydef_t* hkey = xhash_get_str(mgr->keydefs, key);
 	xassert(hkey);
 	void (*freefunc)(void* p) = xfree_as_callback;
 	if (hkey && hkey->type == L_T_CUSTOM) {
@@ -412,7 +412,7 @@ layouts_keydef_t* _layouts_entity_get_kv_keydef(layout_t* l, entity_t* e,
 	if (l == NULL || e == NULL || key == NULL)
 		return NULL;
 	_normalize_keydef_key(keytmp, PATHLEN, key, l->type);
-	return xhash_get(mgr->keydefs, keytmp);
+	return xhash_get_str(mgr->keydefs, keytmp);
 }
 
 int _layouts_entity_get_kv_type(layout_t* l, entity_t* e, char* key)
@@ -553,6 +553,9 @@ int _layouts_entity_set_kv(layout_t* l, entity_t* e, char* key, void* value,
 	case L_T_LONG_DOUBLE:
 		size = sizeof(long double);
 		break;
+	default:
+		value = NULL;
+		return SLURM_ERROR;
 	}
 	return entity_set_data(e, key_keydef, value, size);
 }
@@ -616,8 +619,6 @@ int _layouts_entity_get_kv(layout_t* l, entity_t* e, char* key, void* value,
 	}
 
 	switch(real_type) {
-	case L_T_ERROR:
-		return SLURM_ERROR;
 	case L_T_STRING:
 		pstr = (char**) value;
 		*pstr = xstrdup(data);
@@ -648,6 +649,9 @@ int _layouts_entity_get_kv(layout_t* l, entity_t* e, char* key, void* value,
 	case L_T_LONG_DOUBLE:
 		size = sizeof(long double);
 		break;
+	case L_T_ERROR:
+	default:
+		return SLURM_ERROR;
 	}
 	memcpy(value, data, size);
 	return SLURM_SUCCESS;
@@ -674,17 +678,16 @@ int _layouts_entity_get_mkv(layout_t* l, entity_t* e, char* keys, void* value,
 	while ((key = hostlist_shift(kl))) {
 		if (processed >= length) {
 			rc++;
-			continue;
-		}
-		if (_layouts_entity_get_kv_size(l, e, key, &elt_size) ||
-		    (processed + elt_size) > length ||
-		    _layouts_entity_get_kv(l, e, key, value, key_type)) {
+		} else if (_layouts_entity_get_kv_size(l, e, key, &elt_size) ||
+			   (processed + elt_size) > length ||
+			   _layouts_entity_get_kv(l, e, key, value, key_type)) {
 			rc++;
 			processed = length;
-			continue;
+		} else {
+			value += elt_size;
+			processed += elt_size;
 		}
-		value += elt_size;
-		processed += elt_size;
+		free(key);
 	}
 	hostlist_destroy(kl);
 
@@ -736,15 +739,14 @@ int _layouts_entity_get_mkv_ref(layout_t* l, entity_t* e, char* keys,
 	while ((key = hostlist_shift(kl))) {
 		if (processed >= length) {
 			rc++;
-			continue;
-		}
-		if (_layouts_entity_get_kv_ref(l, e, key, value, key_type)) {
+		} else if (_layouts_entity_get_kv_ref(l, e, key, value, key_type)) {
 			rc++;
 			processed = length;
-			continue;
+		} else {
+			value += elt_size;
+			processed += elt_size;
 		}
-		value += elt_size;
-		processed += elt_size;
+		free(key);
 	}
 	hostlist_destroy(kl);
 
@@ -797,7 +799,7 @@ static void _layouts_init_keydef(xhash_t* keydefs,
 		/* if not end of list, a keyspec key is mandatory */
 		_normalize_keydef_key(keytmp, PATHLEN, current->key,
 				      plugin->layout->type);
-		xassert(xhash_get(keydefs, keytmp) == NULL);
+		xassert(xhash_get_str(keydefs, keytmp) == NULL);
 		nkeydef = (layouts_keydef_t*)
 			xmalloc(sizeof(layouts_keydef_t));
 		nkeydef->key = xstrdup(keytmp);
@@ -824,7 +826,7 @@ static void _layouts_init_keydef(xhash_t* keydefs,
 	case LAYOUT_STRUCT_TREE:
 		_normalize_keydef_mgrkey(keytmp, PATHLEN, "enclosed",
 					 plugin->layout->type);
-		xassert(xhash_get(keydefs, keytmp) == NULL);
+		xassert(xhash_get_str(keydefs, keytmp) == NULL);
 		nkeydef = (layouts_keydef_t*)
 			xmalloc(sizeof(layouts_keydef_t));
 		nkeydef->key = xstrdup(keytmp);
@@ -893,7 +895,7 @@ static void _layouts_mgr_parse_global_conf(layouts_mgr_t* mgr)
 {
 	char* layouts;
 	char* parser;
-	char* saveptr;
+	char* saveptr = NULL;
 	char* slash;
 	layouts_conf_spec_t* nspec;
 
@@ -903,14 +905,14 @@ static void _layouts_mgr_parse_global_conf(layouts_mgr_t* mgr)
 	while (parser) {
 		nspec = (layouts_conf_spec_t*)xmalloc(
 			sizeof(layouts_conf_spec_t));
-		nspec->whole_name = xstrdup(trim(parser));
+		nspec->whole_name = xstrdup(_trim(parser));
 		slash = strchr(parser, '/');
 		if (slash) {
 			*slash = 0;
-			nspec->type = xstrdup(trim(parser));
-			nspec->name = xstrdup(trim(slash+1));
+			nspec->type = xstrdup(_trim(parser));
+			nspec->name = xstrdup(_trim(slash+1));
 		} else {
-			nspec->type = xstrdup(trim(parser));
+			nspec->type = xstrdup(_trim(parser));
 			nspec->name = xstrdup("default");
 		}
 		list_append(mgr->layouts_desc, nspec);
@@ -919,29 +921,32 @@ static void _layouts_mgr_parse_global_conf(layouts_mgr_t* mgr)
 	xfree(layouts);
 }
 
-static void layouts_mgr_init(layouts_mgr_t* mgr)
-{
-	_layouts_mgr_parse_global_conf(mgr);
-
-	mgr->layouts = xhash_init(layout_hashable_identify_by_type,
-				  (xhash_freefunc_t)_layout_free, NULL, 0);
-	mgr->entities = xhash_init(entity_hashable_identify,
-				   (xhash_freefunc_t)_entity_free, NULL, 0);
-	mgr->keydefs = xhash_init(layouts_keydef_idfunc,
-				  _layouts_keydef_free, NULL, 0);
-}
-
-static void layouts_mgr_free(layouts_mgr_t* mgr)
+static void _layouts_mgr_free(layouts_mgr_t* mgr)
 {
 	/* free the configuration details */
 	FREE_NULL_LIST(mgr->layouts_desc);
 
-	/* FIXME: can we do a faster free here ? since each node removal will
+	/* FIXME: can we do a faster free here? since each node removal will
 	 * modify either the entities or layouts for back (or forward)
 	 * references. */
 	xhash_free(mgr->layouts);
 	xhash_free(mgr->entities);
 	xhash_free(mgr->keydefs);
+	mgr->init_done = false;
+}
+
+static void _layouts_mgr_init(layouts_mgr_t* mgr)
+{
+	if (mgr->init_done)
+		_layouts_mgr_free(mgr);
+	mgr->init_done = true;
+	_layouts_mgr_parse_global_conf(mgr);
+	mgr->layouts = xhash_init(layout_hashable_identify_by_type,
+				  _layout_free);
+	mgr->entities = xhash_init(entity_hashable_identify,
+				   _entity_free);
+	mgr->keydefs = xhash_init(layouts_keydef_idfunc,
+				  _layouts_keydef_free);
 }
 
 /*****************************************************************************\
@@ -1065,7 +1070,7 @@ static void _layouts_load_automerge(layout_plugin_t* plugin, entity_t* e,
 		option_key = entity_option->key;
 		_normalize_keydef_key(key_keydef, PATHLEN, option_key,
 				      plugin->layout->type);
-		keydef = xhash_get(mgr->keydefs, key_keydef);
+		keydef = xhash_get_str(mgr->keydefs, key_keydef);
 		if (!keydef) {
 			/* key is not meant to be automatically handled,
 			 * ignore it for this function */
@@ -1085,7 +1090,12 @@ static void _layouts_load_automerge(layout_plugin_t* plugin, entity_t* e,
 		} else if (_layouts_merge_check(S_P_UINT32, L_T_UINT32)) {
 			_layouts_load_merge(uint32_t, s_p_get_uint32);
 		} else if (_layouts_merge_check(S_P_BOOLEAN, L_T_BOOLEAN)) {
-			_layouts_load_merge(bool, s_p_get_boolean);
+			bool newvalue;
+			if (s_p_get_boolean(&newvalue, option_key, etbl)) {
+				bool *newalloc = xmalloc(sizeof(bool));
+				*newalloc = newvalue;
+				_entity_add_data(e, key_keydef, newalloc);
+			}
 		} else if (_layouts_merge_check(S_P_LONG, L_T_LONG)) {
 			_layouts_load_merge(long, s_p_get_long);
 		} else if (_layouts_merge_check(S_P_FLOAT, L_T_FLOAT)) {
@@ -1153,10 +1163,10 @@ static int _layouts_read_config_post(layout_plugin_t* plugin,
 			xfree(root_nodename);
 			return SLURM_ERROR;
 		}
-		e = xhash_get(mgr->entities, trim(root_nodename));
+		e = xhash_get_str(mgr->entities, _trim(root_nodename));
 		if (!e) {
 			error("layouts: unable to find specified root "
-			      "entity `%s'", trim(root_nodename));
+			      "entity `%s'", _trim(root_nodename));
 			xfree(root_nodename);
 			return SLURM_ERROR;
 		}
@@ -1258,7 +1268,7 @@ static int _layouts_load_config_common(layout_plugin_t* plugin,
 		}
 
 		/* look for the entity in the entities hash table*/
-		e = xhash_get(mgr->entities, e_name);
+		e = xhash_get_str(mgr->entities, e_name);
 		if (!e) {
 			/* if the entity does not already exists, create it */
 			if (!s_p_get_string(&e_type, "Type", entity_tbl)) {
@@ -1508,7 +1518,8 @@ uint8_t _layouts_build_xtree_walk(xtree_node_t* node,
 		enclosed_hostlist = hostlist_create(enclosed_str);
 		entity_delete_data(e, p->enclosed_key);
 		while ((enclosed_name = hostlist_shift(enclosed_hostlist))) {
-			enclosed_e = xhash_get(mgr->entities, enclosed_name);
+			enclosed_e = xhash_get_str(mgr->entities,
+						   enclosed_name);
 			if (!enclosed_e) {
 				error("layouts: entity '%s' specified in "
 				      "enclosed entities of entity '%s' "
@@ -1669,7 +1680,7 @@ static void _pack_entity_layout_data(void* item, void* arg)
 
 	/* we must be able to get the keydef associated to the data key */
 	xassert(data);
-	keydef = xhash_get(mgr->keydefs, data->key);
+	keydef = xhash_get_str(mgr->keydefs, data->key);
 	xassert(keydef);
 
 	/* only dump keys related to the targeted layout */
@@ -1889,8 +1900,8 @@ static int _autoupdate_entity_kv(layouts_keydef_t* keydef,
 /*
  * helper function used to update KVs of an entity using its xtree_node
  * looking for known inheritance in the neighborhood (parents/children) */
-static void _tree_update_node_entity_data(void* item, void* arg) {
-
+static void _tree_update_node_entity_data(void* item, void* arg)
+{
 	uint32_t action;
 	entity_data_t* data;
 	_autoupdate_tree_args_t *pargs;
@@ -1913,7 +1924,7 @@ static void _tree_update_node_entity_data(void* item, void* arg) {
 
 	/* we must be able to get the keydef associated to the data key */
 	xassert(data);
-	keydef = xhash_get(mgr->keydefs, data->key);
+	keydef = xhash_get_str(mgr->keydefs, data->key);
 	xassert(keydef);
 
 	/* only work on keys that depend of their neighborhood */
@@ -1935,7 +1946,7 @@ static void _tree_update_node_entity_data(void* item, void* arg) {
 
 	/* get ref_key (identical if not defined) */
 	if (keydef->ref_key != NULL) {
-		ref_keydef = xhash_get(mgr->keydefs, keydef->ref_key);
+		ref_keydef = xhash_get_str(mgr->keydefs, keydef->ref_key);
 		if (!ref_keydef) {
 			debug2("layouts: autoupdate: key='%s': invalid "
 			       "ref_key='%s'", keydef->key, keydef->ref_key);
@@ -1954,6 +1965,8 @@ static void _tree_update_node_entity_data(void* item, void* arg) {
 
 		/* get current node value reference */
 		oldvalue = entity_get_data_ref(cnode->entity, keydef->key);
+		if (!oldvalue)
+			return;
 
 		/* get siblings count */
 		child = node->start;
@@ -1988,6 +2001,8 @@ static void _tree_update_node_entity_data(void* item, void* arg) {
 
 		/* get current node value reference */
 		oldvalue = entity_get_data_ref(cnode->entity, keydef->key);
+		if (!oldvalue)
+			return;
 
 		/* get children count */
 		node = (xtree_node_t*)cnode->node;
@@ -2190,7 +2205,7 @@ static void _dump_entity_data(void* item, void* arg)
 	char* data_dump;
 
 	xassert(data);
-	keydef = xhash_get(mgr->keydefs, data->key);
+	keydef = xhash_get_str(mgr->keydefs, data->key);
 	xassert(keydef);
 	data_dump = _dump_data_key(keydef, data->value);
 
@@ -2273,7 +2288,7 @@ int layouts_init(void)
 
 	slurm_mutex_lock(&layouts_mgr.lock);
 
-	layouts_mgr_init(&layouts_mgr);
+	_layouts_mgr_init(&layouts_mgr);
 	layouts_count = list_count(layouts_mgr.layouts_desc);
 	if (layouts_count == 0)
 		info("layouts: no layout to initialize");
@@ -2316,10 +2331,12 @@ int layouts_fini(void)
 
 	slurm_mutex_lock(&mgr->lock);
 
-	/* free the layouts before destroying the plugins,
+	/*
+	 * free the layouts before destroying the plugins,
 	 * otherwise we will get trouble xfreeing the layouts whose
-	 * memory is owned by the plugins structs */
-	layouts_mgr_free(mgr);
+	 * memory is owned by the plugins structs
+	 */
+	_layouts_mgr_free(mgr);
 
 	for (i = 0; i < mgr->plugins_count; i++) {
 		_layout_plugins_destroy(&mgr->plugins[i]);
@@ -2506,7 +2523,7 @@ exit:
 
 layout_t* layouts_get_layout_nolock(const char* type)
 {
-	return (layout_t*)xhash_get(mgr->layouts, type);
+	return (layout_t*)xhash_get_str(mgr->layouts, type);
 }
 
 layout_t* layouts_get_layout(const char* type)
@@ -2520,7 +2537,7 @@ layout_t* layouts_get_layout(const char* type)
 
 entity_t* layouts_get_entity_nolock(const char* name)
 {
-	return (entity_t*)xhash_get(mgr->entities, name);
+	return (entity_t*)xhash_get_str(mgr->entities, name);
 }
 
 entity_t* layouts_get_entity(const char* name)

@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
-# Purpose: Test of SLURM functionality
+# Purpose: Test of Slurm functionality
 #          test to verify job step time limit
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -12,22 +12,22 @@
 # Written by Joseph Donaghy <donaghy1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
-# This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
-# SLURM is free software; you can redistribute it and/or modify it under
+# Slurm is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
 #
-# SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
 #
 # You should have received a copy of the GNU General Public License along
-# with SLURM; if not, write to the Free Software Foundation, Inc.,
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
@@ -41,11 +41,6 @@ set file_err    "test$test_id.error"
 set timeout 60
 
 print_header $test_id
-
-if {[test_alps]} {
-	send_user "\nWARNING: This test is incompatible with Cray systems\n"
-	exit $exit_code
-}
 
 exec $bin_rm -f $file_in file_out file_err
 make_bash_script $file_in "
@@ -106,16 +101,11 @@ if {[wait_for_file $file_out] == 0} {
 	set exit_code 1
 }
 
-if {[test_launch_poe]} {
-	set step_id 2
-} else {
-	set step_id 1
-}
 if {[wait_for_file $file_err] == 0} {
 	set timed_out 0
 	spawn cat $file_err
 	expect {
-		-re " STEP $job_id.$step_id ON .* CANCELLED AT.*DUE TO TIME LIMIT " {
+		-re " STEP $job_id.1 ON .* CANCELLED AT.*DUE TO TIME LIMIT " {
 			set timed_out 1
 			exp_continue
 		}

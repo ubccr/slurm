@@ -9,22 +9,22 @@
  *
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -43,27 +43,22 @@ enum {
 };
 
 static display_data_t display_data_admin[] = {
-	{G_TYPE_INT, SORTID_POS, NULL, FALSE, -1},
-	{G_TYPE_STRING, SORTID_PARTITION, "PARTITION", TRUE, -1},
-	{G_TYPE_STRING, SORTID_AVAIL, "AVAIL", TRUE, -1},
-	{G_TYPE_STRING, SORTID_TIMELIMIT, "TIMELIMIT", TRUE, -1},
-	{G_TYPE_STRING, SORTID_NODES, "NODES", TRUE, -1},
-#ifdef HAVE_BG
-	{G_TYPE_STRING, SORTID_NODELIST, "MIDPLANELIST", TRUE, -1},
-#else
-	{G_TYPE_STRING, SORTID_NODELIST, "NODELIST", TRUE, -1},
-#endif
-	{G_TYPE_NONE, -1, NULL, FALSE, -1}};
+	{G_TYPE_INT, SORTID_POS, NULL, false, -1},
+	{G_TYPE_STRING, SORTID_PARTITION, "PARTITION", true, -1},
+	{G_TYPE_STRING, SORTID_AVAIL, "AVAIL", true, -1},
+	{G_TYPE_STRING, SORTID_TIMELIMIT, "TIMELIMIT", true, -1},
+	{G_TYPE_STRING, SORTID_NODES, "NODES", true, -1},
+	{G_TYPE_STRING, SORTID_NODELIST, "NODELIST", true, -1},
+	{G_TYPE_NONE, -1, NULL, false, -1}};
 
 static display_data_t options_data_admin[] = {
-	{G_TYPE_STRING, JOB_PAGE, "Jobs", TRUE, -1},
-	{G_TYPE_STRING, NODE_PAGE, "Nodes", TRUE, -1},
-	{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", TRUE, -1},
-	{G_TYPE_NONE, -1, NULL, FALSE, -1}
+	{G_TYPE_STRING, JOB_PAGE, "Jobs", true, -1},
+	{G_TYPE_STRING, NODE_PAGE, "Nodes", true, -1},
+	{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", true, -1},
+	{G_TYPE_NONE, -1, NULL, false, -1}
 };
 
 static display_data_t *local_display_data = NULL;
-
 
 extern void get_info_admin(GtkTable *table, display_data_t *display_data)
 {
@@ -97,8 +92,6 @@ extern void row_clicked_admin(GtkTreeView *tree_view,
 			      GtkTreeViewColumn *column,
 			      gpointer user_data)
 {
-	/* job_info_msg_t *job_info_ptr = (job_info_msg_t *)user_data; */
-/* 	job_info_t *job_ptr = NULL; */
 	int line = get_row_number(tree_view, path);
 	GtkWidget *popup = NULL;
 	GtkWidget *label = NULL;
@@ -108,22 +101,16 @@ extern void row_clicked_admin(GtkTreeView *tree_view,
 		return;
 	}
 
-/* 	part_ptr = &new_part_ptr->partition_array[line]; */
-	/* if (!(info = slurm_sprint_partition_info(part_ptr, 0))) { */
-/* 		info = xmalloc(100); */
-/* 		sprintf(info, "Problem getting partition info for %s",  */
-/* 			part_ptr->name); */
-/* 	}  */
-
 	popup = gtk_dialog_new();
 
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	label = gtk_label_new(info);
 	gtk_box_pack_end(GTK_BOX(GTK_DIALOG(popup)->vbox),
-			 label, TRUE, TRUE, 0);
+			 label, true, true, 0);
 	xfree(info);
 	gtk_widget_show(label);
 
 	gtk_widget_show(popup);
 
 }
-

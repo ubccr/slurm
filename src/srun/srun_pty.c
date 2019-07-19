@@ -7,11 +7,11 @@
  *  Written by Morris Jette  <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,28 +27,21 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#if HAVE_PTHREAD
+#include <poll.h>
 #include <pthread.h>
-#endif
-
 #include <signal.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <poll.h>
 
 #include "slurm/slurm_errno.h"
 
@@ -62,8 +55,7 @@
 
 #include "opt.h"
 #include "srun_job.h"
-
-#define MAX_RETRIES 3
+#include "srun_pty.h"
 
 /*  Processed by pty_thr() */
 static int pty_sigarray[] = { SIGWINCH, 0 };
@@ -101,9 +93,14 @@ void block_sigwinch(void)
 void pty_thread_create(srun_job_t *job)
 {
 	slurm_addr_t pty_addr;
-	pthread_attr_t attr;
+	uint16_t *ports;
 
-	if ((job->pty_fd = slurm_init_msg_engine_port(0)) < 0) {
+	if ((ports = slurm_get_srun_port_range()))
+		job->pty_fd = slurm_init_msg_engine_ports(ports);
+	else
+		job->pty_fd = slurm_init_msg_engine_port(0);
+
+	if (job->pty_fd < 0) {
 		error("init_msg_engine_port: %m");
 		return;
 	}
@@ -114,13 +111,7 @@ void pty_thread_create(srun_job_t *job)
 	job->pty_port = ntohs(((struct sockaddr_in) pty_addr).sin_port);
 	debug2("initialized job control port %hu", job->pty_port);
 
-	slurm_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if ((pthread_create(&job->pty_id, &attr, &_pty_thread, (void *) job))) {
-		job->pty_id = 0;
-		error("pthread_create(pty_thread): %m");
-	}
-	slurm_attr_destroy(&attr);
+	slurm_thread_create_detached(NULL, _pty_thread, job);
 }
 
 static void  _handle_sigwinch(int sig)
@@ -165,12 +156,16 @@ static void *_pty_thread(void *arg)
 
 	while (job->state <= SRUN_JOB_RUNNING) {
 		debug2("waiting for SIGWINCH");
-		poll(NULL, 0, -1);
+		if ((poll(NULL, 0, -1) < 1) && (errno != EINTR)) {
+			debug("%s: poll error %m", __func__);
+			continue;
+		}
 		if (winch) {
 			set_winsize(job);
 			_notify_winsize_change(fd, job);
 		}
 		winch = 0;
 	}
+	close(fd);
 	return NULL;
 }

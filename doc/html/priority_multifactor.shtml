@@ -8,17 +8,19 @@
 <LI> <a href=#mfjppintro>Multi-factor Job Priority Plugin</a>
 <LI> <a href=#general>Job Priority Factors In General</a>
 <LI> <a href=#age>Age Factor</a>
+<LI> <a href=#assoc>Association Factor</a>
 <LI> <a href=#jobsize>Job Size Factor</a>
+<LI> <a href=#nice>Nice Factor</a>
 <LI> <a href=#partition>Partition Factor</a>
 <LI> <a href=#qos>Quality of Service (QOS) Factor</a>
+<LI> <a href=#site>Site Factor</a>
 <LI> <a href=#tres>TRES Factors</a>
-<LI> <a href=#fairshare>Fair-share Factor</a>
+<LI> <a href=#fairshare>Fairshare Factor</a>
 <LI> <a href=#sprio>The <i>sprio</i> utility</a>
 <LI> <a href=#config>Configuration</a>
 <LI> <a href=#configexample>Configuration Example</a>
 </UL>
 
-<!-------------------------------------------------------------------------->
 <a name=intro>
 <h2>Introduction</h2></a>
 
@@ -28,23 +30,29 @@
 
 <P> The Multi-factor Job Priority plugin provides a very versatile facility for ordering the queue of jobs waiting to be scheduled.</P>
 
-<!-------------------------------------------------------------------------->
 <a name=mfjppintro>
 <h2>Multi-factor 'Factors'</h2></a>
 
-<P> There are six factors in the Multi-factor Job Priority plugin that influence job priority:</P>
+<P> There are nine factors in the Multi-factor Job Priority plugin that
+influence job priority:</P>
 
 <DL>
 <DT> Age
 <DD> the length of time a job has been waiting in the queue, eligible to be scheduled
+<DT> Association
+<DD> a factor associated with each association
 <DT> Fair-share
 <DD> the difference between the portion of the computing resource that has been promised and the amount of resources that has been consumed
 <DT> Job size
 <DD> the number of nodes or CPUs a job is allocated
+<DT> Nice
+<DD> a factor that can be controlled by users to prioritize their own jobs.
 <DT> Partition
 <DD> a factor associated with each node partition
 <DT> QOS
 <DD> a factor associated with each Quality Of Service
+<DT> Site 
+<DD> a factor dictated by an administrator or a site-developed job_submit or site_factor plugin
 <DT> TRES
 <DD> each TRES Type has it's own factor for a job which represents the number of
 requested/allocated TRES Type in a given partition
@@ -57,14 +65,15 @@ requested/allocated TRES Type in a given partition
   (say 70%), set the job size and the age factors to each contribute
   15%, and set the partition and QOS influences to zero.</P>
 
-<!-------------------------------------------------------------------------->
 <a name=general>
 <h2>Job Priority Factors In General</h2></a>
 
 <P> The job's priority at any given time will be a weighted sum of all the factors that have been enabled in the slurm.conf file.  Job priority can be expressed as:</P>
 <PRE>
 Job_priority =
+	site_factor +
 	(PriorityWeightAge) * (age_factor) +
+	(PriorityWeightAssoc) * (assoc_factor) +
 	(PriorityWeightFairshare) * (fair-share_factor) +
 	(PriorityWeightJobSize) * (job_size_factor) +
 	(PriorityWeightPartition) * (partition_factor) +
@@ -72,6 +81,7 @@ Job_priority =
 	SUM(TRES_weight_cpu * TRES_factor_cpu,
 	    TRES_weight_&lt;type&gt; * TRES_factor_&lt;type&gt;,
 	    ...)
+	- nice_factor
 </PRE>
 
 <P> All of the factors in this formula are floating point numbers that
@@ -92,7 +102,6 @@ Job_priority =
   weights high enough to avoid this scenario, starting around 1000 or
   so for those factors you want to make predominant.</P>
 
-<!-------------------------------------------------------------------------->
 <a name=age>
 <h2>Age Factor</h2></a>
 
@@ -100,7 +109,14 @@ Job_priority =
 
 <P> At some configurable length of time (<i>PriorityMaxAge</i>), the age factor will max out to 1.0.</P>
 
-<!-------------------------------------------------------------------------->
+<a name=assoc>
+<h2>Association Factor</h2></a>
+
+<P> Each association can be assigned an integer priority. The larger the
+number, the greater the job priority will be for jobs that request
+this association. This priority value is normalized to the highest
+priority of all the association to become the association factor.</P>
+
 <a name=jobsize>
 <h2>Job Size Factor</h2></a>
 
@@ -117,9 +133,17 @@ behavior as follows. The job size in CPUs is divided by the time limit in
 minutes. The result is divided by the total number of CPUs in the system.
 Thus a full-system job with a time limit of one will receive a job size factor
 of 1.0, while a tiny job with a large time limit will receive a job size factor
-close to 0.0. 
+close to 0.0.</p>
 
-<!-------------------------------------------------------------------------->
+
+<a name=nice>
+<h2>Nice Factor</h2></a>
+<P> Users can adjust the priority of their own jobs by setting the nice value
+on their jobs. Like the system nice, positive values negatively impact a job's
+priority and positive values increase a job's priority. Only privileged users
+can specify a negative value. The adjustment range is +/-2147483645.
+</P>
+
 <a name=partition>
 <h2>Partition Factor</h2></a>
 
@@ -129,7 +153,6 @@ request to run in this partition.  This priority value is then
 normalized to the highest priority of all the partitions to become the
 partition factor.</P>
 
-<!-------------------------------------------------------------------------->
 <a name=qos>
 <h2>Quality of Service (QOS) Factor</h2></a>
 
@@ -138,7 +161,14 @@ number, the greater the job priority will be for jobs that request
 this QOS.  This priority value is then normalized to the highest
 priority of all the QOS's to become the QOS factor.</P>
 
-<!-------------------------------------------------------------------------->
+<a name=site>
+<h2>Site Factor</h2></a>
+
+<P> The site factor is a factor that can be set either using scontrol,
+through a job_submit or site_factor plugin. An example use case, might be a
+job_submit plugin
+that sets a specific priority based on how many resources are requested.</P>
+
 <a name=tres>
 <h2>TRES Factors</h2></a>
 
@@ -150,7 +180,6 @@ TRES Type requested/allocated in the whole system. The more a given TRES Type is
 requested/allocated on a job, the greater the job priority will be for that job.
 </P>
 
-<!-------------------------------------------------------------------------->
 <a name=fairshare>
 <h2>Fair-share Factor</h2></a>
 
@@ -206,296 +235,24 @@ This method is turned on by defining the MAX_TRES priority flags in the
 slurm.conf.
 </P>
 
-<h3> Normalized Shares</h3>
+<h3>"Fair Tree" Fairshare</h3>
+
+<p>
+As of the 19.05 release, the "Fair Tree" fairshare algorithm has been made the
+default. Please see the <a href="fair_tree.html">Fair Tree Fairshare</a>
+documentation for further details.
+</p>
+
+<h3>"Classic" Fairshare</h3>
+
+<p>
+As of the 19.05 release, the "classic" fairshare algorithm is no longer the
+default, and will only be used if <i>PriorityFlags=NO_FAIR_TREE</i> is
+explicitly configured. Docmentation describing that algorithm has been moved
+to a separate <a href="classic_fair_share.html">Classic Fairshare</a>
+documentation page.
+</p>
 
-<P> The fair-share hierarchy represents the portions of the computing resource that have been allocated to multiple projects.  These allocations are assigned to an account.  There can be multiple levels of allocations made as allocations of a given account are further divided to sub-accounts:</P>
-
-<div class="figure">
-  <img src=allocation_pies.gif width=400 ><BR>
-  Figure 1. Machine Allocation
-</div>
-
-<P> The chart above shows the resources of the machine allocated to four accounts, A, B, C and D.  Furthermore, account A's shares are further allocated to sub accounts, A1 through A4.  Users are granted permission (through sacctmgr) to submit jobs against specific accounts.  If there are 10 users given equal shares in Account A3, they will each be allocated 1% of the machine.</P>
-
-<P> A user's normalized shares is simply</P>
-
-<PRE>
-S =	(S<sub>user</sub> / S<sub>siblings</sub>) *
-	(S<sub>account</sub> / S<sub>sibling-accounts</sub>) *
-	(S<sub>parent</sub> / S<sub>parent-siblings</sub>) * ...
-</PRE>
-
-Where:
-
-<DL>
-<DT> S
-<DD> is the user's normalized share, between zero and one
-<DT> S<sub>user</sub>
-<DD> are the number of shares of the account allocated to the user
-<DT> S<sub>siblings</sub>
-<DD> are the total number of shares allocated to all users permitted to charge the account (including S<sub>user</sub>)
-<DT> S<sub>account</sub>
-<DD> are the number of shares of the parent account allocated to the account
-<DT> S<sub>sibling-accounts</sub>
-<DD> are the total number of shares allocated to all sub-accounts of the parent account
-<DT> S<sub>parent</sub>
-<DD> are the number of shares of the grandparent account allocated to the parent
-<DT> S<sub>parent-siblings</sub>
-<DD> are the total number of shares allocated to all sub-accounts of the grandparent account
-</DL>
-
-<h3> Normalized Usage</h3>
-
-<P> The processor*seconds allocated to every job are tracked in real-time.  If one only considered usage over a fixed time period, then calculating a user's normalized usage would be a simple quotient:</P>
-
-<PRE>
-	U<sub>N</sub> = U<sub>user</sub> / U<sub>total</sub>
-</PRE>
-
-Where:
-
-<DL>
-<DT> U<sub>N</sub>
-<DD> is normalized usage, between zero and one
-<DT> U<sub>user</sub>
-<DD> is the processor*seconds consumed by all of a user's jobs in a given account for over a fixed time period
-<DT> U<sub>total</sub>
-<DD> is the total number of processor*seconds utilized across the cluster during that same time period
-</DL>
-
-<P> However, significant real-world usage quantities span multiple time periods.  Rather than treating usage over a number of weeks or months with equal importance, Slurm's fair-share priority calculation places more importance on the most recent resource usage and less importance on usage from the distant past.</P>
-
-<P> The Slurm usage metric is based off a half-life formula that favors the most recent usage statistics.  Usage statistics from the past decrease in importance based on a single decay factor, D:</P>
-
-<PRE>
-	U<sub>H</sub> = U<sub>current_period</sub> +
-	     ( D * U<sub>last_period</sub>) + (D * D * U<sub>period-2</sub>) + ...
-</PRE>
-
-Where:
-
-<DL>
-<DT> U<sub>H</sub>
-<DD> is the historical usage subject to the half-life decay
-<DT> U<sub>current_period</sub>
-<DD> is the usage charged over the current measurement period
-<DT> U<sub>last_period</sub>
-<DD> is the usage charged over the last measurement period
-<DT> U<sub>period-2</sub>
-<DD> is the usage charged over the second last measurement period
-<DT> D
-<DD> is a decay factor between zero and one that delivers the
-  half-life decay based off the <i>PriorityDecayHalfLife</i> setting
-  in the slurm.conf file.  Without accruing additional usage, a user's
-  U<sub>H</sub> usage will decay to half its original value after a time period
-  of <i>PriorityDecayHalfLife</i> seconds.
-</DL>
-
-<P> In practice, the <i>PriorityDecayHalfLife</i> could be a matter of
-seconds or days as appropriate for each site.  The decay is
-recalculated every <i>PriorityCalcPeriod</i> minutes, or 5 minutes by
-default.  The decay factor, D, is assigned the value that will achieve
-the half-life decay rate specified by the <i>PriorityDecayHalfLife</i>
-parameter.</P>
-
-<P> The total number of processor*seconds utilized can be similarly aggregated with the same decay factor:</P>
-
-<PRE>
-	R<sub>H</sub> = R<sub>current_period</sub> +
-	    ( D * R<sub>last_period</sub>) + (D * D * R<sub>period-2</sub>) + ...
-</PRE>
-
-Where:
-
-<DL>
-<DT> R<sub>H</sub>
-<DD> is the total historical usage subject to the same half-life decay as the usage formula.
-<DT> R<sub>current_period</sub>
-<DD> is the total usage charged over the current measurement period
-<DT> R<sub>last_period</sub>
-<DD> is the total usage charged over the last measurement period
-<DT> R<sub>period-2</sub>
-<DD> is the total usage charged over the second last measurement period
-<DT> D
-<DD> is the decay factor between zero and one
-</DL>
-
-<P> A user's normalized usage that spans multiple time periods then becomes:</P>
-
-<PRE>
-	U = U<sub>H</sub> / R<sub>H</sub>
-</PRE>
-
-
-<h3>Simplified Fair-Share Formula</h3>
-
-<P> The simplified formula for calculating the fair-share factor for usage that spans multiple time periods and subject to a half-life decay is:</P>
-
-<PRE>
-	F = 2**(-U/S/d)
-</PRE>
-
-Where:
-
-<DL compact>
-<DT> F
-<DD> is the fair-share factor
-<DT> S
-<DD> is the normalized shares
-<DT> U
-<DD> is the normalized usage factoring in half-life decay
-<DT> d
-<DD> is the FairShareDampeningFactor (a configuration parameter, default value of 1)
-</DL>
-
-<P> The fair-share factor will therefore range from zero to one, where one represents the highest priority for a job.  A fair-share factor of 0.5 indicates that the user's jobs have used exactly the portion of the machine that they have been allocated.  A fair-share factor of above 0.5 indicates that the user's jobs have consumed less than their allocated share while a fair-share factor below 0.5 indicates that the user's jobs have consumed more than their allocated share of the computing resources.</P>
-
-<h3>The Fair-share Factor Under An Account Hierarchy</h3>
-
-<P> The method described above presents a system whereby the priority of a user's job is calculated based on the portion of the machine allocated to the user and the historical usage of all the jobs run by that user under a specific account.</P>
-
-<P> Another layer of "fairness" is necessary however, one that factors in the usage of other users drawing from the same account.  This allows a job's fair-share factor to be influenced by the computing resources delivered to jobs of other users drawing from the same account.</P>
-
-<P> If there are two members of a given account, and if one of those users has run many jobs under that account, the job priority of a job submitted by the user who has not run any jobs will be negatively affected.  This ensures that the combined usage charged to an account matches the portion of the machine that is allocated to that account.</P>
-
-<P> In the example below, when user 3 submits their first job using account C, they will want their job's priority to reflect all the resources delivered to account B.  They do not care that user 1 has been using up a significant portion of the cycles allocated to account B and user 2 has yet to run a job out of account B.  If user 2 submits a job using account B and user 3 submits a job using account C, user 3 expects their job to be scheduled before the job from user 2.</P>
-
-<div class="figure">
-  <img src=usage_pies.gif width=400 ><BR>
-  Figure 2. Usage Example
-</div>
-
-<h3>The Slurm Fair-Share Formula</h3>
-
-<P> The Slurm fair-share formula has been designed to provide fair scheduling to users based on the allocation and usage of every account.</P>
-
-<P> The actual formula used is a refinement of the formula presented above:</P>
-
-<PRE>
-	F = 2**(-U<sub>E</sub>/S)
-</PRE>
-
-<P> The difference is that the usage term is effective usage, which is defined as:</P>
-
-<PRE>
-	U<sub>E</sub> = U<sub>Achild</sub> +
-		  ((U<sub>Eparent</sub> - U<sub>Achild</sub>) * S<sub>child</sub>/S<sub>all_siblings</sub>)
-</PRE>
-
-Where:
-
-<DL>
-<DT> U<sub>E</sub>
-<DD> is the effective usage of the child user or child account
-<DT> U<sub>Achild</sub>
-<DD> is the actual usage of the child user or child account
-<DT> U<sub>Eparent</sub>
-<DD> is the effective usage of the parent account
-<DT> S<sub>child</sub>
-<DD> is the shares allocated to the child user or child account
-<DT> S<sub>all_siblings</sub>
-<DD> is the shares allocated to all the children of the parent account
-</DL>
-
-<P> This formula only applies with the second tier of accounts below root.  For the tier of accounts just under root, their effective usage equals their actual usage.</P>
-
-<P> Because the formula for effective usage includes a term of the effective usage of the parent, the calculation for each account in the tree must start at the second tier of accounts and proceed downward:  to the children accounts, then grandchildren, etc.  The effective usage of the users will be the last to be calculated.</P>
-
-<P> Plugging in the effective usage into the fair-share formula above yields a fair-share factor that reflects the aggregated usage charged to each of the accounts in the fair-share hierarchy.</P>
-
-<h3>FairShare=parent</h3>
-
-<P>It is possible to disable the fairshare at certain levels of the fair share
-hierarchy by using the <code>FairShare=parent</code> option of sacctmgr.
-For users and accounts with <code>FairShare=parent</code> the normalized shares
-and effective usage values from the parent in the hierarchy will be used when
-calculating fairshare priories.</P>
-
-<P>If all users in an account is configured with <code>FairShare=parent</code>
-the result is that all the jobs drawing from that account will get the same
-fairshare priority, based on the accounts total usage. No additional fairness
-is added based on users individual usage.</P>
-
-<h3>Example</h3>
-
-<P> The following example demonstrates the effective usage calculations and resultant fair-share factors. (See Figure 3 below.)</P>
-
-<P> The machine's computing resources are allocated to accounts A and D with 40 and 60 shares respectively.  Account A is further divided into two children accounts, B with 30 shares and C with 10 shares.  Account D is further divided into two children accounts, E with 25 shares and F with 35 shares.</P>
-
-<P> Note:  the shares at any given tier in the Account hierarchy do not need to total up to 100 shares.  This example shows them totaling up to 100 to make the arithmetic easier to follow in your head.</P>
-
-<P> User 1 is granted permission to submit jobs against the B account.  Users 2 and 3 are granted one share each in the C account.  User 4 is the sole member of the E account and User 5 is the sole member of the F account.</P>
-
-<P> Note:  accounts A and D do not have any user members in this example, though users could have been assigned.</P>
-
-<P> The shares assigned to each account make it easy to determine normalized shares of the machine's complete resources.  Account A has .4 normalized shares, B has .3 normalized shares, etc.  Users who are sole members of an account have the same number of normalized shares as the account.  (E.g., User 1 has .3 normalized shares).  Users who share accounts have a portion of the normalized shares based on their shares.  For example, if user 2 had been allocated 4 shares instead of 1, user 2 would have had .08 normalized shares.  With users 2 and 3 each holding 1 share, they each have a normalized share of  0.05.</P>
-
-<P> Users 1, 2, and 4 have run jobs that have consumed the machine's computing resources.  User 1's actual usage is 0.2 of the machine; user 2 is 0.25,  and user 4 is 0.25.</P>
-
-<P> The actual usage charged to each account is represented by the solid arrows.  The actual usage charged to each account is summed as one goes up the tree.  Account C's usage is the sum of the usage of Users 2 and 3; account A's actual usage is the sum of its children, accounts B and C.</P>
-
-<div class="figure">
-  <img src=example_usage.gif width=400 ><BR>
-  Figure 3. Fair-share Example
-</div>
-
-<UL>
-<LI> User 1 normalized share: 0.3
-<LI> User 2 normalized share: 0.05
-<LI> User 3 normalized share: 0.05
-<LI> User 4 normalized share: 0.25
-<LI> User 5 normalized share: 0.35
-</UL>
-
-<P> As stated above, the effective usage is computed from the formula:</P>
-
-<PRE>
-	U<sub>E</sub> = U<sub>Achild</sub> +
-		  ((U<sub>Eparent</sub> - U<sub>Achild</sub>) * S<sub>child</sub>/S<sub>all_siblings</sub>)
-</PRE>
-
-<P> The effective usage for all accounts at the first tier under the root allocation is always equal to the actual usage:</P>
-
-Account A's effective usage is therefore equal to .45.  Account D's effective usage is equal to .25.
-
-<UL>
-<LI> Account B effective usage: 0.2 + ((0.45 - 0.2) * 30 / 40) = 0.3875
-<LI> Account C effective usage: 0.25 + ((0.45 - 0.25) * 10 / 40) = 0.3
-<LI> Account E effective usage: 0.25 + ((0.25 - 0.25) * 25 / 60) = 0.25
-<LI> Account F effective usage: 0.0 + ((0.25 - 0.0) * 35 / 60) = 0.1458
-</UL>
-
-<P> The effective usage of each user is calculated using the same formula:</P>
-
-<UL>
-<LI> User 1 effective usage: 0.2 + ((0.3875 - 0.2) * 1 / 1) = 0.3875
-<LI> User 2 effective usage: 0.25 + ((0.3 - 0.25) * 1 / 2) =  0.275
-<LI> User 3 effective usage: 0.0 + ((0.3 - 0.0) * 1 / 2) =  0.15
-<LI> User 4 effective usage: 0.25 + ((0.25 - 0.25) * 1 / 1) = 0.25
-<LI> User 5 effective usage: 0.0 + ((.1458 - 0.0) * 1 / 1) =  0.1458
-</UL>
-
-<P> Using the Slurm fair-share formula,</P>
-
-<PRE>
-	F = 2**(-U<sub>E</sub>/S)
-</PRE>
-
-<P> the fair-share factor for each user is:</P>
-
-<UL>
-<LI> User 1 fair-share factor: 2**(-.3875 / .3) =  0.408479
-<LI> User 2 fair-share factor: 2**(-.275 / .05) =  0.022097
-<LI> User 3 fair-share factor: 2**(-.15 / .05) =   0.125000
-<LI> User 4 fair-share factor: 2**(-.25 / .25) =   0.500000
-<LI> User 5 fair-share factor: 2**(-.1458 / .35) = 0.749154
-</UL>
-
-<P> From this example, once can see that users 1,2, and 3 are over-serviced while user 5 is under-serviced.  Even though user 3 has yet to submit a job, his/her fair-share factor is negatively influenced by the jobs users 1 and 2 have run.</P>
-
-<P> Based on the fair-share factor alone, if all 5 users were to submit a job charging their respective accounts, user 5's job would be granted the highest scheduling priority.</P>
-
-<!-------------------------------------------------------------------------->
 <a name=sprio>
 <h2>The <i>sprio</i> utility</h2></a>
 
@@ -507,7 +264,6 @@ for each job.  In addition, the <i>sprio -w</i> option displays the
 weights (PriorityWeightAge, PriorityWeightFairshare, etc.) for each
 factor as it is currently configured.</P>
 
-<!-------------------------------------------------------------------------->
 <a name=config>
 <h2>Configuration</h2></a>
 
@@ -558,6 +314,8 @@ factor as it is currently configured.</P>
   days-hr).  The default value is 7-0 (7 days).
 <DT> PriorityWeightAge
 <DD> An unsigned integer that scales the contribution of the age factor.
+<DT> PriorityWeightAssoc
+<DD> An unsigned integer that scales the contribution of the association factor.
 <DT> PriorityWeightFairshare
 <DD> An unsigned integer that scales the contribution of the fair-share factor.
 <DT> PriorityWeightJobSize
@@ -569,11 +327,43 @@ factor as it is currently configured.</P>
 <DT> PriorityWeightTRES
 <DD> A list of TRES Types and weights that scales the contribution of each TRES
   Type's factor.
+
+<DT> PriorityFlags
+<DD> Flags to modify priority behavior. Applicable only if
+PriorityType=priority/multifactor.
+<ul>
+<li>ACCRUE_ALWAYS: If set, priority age factor will be increased despite job
+	dependencies or holds.</li>
+<li>CALCULATE_RUNNING: If set, priorities will be recalculated not only for
+	pending jobs, but also running and suspended jobs.</li>
+<li>DEPTH_OBLIVIOUS: If set, priority will be calculated based similar to the
+	normal multifactor calculation, but depth of the associations in the
+	tree do not adversely effect their priority. This option automatically
+	enables NO_FAIR_TREE.</li>
+<li>NO_FAIR_TREE: Disables the "fair tree" algorithm, and reverts to "classic"
+	fair share priority scheduling.</li>
+<li>INCR_ONLY: If set, priority values will only increase in value. Job
+	priority will never decrease in value.</li>
+<li>MAX_TRES: If set, the weighted TRES value (e.g. TRESBillingWeights) is
+	calculated as the MAX of individual TRES' on a node (e.g. cpus, mem,
+	gres) plus the sum of all global TRES' (e.g. licenses).</li>
+<li>NO_NORMAL_ALL: If set, all NO_NORMAL_* flags are set.</li>
+<li>NO_NORMAL_ASSOC: If set, the associaton factor is not normalized against
+	the highest association priority.</li>
+<li>NO_NORMAL_PART: If set, the partition factor is not normalized against the
+	highest partition PriorityTier</li>
+<li>NO_NORMAL_QOS: If set, the QOS factor is not normalized against the
+	highest qos priority.</li>
+<li>NO_NORMAL_TRES: If set, the QOS factor is not normalized against the job's
+	partition TRES counts.</li>
+<li>SMALL_RELATIVE_TO_TIME: If set, the job's size component will be based
+	upon not the job size alone, but the job's size divided by it's time
+	limit.</li>
+</ul>
 </DL>
 
 <P> Note:  As stated above, the six priority factors range from 0.0 to 1.0.  As such, the PriorityWeight terms may need to be set to a high enough value (say, 1000) to resolve very tiny differences in priority factors.  This is especially true with the fair-share factor, where two jobs may differ in priority by as little as .001. (or even less!)</P>
 
-<!-------------------------------------------------------------------------->
 <a name=configexample>
 <h2>Configuration Example</h2></a>
 
@@ -637,7 +427,6 @@ PriorityWeightPartition=1000
 PriorityWeightQOS=0 # don't use the qos factor
 </PRE>
 
-<!-------------------------------------------------------------------------->
 <p style="text-align:center;">Last modified 1 November 2013</p>
 
 <!--#include virtual="footer.txt"-->

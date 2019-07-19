@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,24 +27,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
 #include <errno.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "slurm/slurm.h"
 
@@ -66,13 +62,15 @@ extern int slurm_set_trigger (trigger_info_t *trigger_set)
 	/*
 	 * Request message:
 	 */
+	memset(&req, 0, sizeof(req));
 	req.record_count  = 1;
 	req.trigger_array = trigger_set;
 	msg.msg_type      = REQUEST_TRIGGER_SET;
         msg.data          = &req;
 
-	if (slurm_send_recv_controller_rc_msg(&msg, &rc) < 0)
-		return SLURM_FAILURE;
+	if (slurm_send_recv_controller_rc_msg(&msg, &rc,
+					      working_cluster_rec) < 0)
+		return SLURM_ERROR;
 
 	if (rc)
 		slurm_seterrno_ret(rc);
@@ -94,13 +92,15 @@ extern int slurm_clear_trigger (trigger_info_t *trigger_clear)
 	/*
 	 * Request message:
 	 */
+	memset(&req, 0, sizeof(req));
 	req.record_count  = 1;
 	req.trigger_array = trigger_clear;
 	msg.msg_type      = REQUEST_TRIGGER_CLEAR;
         msg.data          = &req;
 
-	if (slurm_send_recv_controller_rc_msg(&msg, &rc) < 0)
-		return SLURM_FAILURE;
+	if (slurm_send_recv_controller_rc_msg(&msg, &rc,
+					      working_cluster_rec) < 0)
+		return SLURM_ERROR;
 
 	if (rc)
 		slurm_seterrno_ret(rc);
@@ -123,12 +123,14 @@ extern int slurm_get_triggers (trigger_info_msg_t ** trigger_get)
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
 
+	memset(&req, 0, sizeof(req));
 	req.record_count  = 0;
 	req.trigger_array = NULL;
 	req_msg.msg_type  = REQUEST_TRIGGER_GET;
 	req_msg.data      = &req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					   working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	switch (resp_msg.msg_type) {
@@ -146,7 +148,7 @@ extern int slurm_get_triggers (trigger_info_msg_t ** trigger_get)
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS ;
+	return SLURM_SUCCESS ;
 }
 
 /*
@@ -163,14 +165,15 @@ extern int slurm_pull_trigger (trigger_info_t *trigger_pull)
 	 * Request message:
 	 */
 	slurm_msg_t_init(&msg);
-	memset(&req, 0, sizeof(trigger_info_msg_t));
+	memset(&req, 0, sizeof(req));
 	req.record_count  = 1;
 	req.trigger_array = trigger_pull;
 	msg.msg_type      = REQUEST_TRIGGER_PULL;
 	msg.data	  = &req;
 
-	if (slurm_send_recv_controller_rc_msg(&msg, &rc) < 0)
-		return SLURM_FAILURE;
+	if (slurm_send_recv_controller_rc_msg(&msg, &rc,
+					      working_cluster_rec) < 0)
+		return SLURM_ERROR;
 	if (rc)
 		slurm_seterrno_ret(rc);
 

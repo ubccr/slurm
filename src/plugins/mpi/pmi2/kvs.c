@@ -5,11 +5,11 @@
  *  Written by Hongjia Cao <hjcao@nudt.edu.cn>.
  *  All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -25,13 +25,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -116,9 +116,9 @@ temp_kvs_init(void)
 		/* XXX: TBC */
 		num_children = tree_info.num_children + 1;
 
-		pack32((uint32_t)nodeid, buf); /* from_nodeid */
+		pack32(nodeid, buf); /* from_nodeid */
 		packstr(tree_info.this_node, buf); /* from_node */
-		pack32((uint32_t)num_children, buf); /* num_children */
+		pack32(num_children, buf); /* num_children */
 		pack32(kvs_seq, buf);
 	} else {
 		pack32(kvs_seq, buf);

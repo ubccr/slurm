@@ -7,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -27,17 +27,20 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#define _GNU_SOURCE
 #include <pthread.h>
+#include <sched.h>
+#include <ctype.h>
 
 #include "src/common/plugin.h"
 #include "src/common/plugrack.h"
@@ -50,20 +53,17 @@
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 typedef struct slurmd_task_ops {
-	int	(*slurmd_batch_request)	    (uint32_t job_id,
-					     batch_job_launch_msg_t *req);
-	int	(*slurmd_launch_request)    (uint32_t job_id,
-					     launch_tasks_request_msg_t *req,
+	int	(*slurmd_batch_request)	    (batch_job_launch_msg_t *req);
+	int	(*slurmd_launch_request)    (launch_tasks_request_msg_t *req,
 					     uint32_t node_id);
-	int	(*slurmd_reserve_resources) (uint32_t job_id,
-					     launch_tasks_request_msg_t *req,
+	int	(*slurmd_reserve_resources) (launch_tasks_request_msg_t *req,
 					     uint32_t node_id);
 	int	(*slurmd_suspend_job)	    (uint32_t job_id);
 	int	(*slurmd_resume_job)	    (uint32_t job_id);
 	int	(*slurmd_release_resources) (uint32_t job_id);
 
 	int	(*pre_setuid)		    (stepd_step_rec_t *job);
-	int	(*pre_launch_priv)	    (stepd_step_rec_t *job);
+	int	(*pre_launch_priv)	    (stepd_step_rec_t *job, pid_t pid);
 	int	(*pre_launch)		    (stepd_step_rec_t *job);
 	int	(*post_term)		    (stepd_step_rec_t *job,
 					     stepd_step_task_info_t *task);
@@ -163,7 +163,7 @@ extern int slurmd_task_init(void)
  */
 extern int slurmd_task_fini(void)
 {
-	int i, rc = SLURM_SUCCESS;
+	int i, rc = SLURM_SUCCESS, rc2;
 
 	slurm_mutex_lock( &g_task_context_lock );
 	if (!g_task_context)
@@ -172,8 +172,11 @@ extern int slurmd_task_fini(void)
 	init_run = false;
 	for (i = 0; i < g_task_context_num; i++) {
 		if (g_task_context[i]) {
-			if (plugin_context_destroy(g_task_context[i]) !=
-			    SLURM_SUCCESS) {
+			rc2 = plugin_context_destroy(g_task_context[i]);
+			if (rc2 != SLURM_SUCCESS) {
+				debug("%s: %s: %s", __func__,
+				      g_task_context[i]->type,
+				      slurm_strerror(rc2));
 				rc = SLURM_ERROR;
 			}
 		}
@@ -193,8 +196,7 @@ done:
  *
  * RET - slurm error code
  */
-extern int task_g_slurmd_batch_request(uint32_t job_id,
-				       batch_job_launch_msg_t *req)
+extern int task_g_slurmd_batch_request(batch_job_launch_msg_t *req)
 {
 	int i, rc = SLURM_SUCCESS;
 
@@ -202,8 +204,13 @@ extern int task_g_slurmd_batch_request(uint32_t job_id,
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++) {
-		rc = (*(ops[i].slurmd_batch_request))(job_id, req);
+	for (i = 0; i < g_task_context_num; i++) {
+		rc = (*(ops[i].slurmd_batch_request))(req);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
 	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
@@ -215,9 +222,8 @@ extern int task_g_slurmd_batch_request(uint32_t job_id,
  *
  * RET - slurm error code
  */
-extern int task_g_slurmd_launch_request(uint32_t job_id,
-				 launch_tasks_request_msg_t *req,
-				 uint32_t node_id)
+extern int task_g_slurmd_launch_request(launch_tasks_request_msg_t *req,
+					uint32_t node_id)
 {
 	int i, rc = SLURM_SUCCESS;
 
@@ -225,9 +231,13 @@ extern int task_g_slurmd_launch_request(uint32_t job_id,
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++) {
-		rc = (*(ops[i].slurmd_launch_request))
-					(job_id, req, node_id);
+	for (i = 0; i < g_task_context_num; i++) {
+		rc = (*(ops[i].slurmd_launch_request)) (req, node_id);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
 	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
@@ -239,9 +249,8 @@ extern int task_g_slurmd_launch_request(uint32_t job_id,
  *
  * RET - slurm error code
  */
-extern int task_g_slurmd_reserve_resources(uint32_t job_id,
-				    launch_tasks_request_msg_t *req,
-				    uint32_t node_id )
+extern int task_g_slurmd_reserve_resources(launch_tasks_request_msg_t *req,
+					   uint32_t node_id )
 {
 	int i, rc = SLURM_SUCCESS;
 
@@ -249,9 +258,13 @@ extern int task_g_slurmd_reserve_resources(uint32_t job_id,
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++) {
-		rc = (*(ops[i].slurmd_reserve_resources))
-					(job_id, req, node_id);
+	for (i = 0; i < g_task_context_num; i++) {
+		rc = (*(ops[i].slurmd_reserve_resources))(req, node_id);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
 	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
@@ -271,8 +284,14 @@ extern int task_g_slurmd_suspend_job(uint32_t job_id)
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++)
+	for (i = 0; i < g_task_context_num; i++) {
 		rc = (*(ops[i].slurmd_suspend_job))(job_id);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
+	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
 	return (rc);
@@ -291,8 +310,14 @@ extern int task_g_slurmd_resume_job(uint32_t job_id)
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++)
+	for (i = 0; i < g_task_context_num; i++) {
 		rc = (*(ops[i].slurmd_resume_job))(job_id);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
+	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
 	return (rc);
@@ -311,9 +336,13 @@ extern int task_g_slurmd_release_resources(uint32_t job_id)
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++) {
-		rc = (*(ops[i].slurmd_release_resources))
-				(job_id);
+	for (i = 0; i < g_task_context_num; i++) {
+		rc = (*(ops[i].slurmd_release_resources))(job_id);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
 	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
@@ -334,8 +363,14 @@ extern int task_g_pre_setuid(stepd_step_rec_t *job)
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++)
+	for (i = 0; i < g_task_context_num; i++) {
 		rc = (*(ops[i].pre_setuid))(job);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
+	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
 	return (rc);
@@ -346,7 +381,7 @@ extern int task_g_pre_setuid(stepd_step_rec_t *job)
  *
  * RET - slurm error code
  */
-extern int task_g_pre_launch_priv(stepd_step_rec_t *job)
+extern int task_g_pre_launch_priv(stepd_step_rec_t *job, pid_t pid)
 {
 	int i, rc = SLURM_SUCCESS;
 
@@ -354,8 +389,14 @@ extern int task_g_pre_launch_priv(stepd_step_rec_t *job)
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++)
-		rc = (*(ops[i].pre_launch_priv))(job);
+	for (i = 0; i < g_task_context_num; i++) {
+		rc = (*(ops[i].pre_launch_priv))(job, pid);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
+	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
 	return (rc);
@@ -374,8 +415,14 @@ extern int task_g_pre_launch(stepd_step_rec_t *job)
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++)
+	for (i = 0; i < g_task_context_num; i++) {
 		rc = (*(ops[i].pre_launch))(job);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
+	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
 	return (rc);
@@ -395,8 +442,14 @@ extern int task_g_post_term(stepd_step_rec_t *job,
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++)
+	for (i = 0; i < g_task_context_num; i++) {
 		rc = (*(ops[i].post_term))(job, task);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
+	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
 	return (rc);
@@ -415,8 +468,14 @@ extern int task_g_post_step(stepd_step_rec_t *job)
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++)
+	for (i = 0; i < g_task_context_num; i++) {
 		rc = (*(ops[i].post_step))(job);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
+	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
 	return (rc);
@@ -435,9 +494,147 @@ extern int task_g_add_pid(pid_t pid)
 		return SLURM_ERROR;
 
 	slurm_mutex_lock( &g_task_context_lock );
-	for (i = 0; ((i < g_task_context_num) && (rc == SLURM_SUCCESS)); i++)
+	for (i = 0; i < g_task_context_num; i++) {
 		rc = (*(ops[i].add_pid))(pid);
+		if (rc != SLURM_SUCCESS) {
+			debug("%s: %s: %s", __func__,
+			      g_task_context[i]->type, slurm_strerror(rc));
+			break;
+		}
+	}
 	slurm_mutex_unlock( &g_task_context_lock );
 
 	return (rc);
+}
+
+extern void task_slurm_chkaffinity(cpu_set_t *mask, stepd_step_rec_t *job,
+				   int statval)
+{
+#if defined(__APPLE__)
+	fatal("%s: not supported on macOS", __func__);
+#else
+	char *bind_type, *action, *status, *units;
+	char mstr[1 + CPU_SETSIZE / 4];
+	int task_gid = job->envtp->procid;
+	int task_lid = job->envtp->localid;
+	pid_t mypid = job->envtp->task_pid;
+
+	if (!(job->cpu_bind_type & CPU_BIND_VERBOSE))
+		return;
+
+	if (statval)
+		status = " FAILED";
+	else
+		status = "";
+
+	if (job->cpu_bind_type & CPU_BIND_NONE) {
+		action = "";
+		units  = "";
+		bind_type = "NONE";
+	} else {
+		action = " set";
+		if (job->cpu_bind_type & CPU_BIND_TO_THREADS)
+			units = "-threads";
+		else if (job->cpu_bind_type & CPU_BIND_TO_CORES)
+			units = "-cores";
+		else if (job->cpu_bind_type & CPU_BIND_TO_SOCKETS)
+			units = "-sockets";
+		else if (job->cpu_bind_type & CPU_BIND_TO_LDOMS)
+			units = "-ldoms";
+		else
+			units = "";
+		if (job->cpu_bind_type & CPU_BIND_RANK) {
+			bind_type = "RANK";
+		} else if (job->cpu_bind_type & CPU_BIND_MAP) {
+			bind_type = "MAP ";
+		} else if (job->cpu_bind_type & CPU_BIND_MASK) {
+			bind_type = "MASK";
+		} else if (job->cpu_bind_type & CPU_BIND_LDRANK) {
+			bind_type = "LDRANK";
+		} else if (job->cpu_bind_type & CPU_BIND_LDMAP) {
+			bind_type = "LDMAP ";
+		} else if (job->cpu_bind_type & CPU_BIND_LDMASK) {
+			bind_type = "LDMASK";
+		} else if (job->cpu_bind_type & (~CPU_BIND_VERBOSE)) {
+			bind_type = "UNK ";
+		} else {
+			action = "";
+			bind_type = "NULL";
+		}
+	}
+
+	fprintf(stderr, "cpu-bind%s=%s - "
+			"%s, task %2u %2u [%u]: mask 0x%s%s%s\n",
+			units, bind_type,
+			job->node_name,
+			task_gid,
+			task_lid,
+			mypid,
+			task_cpuset_to_str(mask, mstr),
+			action,
+			status);
+#endif
+}
+
+extern char *task_cpuset_to_str(const cpu_set_t *mask, char *str)
+{
+#if defined(__APPLE__)
+	fatal("%s: not supported on macOS", __func__);
+#else
+	int base;
+	char *ptr = str;
+	char *ret = NULL;
+
+	for (base = CPU_SETSIZE - 4; base >= 0; base -= 4) {
+		char val = 0;
+		if (CPU_ISSET(base, mask))
+			val |= 1;
+		if (CPU_ISSET(base + 1, mask))
+			val |= 2;
+		if (CPU_ISSET(base + 2, mask))
+			val |= 4;
+		if (CPU_ISSET(base + 3, mask))
+			val |= 8;
+		if (!ret && val)
+			ret = ptr;
+		*ptr++ = slurm_hex_to_char(val);
+	}
+	*ptr = '\0';
+	return ret ? ret : ptr - 1;
+#endif
+}
+
+extern int task_str_to_cpuset(cpu_set_t *mask, const char* str)
+{
+#if defined(__APPLE__)
+	fatal("%s: not supported on macOS", __func__);
+#else
+	int len = strlen(str);
+	const char *ptr = str + len - 1;
+	int base = 0;
+
+	/* skip 0x, it's all hex anyway */
+	if (len > 1 && !memcmp(str, "0x", 2L))
+		str += 2;
+
+	CPU_ZERO(mask);
+	while (ptr >= str) {
+		char val = slurm_char_to_hex(*ptr);
+		if (val == (char) -1)
+			return -1;
+		if (val & 1)
+			CPU_SET(base, mask);
+		if (val & 2)
+			CPU_SET(base + 1, mask);
+		if (val & 4)
+			CPU_SET(base + 2, mask);
+		if (val & 8)
+			CPU_SET(base + 3, mask);
+		len--;
+		ptr--;
+		base += 4;
+	}
+
+	return 0;
+#endif
 }

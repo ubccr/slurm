@@ -1,5 +1,7 @@
 /** TODO: copyright notice */
 
+#include "config.h"
+
 #include "slurm/slurm.h"
 
 #include "src/common/layouts_mgr.h"
@@ -116,4 +118,3 @@ int fini(void)
 {
 	return SLURM_SUCCESS;
 }
-

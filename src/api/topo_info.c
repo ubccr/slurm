@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,31 +26,23 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#ifdef HAVE_SYS_SYSLOG_H
-#  include <sys/syslog.h>
-#endif
-
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <unistd.h>
 
 #include "slurm/slurm.h"
@@ -78,7 +70,8 @@ extern int slurm_load_topo(topo_info_response_msg_t **resp)
 	req_msg.msg_type = REQUEST_TOPO_INFO;
 	req_msg.data     = NULL;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					   working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	switch (resp_msg.msg_type) {
@@ -97,7 +90,7 @@ extern int slurm_load_topo(topo_info_response_msg_t **resp)
 		break;
 	}
 
-	return SLURM_PROTOCOL_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 /*
@@ -125,22 +118,6 @@ extern void slurm_print_topo_info_msg(
 		slurm_print_topo_record(out, &topo_ptr[i], one_liner);
 }
 
-
-static int _print_topo_record(const char *print, const char* record,
-			       const int size, char **out_buf)
-{
-	int len = 0;
-
-	if (size <= 0)
-		return 0;
-	if (print && print[0]) {
-		char tmp_line[size];
-		snprintf(tmp_line, size, "%s=%s ", record, print);
-		len = size - strlen(tmp_line);
-		xstrcat(*out_buf, tmp_line);
-	}
-	return len;
-}
 /*
  * slurm_print_topo_record - output information about a specific Slurm topology
  *	record based upon message as loaded using slurm_load_topo
@@ -153,33 +130,25 @@ static int _print_topo_record(const char *print, const char* record,
 extern void slurm_print_topo_record(FILE * out, topo_info_t *topo_ptr,
 				    int one_liner)
 {
-	char tmp_line[512];
-	char *buf;
-	char *out_buf = NULL;
+	char *env, *line = NULL;
 	int max_len = 0, len;
 
-	buf = getenv("SLURM_TOPO_LEN");
-	if (buf)
-		max_len = atoi(buf);
-	if (max_len <= 0)
-		max_len = 512;
-
-	if (max_len < sizeof(tmp_line))
-		len = max_len;
-	else
-		len =  sizeof(tmp_line);
+	if ((env = getenv("SLURM_TOPO_LEN")))
+		max_len = atoi(env);
 
 	/****** Line 1 ******/
-	snprintf(tmp_line, len,
-		"SwitchName=%s Level=%u LinkSpeed=%u ",
-		topo_ptr->name, topo_ptr->level, topo_ptr->link_speed);
-	xstrcat(out_buf, tmp_line);
-	len = max_len - strlen(tmp_line);
+	len = xstrfmtcat(line, "SwitchName=%s Level=%u LinkSpeed=%u",
+			 topo_ptr->name, topo_ptr->level, topo_ptr->link_speed);
 
-	len = _print_topo_record(topo_ptr->nodes, "Nodes", len, &out_buf);
-	(void)_print_topo_record(topo_ptr->switches, "Switches", len, &out_buf);
+	if (topo_ptr->nodes)
+		len += xstrfmtcat(line, " Nodes=%s", topo_ptr->nodes);
 
-	xstrcat(out_buf, "\n");
-	fprintf(out, "%s", out_buf);
-	xfree(out_buf);
+	if (topo_ptr->switches)
+		len += xstrfmtcat(line, " Switches=%s", topo_ptr->switches);
+
+	if ((max_len > 0) && (len > max_len))
+		line[max_len] = '\0';
+
+	fprintf(out, "%s\n", line);
+	xfree(line);
 }

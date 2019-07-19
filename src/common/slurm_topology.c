@@ -1,4 +1,3 @@
-
 /*****************************************************************************\
  *  slurm_topology.c - Topology plugin function setup.
  *****************************************************************************
@@ -8,11 +7,11 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,13 +27,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -59,9 +58,6 @@ struct hypercube_switch *hypercube_switch_table = NULL;
 int hypercube_switch_cnt = 0;
 struct hypercube_switch ***hypercube_switches = NULL; 
 
-/* ************************************************************************ */
-/*  TAG(                        slurm_topo_ops_t                         )  */
-/* ************************************************************************ */
 typedef struct slurm_topo_ops {
 	int		(*build_config)		( void );
 	bool		(*node_ranking)		( void );
@@ -84,16 +80,13 @@ static plugin_context_t	*g_context = NULL;
 static pthread_mutex_t g_context_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool init_run = false;
 
-/* *********************************************************************** */
-/*  TAG(                        slurm_topo_init                         )  */
-/*                                                                         */
-/*  NOTE: The topology plugin can not be changed via reconfiguration       */
-/*        due to background threads, job priorities, etc. Slurmctld must   */
-/*        be restarted  and job priority changes may be required to change */
-/*        the topology type.                                               */
-/* *********************************************************************** */
-extern int
-slurm_topo_init( void )
+/*
+ * The topology plugin can not be changed via reconfiguration
+ * due to background threads, job priorities, etc. slurmctld must
+ * be restarted and job priority changes may be required to change
+ * the topology type.
+ */
+extern int slurm_topo_init(void)
 {
 	int retval = SLURM_SUCCESS;
 	char *plugin_type = "topo";
@@ -125,11 +118,7 @@ done:
 	return retval;
 }
 
-/* *********************************************************************** */
-/*  TAG(                        slurm_topo_fini                         )  */
-/* *********************************************************************** */
-extern int
-slurm_topo_fini( void )
+extern int slurm_topo_fini(void)
 {
 	int rc;
 
@@ -142,12 +131,7 @@ slurm_topo_fini( void )
 	return rc;
 }
 
-
-/* *********************************************************************** */
-/*  TAG(                      slurm_topo_build_config                   )  */
-/* *********************************************************************** */
-extern int
-slurm_topo_build_config( void )
+extern int slurm_topo_build_config(void)
 {
 	int rc;
 	DEF_TIMERS;
@@ -162,13 +146,11 @@ slurm_topo_build_config( void )
 	return rc;
 }
 
-/* *********************************************************************** */
-/*  TAG(                      slurm_topo_generate_node_ranking          )  */
-/* NOTE: This operation is only supported by those topology plugins for    */
-/*       which the node ordering between slurmd and slurmctld is invariant */
-/* *********************************************************************** */
-extern bool
-slurm_topo_generate_node_ranking( void )
+/*
+ * This operation is only supported by those topology plugins for
+ * which the node ordering between slurmd and slurmctld is invariant.
+ */
+extern bool slurm_topo_generate_node_ranking(void)
 {
 	if ( slurm_topo_init() < 0 )
 		return SLURM_ERROR;
@@ -176,15 +158,12 @@ slurm_topo_generate_node_ranking( void )
 	return (*(ops.node_ranking))();
 }
 
-/* *********************************************************************** */
-/*  TAG(                      slurm_topo_get_node_addr                  )  */
-/* *********************************************************************** */
-extern int
-slurm_topo_get_node_addr( char* node_name, char ** addr, char** pattern )
+extern int slurm_topo_get_node_addr(char* node_name,
+				    char **addr,
+				    char **pattern)
 {
 	if ( slurm_topo_init() < 0 )
 		return SLURM_ERROR;
 
 	return (*(ops.get_node_addr))(node_name,addr,pattern);
 }
-

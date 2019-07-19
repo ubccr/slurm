@@ -6,11 +6,11 @@
  *  Written by Morris Jette <jette@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -26,13 +26,13 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
@@ -107,19 +107,26 @@ extern int license_job_return(struct job_record *job_ptr);
  * license_job_test - Test if the licenses required for a job are available
  * IN job_ptr - job identification
  * IN when    - time to check
+ * IN reboot    - true if node reboot required to start job
  * RET: SLURM_SUCCESS, EAGAIN (not available now), SLURM_ERROR (never runnable)
  */
-extern int license_job_test(struct job_record *job_ptr, time_t when);
+extern int license_job_test(struct job_record *job_ptr, time_t when,
+			    bool reboot);
 
 /*
  * license_validate - Test if the required licenses are valid
  * IN licenses - required licenses
+ * IN validate_configured - if true, validate that there are enough configured
+ *                          licenses for the requested amount.
+ * IN validate_existing - if true, validate that licenses exist, otherwise don't
+ *                        return them in the final list.
  * OUT tres_req_cnt - appropriate counts for each requested gres
  * OUT valid - true if required licenses are valid and a sufficient number
  *             are configured (though not necessarily available now)
  * RET license_list, must be destroyed by caller
  */
-extern List license_validate(char *licenses,
+extern List license_validate(char *licenses, bool validate_configured,
+			     bool validate_existing,
 			     uint64_t *tres_req_cnt, bool *valid);
 
 /*
@@ -127,6 +134,18 @@ extern List license_validate(char *licenses,
  *	names found in the two lists
  */
 extern bool license_list_overlap(List list_1, List list_2);
+
+/*
+ * Given a list of license_t records, return a license string.
+ *
+ * This can be combined with _build_license_list() to eliminate duplicates
+ * (e.g. "tux*2,tux*3" gets changed to "tux*5").
+ *
+ * IN license_list - list of license_t records
+ *
+ * RET string represenation of licenses. Must be destroyed by caller.
+ */
+extern char *license_list_to_string(List license_list);
 
 /* pack_all_licenses()
  *
@@ -144,14 +163,6 @@ get_all_license_info(char **buffer_ptr,
  *
  */
 extern uint32_t get_total_license_cnt(char *name);
-
-/*
- * lic_get_value_by_type - Return count of named licenses used by job
- * IN licenses - list containing licenses_t records
- * IN name - name of the license
- * RET number of licenses of the particular type used
- */
-extern uint32_t license_get_total_cnt_from_list(List license_list, char *name);
 
 /* node_read should be locked before coming in here
  * returns tres_str of the license_list.

@@ -4,11 +4,11 @@
  *  Copyright (C) 2009 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -24,19 +24,15 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-
-#if HAVE_CONFIG_H
-#   include "config.h"
-#endif
 
 #ifndef _TASK_CGROUP_CPUSET_H_
 #define _TASK_CGROUP_CPUSET_H_
@@ -44,10 +40,10 @@
 #include "src/common/xcgroup_read_config.h"
 
 /* initialize cpuset subsystem of task/cgroup */
-extern int task_cgroup_cpuset_init(slurm_cgroup_conf_t *slurm_cgroup_conf);
+extern int task_cgroup_cpuset_init(void);
 
 /* release cpuset subsystem resources */
-extern int task_cgroup_cpuset_fini(slurm_cgroup_conf_t *slurm_cgroup_conf);
+extern int task_cgroup_cpuset_fini(void);
 
 /* create user/job/jobstep cpuset cgroups */
 extern int task_cgroup_cpuset_create(stepd_step_rec_t *job);

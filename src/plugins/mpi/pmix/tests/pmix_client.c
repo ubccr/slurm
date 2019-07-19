@@ -183,7 +183,7 @@ int main(int argc, char **argv)
 		TEST_ERROR(("rank %d: PMIx_Get universe size returned NULL value", rank));
 		exit(0);
 	}
-	/* TODO: Guess number of processes from the SLURM environment! */
+	/* TODO: Guess number of processes from the Slurm environment! */
 	if (val->type != PMIX_UINT32 || val->data.uint32 != nprocs) {
 		TEST_ERROR(("rank %d: Universe size value or type mismatch,"
 			    " want %d(%d) get %d(%d)",
@@ -193,7 +193,7 @@ int main(int argc, char **argv)
 	}
 	TEST_OUTPUT(("rank %d: Universe size check: PASSED", rank));
 
-	/* Guess the namespace from SLURM environment
+	/* Guess the namespace from Slurm environment
     if (0 != xstrcmp(nspace, TEST_NAMESPACE)) {
 	TEST_ERROR(("rank %d: Bad nspace!", rank));
 	exit(0);
@@ -277,7 +277,7 @@ int main(int argc, char **argv)
 			}
 
 			if (local) {
-				sprintf(key,"local-key-%d",j);
+				snprintf(key, 50, "local-key-%d",j);
 				if (PMIX_SUCCESS != (rc = PMIx_Get(nspace, i, key, &val))) {
 					TEST_ERROR(("rank %d: PMIx_Get failed: %d", rank, rc));
 					exit(0);
@@ -296,8 +296,8 @@ int main(int argc, char **argv)
 				TEST_VERBOSE(("rank %d: GET OF %s SUCCEEDED", rank, key));
 				PMIX_VALUE_RELEASE(val);
 			}
-			sprintf(key,"remote-key-%d",j);
-			sprintf(sval,"Test string #%d",j);
+			snprintf(key, 50, "remote-key-%d",j);
+			snprintf(sval, 50, "Test string #%d",j);
 			if (PMIX_SUCCESS != (rc = PMIx_Get(nspace, i, key, &val))) {
 				TEST_ERROR(("rank %d: PMIx_Get failed (%d)", rank, rc));
 				exit(0);
@@ -310,7 +310,7 @@ int main(int argc, char **argv)
 			TEST_VERBOSE(("rank %d: GET OF %s SUCCEEDED", rank, key));
 			PMIX_VALUE_RELEASE(val);
 
-			sprintf(key, "global-key-%d", j);
+			snprintf(key, 50, "global-key-%d", j);
 			if (PMIX_SUCCESS != (rc = PMIx_Get(nspace, i, key, &val))) {
 				TEST_ERROR(("rank %d: PMIx_Get failed (%d)", rank, rc))
 						exit(0);

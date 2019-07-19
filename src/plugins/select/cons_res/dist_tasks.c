@@ -8,11 +8,11 @@
  *  Portions copyright (C) 2012 Bull
  *  Written by Martin Perry <martin.perry@bull.com>
  *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  This file is part of Slurm, a resource management program.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
- *  SLURM is free software; you can redistribute it and/or modify it under
+ *  Slurm is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
@@ -28,19 +28,18 @@
  *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  with Slurm; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #include "select_cons_res.h"
 #include "dist_tasks.h"
-
 
 /* Max boards supported for best-fit across boards */
 /* Larger board configurations may require new algorithm */
@@ -152,8 +151,8 @@ static int _compute_c_b_task_dist(struct job_record *job_ptr)
 	bool log_over_subscribe = true;
 
 	if (!job_res || !job_res->cpus || !job_res->nhosts) {
-		error("cons_res: _compute_c_b_task_dist invalid allocation "
-		      "for job %u", job_ptr->job_id);
+		error("cons_res: %s invalid allocation for %pJ",
+		      __func__, job_ptr);
 		return SLURM_ERROR;
 	}
 
@@ -172,11 +171,12 @@ static int _compute_c_b_task_dist(struct job_record *job_ptr)
 		}
 	}
 
-	/* Safe guard if the user didn't specified a lower number of
-	 * cpus than cpus_per_task or didn't specify the number. */
+	/*
+	 * Safe guard if the user didn't specified a lower number of
+	 * CPUs than cpus_per_task or didn't specify the number.
+	 */
 	if (!maxtasks) {
-		error("_compute_c_b_task_dist: request was for 0 tasks, "
-		      "setting to 1");
+		error("_compute_c_b_task_dist: request was for 0 tasks, setting to 1");
 		maxtasks = 1;
 	}
 	if (job_ptr->details->cpus_per_task == 0)
@@ -187,13 +187,14 @@ static int _compute_c_b_task_dist(struct job_record *job_ptr)
 	     i += job_ptr->details->cpus_per_task ) { /* cycle counter */
 		bool space_remaining = false;
 		if (over_subscribe && log_over_subscribe) {
-			/* 'over_subscribe' is a relief valve that guards
+			/*
+			 * 'over_subscribe' is a relief valve that guards
 			 * against an infinite loop, and it *should* never
 			 * come into play because maxtasks should never be
 			 * greater than the total number of available cpus
 			 */
-			error("cons_res: _compute_c_b_task_dist "
-			      "oversubscribe for job %u", job_ptr->job_id);
+			error("cons_res: %s oversubscribe for %pJ",
+			      __func__, job_ptr);
 			log_over_subscribe = false	/* Log once per job */;
 		}
 		for (n = 0; ((n < job_res->nhosts) && (tid < maxtasks)); n++) {
@@ -227,8 +228,8 @@ static int _compute_plane_dist(struct job_record *job_ptr)
 	bool log_over_subscribe = true;
 
 	if (!job_res || !job_res->cpus || !job_res->nhosts) {
-		error("cons_res: _compute_plane_dist invalid allocation "
-		      "for job %u", job_ptr->job_id);
+		error("cons_res: %s invalid allocation for %pJ",
+		      __func__, job_ptr);
 		return SLURM_ERROR;
 	}
 
@@ -242,8 +243,7 @@ static int _compute_plane_dist(struct job_record *job_ptr)
 		plane_size = job_ptr->details->mc_ptr->plane_size;
 
 	if (plane_size <= 0) {
-		error("cons_res: _compute_plane_dist received invalid "
-		      "plane_size");
+		error("cons_res: _compute_plane_dist received invalid plane_size");
 		return SLURM_ERROR;
 	}
 	job_res->cpus = xmalloc(job_res->nhosts * sizeof(uint16_t));
@@ -252,13 +252,14 @@ static int _compute_plane_dist(struct job_record *job_ptr)
 	for (tid = 0, i = 0; (tid < maxtasks); i++) { /* cycle counter */
 		bool space_remaining = false;
 		if (over_subscribe && log_over_subscribe) {
-			/* 'over_subscribe' is a relief valve that guards
+			/*
+			 * 'over_subscribe' is a relief valve that guards
 			 * against an infinite loop, and it *should* never
 			 * come into play because maxtasks should never be
 			 * greater than the total number of available cpus
 			 */
-			error("cons_res: _compute_plane_dist oversubscribe "
-			      "for job %u", job_ptr->job_id);
+			error("cons_res: %s oversubscribe for %pJ",
+			      __func__, job_ptr);
 			log_over_subscribe = false	/* Log once per job */;
 		}
 		for (n = 0; ((n < job_res->nhosts) && (tid < maxtasks)); n++) {
@@ -329,11 +330,11 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 	uint16_t cpus_per_task = job_ptr->details->cpus_per_task;
 	job_resources_t *job_res = job_ptr->job_resrcs;
 	bool alloc_cores = false, alloc_sockets = false;
-	uint16_t ncpus_per_core = 0xffff;	/* Usable CPUs per core */
 	uint16_t ntasks_per_core = 0xffff;
 	int tmp_cpt = 0;
 	int count, cpu_min, b_min, elig, s_min, comb_idx, sock_idx;
 	int elig_idx, comb_brd_idx, sock_list_idx, comb_min, board_num;
+	int sock_per_comb;
 	int* boards_core_cnt;
 	int* sort_brds_core_cnt;
 	int* board_combs;
@@ -347,7 +348,6 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 	uint16_t ncores_nb;
 	uint16_t nsockets_nb;
 	uint16_t sock_per_brd;
-	uint16_t sock_per_comb;
 	uint16_t req_cores,best_fit_cores = 0;
 	uint32_t best_fit_location = 0;
 	uint64_t ncomb_brd;
@@ -356,13 +356,13 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 	if (!job_res)
 		return;
 	if (!job_res->core_bitmap) {
-		error("%s: core_bitmap for job %u is NULL",
-		      __func__, job_ptr->job_id);
+		error("%s: core_bitmap for %pJ is NULL",
+		      __func__, job_ptr);
 		return;
 	}
 	if (bit_ffs(job_res->core_bitmap) == -1) {
-		error("%s: core_bitmap for job %u has no bits set",
-		      __func__, job_ptr->job_id);
+		error("%s: core_bitmap for job %pJ has no bits set",
+		      __func__, job_ptr);
 		return;
 	}
 
@@ -373,14 +373,9 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 
 	if (job_ptr->details && job_ptr->details->mc_ptr) {
 		multi_core_data_t *mc_ptr = job_ptr->details->mc_ptr;
-		if ((mc_ptr->ntasks_per_core != (uint16_t) INFINITE) &&
+		if ((mc_ptr->ntasks_per_core != INFINITE16) &&
 		    (mc_ptr->ntasks_per_core)) {
 			ntasks_per_core = mc_ptr->ntasks_per_core;
-			ncpus_per_core  = ntasks_per_core * cpus_per_task;
-		}
-		if ((mc_ptr->threads_per_core != (uint16_t) NO_VAL) &&
-		    (mc_ptr->threads_per_core <  ncpus_per_core)) {
-			ncpus_per_core = mc_ptr->threads_per_core;
 		}
 	}
 
@@ -409,7 +404,7 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 			fatal("cons_res: _block_sync_core_bitmap index error");
 
 		cpus  = job_res->cpus[i];
-		vpus = MIN(select_node_record[n].vpus, ncpus_per_core);
+		vpus = cr_cpus_per_core(job_ptr->details, n);
 
 		/* compute still required cores on the node */
 		req_cores = cpus / vpus;
@@ -448,9 +443,8 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 		if (nsockets_nb >= nboards_nb) {
 			sock_per_brd = nsockets_nb / nboards_nb;
 		} else {
-			error("Node socket count lower than board count "
-			      "(%u < %u), job %u node %s",
-			      nsockets_nb, nboards_nb, job_ptr->job_id,
+			error("Node socket count lower than board count (%u < %u), %pJ node %s",
+			      nsockets_nb, nboards_nb, job_ptr,
 			      node_record_table_ptr[n].name);
 			sock_per_brd = 1;
 		}
@@ -721,12 +715,10 @@ static int _cyclic_sync_core_bitmap(struct job_record *job_ptr,
 {
 	uint32_t c, i, j, s, n, *sock_start, *sock_end, size, csize, core_cnt;
 	uint16_t cps = 0, cpus, vpus, sockets, sock_size;
-	uint16_t cpus_per_task = job_ptr->details->cpus_per_task;
 	job_resources_t *job_res = job_ptr->job_resrcs;
 	bitstr_t *core_map;
 	bool *sock_used, *sock_avoid;
 	bool alloc_cores = false, alloc_sockets = false;
-	uint16_t ncpus_per_core = 0xffff;	/* Usable CPUs per core */
 	uint16_t ntasks_per_socket = 0xffff;
 	uint16_t ntasks_per_core = 0xffff;
 	int error_code = SLURM_SUCCESS;
@@ -744,15 +736,9 @@ static int _cyclic_sync_core_bitmap(struct job_record *job_ptr,
 	core_map = job_res->core_bitmap;
 	if (job_ptr->details->mc_ptr) {
 		multi_core_data_t *mc_ptr = job_ptr->details->mc_ptr;
-		if ((mc_ptr->ntasks_per_core != (uint16_t) INFINITE) &&
+		if ((mc_ptr->ntasks_per_core != INFINITE16) &&
 		    (mc_ptr->ntasks_per_core)) {
 			ntasks_per_core = mc_ptr->ntasks_per_core;
-			ncpus_per_core  = ntasks_per_core * cpus_per_task;
-		}
-
-		if ((mc_ptr->threads_per_core != (uint16_t) NO_VAL) &&
-		    (mc_ptr->threads_per_core <  ncpus_per_core)) {
-			ncpus_per_core = mc_ptr->threads_per_core;
 		}
 
 		if (mc_ptr->ntasks_per_socket)
@@ -772,12 +758,11 @@ static int _cyclic_sync_core_bitmap(struct job_record *job_ptr,
 			continue;
 		sockets = select_node_record[n].sockets;
 		cps     = select_node_record[n].cores;
-		vpus = MIN(select_node_record[n].vpus, ncpus_per_core);
+		vpus    = cr_cpus_per_core(job_ptr->details, n);
 
 		if (select_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
-			info("DEBUG: job %u node %s vpus %u cpus %u",
-			     job_ptr->job_id,
-			     select_node_record[n].node_ptr->name,
+			info("DEBUG: %pJ node %s vpus %u cpus %u",
+			     job_ptr, select_node_record[n].node_ptr->name,
 			     vpus, job_res->cpus[i]);
 		}
 
@@ -908,10 +893,10 @@ static int _cyclic_sync_core_bitmap(struct job_record *job_ptr,
 				/* we're stuck! */
 				job_ptr->priority = 0;
 				job_ptr->state_reason = WAIT_HELD;
-				error("%s: sync loop not progressing on node %s, holding job %u",
+				error("%s: sync loop not progressing on node %s, holding %pJ",
 				      __func__,
 				      select_node_record[n].node_ptr->name,
-				      job_ptr->job_id);
+				      job_ptr);
 			}
 			error_code = SLURM_ERROR;
 			goto fini;
@@ -954,29 +939,46 @@ fini:	xfree(sock_avoid);
 }
 
 /* Remove any specialized cores from those allocated to the job */
-static void _clear_spec_cores(bitstr_t *alloc_node_bitmap,
-			      bitstr_t *alloc_core_bitmap,
+static void _clear_spec_cores(struct job_record *job_ptr,
 			      bitstr_t *avail_core_bitmap)
 {
 	int first_node, last_node, i_node;
 	int first_core, last_core, i_core;
-	int alloc_core = -1;
+	int alloc_node = -1, alloc_core = -1, size;
+	job_resources_t *job_res = job_ptr->job_resrcs;
+	multi_core_data_t *mc_ptr = NULL;
 
-	first_node = bit_ffs(alloc_node_bitmap);
+	if (job_ptr->details && job_ptr->details->mc_ptr)
+		mc_ptr = job_ptr->details->mc_ptr;
+
+	size = bit_size(job_res->core_bitmap);
+	bit_nset(job_res->core_bitmap, 0, size - 1);
+
+	first_node = bit_ffs(job_res->node_bitmap);
 	if (first_node >= 0)
-		last_node = bit_fls(alloc_node_bitmap);
+		last_node = bit_fls(job_res->node_bitmap);
 	else
 		last_node = first_node - 1;
 
 	for (i_node = first_node; i_node <= last_node; i_node++) {
-		if (!bit_test(alloc_node_bitmap, i_node))
+		if (!bit_test(job_res->node_bitmap, i_node))
 			continue;
+		job_res->cpus[++alloc_node] = 0;
 		first_core = cr_get_coremap_offset(i_node);
 		last_core  = cr_get_coremap_offset(i_node + 1) - 1;
 		for (i_core = first_core; i_core <= last_core; i_core++) {
 			alloc_core++;
-			if (!bit_test(avail_core_bitmap, i_core))
-				bit_clear(alloc_core_bitmap, alloc_core);
+			if (bit_test(avail_core_bitmap, i_core)) {
+				uint16_t tpc = select_node_record[i_node].vpus;
+				if (mc_ptr &&
+				    (mc_ptr->threads_per_core != NO_VAL16) &&
+				    (mc_ptr->threads_per_core < tpc))
+					tpc = mc_ptr->threads_per_core;
+
+				job_res->cpus[alloc_node] += tpc;
+			} else {
+				bit_clear(job_res->core_bitmap, alloc_core);
+			}
 		}
 	}
 }
@@ -1020,7 +1022,7 @@ extern int cr_dist(struct job_record *job_ptr, const uint16_t cr_type,
 {
 	int error_code, cr_cpu = 1;
 
-	if (job_ptr->details->core_spec != (uint16_t) NO_VAL) {
+	if (job_ptr->details->core_spec != NO_VAL16) {
 		/* The job has been allocated all non-specialized cores,
 		 * so we don't need to select specific CPUs. */
 		return SLURM_SUCCESS;
@@ -1029,13 +1031,11 @@ extern int cr_dist(struct job_record *job_ptr, const uint16_t cr_type,
 	if ((job_ptr->job_resrcs->node_req == NODE_CR_RESERVED) ||
 	    (job_ptr->details->whole_node == 1)) {
 		/* The job has been allocated an EXCLUSIVE set of nodes,
-		 * so it gets all of the bits in the core_bitmap and
-		 * all of the available CPUs in the cpus array. */
-		int size = bit_size(job_ptr->job_resrcs->core_bitmap);
-		bit_nset(job_ptr->job_resrcs->core_bitmap, 0, size - 1);
-		_clear_spec_cores(job_ptr->job_resrcs->node_bitmap,
-				  job_ptr->job_resrcs->core_bitmap,
-				  avail_core_bitmap);
+		 * so it gets all of the bits in the core_bitmap and all of
+		 * the available CPUs in the cpus array. Up to this point
+		 * we might not have the correct CPU count, but a core count
+		 * and ignoring specialized cores. Fix that too. */
+		_clear_spec_cores(job_ptr, avail_core_bitmap);
 		return SLURM_SUCCESS;
 	}
 
