@@ -60,6 +60,7 @@ static pthread_rwlock_t paths_lock = PTHREAD_RWLOCK_INITIALIZER;
 static List paths = NULL;
 static int path_tag_counter = 0;
 static const data_t *spec = NULL;
+static const char *api_path_prefix = "/slurm/v0.0.35";
 
 typedef enum {
 	OPENAPI_TYPE_UNKNOWN = 0,
@@ -229,6 +230,61 @@ fail:
 	return NULL;
 }
 
+static entry_t *_parse_openapi_path_with_prefix(const char *prefix, const char *str_path)
+{
+	entry_t *entries = NULL;
+	entry_t *entry = NULL;
+	int count = 0;
+
+	entry_t *prefix_entries = _parse_openapi_path(prefix);
+	if(!prefix_entries)
+		return NULL;
+
+	entry_t *path_entries = _parse_openapi_path(str_path);
+	if(!path_entries)
+		return NULL;
+
+	for (entry_t *pe = prefix_entries; pe->type; pe++)
+		count++;
+
+	for (entry_t *pe = path_entries; pe->type; pe++)
+		count++;
+
+	entry = entries = xcalloc((count + 1), sizeof(entry_t));
+
+	for (entry_t *pe = prefix_entries; pe->type; pe++) {
+		entry->entry = xstrdup(pe->entry);
+		entry->type = pe->type;
+		entry->name = xstrdup(pe->name);
+
+		xfree(pe->entry);
+		xfree(pe->name);
+
+		entry++;
+		xassert(entry <= entries + count);
+	}
+
+	for (entry_t *pe = path_entries; pe->type; pe++) {
+		entry->entry = xstrdup(pe->entry);
+		entry->type = pe->type;
+		entry->name = xstrdup(pe->name);
+
+		xfree(pe->entry);
+		xfree(pe->name);
+
+		entry++;
+		xassert(entry <= entries + count);
+	}
+
+
+	/* last is always NULL */
+	xassert(!entry->type);
+	xfree(prefix_entries);
+	xfree(path_entries);
+
+	return entries;
+}
+
 typedef struct {
 	const char *str_path;
 	const data_t *found;
@@ -363,7 +419,7 @@ static data_for_each_cmd_t _populate_methods(const char *key,
 extern int register_path_tag(const char *str_path)
 {
 	path_t *path = NULL;
-	entry_t *entries = _parse_openapi_path(str_path);
+	entry_t *entries = _parse_openapi_path_with_prefix(api_path_prefix, str_path);
 	const data_t *spec_entry;
 	populate_methods_t args = {0};
 

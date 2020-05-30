@@ -1551,15 +1551,15 @@ extern int init_op_jobs(void)
 		}
 	}
 
-	if ((rc = bind_operation_handler("/slurm/v0.0.35/jobs/",
+	if ((rc = bind_operation_handler("/jobs",
 					     _op_handler_jobs, URL_TAG_JOBS)))
 		/* no-op */;
-	else if ((rc = bind_operation_handler("/slurm/v0.0.35/job/{job_id}",
+	else if ((rc = bind_operation_handler("/job/{job_id}",
 						  _op_handler_job,
 						  URL_TAG_JOB)))
 		/* no-op */;
 	else
-		rc = bind_operation_handler("/slurm/v0.0.35/job/submit",
+		rc = bind_operation_handler("/job/submit",
 						_op_handler_submit_job,
 						URL_TAG_JOB_SUBMIT);
 

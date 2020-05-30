@@ -91,7 +91,7 @@ static int _dump_node(data_t *p, node_info_t *node)
 		return SLURM_SUCCESS;
 	}
 
-	d = data_set_dict(data_key_set(p, node->name));
+	d = data_set_dict(data_list_append(p));
 
 	data_set_string(data_key_set(d, "architecture"), node->arch);
 	data_set_string(data_key_set(d, "burstbuffer_network_address"),
@@ -155,7 +155,7 @@ static int _op_handler_nodes(const char *context_id,
 	int rc = SLURM_SUCCESS;
 	data_t *d = data_set_dict(resp);
 	data_t *errors = data_set_list(data_key_set(d, "errors"));
-	data_t *nodes = data_set_dict(data_key_set(d, "nodes"));
+	data_t *nodes = data_set_list(data_key_set(d, "nodes"));
 	node_info_msg_t *node_info_ptr = NULL;
 
 	if (tag == URL_TAG_NODES)
@@ -198,12 +198,12 @@ extern int init_op_nodes(void)
 {
 	int rc;
 
-	if ((rc = bind_operation_handler("/slurm/v0.0.35/nodes/",
+	if ((rc = bind_operation_handler("/nodes",
 					     _op_handler_nodes, URL_TAG_NODES)))
 		/* no-op */;
 	else
 		rc = bind_operation_handler(
-			"/slurm/v0.0.35/node/{node_name}", _op_handler_nodes,
+			"/node/{node_name}", _op_handler_nodes,
 			URL_TAG_NODE);
 	return rc;
 }

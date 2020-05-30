@@ -12,42 +12,70 @@
   },
   "servers": [
     {
-      "url": "/"
+      "url": "/slurm/v0.0.35"
     }
   ],
   "paths": {
-    "/slurm/v0.0.35/diag/": {
+    "/diag": {
       "get": {
+        "operationId": "diag",
         "summary": "get diagnostics",
         "responses": {
           "200": {
-            "description": "dictionary of statistics"
+            "description": "dictionary of statistics",
+            "content": {
+               "application/json": {
+                 "schema": {
+                   "$ref": "#/components/schemas/diag"
+                 }
+               }
+            }
           }
         }
       }
     },
-    "/slurm/v0.0.35/ping/": {
+    "/ping": {
       "get": {
+        "operationId": "ping",
         "summary": "ping test",
         "responses": {
           "200": {
-            "description": "results of ping test"
+            "description": "results of ping test",
+            "content": {
+               "application/json": {
+                 "schema": {
+                   "$ref": "#/components/schemas/pings"
+                 }
+               }
+            }
           }
         }
       }
     },
-    "/slurm/v0.0.35/jobs/": {
+    "/jobs": {
       "get": {
+        "operationId": "jobs",
         "summary": "get list of jobs",
         "responses": {
           "200": {
-            "description": "array of all job information in slurmctld"
+            "description": "array of all job information in slurmctld",
+            "content": {
+               "application/json": {
+                   "schema": {
+                      "type": "array",
+                      "items": {
+                          "$ref": "#/components/schemas/job_properties"
+                      }
+                   }
+               }
+            }
           }
         }
       }
     },
-    "/slurm/v0.0.35/job/{job_id}": {
+    "/job/{job_id}": {
       "get": {
+        "operationId": "getJob",
         "summary": "get job info",
         "parameters": [
           {
@@ -65,7 +93,14 @@
         ],
         "responses": {
           "200": {
-            "description": "job information"
+            "description": "job information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/job_properties"
+                }
+              }
+            }
           },
           "500": {
             "description": "job not found"
@@ -73,6 +108,7 @@
         }
       },
       "post": {
+        "operationId": "updateJob",
         "summary": "update job",
         "parameters": [
           {
@@ -114,6 +150,7 @@
         }
       },
       "delete": {
+        "operationId": "cancelJob",
         "summary": "cancel or signal job",
         "parameters": [
           {
@@ -150,8 +187,9 @@
         }
       }
     },
-    "/slurm/v0.0.35/job/submit": {
+    "/job/submit": {
       "post": {
+        "operationId": "submitJob",
         "summary": "submit new job",
         "requestBody": {
           "description": "submit new job",
@@ -179,12 +217,20 @@
         }
       }
     },
-    "/slurm/v0.0.35/nodes/": {
+    "/nodes": {
       "get": {
+        "operationId": "nodes",
         "summary": "get all node info",
         "responses": {
           "200": {
-            "description": "nodes information"
+            "description": "nodes information",
+            "content": {
+               "application/json": {
+                 "schema": {
+                   "$ref": "#/components/schemas/node_info"
+                 }
+               }
+            }
           },
           "500": {
             "description": "no nodes in cluster"
@@ -192,8 +238,9 @@
         }
       }
     },
-    "/slurm/v0.0.35/node/{node_name}": {
+    "/node/{node_name}": {
       "get": {
+        "operationId": "getNode",
         "summary": "get node info",
         "parameters": [
           {
@@ -210,7 +257,14 @@
         ],
         "responses": {
           "200": {
-            "description": "node information"
+            "description": "node information",
+            "content": {
+               "application/json": {
+                 "schema": {
+                   "$ref": "#/components/schemas/node_info"
+                 }
+               }
+            }
           },
           "500": {
             "description": "node not found"
@@ -218,12 +272,20 @@
         }
       }
     },
-    "/slurm/v0.0.35/partitions/": {
+    "/partitions": {
       "get": {
+        "operationId": "partitions",
         "summary": "get all partition info",
         "responses": {
           "200": {
-            "description": "partitions information"
+            "description": "partitions information",
+            "content": {
+               "application/json": {
+                 "schema": {
+                   "$ref": "#/components/schemas/partition_info"
+                 }
+               }
+            }
           },
           "500": {
             "description": "no partitions in cluster"
@@ -231,8 +293,9 @@
         }
       }
     },
-    "/slurm/v0.0.35/partition/{partition_name}": {
+    "/partition/{partition_name}": {
       "get": {
+        "operationId": "getPartition",
         "summary": "get partition info",
         "parameters": [
           {
@@ -249,7 +312,14 @@
         ],
         "responses": {
           "200": {
-            "description": "partition information"
+            "description": "partition information",
+            "content": {
+               "application/json": {
+                 "schema": {
+                   "$ref": "#/components/schemas/partition_info"
+                 }
+               }
+            }
           },
           "500": {
             "description": "partition not found"
@@ -300,38 +370,30 @@
   },
   "components": {
     "schemas": {
-	  "signal": {
-		"oneOf": [
-		  {
-			"type": "integer",
-			"description": "POSIX signal number",
-			"format": "int32"
-		  },
-		  {
-			"type": "string",
-			"description": "POSIX signal name",
-			"format": "int32",
-			"enum": [
-			  "HUP",
-			  "INT",
-			  "QUIT",
-			  "ABRT",
-			  "KILL",
-			  "ALRM",
-			  "TERM",
-			  "USR1",
-			  "USR2",
-			  "URG",
-			  "CONT",
-			  "STOP",
-			  "TSTP",
-			  "TTIN",
-			  "TTOU"
-			]
-		  }
-		]
-	  },
+      "signal": {
+         "type": "string",
+         "description": "POSIX signal name",
+         "format": "int32",
+         "enum": [
+           "HUP",
+           "INT",
+           "QUIT",
+           "ABRT",
+           "KILL",
+           "ALRM",
+           "TERM",
+           "USR1",
+           "USR2",
+           "URG",
+           "CONT",
+           "STOP",
+           "TSTP",
+           "TTIN",
+           "TTOU"
+         ]
+      },
       "job_properties": {
+        "type": "object",
         "properties": {
           "account": {
             "type": "string",
@@ -409,7 +471,7 @@
             "description": "Instruct Slurm to connect the batch script's standard output directly to the file name."
           },
           "deadline": {
-            "type": "string",
+            "type": "integer",
             "description": "Remove the job if no ending is possible before this deadline (start > (deadline - time[-min]))."
           },
           "delay_boot": {
@@ -429,21 +491,8 @@
             "description": "Dictionary of environment entries."
           },
           "exclusive": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "The job allocation can share nodes just other users with the \"user\" option or with the \"mcs\" option).",
-                "enum": [
-                  "user",
-                  "mcs"
-                ]
-              },
-              {
-                "type": "boolean",
-                "description": "Request exclusive use of nodes.",
-                "default": true
-              }
-            ]
+            "type": "string",
+            "description": "Request exclusive use of nodes."
           },
           "get_user_environment": {
             "type": "boolean",
@@ -546,21 +595,8 @@
             "description": "Do not automatically terminate a job if one of the nodes it has been allocated fails."
           },
           "nodes": {
-            "oneOf": [
-              {
-                "type": "integer",
-                "description": "Request that a minimum of minnodes nodes be allocated to this job."
-              },
-              {
-                "maxItems": 2,
-                "minItems": 2,
-                "type": "array",
-                "description": "Request that a minimum of minnodes nodes and a maximum node count.",
-                "items": {
-                  "type": "integer"
-                }
-              }
-            ]
+            "type": "integer",
+            "description": "Request that a minimum of minnodes nodes and a maximum node count."
           },
           "open_mode": {
             "type": "string",
@@ -576,7 +612,7 @@
             "description": "Request a specific partition for the resource allocation."
           },
           "priority": {
-            "type": "string",
+            "type": "integer",
             "description": "Request a specific job priority."
           },
           "qos": {
@@ -591,11 +627,11 @@
             "type": "string",
             "description": "Allocate resources for the job from the named reservation."
           },
-		  "signal" : {
-			"pattern" : "[B:]<sig_num>[@<sig_time>]",
-			"type" : "string",
-			"description" : "When a job is within sig_time seconds of its end time, send it the signal sig_num."
-		  },
+          "signal": {
+            "pattern": "[B:]<sig_num>[@<sig_time>]",
+            "type": "string",
+            "description": "When a job is within sig_time seconds of its end time, send it the signal sig_num."
+          },
           "sockets_per_node": {
             "type": "integer",
             "description": "Restrict node selection to nodes with at least the specified number of sockets."
@@ -655,7 +691,546 @@
           "wckey": {
             "type": "string",
             "description": "Specify wckey to be used with job."
+          }
+        }
+      },
+      "error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "error message"
           },
+          "errno": {
+            "type": "integer",
+            "description": "error number"
+          }
+        }
+      },
+      "statistics": {
+        "type": "object",
+        "properties": {
+          "parts_packed": {
+            "type": "integer",
+            "description": ""
+          },
+          "req_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "req_time_start": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "server_thread_count": {
+            "type": "integer",
+            "description": ""
+          },
+          "agent_queue_size": {
+            "type": "integer",
+            "description": ""
+          },
+          "agent_count": {
+            "type": "integer",
+            "description": ""
+          },
+          "dbd_agent_queue_size": {
+            "type": "integer",
+            "description": ""
+          },
+          "gettimeofday_latency": {
+            "type": "integer",
+            "description": ""
+          },
+          "schedule_cycle_max": {
+            "type": "integer",
+            "description": ""
+          },
+          "schedule_cycle_last": {
+            "type": "integer",
+            "description": ""
+          },
+          "schedule_cycle_sum": {
+            "type": "integer",
+            "description": ""
+          },
+          "schedule_cycle_counter": {
+            "type": "integer",
+            "description": ""
+          },
+          "schedule_cycle_depth": {
+            "type": "integer",
+            "description": ""
+          },
+          "schedule_queue_len": {
+            "type": "integer",
+            "description": ""
+          },
+          "jobs_submitted": {
+            "type": "integer",
+            "description": ""
+          },
+          "jobs_started": {
+            "type": "integer",
+            "description": ""
+          },
+          "jobs_completed": {
+            "type": "integer",
+            "description": ""
+          },
+          "jobs_canceled": {
+            "type": "integer",
+            "description": ""
+          },
+          "jobs_failed": {
+            "type": "integer",
+            "description": ""
+          },
+          "jobs_pending": {
+            "type": "integer",
+            "description": ""
+          },
+          "jobs_running": {
+            "type": "integer",
+            "description": ""
+          },
+          "job_states_ts": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_backfilled_jobs": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_last_backfilled_jobs": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_backfilled_het_jobs": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_cycle_counter": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_cycle_sum": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_cycle_last": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_cycle_max": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_last_depth": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_last_depth_try": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_depth_sum": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_depth_try_sum": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_queue_len": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_queue_len_sum": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_when_last_cycle": {
+            "type": "integer",
+            "description": ""
+          },
+          "bf_active": {
+            "type": "integer",
+            "description": ""
+          }
+        }
+      },
+      "diag": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/error"
+            }
+          },
+          "statistics": {
+            "type": "object",
+            "description": "slurm schedular statistics",
+            "$ref": "#/components/schemas/statistics"
+          }
+        }
+      },
+      "ping": {
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "type": "string",
+            "description": "slurm controller hostname"
+          },
+          "ping": {
+            "type": "string",
+            "description": "slurm controller host up",
+            "enum": [
+              "UP",
+              "DOWN"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "description": "slurm controller mode"
+          },
+          "status": {
+            "type": "integer",
+            "description": "slurm controller status"
+          }
+        }
+      },
+      "pings": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/error"
+            }
+          },
+          "pings": {
+            "type": "array",
+            "description": "slurm controller pings",
+            "items": {
+              "$ref": "#/components/schemas/ping"
+            }
+          }
+        }
+      },
+      "node": {
+        "type": "object",
+        "properties": {
+          "architecture": {
+            "type": "string",
+            "description": ""
+          },
+          "burstbuffer_network_address": {
+            "type": "string",
+            "description": ""
+          },
+          "boards": {
+            "type": "integer",
+            "description": ""
+          },
+          "boot_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "cores": {
+            "type": "integer",
+            "description": ""
+          },
+          "cpu_binding": {
+            "type": "integer",
+            "description": ""
+          },
+          "cpu_load": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "free_memory": {
+            "type": "integer",
+            "description": ""
+          },
+          "cpus": {
+            "type": "integer",
+            "description": ""
+          },
+          "features": {
+            "type": "string",
+            "description": ""
+          },
+          "active_features": {
+            "type": "string",
+            "description": ""
+          },
+          "gres": {
+            "type": "string",
+            "description": ""
+          },
+          "gres_drained": {
+            "type": "string",
+            "description": ""
+          },
+          "gres_used": {
+            "type": "string",
+            "description": ""
+          },
+          "mcs_label": {
+            "type": "string",
+            "description": ""
+          },
+          "name": {
+            "type": "string",
+            "description": ""
+          },
+          "next_state_after_reboot": {
+            "type": "string",
+            "description": ""
+          },
+          "address": {
+            "type": "string",
+            "description": ""
+          },
+          "hostname": {
+            "type": "string",
+            "description": ""
+          },
+          "state": {
+            "type": "string",
+            "description": ""
+          },
+          "operating_system": {
+            "type": "string",
+            "description": ""
+          },
+          "owner": {
+            "type": "string",
+            "description": ""
+          },
+          "port": {
+            "type": "integer",
+            "description": ""
+          },
+          "real_memory": {
+            "type": "integer",
+            "description": ""
+          },
+          "reason": {
+            "type": "string",
+            "description": ""
+          },
+          "reason_changed_at": {
+            "type": "integer",
+            "description": ""
+          },
+          "reason_set_by_user": {
+            "type": "string",
+            "description": ""
+          },
+          "slurmd_start_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "sockets": {
+            "type": "integer",
+            "description": ""
+          },
+          "threads": {
+            "type": "integer",
+            "description": ""
+          },
+          "temporary_disk": {
+            "type": "integer",
+            "description": ""
+          },
+          "weight": {
+            "type": "integer",
+            "description": ""
+          },
+          "tres": {
+            "type": "",
+            "description": ""
+          },
+          "slurmd_version": {
+            "type": "string",
+            "description": ""
+          }
+        }
+      },
+      "node_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/error"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "description": "nodes info",
+            "items": {
+              "$ref": "#/components/schemas/node"
+            }
+          }
+        }
+      },
+      "partition": {
+        "type": "object",
+        "properties": {
+          "flags": {
+            "type": "array",
+            "description": "",
+            "items": {
+              "type": "string"
+            }
+          },
+          "preemption_mode": {
+            "type": "array",
+            "description": "",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowed_allocation_nodes": {
+            "type": "string",
+            "description": ""
+          },
+          "allowed_accounts": {
+            "type": "string",
+            "description": ""
+          },
+          "allowed_groups": {
+            "type": "string",
+            "description": ""
+          },
+          "allowed_qos": {
+            "type": "string",
+            "description": ""
+          },
+          "alternative": {
+            "type": "string",
+            "description": ""
+          },
+          "billing_weights": {
+            "type": "string",
+            "description": ""
+          },
+          "default_memory_per_cpu": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "default_time_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "denied_accounts": {
+            "type": "string",
+            "description": ""
+          },
+          "denied_qos": {
+            "type": "string",
+            "description": ""
+          },
+          "preemption_grace_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "maximum_cpus_per_node": {
+            "type": "integer",
+            "description": ""
+          },
+          "maximum_memory_per_node": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "maximum_nodes_per_job": {
+            "type": "integer",
+            "description": ""
+          },
+          "max_time_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "min_nodes_per_job": {
+            "type": "integer",
+            "description": ""
+          },
+          "name": {
+            "type": "string",
+            "description": ""
+          },
+          "nodes": {
+            "type": "string",
+            "description": ""
+          },
+          "over_time_limit": {
+            "type": "integer",
+            "description": ""
+          },
+          "priority_job_factor": {
+            "type": "integer",
+            "description": ""
+          },
+          "priority_tier": {
+            "type": "integer",
+            "description": ""
+          },
+          "qos": {
+            "type": "string",
+            "description": ""
+          },
+          "nodes_online": {
+            "type": "integer",
+            "description": ""
+          },
+          "total_cpus": {
+            "type": "integer",
+            "description": ""
+          },
+          "total_nodes": {
+            "type": "integer",
+            "description": ""
+          },
+          "tres": {
+            "type": "string",
+            "description": ""
+          }
+        }
+      },
+      "partition_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/error"
+            }
+          },
+          "partitions": {
+            "type": "array",
+            "description": "partition info",
+            "items": {
+              "$ref": "#/components/schemas/partition"
+            }
+          }
         }
       }
     }

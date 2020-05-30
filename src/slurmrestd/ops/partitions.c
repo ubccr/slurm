@@ -61,7 +61,7 @@ typedef enum {
 
 static int _dump_part(data_t *p, partition_info_t *part)
 {
-	data_t *d = data_set_dict(data_key_set(p, part->name));
+	data_t *d = data_set_dict(data_list_append(p));
 	data_t *flags = data_set_list(data_key_set(d, "flags"));
 	data_t *pm = data_set_list(data_key_set(d, "preemption_mode"));
 
@@ -78,8 +78,7 @@ static int _dump_part(data_t *p, partition_info_t *part)
 	data_set_int(data_key_set(d, "default_memory_per_cpu"),
 		     part->def_mem_per_cpu);
 	if (part->default_time == INFINITE)
-		data_set_string(data_key_set(d, "default_time_limit"),
-				"INFINITE");
+		data_set_int(data_key_set(d, "default_time_limit"), -1);
 	if (part->default_time == NO_VAL)
 		data_set_null(data_key_set(d, "default_time_limit"));
 	else
@@ -110,8 +109,7 @@ static int _dump_part(data_t *p, partition_info_t *part)
 		     part->grace_time);
 
 	if (part->max_cpus_per_node == INFINITE)
-		data_set_string(data_key_set(d, "maximum_cpus_per_node"),
-				"INFINITE");
+		data_set_int(data_key_set(d, "maximum_cpus_per_node"), -1);
 	else if (part->max_cpus_per_node == NO_VAL)
 		data_set_null(data_key_set(d, "maximum_cpus_per_node"));
 	else
@@ -122,17 +120,16 @@ static int _dump_part(data_t *p, partition_info_t *part)
 		     part->max_mem_per_cpu);
 
 	if (part->max_nodes == INFINITE)
-		data_set_string(data_key_set(d, "maximum_nodes_per_job"),
-				"INFINITE");
+		data_set_int(data_key_set(d, "maximum_nodes_per_job"), -1);
 	else
 		data_set_int(data_key_set(d, "maximum_nodes_per_job"),
 			     part->max_nodes);
 
 	if (part->max_time == INFINITE)
-		data_set_string(data_key_set(d, "max_time_limit"), "INFINITE");
+		data_set_int(data_key_set(d, "max_time_limit"), -1);
 	else
 		data_set_int(data_key_set(d, "max_time_limit"), part->max_time);
-	data_set_int(data_key_set(d, "min nodes per job"), part->min_nodes);
+	data_set_int(data_key_set(d, "min_nodes_per_job"), part->min_nodes);
 	data_set_string(data_key_set(d, "name"), part->name);
 	// TODO: int32_t *node_inx;	/* list index pairs into node_table:
 	// 			 * start_range_1, end_range_1,
@@ -173,7 +170,7 @@ static int _op_handler_partitions(const char *context_id,
 	int rc = SLURM_SUCCESS;
 	data_t *d = data_set_dict(resp);
 	data_t *errors = data_set_list(data_key_set(d, "errors"));
-	data_t *partitions = data_set_dict(data_key_set(d, "partitions"));
+	data_t *partitions = data_set_list(data_key_set(d, "partitions"));
 	char *name = NULL;
 	partition_info_msg_t *part_info_ptr = NULL;
 
@@ -223,13 +220,13 @@ extern int init_op_partitions(void)
 {
 	int rc;
 
-	if ((rc = bind_operation_handler("/slurm/v0.0.35/partitions/",
+	if ((rc = bind_operation_handler("/partitions",
 					 _op_handler_partitions,
 					 URL_TAG_PARTITIONS)))
 		/* no-op */;
 	else
 		rc = bind_operation_handler(
-			"/slurm/v0.0.35/partition/{partition_name}",
+			"/partition/{partition_name}",
 			_op_handler_partitions, URL_TAG_PARTITION);
 	return rc;
 }
