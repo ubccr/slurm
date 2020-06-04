@@ -399,6 +399,35 @@
             "type": "string",
             "description": "Charge resources used by this job to specified account."
           },
+          "accrue_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "admin_comment": {
+            "type": "string",
+            "description": ""
+          },
+          "array_job_id": {
+            "type": "integer",
+            "description": ""
+          },
+          "array_task_id": {
+            "type": "integer",
+            "description": ""
+          },
+          "array_max_tasks": {
+            "type": "integer",
+            "description": ""
+          },
+          "array_task_string": {
+            "type": "string",
+            "description": ""
+          },
+          "association_id": {
+            "type": "integer",
+            "description": ""
+          },
           "account_gather_freqency": {
             "type": "string",
             "description": "Define the job accounting and profiling sampling intervals."
@@ -418,6 +447,21 @@
             "type": "string",
             "description": "features required for batch script's node"
           },
+          "batch_flag": {
+            "type": "boolean",
+            "description": ""
+          },
+          "flags": {
+            "type": "array",
+            "description": "",
+            "items": {
+              "type": "string"
+            }
+          },
+          "batch_host": {
+            "type": "string",
+            "description": ""
+          },
           "begin_time": {
             "type": "string",
             "description": "Submit the batch script to the Slurm controller immediately, like normal, but tell the controller to defer the allocation of the job until the specified time."
@@ -426,9 +470,29 @@
             "type": "string",
             "description": "Burst buffer specification."
           },
+          "burst_buffer_state": {
+            "type": "string",
+            "description": ""
+          },
           "cluster_constraints": {
             "type": "string",
             "description": "Specifies features that a federated cluster must have to have a sibling job submitted to it."
+          },
+          "command": {
+            "type": "string",
+            "description": ""
+          },
+          "cluster": {
+            "type": "string",
+            "description": ""
+          },
+          "cluster_features": {
+            "type": "string",
+            "description": ""
+          },
+          "contiguous": {
+            "type": "boolean",
+            "description": ""
           },
           "comment": {
             "type": "string",
@@ -478,6 +542,11 @@
             "type": "integer",
             "description": "Do not reboot nodes in order to satisfied this job's feature specification if the job has been eligible to run for less than this time period."
           },
+          "derived_exit_code": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
           "dependency": {
             "type": "string",
             "description": "Defer the start of this job until the specified dependencies have been satisfied completed."
@@ -490,9 +559,32 @@
             "type": "object",
             "description": "Dictionary of environment entries."
           },
+          "eligible_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "end_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "excluded_nodes": {
+            "type": "string",
+            "description": ""
+          },
           "exclusive": {
             "type": "string",
             "description": "Request exclusive use of nodes."
+          },
+          "exit_code": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "features": {
+            "type": "string",
+            "description": ""
           },
           "get_user_environment": {
             "type": "boolean",
@@ -534,6 +626,26 @@
             "type": "string",
             "description": "GPUs per task."
           },
+          "group_id": {
+            "type": "integer",
+            "description": ""
+          },
+          "job_id": {
+            "type": "integer",
+            "description": ""
+          },
+          "job_state": {
+            "type": "string",
+            "description": ""
+          },
+          "state_reason": {
+            "type": "string",
+            "description": ""
+          },
+          "state_description": {
+            "type": "string",
+            "description": ""
+          },
           "hold": {
             "type": "boolean",
             "description": "Specify the job is to be submitted in a held state (priority of zero)."
@@ -545,6 +657,11 @@
           "licenses": {
             "type": "string",
             "description": "Specification of licenses (or other resources available on all nodes of the cluster) which must be allocated to this job."
+          },
+          "last_sched_evaluation": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
           },
           "mail_type": {
             "type": "string",
@@ -640,6 +757,21 @@
             "type": "boolean",
             "description": "Spread the job allocation over as many nodes as possible and attempt to evenly distribute tasks across the allocated nodes."
           },
+          "start_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "submit_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
+          "suspend_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": ""
+          },
           "standard_error": {
             "type": "string",
             "description": "Instruct Slurm to connect the batch script's standard error directly to the file name."
@@ -683,6 +815,22 @@
           "time_minimum": {
             "type": "integer",
             "description": "Minimum run time in minutes."
+          },
+          "tres_req_str": {
+            "type": "string",
+            "description": ""
+          },
+          "tres_alloc_str": {
+            "type": "string",
+            "description": ""
+          },
+          "user_id": {
+            "type": "integer",
+            "description": ""
+          },
+          "user_name": {
+            "type": "string",
+            "description": ""
           },
           "wait_all_nodes": {
             "type": "boolean",
@@ -943,7 +1091,7 @@
             "format": "int64",
             "description": ""
           },
-          "cores": {
+          "cores_per_socket": {
             "type": "integer",
             "description": ""
           },
@@ -961,6 +1109,14 @@
             "description": ""
           },
           "cpus": {
+            "type": "integer",
+            "description": ""
+          },
+          "alloc_cpus": {
+            "type": "integer",
+            "description": ""
+          },
+          "idle_cpus": {
             "type": "integer",
             "description": ""
           },
@@ -1008,6 +1164,10 @@
             "type": "string",
             "description": ""
           },
+          "partitions": {
+            "type": "string",
+            "description": ""
+          },
           "operating_system": {
             "type": "string",
             "description": ""
@@ -1021,6 +1181,10 @@
             "description": ""
           },
           "real_memory": {
+            "type": "integer",
+            "description": ""
+          },
+          "alloc_memory": {
             "type": "integer",
             "description": ""
           },
@@ -1058,7 +1222,11 @@
             "description": ""
           },
           "tres": {
-            "type": "",
+            "type": "string",
+            "description": ""
+          },
+          "tres_used": {
+            "type": "string",
             "description": ""
           },
           "slurmd_version": {
