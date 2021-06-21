@@ -50,6 +50,7 @@
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/node_select.h"
 
 #include "src/slurmrestd/openapi.h"
 #include "src/slurmrestd/operations.h"
@@ -68,6 +69,14 @@ static const char *_get_long_node_state(uint32_t state)
 	switch (state & NODE_STATE_BASE) {
 	case NODE_STATE_DOWN:
 		return "down";
+	case NODE_STATE_DRAIN:
+		return "drain";
+	case NODE_STATE_FAIL:
+		return "fail";
+	case NODE_STATE_CLOUD:
+		return "cloud";
+	case NODE_STATE_COMPLETING:
+		return "completing";
 	case NODE_STATE_IDLE:
 		return "idle";
 	case NODE_STATE_ALLOCATED:
@@ -85,12 +94,29 @@ static const char *_get_long_node_state(uint32_t state)
 
 static int _dump_node(data_t *p, node_info_t *node)
 {
+	uint32_t my_state = node->node_state;
+	uint16_t alloc_cpus = 0;
+	int idle_cpus;
+	uint64_t alloc_memory;
+	char *node_alloc_tres = NULL;
 	data_t *d;
 
 	if (!node->name) {
 		debug2("%s: ignoring defunct node: %s",
 		       __func__, node->node_hostname);
 		return SLURM_SUCCESS;
+	}
+
+	select_g_select_nodeinfo_get(node->select_nodeinfo,
+								SELECT_NODEDATA_SUBCNT,
+								NODE_STATE_ALLOCATED,
+								&alloc_cpus);
+
+	idle_cpus = node->cpus - alloc_cpus;
+
+	if (idle_cpus  && (idle_cpus != node->cpus)) {
+		my_state &= NODE_STATE_FLAGS;
+		my_state |= NODE_STATE_MIXED;
 	}
 
 	d = data_set_dict(data_list_append(p));
@@ -121,11 +147,11 @@ static int _dump_node(data_t *p, node_info_t *node)
 	/* mem_spec_limit intentionally omitted */
 	data_set_string(data_key_set(d, "name"), node->name);
 	data_set_string(data_key_set(d, "next_state_after_reboot"),
-			_get_long_node_state(node->next_state));
+			node_state_string(node->next_state));
 	data_set_string(data_key_set(d, "address"), node->node_addr);
 	data_set_string(data_key_set(d, "hostname"), node->node_hostname);
 	data_set_string(data_key_set(d, "state"),
-			_get_long_node_state(node->node_state));
+			node_state_string(my_state));
 	data_set_string(data_key_set(d, "operating_system"), node->os);
 	if (node->owner == NO_VAL) {
 		data_set_null(data_key_set(d, "owner"));
@@ -148,6 +174,24 @@ static int _dump_node(data_t *p, node_info_t *node)
 	data_set_int(data_key_set(d, "weight"), node->weight);
 	data_set_string(data_key_set(d, "tres"), node->tres_fmt_str);
 	data_set_string(data_key_set(d, "slurmd_version"), node->version);
+	data_set_string(data_key_set(d, "partitions"), node->partitions);
+
+	select_g_select_nodeinfo_get(node->select_nodeinfo,
+									SELECT_NODEDATA_TRES_ALLOC_FMT_STR,
+									NODE_STATE_ALLOCATED, &node_alloc_tres);
+	if(node_alloc_tres)
+		data_set_string(data_key_set(d, "tres_used"), node_alloc_tres);
+	else
+		data_set_null(data_key_set(d, "tres_used"));
+
+	slurm_get_select_nodeinfo(node->select_nodeinfo,
+								SELECT_NODEDATA_MEM_ALLOC,
+								NODE_STATE_ALLOCATED,
+								&alloc_memory);
+
+	data_set_int(data_key_set(d, "alloc_memory"), alloc_memory);
+	data_set_int(data_key_set(d, "alloc_cpus"), alloc_cpus);
+	data_set_int(data_key_set(d, "idle_cpus"), idle_cpus);
 
 	return SLURM_SUCCESS;
 }
@@ -161,6 +205,7 @@ static int _op_handler_nodes(const char *context_id,
 	data_t *errors = populate_response_format(d);
 	data_t *nodes = data_set_list(data_key_set(d, "nodes"));
 	node_info_msg_t *node_info_ptr = NULL;
+	partition_info_msg_t *part_info_ptr = NULL;
 
 	if (tag == URL_TAG_NODES)
 		rc = slurm_load_node(0, &node_info_ptr, SHOW_ALL|SHOW_DETAIL);
@@ -179,10 +224,14 @@ static int _op_handler_nodes(const char *context_id,
 	} else
 		rc = SLURM_ERROR;
 
-	if (!rc && node_info_ptr)
+	if (!rc && node_info_ptr) {
+        if(!slurm_load_partitions((time_t) NULL, &part_info_ptr, SHOW_ALL))
+			slurm_populate_node_partitions(node_info_ptr, part_info_ptr);
+
 		for (int i = 0; !rc && i < node_info_ptr->record_count; i++)
 			rc = _dump_node(nodes,
 					   &node_info_ptr->node_array[i]);
+	}
 
 	if (!node_info_ptr || node_info_ptr->record_count == 0)
 		rc = ESLURM_INVALID_NODE_NAME;
